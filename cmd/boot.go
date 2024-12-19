@@ -9,7 +9,7 @@ import (
 
 var bootCmd = &cobra.Command{
 	Use:   "boot",
-	Short: "Bootstrap pigsty",
+	Short: "Bootstrap Pigsty",
 	Long: `Bootstrap pigsty with ./bootstrap script
 https://pigsty.io/docs/setup/offline/#bootstrap
 `,

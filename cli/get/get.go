@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"pig/internal/config"
 	"regexp"
 	"sort"
 	"strconv"
@@ -32,7 +33,7 @@ var (
 	Source         = ViaNA
 	Region         = "default"
 	InternetAccess = false
-	LatestVersion  = "v3.1.0"
+	LatestVersion  = config.PigstyVersion
 	AllVersions    []VersionInfo
 )
 

@@ -1,22 +1,40 @@
 package config
 
 import (
+	"bufio"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
 var (
-	ConfigDir  string
-	ConfigFile string
-	HomeDir    string
+	PigVersion    = "0.0.1"
+	PigstyVersion = "3.2.0"
 
+	ConfigDir    string
+	ConfigFile   string
+	HomeDir      string
 	PigstyHome   string
 	PigstyConfig string
+
+	OSArch        string // CPU architecture (amd64, arm64)
+	OSCode        string // Distribution version (el8, el9, d12, u22)
+	OSType        string // rpm / deb
+	OSVendor      string // rocky/debian/ubuntu from ID
+	OSVersion     string // 7/8/9/11/12/20/22/24
+	OSVersionFull string // 9.3 / 22.04 / 12 from VERSION_ID
+	OSVersionCode string // OS full version string
+	NodeHostname  string // hostname from /etc/hostname
+	NodeCPUCount  int    // cpu count from /proc/cpuinfo
+
 )
 
 func InitConfig(inventory string) {
@@ -82,6 +100,8 @@ func InitConfig(inventory string) {
 			logrus.Debugf("inventory = %s, home = %s, from defualt", PigstyConfig, PigstyHome)
 		}
 	}
+
+	DetectOS()
 }
 
 func InitInventory(configFile string) {
@@ -139,4 +159,94 @@ func InitInventory(configFile string) {
 	} else {
 		logrus.Debugf("Load config from %s: %s", configSource, configFile)
 	}
+}
+
+func DetectOS() {
+	OSArch = runtime.GOARCH
+	NodeHostname, _ = os.Hostname()
+	NodeCPUCount = runtime.NumCPU()
+
+	if runtime.GOOS != "linux" {
+		if runtime.GOOS == "darwin" {
+			OSVendor = "macos"
+			OSType = "brew"
+			osVersion, err := exec.Command("uname", "-r").Output()
+			if err != nil {
+				logrus.Debugf("Failed to get os version from uname: %s", err)
+				return
+			} else {
+				OSVersionFull = strings.TrimSpace(string(osVersion))
+			}
+			if OSVersionFull != "" {
+				OSVersion = strings.Split(OSVersionFull, ".")[0]
+				OSCode = fmt.Sprintf("a%s", OSVersion)
+				OSVersionCode = OSCode
+			}
+			return
+		}
+		logrus.Debugf("Running on non-Linux platform: %s", runtime.GOOS)
+		return
+	}
+
+	// First determine OS type by checking package manager
+	if _, err := os.Stat("/usr/bin/rpm"); err == nil {
+		OSType = "rpm"
+	}
+	if _, err := os.Stat("/usr/bin/dpkg"); err == nil {
+		OSType = "deb"
+	}
+
+	// Try to read OS release info
+	f, err := os.Open("/etc/os-release")
+	if err != nil {
+		logrus.Debugf("could not read /etc/os-release: %s", err)
+		return
+	}
+	defer f.Close()
+
+	var id, versionID string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := parts[0]
+		val := strings.Trim(parts[1], "\"")
+
+		switch key {
+		case "ID":
+			id = val
+			OSVendor = val
+		case "VERSION_ID":
+			versionID = val
+			OSVersionFull = val
+		case "VERSION_CODENAME":
+			OSVersionCode = val
+		}
+	}
+
+	// Extract major version
+	if versionID != "" {
+		OSVersion = strings.Split(versionID, ".")[0]
+	}
+
+	// Determine OS code based on distribution and package type
+	if OSType == "rpm" {
+		OSCode = "el" + OSVersion
+		OSVersionCode = OSCode
+	}
+	if OSType == "deb" {
+		if id == "ubuntu" {
+			OSCode = "u" + OSVersion
+		}
+		OSCode = "d" + OSVersion
+	}
+
+	logrus.Debugf("Detected OS: code=%s arch=%s type=%s vendor=%s version=%s %s",
+		OSCode, OSArch, OSType, OSVendor, OSVersion, OSVersionCode)
 }

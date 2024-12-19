@@ -1,5 +1,8 @@
+
 .code/
 .idea/
+
+bin/dist
 tmp/
 dist/
 pig

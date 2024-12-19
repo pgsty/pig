@@ -57,6 +57,7 @@ type LicenseManager struct {
 	Active     *jwt.Token
 	License    string
 	Valid      bool
+	Hide       bool
 	publicKeys []*ecdsa.PublicKey
 	privateKey *ecdsa.PrivateKey
 }
@@ -174,6 +175,12 @@ func (lm *LicenseManager) Validate(license string) (t *jwt.Token, err error) {
 	return nil, fmt.Errorf("failed to validate token: %w", err)
 }
 
+func (lm *LicenseManager) DescribeDefault() {
+	if lm.License != "" {
+		lm.Describe(Manager.License)
+	}
+}
+
 // Describe will print license information
 func (lm *LicenseManager) Describe(tokenString string) {
 	t, err := lm.Validate(tokenString)
@@ -196,8 +203,9 @@ func (lm *LicenseManager) Describe(tokenString string) {
 		logrus.Error("failed to parse claims")
 		return
 	}
-
-	fmt.Printf("raw : %s\n", tokenString)
+	if !lm.Hide {
+		fmt.Printf("raw : %s\n", tokenString)
+	}
 	sig := "invalid"
 	if t != nil && t.Valid {
 		sig = "valid"

@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const PigstyVersion = "3.1.0"
+const PigstyVersion = "3.2.0"
 
 // log level parameters
 var (
@@ -46,8 +46,8 @@ Usage:
     minio     minio administration  info | add  | rm
     repo      setup yum/apt repo    info | add  | rm | set | build | cache | create
 	
-    ca        manage local CA       info | sign | dump
-    license   license management    status | verify | issue | history
+    status    show pig status
+    license   license management
 `,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initAll()
@@ -138,4 +138,5 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&logPath, "log-path", "", "log file path, terminal by default")
 
 	rootCmd.PersistentFlags().StringVarP(&inventory, "inventory", "i", "", "config inventory path")
+
 }

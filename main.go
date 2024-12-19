@@ -7,7 +7,7 @@ import (
 	"pig/cmd"
 )
 
-const VERSION = "3.1.0"
+const VERSION = "0.0.1"
 
 func main() {
 	cmd.Execute()

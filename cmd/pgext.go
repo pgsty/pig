@@ -19,7 +19,7 @@ var (
 // pgextCmd represents the installation command
 var pgextCmd = &cobra.Command{
 	Use:     "pgext",
-	Short:   "manage postgres extensions",
+	Short:   "Manage PostgreSQL Extensions",
 	Aliases: []string{"e", "ext"},
 	Long: `
 Description:

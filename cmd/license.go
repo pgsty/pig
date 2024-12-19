@@ -34,7 +34,7 @@ var (
 // licenseCmd represents the top-level `license` command
 var licenseCmd = &cobra.Command{
 	Use:     "license",
-	Short:   "Manage pigsty licenses",
+	Short:   "Manage Pigsty Licenses",
 	Aliases: []string{"lic", "l"},
 	Long: `Description:
     $ pig license status    

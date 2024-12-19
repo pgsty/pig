@@ -20,7 +20,7 @@ var (
 // getCmd represents the installation command
 var getCmd = &cobra.Command{
 	Use:     "get",
-	Short:   "download pigsty",
+	Short:   "Download Pigsty src & pkg",
 	Aliases: []string{"g", "download"},
 	Long: `
 Description:

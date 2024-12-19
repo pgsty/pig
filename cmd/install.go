@@ -22,7 +22,7 @@ var (
 // installCmd represents the installation command
 var installCmd = &cobra.Command{
 	Use:     "install",
-	Short:   "install pigsty",
+	Short:   "Install Pigsty Software",
 	Aliases: []string{"init", "i"},
 	Long: `
 Description:
@@ -36,7 +36,7 @@ Examples:
     pig install                   # install to ~/pigsty with embedded version
     pig install -f                # install and OVERWRITE existing pigsty dir
     pig install -p /tmp/pigsty    # install to another location /tmp/pigsty
-    pig install -v 3.1            # get & install specific version v3.1.0
+    pig install -v 3.2            # get & install specific version v3.2.0
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 

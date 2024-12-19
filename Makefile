@@ -5,8 +5,7 @@
 #==============================================================#
 
 # Get Current Version
-VERSION=v3.1.0
-# VERSION=`cat cmd/root.go | grep -E 'const PigstyVersion' | grep -Eo '[a-zA-Z-0-9.]+'`
+VERSION=v0.0.1
 
 # Release Dir
 LINUX_AMD_DIR:=dist/$(VERSION)/pig-$(VERSION).linux-amd64
@@ -48,5 +47,15 @@ linux-arm64: clean build-linux-arm64
 	cp -r pig $(LINUX_ARM_DIR)/pig
 	tar -czf dist/$(VERSION)/pig-$(VERSION).linux-arm64.tar.gz -C dist/$(VERSION) pig-$(VERSION).linux-arm64
 	rm -rf $(LINUX_ARM_DIR)
+
+t: tb tt
+tb:
+	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -a -ldflags '-extldflags "-static"' -o pig
+	scp pig sv:/tmp/pig
+tt:
+	ssh sv "/tmp/pig status"
+td:
+	bin/dist
+
 
 .PHONY: run build clean build-linux-amd64 build-linux-arm64 release release-linux linux-amd64 linux-arm64
