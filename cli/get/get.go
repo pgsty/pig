@@ -20,11 +20,12 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var Timeout = 1500 * time.Millisecond
+
 const (
-	ViaIO   = "pigsty.io"
-	ViaCC   = "pigsty.cc"
-	ViaNA   = "nowhere"
-	Timeout = 1500 * time.Millisecond
+	ViaIO = "pigsty.io"
+	ViaCC = "pigsty.cc"
+	ViaNA = "nowhere"
 )
 
 var (

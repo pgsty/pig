@@ -36,7 +36,7 @@ Description:
 var pgextListCmd = &cobra.Command{
 	Use:     "list",
 	Short:   "list & search available extensions",
-	Aliases: []string{"l", "info"},
+	Aliases: []string{"l", "ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgext.InitExtensionData("")
 		filter := pgext.FilterExtensions(pgextDistro, pgextCategory)

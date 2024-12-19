@@ -54,7 +54,7 @@ tb:
 	scp pig sv:/tmp/pig
 tt:
 	ssh sv "/tmp/pig status"
-td:
+d:
 	bin/dist
 
 

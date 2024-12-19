@@ -31,23 +31,14 @@ var rootCmd = &cobra.Command{
 	Long: `pig - the cli for PostgreSQL & Pigsty
 
 Usage:
-    
-    pgext     PGSQL extension       list | info | install | remove
 
-    get       download pigsty       list | src | pkg
-    init      install pigsty
-    boot      bootstrap pigsty      
-    conf      generating config     info | gen | check | init | edit | load | dump
-    
-    pgsql     pgsql administration  info | add  | rm | user | db | svc | hba
-    infra     infra administration  info    
-    etcd      etcd  administration  info | add  | rm
-    node      node  administration  info | add  | rm | pkg | repo |
-    minio     minio administration  info | add  | rm
-    repo      setup yum/apt repo    info | add  | rm | set | build | cache | create
-	
-    status    show pig status
-    license   license management
+  repo      manage pigsty repo    add  |
+  ext       manage pg extension   list | info | add | rm
+  get       download pigsty       list | src  | pkg
+  init      install pigsty
+  boot      bootstrap pigsty
+  status    show pig status
+
 `,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initAll()
