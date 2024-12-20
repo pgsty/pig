@@ -16,9 +16,6 @@ import (
 )
 
 var (
-	PigVersion    = "0.0.1"
-	PigstyVersion = "3.2.0"
-
 	ConfigDir    string
 	ConfigFile   string
 	HomeDir      string
@@ -32,9 +29,17 @@ var (
 	OSVersion     string // 7/8/9/11/12/20/22/24
 	OSVersionFull string // 9.3 / 22.04 / 12 from VERSION_ID
 	OSVersionCode string // OS full version string
+	CurrentUser   string // current user
 	NodeHostname  string // hostname from /etc/hostname
 	NodeCPUCount  int    // cpu count from /proc/cpuinfo
+)
 
+const (
+	PigVersion    = "0.0.1"
+	PigstyVersion = "3.2.0"
+	DistroEL      = "rpm"
+	DistroDEB     = "deb"
+	DistroMac     = "brew"
 )
 
 func InitConfig(inventory string) {
@@ -161,15 +166,18 @@ func InitInventory(configFile string) {
 	}
 }
 
+// DetectOS detects the OS and sets the global variables
 func DetectOS() {
 	OSArch = runtime.GOARCH
 	NodeHostname, _ = os.Hostname()
 	NodeCPUCount = runtime.NumCPU()
-
+	if user, err := user.Current(); err == nil {
+		CurrentUser = user.Username
+	}
 	if runtime.GOOS != "linux" {
 		if runtime.GOOS == "darwin" {
 			OSVendor = "macos"
-			OSType = "brew"
+			OSType = DistroMac
 			osVersion, err := exec.Command("uname", "-r").Output()
 			if err != nil {
 				logrus.Debugf("Failed to get os version from uname: %s", err)
@@ -190,10 +198,10 @@ func DetectOS() {
 
 	// First determine OS type by checking package manager
 	if _, err := os.Stat("/usr/bin/rpm"); err == nil {
-		OSType = "rpm"
+		OSType = DistroEL
 	}
 	if _, err := os.Stat("/usr/bin/dpkg"); err == nil {
-		OSType = "deb"
+		OSType = DistroDEB
 	}
 
 	// Try to read OS release info
@@ -236,11 +244,11 @@ func DetectOS() {
 	}
 
 	// Determine OS code based on distribution and package type
-	if OSType == "rpm" {
+	if OSType == DistroEL {
 		OSCode = "el" + OSVersion
 		OSVersionCode = OSCode
 	}
-	if OSType == "deb" {
+	if OSType == DistroDEB {
 		if id == "ubuntu" {
 			OSCode = "u" + OSVersion
 		}

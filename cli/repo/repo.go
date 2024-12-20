@@ -1,129 +1,67 @@
 package repo
 
 import (
+	"bytes"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"pig/cli/get"
 	"pig/internal/config"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/openpgp/armor"
-)
-
-const (
-	EL           = "rpm"
-	Debian       = "deb"
-	PigstyGPGKey = `-----BEGIN PGP PUBLIC KEY BLOCK-----
-
-mQINBGaV5PwBEACbErI+7yOrsXTT3mR83O6Fw9WyHJqozhyNPF3dA1gAtWpfWqd4
-S9x6vBjVwUbIRn21jYgov0hDiaLABNQhRzifvVr0r1IjBW8lhA8zJGaO42Uz0aBW
-YIkajOklsXgYMX+gSmy5WXzM31sDQVMnzptHh9dwW067hMM5pJKDslu2pLMwSb9K
-QgIFcYsaR0taBkcDg4dNu1gncriD/GcdXIS0/V4R82DIYeIqj2S0lt0jDTACbUz3
-C6esrTw2XerCeHKHb9c/V+KMhqvLJOOpy/aJWLrTGBoaH7xw6v0qg32OYiBxlUj9
-VEzoQbDfbRkR+jlxiuYP3scUs/ziKrSh+0mshVbeuLRSNfuHLa7C4xTEnATcgD1J
-MZeMaJXIcDt+DN+1aHVQjY5YNvr5wA3ykxW51uReZf7/odgqVW3+1rhW5pd8NQKQ
-qoVUHOtIrC9KaiGfrczEtJTNUxcNZV9eBgcKHYDXB2hmR2pIf7WvydgXTs/qIsXg
-SIzfKjisi795Dd5GrvdLYXVnu9YzylWlkJ5rjod1wnSxkI/CcCJaoPLnXZA9KV7A
-cpMWWaUEXP/XBIwIU+vxDd1taBIaPIOv1KIdzvG7QqAQtf5Lphi5HfaGvBud/CVt
-mvWhRPJMr1J0ER2xAgU2iZR7dN0vSF6zDqc0W09RAoC0nDS3tupDX2BrOwARAQAB
-tCRSdW9oYW5nIEZlbmcgKFBpZ3N0eSkgPHJoQHZvbm5nLmNvbT6JAlEEEwEIADsW
-IQSVkqe8emguczM3bgnnk12Nub2LIAUCZpXk/AIbAwULCQgHAgIiAgYVCgkICwIE
-FgIDAQIeBwIXgAAKCRDnk12Nub2LIOMuEACBLVc09O4icFwc45R3KMvOMu14Egpn
-UkpmBKhErjup0TIunzI0zZH6HG8LGuf6XEdH4ItCJeLg5349UE00BUHNmxk2coo2
-u4Wtu28LPqmxb6sqpuRAaefedU6vqfs7YN6WWp52pVF1KdOHkIOcgAQ9z3ZHdosM
-I/Y/UxO2t4pjdCAfJHOmGPrbgLcHSMpoLLxjuf3YIwS5NSfjNDd0Y8sKFUcMGLCF
-5P0lv5feLLdZvh2Una34UmHKhZlXC5E3vlY9bf/LgsRzXRFQosD0RsCXbz3Tk+zF
-+j/eP3WhUvJshqIDuY6eJYCzMjiA8sM5gety+htVJuD0mewp+qAhjxE0d4bIr4qO
-BKQzBt9tT2ackCPdgW42VPS+IZymm1oMET0hgZfKiVpwsKO6qxeWn4RW2jJ0zkUJ
-MsrrxOPFdZQAtuFcLwa5PUAHHs6XQT2vzxDpeE9lInQ14lshofU5ZKIeb9sbvb/w
-P+xnDqvZ1pcotEIBvDK0S0jHbHHqtioIUdDFvdCBlBlYP1TQRNPlJ7TJDBBvhj8i
-fmjQsYSV1u36aHOJVGYNHv+SyJpVd3nHCZn97ADM9qHnDm7xljyHXPzIx4FMmBGJ
-UTiLH5yxa1xhWr42Iv3TykaQJVbpydmBuegFR8WbWitAvVqI3HvRG+FalLsjJruc
-8YDAf7gHdj/937kCDQRmleT8ARAAmJxscC76NZzqFBiaeq2+aJxOt1HGPqKb4pbz
-jLKRX9sFkeXuzhfZaNDljnr2yrnQ75rit9Aah/loEhbSHanNUDCNmvOeSEISr9yA
-yfOnqlcVOtcwWQK57n6MvlCSM8Js3jdoSmCFHVtdFFwxejE5ok0dk1VFYDIg6DRk
-ZBMuxGO7ZJW7TzCxhK4AL+NNYA2wX6b+IVMn6CA9kwNwCNrrnGHR1sblSxZp7lPo
-+GsqzYY0LXGR2eEicgKd4lk38gaO8Q4d1mlpX95vgdhGKxR+CM26y9QU0qrO1hXP
-Fw6lX9HfIUkVNrqAa1mzgneYXivnLvcj8gc7bFAdweX4MyBHsmiPm32WqjUJFAmw
-kcKYaiyfDJ+1wusa/b+7RCnshWc8B9udYbXfvcpOGgphpUuvomKT8at3ToJfEWmR
-BzToYYTsgAAX8diY/X53BHCE/+MhLccglEUYNZyBRkTwDLrS9QgNkhrADaTwxsv1
-8PwnVKve/ZxwOU0QGf4ZOhA2YQOE5hkRDR5uY2OHsOS5vHsd9Y6kNNnO8EBy99d1
-QiBJOW3AP0nr4Cj1/NhdigAujsYRKiCAuPT7dgqART58VU4bZ3PgonMlziLe7+ht
-YYxV+wyP6LVqicDd0MLLvG7r/JOiWuABOUxsFFaRecehoPJjeAEQxnWJjedokXKL
-HVOFaEkAEQEAAYkCNgQYAQgAIBYhBJWSp7x6aC5zMzduCeeTXY25vYsgBQJmleT8
-AhsMAAoJEOeTXY25vYsgG8sP/3UdsWuiwTsf/x4BTW82K+Uk9YwZDnUNH+4dUMED
-bKT1C6CbuSZ7Mnbi2rVsmGzOMs9MehIx6Ko8/iCR2OCeWi8Q+wM+iffAfWuT1GK6
-7f/VIfoYBUWEa+kvDcPgEbd5Tu7ZdUO/jROVBSlXRSjzK9LpIj7GozBTJ8Vqy5x7
-oqbWPPEYtGDVHime8o6f5/wfhNgL3mFnoq6srK7KhwACwfTXlNqAlGiXGa30Yj+b
-Cj6IvmxoII49E67/ovMEmzDCb3RXiaL6OATy25P+HQJvWvAam7Qq5Xn+bZg65Mup
-vXq3zoX0a7EKXc5vsJVNtTlXO1ATdYszKP5uNzkHrNAN52VRYaowq1vPy/MVMbSI
-rL/hTFKr7ZNhmC7jmS3OuJyCYQsfEerubtBUuc/W6JDc2oTI3xOG1S2Zj8f4PxLl
-H7vMG4E+p6eOrUGw6VQXjFsH9GtwhkPh/ZGMKENb2+JztJ02674Cok4s5c/lZFKz
-mmRUcNjX2bm2K0GfGG5/hAog/CHCeUZvwIh4hZLkdeJ1QsIYpN8xbvY7QP6yh4VB
-XrL18+2sontZ45MsGResrRibB35x7IrCrxZsVtRJZthHqshiORPatgy+AiWcAtEv
-UWEnnC1xBSasNebw4fSE8AJg9JMCRw+3GAetlotOeW9q7PN6yrXD9rGuV/QquQNd
-/c7w
-=4rRi
------END PGP PUBLIC KEY BLOCK-----
-`
-	pigstyRpmRepoPath = "/etc/yum.repos.d/pigsty.repo"
-	pigstyRpmRepo     = `# Pigsty EL Repo
-[pigsty-infra]
-name=Pigsty Infra for $basearch
-baseurl=https://repo.pigsty.io/yum/infra/$basearch
-skip_if_unavailable = 1
-enabled = 1
-priority = 1
-gpgcheck = 1
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty
-module_hotfixes=1
-
-[pigsty-pgsql]
-name=Pigsty PGSQL For el$releasever.$basearch
-baseurl=https://repo.pigsty.io/yum/pgsql/el$releasever.$basearch
-skip_if_unavailable = 1
-enabled = 1
-priority = 1
-gpgcheck = 1
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty
-module_hotfixes=1
-`
-	pigstyDebRepoPath = "/etc/apt/sources.list.d/pigsty.list"
-	pigstyDebRepo     = `# Pigsty Debian Repo
-deb [signed-by=/etc/apt/keyrings/pigsty.gpg] https://repo.pigsty.io/apt/infra generic main 
-deb [signed-by=/etc/apt/keyrings/pigsty.gpg] https://repo.pigsty.io/apt/pgsql/${distro_codename} ${distro_codename} main
-`
-
-	rpmRepoTmpl = ``
-	debRepoTmpl = ``
+	"gopkg.in/yaml.v3"
 )
 
 var (
-	RpmRepos []Repository
-	DebRepos []Repository
+	//go:embed assets/rpm.yml
+	embedRpmRepo []byte
 
-	RpmRepoMap map[string]*Repository
-	DebRepoMap map[string]*Repository
+	//go:embed assets/deb.yml
+	embedDebRepo []byte
 
-	RpmModuleMap map[string][]string
-	DebModuleMap map[string][]string
+	//go:embed assets/key.gpg
+	embedGPGKey []byte
 )
+
+const (
+	pigstyRpmGPGPath = "/etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
+	pigstyDebGPGPath = "/etc/apt/keyrings/pigsty.gpg"
+)
+
+/********************
+* Global Vars
+********************/
+
+var (
+	Repos          []Repository
+	RepoMap        map[string]*Repository
+	ModuleMap      map[string][]string = make(map[string][]string)
+	PigstyGPGCheck bool                = true
+)
+
+/********************
+* Repo Data Type
+********************/
 
 // Repository represents a package repository configuration
 type Repository struct {
 	Name        string            `yaml:"name"`
 	Description string            `yaml:"description"`
 	Module      string            `yaml:"module"`
-	Releases    []string          `yaml:"releases"`
+	Releases    []int             `yaml:"releases"`
 	Arch        []string          `yaml:"arch"`
 	BaseURL     map[string]string `yaml:"baseurl"`
+	Meta        map[string]string `yaml:"-"`
 	Distro      string            `yaml:"-"` // el|deb
 }
 
@@ -135,71 +73,25 @@ func (r *Repository) SupportArm64() bool {
 	return slices.Contains(r.Arch, "aarch64")
 }
 
-func (r *Repository) String() string {
-	// dump this  to one-line json
-	json, err := json.Marshal(r)
-	if err != nil {
-		return fmt.Sprintf("%s: %s", r.Name, r.Description)
+func (r *Repository) GetBaseURL(region string) string {
+	if url, ok := r.BaseURL[region]; ok {
+		return url
 	}
-	return string(json)
+	return r.BaseURL["default"]
 }
 
-func (r *Repository) FilePath() string {
-	if r.Distro == Debian {
-		return fmt.Sprintf("/etc/apt/sources.list.d/%s.list", r.Name)
-	}
-	if r.Distro == EL {
-		return fmt.Sprintf("/etc/yum.repos.d/%s.repo", r.Name)
-	}
-	return ""
-}
-
-// Repositories holds all repository configurations
-var Repositories = []Repository{
-	{
-		Name: "pigsty-pgsql", Description: "Pigsty PgSQL", Module: "pgsql", Distro: Debian,
-		Releases: []string{"d11", "d12", "u20", "u22", "u24"}, Arch: []string{"x86_64", "aarch64"},
-		BaseURL: map[string]string{
-			"default": "https://repo.pigsty.io/apt/pgsql/${distro_codename} ${distro_codename} main",
-			"china":   "https://repo.pigsty.cc/apt/pgsql/${distro_codename} ${distro_codename} main",
-		},
-	},
-	{
-		Name: "pigsty-infra", Description: "Pigsty Infra", Module: "infra", Distro: Debian,
-		Releases: []string{"d11", "d12", "u20", "u22", "u24"}, Arch: []string{"x86_64", "aarch64"},
-		BaseURL: map[string]string{
-			"default": "https://repo.pigsty.io/apt/infra/ generic main",
-			"china":   "https://repo.pigsty.cc/apt/infra/ generic main",
-		},
-	},
-	{
-		Name: "pigsty-infra", Description: "Pigsty INFRA", Module: "infra", Distro: EL,
-		Releases: []string{"el7", "el8", "el9"}, Arch: []string{"x86_64", "aarch64"},
-		BaseURL: map[string]string{
-			"default": "https://repo.pigsty.io/yum/infra/$basearch",
-			"china":   "https://repo.pigsty.cc/yum/infra/$basearch",
-		},
-	},
-	{
-		Name: "pigsty-pgsql", Description: "Pigsty PGSQL", Module: "pgsql", Distro: EL,
-		Releases: []string{"el7", "el8", "el9"}, Arch: []string{"x86_64", "aarch64"},
-		BaseURL: map[string]string{
-			"default": "https://repo.pigsty.io/yum/pgsql/el$releasever.$basearch",
-			"china":   "https://repo.pigsty.cc/yum/pgsql/el$releasever.$basearch",
-		},
-	},
-}
-
-func (r *Repository) Available(distro string, arch string) bool {
-	// convert arch to x86_64 or aarch64
-	distro = strings.ToLower(distro)
+// Available checks if the repository is available for a given distribution and architecture
+func (r *Repository) Available(code string, arch string) bool {
+	code = strings.ToLower(code)
 	arch = strings.ToLower(arch)
-	if arch == "amd64" {
+	if arch == "amd64" || arch == "x86_64" {
+		// convert arch to x86_64 or aarch64
 		arch = "x86_64"
-	} else if arch == "arm64" {
+	} else if arch == "arm64" || arch == "aarch64" {
 		arch = "aarch64"
 	}
-	if distro != "" && !slices.Contains(r.Releases, distro) {
+	major := GetMajorVersionFromCode(code)
+	if code != "" && (major == -1 || !slices.Contains(r.Releases, major)) {
 		return false
 	}
 	if arch != "" && !slices.Contains(r.Arch, arch) {
@@ -208,120 +100,638 @@ func (r *Repository) Available(distro string, arch string) bool {
 	return true
 }
 
-// ListRepo lists all available repositories for a given distribution and architecture
-func ListRepo(distro string, arch string) {
-	if distro == "" {
-		distro = config.OSCode
+func (r *Repository) String() string {
+	json, err := json.Marshal(r)
+	if err != nil {
+		return fmt.Sprintf("%s: %s", r.Name, r.Description)
 	}
-	if arch == "" {
-		arch = config.OSArch
-	}
-
-	logrus.Infof("Available repositories for distro = %s, arch = %s:", distro, arch)
-	for _, repo := range Repositories {
-		if repo.Available(distro, arch) {
-			fmt.Println(repo.String())
-		}
-	}
-	return
+	return string(json)
 }
 
-func AddDebGPGKey() error {
-	if err := os.MkdirAll("/etc/apt/keyrings", 0755); err != nil {
-		return fmt.Errorf("failed to create keyrings directory: %v", err)
+func (r *Repository) Content(region ...string) string {
+	regionStr := "default"
+	if len(region) > 0 {
+		regionStr = region[0]
 	}
-	block, _ := armor.Decode(strings.NewReader(PigstyGPGKey))
+	if r.Distro == config.DistroEL {
+		rpmMeta := ""
+		// Get sorted keys
+		keys := make([]string, 0, len(r.Meta))
+		for k := range r.Meta {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		// Add meta in sorted order
+		for _, k := range keys {
+			rpmMeta += fmt.Sprintf("%s=%s\n", k, r.Meta[k])
+		}
+		return fmt.Sprintf("[%s]\nname=%s\nbaseurl=%s\n%s", r.Name, r.Name, r.GetBaseURL(regionStr), rpmMeta)
+	}
+	if r.Distro == config.DistroDEB {
+		// Get sorted keys
+		keys := make([]string, 0, len(r.Meta))
+		for k := range r.Meta {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		// Build meta string in sorted order
+		debMeta := ""
+		for _, k := range keys {
+			debMeta += fmt.Sprintf("%s=%s ", k, r.Meta[k])
+		}
+		debMeta = strings.TrimSpace(debMeta)
+		repoURL := r.GetBaseURL(regionStr)
+		repoURL = strings.ReplaceAll(repoURL, "${distro_codename}", config.OSVersionCode)
+		repoURL = strings.ReplaceAll(repoURL, "${distro_name}", config.OSVendor)
+		return fmt.Sprintf("# %s %s\ndeb [%s] %s", r.Name, r.Description, debMeta, repoURL)
+	}
+	return ""
+}
+
+/********************
+* Repo API Command
+********************/
+
+// AddRepo adds the Pigsty repository to the system
+func AddRepo(region string, modules ...string) error {
+	// if "all" in modules, replace it with node, pgsql
+	if slices.Contains(modules, "all") {
+		modules = append(modules, "node", "pgsql", "infra")
+		// remove "all" from modules
+		modules = slices.DeleteFunc(modules, func(module string) bool {
+			return module == "all"
+		})
+	}
+	// if "pgsql" in modules, remove "pgdg"
+	if slices.Contains(modules, "pgsql") {
+		modules = slices.DeleteFunc(modules, func(module string) bool {
+			return module == "pgdg"
+		})
+	}
+	modules = slices.Compact(modules)
+	slices.Sort(modules)
+
+	// load repo data according to OS type
+	var err error
+	if config.OSType == config.DistroEL {
+		err = LoadRpmRepo(embedRpmRepo)
+	} else if config.OSType == config.DistroDEB {
+		err = LoadDebRepo(embedDebRepo)
+	}
+	if err != nil {
+		return err
+	}
+
+	// check module availability
+	for _, module := range modules {
+		if _, ok := ModuleMap[module]; !ok {
+			logrus.Warnf("available modules: %v", strings.Join(GetModuleList(), ", "))
+			return fmt.Errorf("module %s not found", module)
+		}
+	}
+
+	// infer region if not set
+	if region == "" {
+		get.Timeout = time.Second
+		get.NetworkCondition()
+		if !get.InternetAccess {
+			logrus.Warn("no internet access, assume region = default")
+			region = "default"
+		} else {
+			logrus.Infof("infer region %s from network condition", get.Region)
+			region = get.Region
+		}
+	}
+	logrus.Infof("add repo for %s.%s , region = %s", config.OSCode, config.OSArch, region)
+
+	// if any of pigsty pgsql infra is in the modules, we need to add the pigsty gpg key, also throw error on permission denied here
+	if slices.Contains(modules, "pgsql") || slices.Contains(modules, "infra") || slices.Contains(modules, "pigsty") || slices.Contains(modules, "all") {
+		if config.OSType == config.DistroDEB {
+			err = AddDebGPGKey()
+		} else if config.OSType == config.DistroEL {
+			err = AddRpmGPGKey()
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, module := range modules {
+		repoContent := ModuleRepoConfig(module, region)
+		err = TryReadMkdirWrite(ModuleRepoPath(module), []byte(repoContent))
+		if err != nil {
+			return err
+		}
+		logrus.Infof("add repo module: %s", module)
+	}
+	return nil
+}
+
+// BackupRepo makes a backup of the current repo files (sudo required)
+func BackupRepo() error {
+	// make a repo backup dir
+	if config.OSType == config.DistroEL {
+		logrus.Warn("old repos = moved to /etc/yum.repos.d/backup")
+		err := os.MkdirAll("/etc/yum.repos.d/backup", os.ModePerm)
+		if err != nil {
+			return err
+		}
+		files, err := filepath.Glob("/etc/yum.repos.d/*.repo")
+		if err != nil {
+			return err
+		}
+		for _, file := range files {
+			dest := filepath.Join("/etc/yum.repos.d/backup", filepath.Base(file))
+			err = os.Rename(file, dest)
+			if err != nil {
+				logrus.Errorf("failed to move %s to %s: %v", file, dest, err)
+				// return err
+			}
+		}
+	} else if config.OSType == config.DistroDEB {
+		logrus.Warn("old repos = moved to /etc/apt/backup")
+		err := os.MkdirAll("/etc/apt/backup", os.ModePerm)
+		if err != nil {
+			return err
+		}
+		files, err := filepath.Glob("/etc/apt/sources.list.d/*")
+		if err != nil {
+			return err
+		}
+		for _, file := range files {
+			dest := filepath.Join("/etc/apt/backup", filepath.Base(file))
+			err = os.Rename(file, dest)
+			if err != nil {
+				logrus.Errorf("failed to move %s to %s: %v", file, dest, err)
+				// return err
+			}
+		}
+		// check if sources.list exists and non empty? if so, move it to backup, and touch an empty sources.list
+		// if this file is empty, do nothing
+		debSourcesList := "/etc/apt/sources.list"
+		if fileInfo, err := os.Stat(debSourcesList); err == nil {
+			if fileInfo.Size() > 0 {
+				err = os.Rename(debSourcesList, "/etc/apt/backup/sources.list")
+				if err != nil {
+					return err
+				}
+				err = os.WriteFile(debSourcesList, []byte(""), 0644)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func RemoveRepo(modules ...string) error {
+	for _, module := range modules {
+		repoPath := ModuleRepoPath(module)
+		if err := WipeFile(repoPath); err != nil {
+			logrus.Errorf("failed to remove repo module %s: %v", repoPath, err)
+		} else {
+			logrus.Infof("repo module removed %s", repoPath)
+		}
+	}
+	return nil
+}
+
+// AddPigstyRpmRepo adds the Pigsty RPM repository to the system
+func AddPigstyRpmRepo(region string) error {
+	if err := RpmPrecheck(); err != nil {
+		return err
+	}
+	LoadRpmRepo(embedRpmRepo)
+	if region == "" { // check network condition (if region is not set)
+		get.Timeout = time.Second
+		get.NetworkCondition()
+		if !get.InternetAccess {
+			logrus.Warn("no internet access, assume region = default")
+			region = "default"
+		}
+	}
+
+	// write gpg key
+	err := TryReadMkdirWrite(pigstyRpmGPGPath, embedGPGKey)
+	if err != nil {
+		return err
+	}
+	logrus.Infof("import gpg key B9BD8B20 to %s", pigstyRpmGPGPath)
+
+	// write repo file
+	repoContent := ModuleRepoConfig("pigsty", region)
+	err = TryReadMkdirWrite(ModuleRepoPath("pigsty"), []byte(repoContent))
+	if err != nil {
+		return err
+	}
+	logrus.Infof("repo added: %s", ModuleRepoPath("pigsty"))
+	return nil
+}
+
+// RemovePigstyRpmRepo removes the Pigsty RPM repository from the system
+func RemovePigstyRpmRepo() error {
+	if err := RpmPrecheck(); err != nil {
+		return err
+	}
+
+	// wipe pigsty repo file
+	err := WipeFile(ModuleRepoPath("pigsty"))
+	if err != nil {
+		return err
+	}
+	logrus.Infof("remove %s", ModuleRepoPath("pigsty"))
+
+	// wipe pigsty gpg file
+	err = WipeFile(pigstyRpmGPGPath)
+	if err != nil {
+		return err
+	}
+	logrus.Infof("remove gpg key B9BD8B20 from %s", pigstyRpmGPGPath)
+	return nil
+}
+
+// ListPigstyRpmRepo lists the Pigsty RPM repository
+func ListPigstyRpmRepo() error {
+	if err := RpmPrecheck(); err != nil {
+		return err
+	}
+	fmt.Println("\n======== ls /etc/yum.repos.d/ ")
+	if err := RunCmd([]string{"ls", "/etc/yum.repos.d/"}); err != nil {
+		return err
+	}
+	fmt.Println("\n======== yum repolist")
+	if err := RunCmd([]string{"yum", "repolist"}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RpmPrecheck checks if the system is an EL distro
+func RpmPrecheck() error {
+	if runtime.GOOS != "linux" { // check if linux
+		return fmt.Errorf("pigsty works on linux, unsupported os: %s", runtime.GOOS)
+	}
+	if config.OSType != config.DistroEL { // check if EL distro
+		return fmt.Errorf("can not add rpm repo to %s distro", config.OSType)
+	}
+	return nil
+}
+
+// AddPigstyDebRepo adds the Pigsty DEB repository to the system
+func AddPigstyDebRepo(region string) error {
+	if err := DebPrecheck(); err != nil {
+		return err
+	}
+	LoadDebRepo(embedDebRepo)
+
+	if region == "" { // check network condition (if region is not set)
+		get.Timeout = time.Second
+		get.NetworkCondition()
+		if !get.InternetAccess {
+			logrus.Warn("no internet access, assume region = default")
+			region = "default"
+		}
+	}
+
+	// write gpg key
+	err := AddDebGPGKey()
+	if err != nil {
+		return err
+	}
+	logrus.Infof("import gpg key B9BD8B20 to %s", pigstyDebGPGPath)
+
+	// write repo file
+	repoContent := ModuleRepoConfig("pigsty", region)
+	err = TryReadMkdirWrite(ModuleRepoPath("pigsty"), []byte(repoContent))
+	if err != nil {
+		return err
+	}
+	logrus.Infof("repo added: %s", ModuleRepoPath("pigsty"))
+	return nil
+}
+
+// RemovePigstyDebRepo removes the Pigsty DEB repository from the system
+func RemovePigstyDebRepo() error {
+	if err := DebPrecheck(); err != nil {
+		return err
+	}
+
+	// wipe pigsty repo file
+	err := WipeFile(ModuleRepoPath("pigsty"))
+	if err != nil {
+		return err
+	}
+	logrus.Infof("remove %s", ModuleRepoPath("pigsty"))
+
+	// wipe pigsty gpg file
+	err = WipeFile(pigstyDebGPGPath)
+	if err != nil {
+		return err
+	}
+	logrus.Infof("remove gpg key B9BD8B20 from %s", pigstyDebGPGPath)
+	return nil
+}
+
+// ListPigstyDebRepo lists the Pigsty DEB repository
+func ListPigstyDebRepo() error {
+	if err := DebPrecheck(); err != nil {
+		return err
+	}
+
+	fmt.Println("\n======== ls /etc/apt/sources.list.d/")
+	if err := RunCmd([]string{"ls", "/etc/apt/sources.list.d/"}); err != nil {
+		return err
+	}
+
+	// also check /etc/apt/sources.list if exists and non empty, print it
+	if fileInfo, err := os.Stat("/etc/apt/sources.list"); err == nil {
+		if fileInfo.Size() > 0 {
+			fmt.Println("\n======== /etc/apt/sources.list")
+			if err := RunCmd([]string{"cat", "/etc/apt/sources.list"}); err != nil {
+				return err
+			}
+		}
+	}
+
+	fmt.Println("\n===== [apt-cache policy] =========================")
+	if err := RunCmd([]string{"apt-cache", "policy"}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// DebPrecheck checks if the system is a DEB distro
+func DebPrecheck() error {
+	if runtime.GOOS != "linux" { // check if linux
+		return fmt.Errorf("pigsty works on linux, unsupported os: %s", runtime.GOOS)
+	}
+	if config.OSType != config.DistroDEB { // check if DEB distro
+		return fmt.Errorf("can not add deb repo to %s distro", config.OSType)
+	}
+	return nil
+}
+
+// This function will try to read file and compare content, if same, return nil, otherwise write content to file, and make sure the directory exists
+func TryReadMkdirWrite(filePath string, content []byte) error {
+	// if it is permission denied, don't try to write
+	if _, err := os.Stat(filePath); err == nil {
+		if target, err := os.ReadFile(filePath); err == nil {
+			if string(target) == string(content) {
+				return nil
+			}
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return err //fmt.Errorf("failed to create parent directories: %v", err)
+	}
+	return os.WriteFile(filePath, content, 0644)
+}
+
+// AddDebGPGKey adds the Pigsty GPG key to the Debian repository
+func AddDebGPGKey() error {
+	block, _ := armor.Decode(bytes.NewReader(embedGPGKey))
 	keyBytes, err := io.ReadAll(block.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read GPG key: %v", err)
 	}
-
-	if err := os.WriteFile("/etc/apt/keyrings/pigsty.gpg", keyBytes, 0644); err != nil {
-		return fmt.Errorf("failed to write GPG key: %v", err)
-	}
-	return nil
+	return TryReadMkdirWrite(pigstyDebGPGPath, keyBytes)
 }
 
+// AddRpmGPGKey adds the Pigsty GPG key to the RPM repository
 func AddRpmGPGKey() error {
-	if err := os.WriteFile("/etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty", []byte(PigstyGPGKey), 0644); err != nil {
-		return fmt.Errorf("failed to write GPG key: %v", err)
-	}
-	return nil
+	return TryReadMkdirWrite(pigstyRpmGPGPath, embedGPGKey)
 }
 
-// logrus.Infof("Import pigsty GPG key 0xB9BD8B20 to %s", keyPath)
-
-func AddPigstyRepo() error {
-	if runtime.GOOS != "linux" { // check if linux
-		return fmt.Errorf("pigsty works on linux, unsupported os: %s", runtime.GOOS)
+// ModuleRepoPath returns the path to the repository configuration file for a given module
+func ModuleRepoPath(moduleName string) string {
+	if config.OSType == config.DistroEL {
+		return fmt.Sprintf("/etc/yum.repos.d/%s.repo", moduleName)
+	} else if config.OSType == config.DistroDEB {
+		return fmt.Sprintf("/etc/apt/sources.list.d/%s.list", moduleName)
 	}
-	if os.Geteuid() != 0 { // check if root
-		return fmt.Errorf("insufficient privileges, try again with: sudo pig repo add")
+	return fmt.Sprintf("/tmp/%s.repo", moduleName)
+}
+
+// ModuleRepoConfig generates the repository configuration for a given module
+func ModuleRepoConfig(moduleName string, region string) (content string) {
+	var repoContent string
+	if module, ok := ModuleMap[moduleName]; ok {
+		for _, repoName := range module {
+			if repo, ok := RepoMap[repoName]; ok {
+				if RepoMap[repoName].Available(config.OSCode, config.OSArch) {
+					repoContent += repo.Content(region) + "\n"
+				}
+			}
+		}
 	}
-	logrus.Infof("add pigsty repo for %s.%s", config.OSCode, config.OSArch)
+	return repoContent
+}
 
-	// check network condition
-	get.Timeout = time.Second
-	get.NetworkCondition() // check network condition
-	if !get.InternetAccess {
-		return fmt.Errorf("no internet access")
-	}
-
-	if config.OSType == "rpm" {
-		if err := AddRpmGPGKey(); err != nil {
-			return err
-		}
-
-		rpmRepo := pigstyRpmRepo
-		if get.Source == get.ViaCC {
-			logrus.Infof("use china mirror instead of default repo")
-			rpmRepo = strings.ReplaceAll(rpmRepo, "repo.pigsty.io", "repo.pigsty.cc")
-		}
-		if err := os.WriteFile(pigstyRpmRepoPath, []byte(rpmRepo), 0644); err != nil {
-			return fmt.Errorf("failed to write repo file: %v", err)
-		}
-		logrus.Infof("add pigsty repo file to %s, now run yum makecache ...", pigstyRpmRepoPath)
-
-		// run yum makecache and print output
-		cmd := exec.Command("sudo", "yum", "makecache")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to run yum makecache: %v", err)
-		}
-		return nil
-
-	}
-	if config.OSType == "deb" {
-		if err := AddDebGPGKey(); err != nil {
-			return err
-		}
-		debRepo := strings.ReplaceAll(pigstyDebRepo, "${distro_codename}", config.OSVersionCode)
-		if get.Source == get.ViaCC {
-			logrus.Infof("use china mirror instead of default repo")
-			debRepo = strings.ReplaceAll(debRepo, "repo.pigsty.io", "repo.pigsty.cc")
-		}
-		if err := os.WriteFile(pigstyDebRepoPath, []byte(debRepo), 0644); err != nil {
-			return fmt.Errorf("failed to write repo file: %v", err)
-		}
-		logrus.Infof("add pigsty repo file to %s, now run apt-get update ...", pigstyDebRepoPath)
-		// run apt update and print output
-		cmd := exec.Command("sudo", "apt-get", "update")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to run apt update: %v", err)
-		}
+// WipeFile removes a file, if permission denied, try to remove with sudo
+func WipeFile(filePath string) error {
+	// if not exists, just return
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		logrus.Debugf("file not exists, do nothing : %s %v", filePath, err)
 		return nil
 	}
+	return os.Remove(filePath)
+}
+
+// RunSudoCmd runs a command with sudo if the current user is not root
+func RunSudoCmd(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no command to run")
+	}
+	if config.CurrentUser != "root" {
+		// insert sudo as first cmd arg
+		args = append([]string{"sudo"}, args...)
+	}
+
+	// now split command and args again
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// RunCmd runs a command without sudo
+func RunCmd(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no command to run")
+	}
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+/********************
+* Load Repo Data
+********************/
+
+// LoadRpmRepo loads RPM repository configurations
+func LoadRpmRepo(data []byte) error {
+	if data == nil {
+		data = embedRpmRepo
+	}
+	if err := yaml.Unmarshal(data, &Repos); err != nil {
+		return fmt.Errorf("failed to parse rpm repo: %v", err)
+	}
+	RepoMap = make(map[string]*Repository)
+	ModuleMap = make(map[string][]string)
+	for i := range Repos {
+		repo := &Repos[i]
+		repo.Distro = config.DistroEL
+		repo.Meta = map[string]string{"enabled": "1", "gpgcheck": "0", "module_hotfixes": "1"}
+		RepoMap[repo.Name] = repo
+		if repo.Module != "" {
+			if _, exists := ModuleMap[repo.Module]; !exists {
+				ModuleMap[repo.Module] = make([]string, 0)
+			}
+			ModuleMap[repo.Module] = append(ModuleMap[repo.Module], repo.Name)
+		}
+	}
+
+	if PigstyGPGCheck {
+		RepoMap["pigsty-pgsql"].Meta["gpgcheck"] = "1"
+		RepoMap["pigsty-pgsql"].Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
+		RepoMap["pigsty-infra"].Meta["gpgcheck"] = "1"
+		RepoMap["pigsty-infra"].Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
+	}
+
+	ModuleMap["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
+	ModuleMap["pgdg"] = []string{"pgdg-common", "pgdg-el8fix", "pgdg-el9fix", "pgdg17", "pgdg16", "pgdg15", "pgdg14", "pgdg13"}
+	ModuleMap["all"] = append(ModuleMap["pigsty"], append(ModuleMap["pgdg"], ModuleMap["node"]...)...)
+
+	logrus.Debugf("load %d rpm repo, %d modules", len(RepoMap), len(ModuleMap))
 	return nil
 }
 
-func AddRpmModule(module ...string) error {
-	fmt.Println(module)
+// LoadDebRepo loads DEB repository configurations
+func LoadDebRepo(data []byte) error {
+	if data == nil {
+		data = embedDebRepo
+	}
+	if err := yaml.Unmarshal(data, &Repos); err != nil {
+		return fmt.Errorf("failed to parse rpm repo: %v", err)
+	}
+	RepoMap = make(map[string]*Repository)
+	ModuleMap = make(map[string][]string)
+	for i := range Repos {
+		repo := &Repos[i]
+		repo.Distro = config.DistroDEB
+		repo.Meta = map[string]string{"trusted": "yes"}
+		RepoMap[repo.Name] = repo
+		if repo.Module != "" {
+			if _, exists := ModuleMap[repo.Module]; !exists {
+				ModuleMap[repo.Module] = make([]string, 0)
+			}
+			ModuleMap[repo.Module] = append(ModuleMap[repo.Module], repo.Name)
+		}
+	}
+	if PigstyGPGCheck {
+		delete(RepoMap["pigsty-pgsql"].Meta, "trusted")
+		RepoMap["pigsty-pgsql"].Meta["signed-by"] = "/etc/apt/keyrings/pigsty.gpg"
+		delete(RepoMap["pigsty-infra"].Meta, "trusted")
+		RepoMap["pigsty-infra"].Meta["signed-by"] = "/etc/apt/keyrings/pigsty.gpg"
+	}
+
+	ModuleMap["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
+	ModuleMap["pgdg"] = []string{"pgdg"}
+	ModuleMap["all"] = append(ModuleMap["pigsty"], append(ModuleMap["pgdg"], ModuleMap["node"]...)...)
+
+	logrus.Debugf("load %d deb repo, %d modules", len(RepoMap), len(ModuleMap))
 	return nil
 }
 
-func AddDebRepo(name string, url string) error {
-	return nil
+/********************
+* Misc Repo Functions
+********************/
+
+// GetReposByModule returns all repositories for a given module
+func GetReposByModule(module string) []*Repository {
+	result := make([]*Repository, 0)
+	if repoNames, ok := ModuleMap[module]; ok {
+		for _, name := range repoNames {
+			if repo, exists := RepoMap[name]; exists {
+				result = append(result, repo)
+			}
+		}
+	}
+	return result
+}
+
+// GetRepo returns a repository by name
+func GetRepo(name string) *Repository {
+	return RepoMap[name]
+}
+
+func GetModuleList() []string {
+	// get modulle keys and sort them
+	modules := make([]string, 0, len(ModuleMap))
+	for module := range ModuleMap {
+		modules = append(modules, module)
+	}
+	sort.Strings(modules)
+	return modules
+}
+
+// GetMajorVersionFromCode gets the major version from the code
+func GetMajorVersionFromCode(code string) int {
+	code = strings.ToLower(code)
+
+	// Handle EL versions
+	if strings.HasPrefix(code, "el") {
+		var major int
+		if _, err := fmt.Sscanf(code, "el%d", &major); err == nil {
+			return major
+		} else {
+			return -1
+		}
+	}
+
+	if strings.HasPrefix(code, "u") {
+		var major int
+		if _, err := fmt.Sscanf(code, "u%d", &major); err == nil {
+			return major
+		} else {
+			return -1
+		}
+	}
+
+	if strings.HasPrefix(code, "d") {
+		var major int
+		if _, err := fmt.Sscanf(code, "d%d", &major); err == nil {
+			return major
+		} else {
+			return -1
+		}
+	}
+
+	// Handle Ubuntu codenames
+	switch code {
+	case "focal":
+		return 20
+	case "jammy":
+		return 22
+	case "noble":
+		return 24
+	}
+
+	// Handle Debian codenames
+	switch code {
+	case "bullseye":
+		return 11
+	case "bookworm":
+		return 12
+	case "trixie":
+		return 13
+	}
+
+	return -1
 }
