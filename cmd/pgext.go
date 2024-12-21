@@ -40,12 +40,35 @@ Description:
 }
 
 var pgextListCmd = &cobra.Command{
-	Use:     "list",
+	Use:     "list [query]",
 	Short:   "list & search available extensions",
 	Aliases: []string{"l", "ls"},
+	Example: `
+  pig ext list                # list all extensions
+  pig ext list postgis        # search extensions by name/description
+  pig ext list -d el8 vector  # search with distro filter
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgext.InitExtensionData(nil)
 		filter := pgext.FilterExtensions(pgextDistro, pgextCategory)
+
+		// If search query provided
+		if len(args) > 1 {
+			return fmt.Errorf("too many arguments, only one search query allowed")
+		}
+		if len(args) == 1 {
+			query := args[0]
+			results := pgext.SearchExtensions(query, pgext.Extensions)
+			if len(results) == 0 {
+				logrus.Warnf("no extensions found matching '%s'", query)
+				return nil
+			}
+			logrus.Infof("found %d extensions matching '%s':", len(results), query)
+			pgext.Tabulate(results)
+			return nil
+		}
+
+		// No search query, list all
 		pgext.TabulateExtension(filter)
 		return nil
 	},

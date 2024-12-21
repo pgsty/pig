@@ -21,7 +21,7 @@ import (
 var embedExtensionData []byte
 
 var (
-	Extensions  []Extension
+	Extensions  []*Extension
 	ExtNameMap  map[string]*Extension
 	ExtAliasMap map[string]*Extension
 	NeedBy      map[string][]string = make(map[string][]string)
@@ -70,8 +70,29 @@ type Extension struct {
 	Comment     string   `csv:"comment"`     // Additional comments
 }
 
-func (e *Extension) SummaryURL() string {
-	return fmt.Sprintf("https://ext.pigsty.io/#/%s", e.Name)
+func (e *Extension) FullTextSearchSummary() string {
+	var buf bytes.Buffer
+	buf.WriteString(e.Name)
+	if strings.Contains(e.Name, "-") || strings.Contains(e.Name, "_") {
+		buf.WriteString(" " + strings.Replace(strings.ReplaceAll(e.Name, "-", " "), "_", " ", -1))
+	}
+	if e.Alias != e.Name {
+		buf.WriteString(" " + strings.ToLower(e.Alias))
+	}
+	buf.WriteString(" " + strings.ToLower(e.Category))
+	if e.RpmPkg != "" {
+		buf.WriteString(" " + strings.ToLower(e.RpmPkg))
+	}
+	if e.DebPkg != "" {
+		buf.WriteString(" " + strings.ToLower(e.DebPkg))
+	}
+	if e.EnDesc != "" {
+		buf.WriteString(" " + strings.ToLower(e.EnDesc))
+	}
+	if e.ZhDesc != "" {
+		buf.WriteString(" " + strings.ToLower(e.ZhDesc))
+	}
+	return buf.String()
 }
 
 func (e *Extension) PackageName(pgVer int) string {
@@ -164,11 +185,12 @@ func InitExtensionData(data []byte) error {
 	})
 
 	// Store sorted extensions and update maps with references to array elements
-	Extensions = extensions
+	Extensions = make([]*Extension, len(extensions))
 	ExtNameMap = make(map[string]*Extension)
 	ExtAliasMap = make(map[string]*Extension)
-	for i := range Extensions {
-		ext := &Extensions[i]
+	for i := range extensions {
+		ext := &extensions[i]
+		Extensions[i] = ext
 		ExtNameMap[ext.Name] = ext
 		if ext.Alias != "" && ext.Lead {
 			ExtAliasMap[ext.Alias] = ext
@@ -273,21 +295,36 @@ func splitAndTrim(s string) []string {
 
 func TabulateExtension(filter func(*Extension) bool) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Name\tAlias\tCate\tVersion\tLicense\tLink\tDescription")
+	fmt.Fprintln(w, "Name\tAlias\tCategory\tVersion\tLicense\tDescription")
 
-	for i := range Extensions {
-		ext := &Extensions[i]
+	for _, ext := range Extensions {
 		if filter == nil || filter(ext) {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 				ext.Name,
 				ext.Alias,
 				ext.Category,
 				ext.Version,
 				ext.License,
-				ext.SummaryURL(),
 				ext.EnDesc,
 			)
 		}
+	}
+	w.Flush()
+}
+
+func Tabulate(data []*Extension) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "Name\tAlias\tCategory\tVersion\tLicense\tDescription")
+
+	for _, ext := range data {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			ext.Name,
+			ext.Alias,
+			ext.Category,
+			ext.Version,
+			ext.License,
+			ext.EnDesc,
+		)
 	}
 	w.Flush()
 }
