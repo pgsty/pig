@@ -362,10 +362,12 @@ func (p *PostgresInstallation) scanExtensions() error {
 	}
 	// add sqlLessExtensions (which does not have control file)
 	for name, description := range sqlLessExtensions {
-		if _, known := p.ExtMap[name]; !known {
+		// if found shared lib, add it to extension
+		if lib, exists := p.LibMap[name]; exists {
 			ext := &Extension{
 				Name:        name,
 				Description: description,
+				Library:     lib,
 			}
 			extensions = append(extensions, ext)
 		}

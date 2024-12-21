@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"pig/cli/repo"
+	"pig/cli/utils"
 	"pig/internal/config"
 
 	"github.com/sirupsen/logrus"
@@ -68,6 +69,7 @@ var repoAddCmd = &cobra.Command{
   - pgsql    :  pigsty + pgdg (all available pg extensions) 
   - extra    :  extra postgres modules, non-free, citus, timescaledb upstream 
   - infra    :  observability, grafana & prometheus stack, pg bin utils
+  - local    :  local pigsty repo on 127.0.0.1/pigsty
   - mssql    :  babelfish by wiltondb, MS SQL Server compatible postgres (el + ubuntu)
   - ivory    :  ivorysql, the oracle compatible postgres kernel fork (el only)
   - other    :  pgml, kube, docker, grafana mysql, ...
@@ -104,10 +106,10 @@ var repoAddCmd = &cobra.Command{
 		}
 
 		fmt.Printf("======== ls %s\n", repoDir)
-		repo.RunCmd([]string{"ls", repoDir})
+		utils.ShellCommand([]string{"ls", repoDir})
 
 		if repoUpdate {
-			if err := repo.RunCmd(updateCmd); err != nil {
+			if err := utils.SudoCommand(updateCmd); err != nil {
 				logrus.Error(err)
 				os.Exit(1)
 			}
@@ -166,7 +168,7 @@ var repoRmCmd = &cobra.Command{
 				os.Exit(1)
 			}
 
-			err = repo.RunCmd(updateCmd)
+			err = utils.SudoCommand(updateCmd)
 			if err != nil {
 				logrus.Error(err)
 				os.Exit(1)
@@ -203,13 +205,13 @@ var repoCacheCmd = &cobra.Command{
 	Aliases: []string{"u", "cache"},
 	Run: func(cmd *cobra.Command, args []string) {
 		if config.OSType == config.DistroEL {
-			err := repo.RunCmd([]string{"yum", "makecache"})
+			err := utils.SudoCommand([]string{"yum", "makecache"})
 			if err != nil {
 				logrus.Error(err)
 				os.Exit(1)
 			}
 		} else if config.OSType == config.DistroDEB {
-			err := repo.RunCmd([]string{"apt", "update"})
+			err := utils.SudoCommand([]string{"apt", "update"})
 			if err != nil {
 				logrus.Error(err)
 				os.Exit(1)

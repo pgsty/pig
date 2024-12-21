@@ -1,4 +1,4 @@
-- { name: pigsty-local   ,description: 'Pigsty Local'      ,module: local   ,releases: [7,8,9] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://${admin_ip}/pigsty'  }} # used by intranet nodes
+- { name: pigsty-local   ,description: 'Pigsty Local'      ,module: local   ,releases: [7,8,9] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://127.0.0.1/pigsty'  }} # used by intranet nodes
 - { name: pigsty-infra   ,description: 'Pigsty INFRA'      ,module: infra   ,releases: [7,8,9] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.pigsty.io/yum/infra/$basearch' ,china: 'https://repo.pigsty.cc/yum/infra/$basearch' }}
 - { name: pigsty-pgsql   ,description: 'Pigsty PGSQL'      ,module: pgsql   ,releases: [7,8,9] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.pigsty.io/yum/pgsql/el$releasever.$basearch' ,china: 'https://repo.pigsty.cc/yum/pgsql/el$releasever.$basearch' }}
 - { name: nginx          ,description: 'Nginx Repo'        ,module: infra   ,releases: [7,8,9] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://nginx.org/packages/rhel/$releasever/$basearch/' }}

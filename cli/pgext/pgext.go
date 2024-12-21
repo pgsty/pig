@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"pig/cli/pgsql"
+	"pig/internal/config"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,8 +74,18 @@ func (e *Extension) SummaryURL() string {
 	return fmt.Sprintf("https://ext.pigsty.io/#/%s", e.Name)
 }
 
+func (e *Extension) PackageName(pgVer int) string {
+	if config.OSType == config.DistroEL && e.RpmPkg != "" {
+		return strings.Replace(e.RpmPkg, "$v", strconv.Itoa(pgVer), 1)
+	}
+	if config.OSType == config.DistroDEB && e.DebPkg != "" {
+		return strings.Replace(e.DebPkg, "$v", strconv.Itoa(pgVer), 1)
+	}
+	return ""
+}
+
 func (e *Extension) CreateSQL() string {
-	if e.Requires != nil && len(e.Requires) > 0 {
+	if len(e.Requires) > 0 {
 		return fmt.Sprintf("CREATE EXTENSION %s CASCADE;", e.Name)
 	} else {
 		return fmt.Sprintf("CREATE EXTENSION %s;", e.Name)
@@ -118,25 +129,13 @@ func (e *Extension) NeedBy() []string {
 /********************
 * Init Extension
 ********************/
-
 // InitExtensionData initializes extension data from embedded CSV or file
-func InitExtensionData(path string) error {
+func InitExtensionData(data []byte) error {
 	var csvReader *csv.Reader
-	if path == "" {
-		// Use embedded data
-		csvReader = csv.NewReader(strings.NewReader(string(embedExtensionData)))
-	} else {
-		// Read from file
-		file, err := os.Open(path)
-		if err != nil {
-			logrus.Errorf("failed to open CSV file: %v", err)
-			return fmt.Errorf("failed to open CSV file: %v", err)
-		}
-		defer file.Close()
-		csvReader = csv.NewReader(file)
+	if data == nil { // Use embedded data
+		data = embedExtensionData
 	}
-
-	// Skip header
+	csvReader = csv.NewReader(bytes.NewReader(data))
 	if _, err := csvReader.Read(); err != nil {
 		return fmt.Errorf("failed to read CSV header: %v", err)
 	}

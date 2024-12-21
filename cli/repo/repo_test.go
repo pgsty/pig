@@ -15,12 +15,6 @@ func TestLoadRepoConfig(t *testing.T) {
 	for k, v := range ModuleMap {
 		fmt.Println(k, v)
 	}
-
-	//fmt.Println(RepoMap["pigsty-pgsql"].Meta)
-	//fmt.Println(RepoMap["pigsty-infra"].Content("default"))
-	//fmt.Println(RepoMap["pigsty-pgsql"].Content("default"))
-
-	//AddModule("node")
 }
 
 func TestRepoAvailable(t *testing.T) {

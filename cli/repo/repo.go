@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"pig/cli/get"
+	"pig/cli/utils"
 	"pig/internal/config"
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,7 +47,7 @@ var (
 	Repos          []Repository
 	RepoMap        map[string]*Repository
 	ModuleMap      map[string][]string = make(map[string][]string)
-	PigstyGPGCheck bool                = true
+	PigstyGPGCheck bool                = false
 )
 
 /********************
@@ -205,11 +206,12 @@ func AddRepo(region string, modules ...string) error {
 	}
 	logrus.Infof("add repo for %s.%s , region = %s", config.OSCode, config.OSArch, region)
 
-	// if any of pigsty pgsql infra is in the modules, we need to add the pigsty gpg key, also throw error on permission denied here
-	if slices.Contains(modules, "pgsql") || slices.Contains(modules, "infra") || slices.Contains(modules, "pigsty") || slices.Contains(modules, "all") {
-		if config.OSType == config.DistroDEB {
+	// we don't check gpg key by default (since you may have to sudo to add keys)
+	if PigstyGPGCheck && (containsAny(modules, "pgsql", "infra", "pigsty", "all")) {
+		switch config.OSType {
+		case config.DistroDEB:
 			err = AddDebGPGKey()
-		} else if config.OSType == config.DistroEL {
+		case config.DistroEL:
 			err = AddRpmGPGKey()
 		}
 		if err != nil {
@@ -218,9 +220,7 @@ func AddRepo(region string, modules ...string) error {
 	}
 
 	for _, module := range modules {
-		repoContent := ModuleRepoConfig(module, region)
-		err = TryReadMkdirWrite(ModuleRepoPath(module), []byte(repoContent))
-		if err != nil {
+		if err := AddModule(module, region); err != nil {
 			return err
 		}
 		logrus.Infof("add repo module: %s", module)
@@ -228,74 +228,80 @@ func AddRepo(region string, modules ...string) error {
 	return nil
 }
 
+// AddModule adds a module to the system
+func AddModule(module string, region string) error {
+	modulePath := ModuleRepoPath(module)
+	moduleContent := ModuleRepoConfig(module, region)
+
+	randomFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s-%s.repo", module, strconv.FormatInt(time.Now().UnixNano(), 36)))
+	if err := os.WriteFile(randomFile, []byte(moduleContent), 0644); err != nil {
+		return err
+	}
+	defer os.Remove(randomFile)
+	return utils.SudoCommand([]string{"mv", "-f", randomFile, modulePath})
+}
+
 // BackupRepo makes a backup of the current repo files (sudo required)
 func BackupRepo() error {
-	// make a repo backup dir
+	var backupDir, repoPattern string
+
 	if config.OSType == config.DistroEL {
+		backupDir = "/etc/yum.repos.d/backup"
+		repoPattern = "/etc/yum.repos.d/*.repo"
 		logrus.Warn("old repos = moved to /etc/yum.repos.d/backup")
-		err := os.MkdirAll("/etc/yum.repos.d/backup", os.ModePerm)
-		if err != nil {
-			return err
-		}
-		files, err := filepath.Glob("/etc/yum.repos.d/*.repo")
-		if err != nil {
-			return err
-		}
-		for _, file := range files {
-			dest := filepath.Join("/etc/yum.repos.d/backup", filepath.Base(file))
-			err = os.Rename(file, dest)
-			if err != nil {
-				logrus.Errorf("failed to move %s to %s: %v", file, dest, err)
-				// return err
-			}
-		}
 	} else if config.OSType == config.DistroDEB {
+		backupDir = "/etc/apt/backup"
+		repoPattern = "/etc/apt/sources.list.d/*"
 		logrus.Warn("old repos = moved to /etc/apt/backup")
-		err := os.MkdirAll("/etc/apt/backup", os.ModePerm)
-		if err != nil {
-			return err
+	}
+
+	// Create backup directory and move files using sudo
+	if err := utils.SudoCommand([]string{"mkdir", "-p", backupDir}); err != nil {
+		return err
+	}
+
+	files, err := filepath.Glob(repoPattern)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		dest := filepath.Join(backupDir, filepath.Base(file))
+		if err := utils.SudoCommand([]string{"mv", "-f", file, dest}); err != nil {
+			logrus.Errorf("failed to backup %s to %s: %v", file, dest, err)
 		}
-		files, err := filepath.Glob("/etc/apt/sources.list.d/*")
-		if err != nil {
-			return err
-		}
-		for _, file := range files {
-			dest := filepath.Join("/etc/apt/backup", filepath.Base(file))
-			err = os.Rename(file, dest)
-			if err != nil {
-				logrus.Errorf("failed to move %s to %s: %v", file, dest, err)
-				// return err
-			}
-		}
-		// check if sources.list exists and non empty? if so, move it to backup, and touch an empty sources.list
-		// if this file is empty, do nothing
+	}
+
+	if config.OSType == config.DistroDEB {
 		debSourcesList := "/etc/apt/sources.list"
-		if fileInfo, err := os.Stat(debSourcesList); err == nil {
-			if fileInfo.Size() > 0 {
-				err = os.Rename(debSourcesList, "/etc/apt/backup/sources.list")
-				if err != nil {
-					return err
-				}
-				err = os.WriteFile(debSourcesList, []byte(""), 0644)
-				if err != nil {
-					return err
-				}
+		if fileInfo, err := os.Stat(debSourcesList); err == nil && fileInfo.Size() > 0 {
+			if err := utils.SudoCommand([]string{"mv", "-f", debSourcesList, filepath.Join(backupDir, "sources.list")}); err != nil {
+				return err
+			}
+			if err := utils.SudoCommand([]string{"touch", debSourcesList}); err != nil {
+				return err
 			}
 		}
 	}
+
 	return nil
 }
 
+// RemoveRepo removes the Pigsty repository from the system
 func RemoveRepo(modules ...string) error {
+	var rmFileList []string
 	for _, module := range modules {
-		repoPath := ModuleRepoPath(module)
-		if err := WipeFile(repoPath); err != nil {
-			logrus.Errorf("failed to remove repo module %s: %v", repoPath, err)
-		} else {
-			logrus.Infof("repo module removed %s", repoPath)
+		if module != "" {
+			rmFileList = append(rmFileList, ModuleRepoPath(module))
 		}
 	}
-	return nil
+	if len(rmFileList) == 0 {
+		return fmt.Errorf("no module specified")
+	}
+	rmCmd := []string{"rm", "-f"}
+	rmCmd = append(rmCmd, rmFileList...)
+	logrus.Warnf("remove repo with: %s", strings.Join(rmCmd, " "))
+	return utils.SudoCommand(rmCmd)
 }
 
 // AddPigstyRpmRepo adds the Pigsty RPM repository to the system
@@ -358,11 +364,11 @@ func ListPigstyRpmRepo() error {
 		return err
 	}
 	fmt.Println("\n======== ls /etc/yum.repos.d/ ")
-	if err := RunCmd([]string{"ls", "/etc/yum.repos.d/"}); err != nil {
+	if err := utils.ShellCommand([]string{"ls", "/etc/yum.repos.d/"}); err != nil {
 		return err
 	}
 	fmt.Println("\n======== yum repolist")
-	if err := RunCmd([]string{"yum", "repolist"}); err != nil {
+	if err := utils.ShellCommand([]string{"yum", "repolist"}); err != nil {
 		return err
 	}
 	return nil
@@ -441,7 +447,7 @@ func ListPigstyDebRepo() error {
 	}
 
 	fmt.Println("\n======== ls /etc/apt/sources.list.d/")
-	if err := RunCmd([]string{"ls", "/etc/apt/sources.list.d/"}); err != nil {
+	if err := utils.ShellCommand([]string{"ls", "/etc/apt/sources.list.d/"}); err != nil {
 		return err
 	}
 
@@ -449,14 +455,14 @@ func ListPigstyDebRepo() error {
 	if fileInfo, err := os.Stat("/etc/apt/sources.list"); err == nil {
 		if fileInfo.Size() > 0 {
 			fmt.Println("\n======== /etc/apt/sources.list")
-			if err := RunCmd([]string{"cat", "/etc/apt/sources.list"}); err != nil {
+			if err := utils.ShellCommand([]string{"cat", "/etc/apt/sources.list"}); err != nil {
 				return err
 			}
 		}
 	}
 
 	fmt.Println("\n===== [apt-cache policy] =========================")
-	if err := RunCmd([]string{"apt-cache", "policy"}); err != nil {
+	if err := utils.ShellCommand([]string{"apt-cache", "policy"}); err != nil {
 		return err
 	}
 	return nil
@@ -473,7 +479,7 @@ func DebPrecheck() error {
 	return nil
 }
 
-// This function will try to read file and compare content, if same, return nil, otherwise write content to file, and make sure the directory exists
+// TryReadMkdirWrite will try to read file and compare content, if same, return nil, otherwise write content to file, and make sure the directory exists
 func TryReadMkdirWrite(filePath string, content []byte) error {
 	// if it is permission denied, don't try to write
 	if _, err := os.Stat(filePath); err == nil {
@@ -537,36 +543,6 @@ func WipeFile(filePath string) error {
 		return nil
 	}
 	return os.Remove(filePath)
-}
-
-// RunSudoCmd runs a command with sudo if the current user is not root
-func RunSudoCmd(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("no command to run")
-	}
-	if config.CurrentUser != "root" {
-		// insert sudo as first cmd arg
-		args = append([]string{"sudo"}, args...)
-	}
-
-	// now split command and args again
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-// RunCmd runs a command without sudo
-func RunCmd(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("no command to run")
-	}
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
 
 /********************
@@ -646,91 +622,4 @@ func LoadDebRepo(data []byte) error {
 
 	logrus.Debugf("load %d deb repo, %d modules", len(RepoMap), len(ModuleMap))
 	return nil
-}
-
-/********************
-* Misc Repo Functions
-********************/
-
-// GetReposByModule returns all repositories for a given module
-func GetReposByModule(module string) []*Repository {
-	result := make([]*Repository, 0)
-	if repoNames, ok := ModuleMap[module]; ok {
-		for _, name := range repoNames {
-			if repo, exists := RepoMap[name]; exists {
-				result = append(result, repo)
-			}
-		}
-	}
-	return result
-}
-
-// GetRepo returns a repository by name
-func GetRepo(name string) *Repository {
-	return RepoMap[name]
-}
-
-func GetModuleList() []string {
-	// get modulle keys and sort them
-	modules := make([]string, 0, len(ModuleMap))
-	for module := range ModuleMap {
-		modules = append(modules, module)
-	}
-	sort.Strings(modules)
-	return modules
-}
-
-// GetMajorVersionFromCode gets the major version from the code
-func GetMajorVersionFromCode(code string) int {
-	code = strings.ToLower(code)
-
-	// Handle EL versions
-	if strings.HasPrefix(code, "el") {
-		var major int
-		if _, err := fmt.Sscanf(code, "el%d", &major); err == nil {
-			return major
-		} else {
-			return -1
-		}
-	}
-
-	if strings.HasPrefix(code, "u") {
-		var major int
-		if _, err := fmt.Sscanf(code, "u%d", &major); err == nil {
-			return major
-		} else {
-			return -1
-		}
-	}
-
-	if strings.HasPrefix(code, "d") {
-		var major int
-		if _, err := fmt.Sscanf(code, "d%d", &major); err == nil {
-			return major
-		} else {
-			return -1
-		}
-	}
-
-	// Handle Ubuntu codenames
-	switch code {
-	case "focal":
-		return 20
-	case "jammy":
-		return 22
-	case "noble":
-		return 24
-	}
-
-	// Handle Debian codenames
-	switch code {
-	case "bullseye":
-		return 11
-	case "bookworm":
-		return 12
-	case "trixie":
-		return 13
-	}
-
-	return -1
 }

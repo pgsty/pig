@@ -16,12 +16,11 @@ import (
 )
 
 var (
-	ConfigDir    string
-	ConfigFile   string
-	HomeDir      string
-	PigstyHome   string
-	PigstyConfig string
-
+	ConfigDir     string
+	ConfigFile    string
+	HomeDir       string
+	PigstyHome    string
+	PigstyConfig  string
 	OSArch        string // CPU architecture (amd64, arm64)
 	OSCode        string // Distribution version (el8, el9, d12, u22)
 	OSType        string // rpm / deb

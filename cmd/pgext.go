@@ -26,16 +26,16 @@ var (
 var pgextCmd = &cobra.Command{
 	Use:     "pgext",
 	Short:   "Manage PostgreSQL Extensions",
-	Aliases: []string{"e", "ext"},
-	Long: `
+	Aliases: []string{"e", "ex", "ext"},
+	Example: `
 Description:
-  pig pgext list                list all available versions     
-  pig pgext repo                add extension repo according to distro
-  pig pgext info     <extname>  get infomation of a specific extension
-  pig pgext install  <extname>  install extension for current pg version
-  pig pgext remove   <extname>  remove extension for current pg version
-  pig pgext update   <extname>  update default extension list
-  pig pgext reload              reload postgres to take effect
+  pig ext list                list all available versions     
+  pig ext repo                add extension repo according to distro
+  pig ext info    [ext...]    get infomation of a specific extension
+  pig ext install [ext...]    install extension for current pg version
+  pig ext remove  [ext...]    remove extension for current pg version
+  pig ext update  [ext...]    update default extension list
+  pig ext reload              reload postgres to take effect
 `,
 }
 
@@ -44,7 +44,7 @@ var pgextListCmd = &cobra.Command{
 	Short:   "list & search available extensions",
 	Aliases: []string{"l", "ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pgext.InitExtensionData("")
+		pgext.InitExtensionData(nil)
 		filter := pgext.FilterExtensions(pgextDistro, pgextCategory)
 		pgext.TabulateExtension(filter)
 		return nil
@@ -54,12 +54,12 @@ var pgextListCmd = &cobra.Command{
 var pgextInfoCmd = &cobra.Command{
 	Use:     "info",
 	Short:   "get extension information",
-	Aliases: []string{"i"},
+	Aliases: []string{"show"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			return fmt.Errorf("extension name required")
 		}
-		pgext.InitExtensionData("")
+		pgext.InitExtensionData(nil)
 		for _, name := range args {
 			ext, ok := pgext.ExtNameMap[name]
 			if !ok {
@@ -74,20 +74,45 @@ var pgextInfoCmd = &cobra.Command{
 		return nil
 	},
 }
-var pgextAddCmd = &cobra.Command{
-	Use:     "add",
+
+var pgextInstallCmd = &cobra.Command{
+	Use:     "install",
 	Short:   "install extension for current pg version",
-	Aliases: []string{"a"},
+	Aliases: []string{"i", "ins", "add", "a"},
+	Example: `
+Description:
+  pig ext install pg_duckdb                  # install one extension
+  pig ext install postgis timescaledb        # install multiple extensions
+  pig ext add     pgvector pgvectorscale     # other alias: add, ins, i, a
+	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		pg, err := pgsql.GetPostgres(pgextPgConfig, pgextPgVer)
+		if err != nil {
+			logrus.Errorf("failed to find installed PostgreSQL: %v", err)
+			return nil
+		}
+		if err = pgext.InstallExtensions(args, pg); err != nil {
+			logrus.Errorf("failed to install extensions: %v", err)
+			return nil
+		}
 		return nil
 	},
 }
 
 var pgextRemoveCmd = &cobra.Command{
-	Use:     "rm",
+	Use:     "remove",
 	Short:   "remove extension for current pg version",
-	Aliases: []string{"r", "remove"},
+	Aliases: []string{"r", "rm"},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		pg, err := pgsql.GetPostgres(pgextPgConfig, pgextPgVer)
+		if err != nil {
+			logrus.Errorf("failed to find installed PostgreSQL: %v", err)
+			return nil
+		}
+		if err = pgext.RemoveExtensions(args, pg); err != nil {
+			logrus.Errorf("failed to remove extensions: %v", err)
+			return nil
+		}
 		return nil
 	},
 }
@@ -118,7 +143,7 @@ var pgextStatusCmd = &cobra.Command{
 		fmt.Printf("Share Path     :  %s\n", pg.SharePath)
 		fmt.Printf("Include Path   :  %s\n", pg.IncludePath)
 		fmt.Printf("Extensions     :  %d\n", len(pg.Extensions))
-		fmt.Printf("\nInstalled Extensions %d:\n\n", len(pg.Extensions))
+		fmt.Printf("\nInstalled Extensions (%d) :\n\n", len(pg.Extensions))
 
 		// Sort extensions by name for consistent output
 		extensions := pg.Extensions
@@ -153,10 +178,10 @@ func init() {
 	pgextListCmd.Flags().StringVarP(&pgextDistro, "distro", "d", "", "filter by distribution")
 	pgextListCmd.Flags().StringVarP(&pgextCategory, "category", "c", "", "filter by category")
 
+	pgextCmd.AddCommand(pgextInstallCmd)
+	pgextCmd.AddCommand(pgextRemoveCmd)
 	pgextCmd.AddCommand(pgextListCmd)
 	pgextCmd.AddCommand(pgextInfoCmd)
-	pgextCmd.AddCommand(pgextAddCmd)
-	pgextCmd.AddCommand(pgextRemoveCmd)
 	pgextCmd.AddCommand(pgextUpdateCmd)
 	pgextCmd.AddCommand(pgextStatusCmd)
 	rootCmd.AddCommand(pgextCmd)

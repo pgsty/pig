@@ -1,4 +1,4 @@
-- { name: pigsty-local  ,description: 'Pigsty Local'     ,module: local     ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://${admin_ip}/pigsty ./' }}
+- { name: pigsty-local  ,description: 'Pigsty Local'     ,module: local     ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://127.0.0.1/pigsty ./' }}
 - { name: pigsty-pgsql  ,description: 'Pigsty PgSQL'     ,module: pgsql     ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.pigsty.io/apt/pgsql/${distro_codename} ${distro_codename} main', china: 'https://repo.pigsty.cc/apt/pgsql/${distro_codename} ${distro_codename} main' }}
 - { name: pigsty-infra  ,description: 'Pigsty Infra'     ,module: infra     ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.pigsty.io/apt/infra/ generic main' ,china: 'https://repo.pigsty.cc/apt/infra/ generic main' }}
 - { name: nginx         ,description: 'Nginx'            ,module: infra     ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://nginx.org/packages/${distro_name} ${distro_codename} nginx' }}

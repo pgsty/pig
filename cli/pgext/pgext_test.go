@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseExtension2(t *testing.T) {
-	InitExtensionData("")
+	InitExtensionData(nil)
 
 	//TabulateExtension(nil)
 	//TabulateExtension(FilterByDistro("el9"))
@@ -17,7 +17,7 @@ func TestParseExtension2(t *testing.T) {
 }
 
 func TestExtensionInfo(t *testing.T) {
-	InitExtensionData("")
+	InitExtensionData(nil)
 	ExtNameMap["postgis"].PrintInfo()
 	ExtNameMap["timescaledb"].PrintInfo()
 	ExtNameMap["postgis_tiger_geocoder"].PrintInfo()
