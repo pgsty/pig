@@ -158,8 +158,7 @@ func (r *Repository) Content(region ...string) string {
 func AddRepo(region string, modules ...string) error {
 	// if "all" in modules, replace it with node, pgsql
 	if slices.Contains(modules, "all") {
-		modules = append(modules, "node", "pgsql", "infra")
-		// remove "all" from modules
+		modules = append(modules, "node", "pigsty", "pgdg")
 		modules = slices.DeleteFunc(modules, func(module string) bool {
 			return module == "all"
 		})

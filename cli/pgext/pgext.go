@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"pig/cli/pgsql"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ var (
 	ExtNameMap  map[string]*Extension
 	ExtAliasMap map[string]*Extension
 	NeedBy      map[string][]string = make(map[string][]string)
+	Postgres    *pgsql.PostgresInstallation
 )
 
 /********************

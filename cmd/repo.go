@@ -24,9 +24,9 @@ var repoCmd = &cobra.Command{
 	Example: `
   typical usage: (Beware that manage repo require sudo/root privilege)
   
-  sudo pig repo add all             # add all necessary repo
-  sudo pig repo update              # update yum/apt repo cache
-  sudo pig ext install xxx          # install postgres extensions and ...
+  sudo pig repo add                 # add all necessary repo (pgdg + pigsty + node)
+  sudo pig repo update              # update yum/apt repo cache (apt update or dnf makecache)
+  sudo pig ext install xxx          # install postgres extensions and (apt install or dnf install)
 
   pig repo list                     # list current repos
   pig repo update                   # update repo cache (apt update or dnf makecache, same as '-u|--update' option) 
@@ -35,7 +35,7 @@ var repoCmd = &cobra.Command{
   pig repo set all -u               # same as above, but remove(backup) old repos first (same as '-r|--remove' option)
   pig repo add all -u               # same as 'pig repo add', also update repo cache 
   pig repo add pigsty pgdg          # add pigsty extension repo + pgdg offical repo
-  pig repo add pgsql node           # add os + postgres repo
+  pig repo add pgsql node           # add os + pgdg postgres repo
   pig repo add infra                # add observability, grafana & prometheus stack, pg bin utils
   pig repo rm                       # remove old repos (move existing repos to ${repodir}/backup)
   pig repo rm pigsty                # remove pigsty repo
@@ -61,17 +61,16 @@ var repoAddCmd = &cobra.Command{
 
   available repo modules:
   - all      :  pgsql + node + infra (recommended)
-  - pgsql    :  pigsty + pgdg (all available pg extensions)
     - pigsty :  PostgreSQL Extension Repo (default)
     - pgdg   :  PGDG the Official PostgreSQL Repo (official)
-  - node     :  operating system official repo (el/debian/ubuntu)
+    - node   :  operating system official repo (el/debian/ubuntu)
+
+  - pgsql    :  pigsty + pgdg (all available pg extensions) 
+  - extra    :  extra postgres modules, non-free, citus, timescaledb upstream 
   - infra    :  observability, grafana & prometheus stack, pg bin utils
-  - extra    :  extra postgres modules, non-free, citus, timescaledb upstream
-  - mssql    :  babelfish, microsoft mssql server compaible postgres
-  - ivory    :  ivorysql, the oracle compatible postgres kernel fork (el)
-  - kube     :  kubernetes, kubectl, kubeadm, kubelet
-  - docker   :  docker-ce, docker-compose
-  - ...
+  - mssql    :  babelfish by wiltondb, MS SQL Server compatible postgres (el + ubuntu)
+  - ivory    :  ivorysql, the oracle compatible postgres kernel fork (el only)
+  - other    :  pgml, kube, docker, grafana mysql, ...
 `,
 	// Long: moduleNotice,
 

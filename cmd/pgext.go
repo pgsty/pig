@@ -5,7 +5,11 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"pig/cli/pgext"
+	"pig/cli/pgsql"
+	"sort"
+	"text/tabwriter"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -14,6 +18,8 @@ import (
 var (
 	pgextDistro   string
 	pgextCategory string
+	pgextPgVer    int
+	pgextPgConfig string
 )
 
 // pgextCmd represents the installation command
@@ -95,7 +101,55 @@ var pgextUpdateCmd = &cobra.Command{
 	},
 }
 
+var pgextStatusCmd = &cobra.Command{
+	Use:     "status",
+	Short:   "show installed extension on active pg",
+	Aliases: []string{"s", "st", "stat"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		pg, err := pgsql.GetPostgres(pgextPgConfig, pgextPgVer)
+		if err != nil {
+			logrus.Errorf("failed to get PostgreSQL installation: %v", err)
+			return nil
+		}
+
+		fmt.Printf("PostgreSQL     :  %s\n", pg.Version)
+		fmt.Printf("Binary Path    :  %s\n", pg.BinPath)
+		fmt.Printf("Lib Path       :  %s\n", pg.LibPath)
+		fmt.Printf("Share Path     :  %s\n", pg.SharePath)
+		fmt.Printf("Include Path   :  %s\n", pg.IncludePath)
+		fmt.Printf("Extensions     :  %d\n", len(pg.Extensions))
+		fmt.Printf("\nInstalled Extensions %d:\n\n", len(pg.Extensions))
+
+		// Sort extensions by name for consistent output
+		extensions := pg.Extensions
+		sort.Slice(extensions, func(i, j int) bool {
+			return extensions[i].Name < extensions[j].Name
+		})
+
+		// Print extension details in a tabulated format
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "Name\tVersion\tDescription")
+		fmt.Fprintln(w, "----\t-------\t---------------------")
+		for _, ext := range extensions {
+			extDescHead := ext.Description
+			if len(extDescHead) > 64 {
+				extDescHead = extDescHead[:64] + "..."
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\n",
+				ext.Name,
+				ext.Version,
+				extDescHead,
+			)
+		}
+		w.Flush()
+		return nil
+	},
+}
+
 func init() {
+	pgextCmd.PersistentFlags().IntVarP(&pgextPgVer, "version", "v", 0, "specify a postgres by major version")
+	pgextCmd.PersistentFlags().StringVarP(&pgextPgConfig, "path", "p", "", "specify a postgres by pg_config path")
+
 	pgextListCmd.Flags().StringVarP(&pgextDistro, "distro", "d", "", "filter by distribution")
 	pgextListCmd.Flags().StringVarP(&pgextCategory, "category", "c", "", "filter by category")
 
@@ -104,5 +158,6 @@ func init() {
 	pgextCmd.AddCommand(pgextAddCmd)
 	pgextCmd.AddCommand(pgextRemoveCmd)
 	pgextCmd.AddCommand(pgextUpdateCmd)
+	pgextCmd.AddCommand(pgextStatusCmd)
 	rootCmd.AddCommand(pgextCmd)
 }

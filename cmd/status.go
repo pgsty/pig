@@ -2,15 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"pig/cli/get"
 	"pig/cli/license"
 	"pig/cli/pgsql"
 	"pig/internal/config"
-	"text/tabwriter"
-	"time"
-
-	"github.com/sirupsen/logrus"
 
 	"github.com/spf13/cobra"
 )
@@ -80,45 +75,6 @@ var statusCmd = &cobra.Command{
 		fmt.Println("Inferred Region = ", get.Region)
 		fmt.Println("Latest Pigsty   = ", get.LatestVersion)
 	},
-}
-
-func DectectPG() {
-	if err := pgsql.DetectPostgres(); err != nil {
-		logrus.Debugf("No PostgreSQL installation detected: %v", err)
-	}
-	if pgsql.Active == nil {
-		return
-	}
-	fmt.Printf("Detected PostgreSQL Version: %d.%d\n", pgsql.Active.MajorVersion, pgsql.Active.MinorVersion)
-	fmt.Printf("PostgreSQL Bin Path: %s\n", pgsql.Active.BinPath)
-	fmt.Printf("PostgreSQL Extension Path: %s\n", pgsql.Active.ExtensionPath)
-
-	logrus.Debugf("Detected PostgreSQL %d.%d: bin=%s ext=%s", pgsql.Active.MajorVersion, pgsql.Active.MinorVersion, pgsql.Active.BinPath, pgsql.Active.ExtensionPath)
-
-	pgsql.Active.ScanExtensions()
-
-	// tabulate extensions and shared libraries
-	table := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-
-	// tabulate extensions
-	fmt.Fprintln(table, "Extension\tVersion\tInstalled At\tLibrary\tDescription")
-	for _, ext := range pgsql.Active.Extensions {
-		description := ext.Description
-		if len(description) > 64 {
-			description = description[:64]
-		}
-		library := ""
-		if ext.Library != nil {
-			library = ext.Library.Path
-		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", ext.Name, ext.Version, ext.InstalledAt.Format(time.DateTime), library, description)
-	}
-	table.Flush()
-
-	fmt.Println("\n===== Unmatched Shared Libraries =====")
-	for _, lib := range pgsql.Active.UnmatchedLibs {
-		fmt.Printf("%s\t%s\t%d\t%s\n", lib.Name, lib.Path, lib.Size, lib.CreatedAt.Format(time.RFC3339))
-	}
 }
 
 func init() {
