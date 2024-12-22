@@ -70,6 +70,11 @@ type Extension struct {
 	Comment     string   `csv:"comment"`     // Additional comments
 }
 
+// SummaryURL returns the URL to the ext.pigsty.io catalog summary page
+func (e *Extension) SummaryURL() string {
+	return fmt.Sprintf("htttps://ext.pigsty.io/#/%s", e.Name)
+}
+
 func (e *Extension) FullTextSearchSummary() string {
 	var buf bytes.Buffer
 	buf.WriteString(e.Name)
@@ -96,11 +101,39 @@ func (e *Extension) FullTextSearchSummary() string {
 }
 
 func (e *Extension) PackageName(pgVer int) string {
+	verStr := strconv.Itoa(pgVer)
+	if pgVer == 0 {
+		verStr = "$v"
+	}
 	if config.OSType == config.DistroEL && e.RpmPkg != "" {
-		return strings.Replace(e.RpmPkg, "$v", strconv.Itoa(pgVer), 1)
+		return strings.Replace(e.RpmPkg, "$v", verStr, 1)
 	}
 	if config.OSType == config.DistroDEB && e.DebPkg != "" {
-		return strings.Replace(e.DebPkg, "$v", strconv.Itoa(pgVer), 1)
+		return strings.Replace(e.DebPkg, "$v", verStr, 1)
+	}
+	// for unknown distro, use rpm pkg if available, otherwise use deb pkg
+	if e.RpmPkg != "" {
+		return e.RpmPkg
+	} else if e.DebPkg != "" {
+		return e.DebPkg
+	}
+	return ""
+}
+
+func (e *Extension) GuessRpmNamePattern(pgVer int) string {
+	return strings.Replace(e.Name, "-", "_", -1) + "_$v"
+}
+
+func (e *Extension) GuessDebNamePattern(pgVer int) string {
+	return fmt.Sprintf("postgresql-$v-%s", strings.Replace(e.Name, "_", "-", -1))
+}
+
+func (e *Extension) RepoName() string {
+	if config.OSType == config.DistroEL && e.RpmRepo != "" {
+		return e.RpmRepo
+	}
+	if config.OSType == config.DistroDEB && e.DebRepo != "" {
+		return e.DebRepo
 	}
 	return ""
 }
@@ -147,9 +180,87 @@ func (e *Extension) NeedBy() []string {
 	return NeedBy[e.Name]
 }
 
+func (e *Extension) GetBool(name string) string {
+	// return yes / no n/a  according to the boolean value
+	switch name {
+	case "ddl":
+		if e.NeedDDL {
+			return "Yes"
+		}
+		return "No"
+	case "load":
+		if e.NeedLoad {
+			return "Yes"
+		}
+		return "No"
+	case "utility":
+		if e.Utility {
+			return "Yes"
+		}
+		return "No"
+	case "lead":
+		if e.Lead {
+			return "Yes"
+		}
+		return "No"
+	case "relocatable":
+		if e.Relocatable == "t" {
+			return "Yes"
+		} else if e.Relocatable == "f" {
+			return "No"
+		}
+		return "N/A"
+	case "trusted":
+		if e.Trusted == "t" {
+			return "Yes"
+		} else if e.Trusted == "f" {
+			return "No"
+		}
+		return "N/A"
+	}
+	return "N/A"
+}
+
+func (e *Extension) GetFlag() string {
+	b, d, s, l, t, r := "-", "-", "-", "-", "-", "-"
+	if e.Utility {
+		b = "b"
+	}
+	if e.NeedDDL {
+		d = "d"
+	}
+	if e.NeedLoad {
+		l = "l"
+	}
+	if e.HasSolib {
+		s = "s"
+	}
+	if e.Trusted == "t" {
+		t = "t"
+	} else {
+		if e.Trusted == "f" {
+			t = "-"
+		} else {
+			t = "x"
+		}
+	}
+	if e.Relocatable == "t" {
+		r = "r"
+	} else {
+		if e.Relocatable == "f" {
+			r = "-"
+		} else {
+			r = "x"
+		}
+	}
+
+	return b + d + s + l + t + r
+}
+
 /********************
 * Init Extension
 ********************/
+
 // InitExtensionData initializes extension data from embedded CSV or file
 func InitExtensionData(data []byte) error {
 	var csvReader *csv.Reader
@@ -308,23 +419,6 @@ func TabulateExtension(filter func(*Extension) bool) {
 				ext.EnDesc,
 			)
 		}
-	}
-	w.Flush()
-}
-
-func Tabulate(data []*Extension) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Name\tAlias\tCategory\tVersion\tLicense\tDescription")
-
-	for _, ext := range data {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			ext.Name,
-			ext.Alias,
-			ext.Category,
-			ext.Version,
-			ext.License,
-			ext.EnDesc,
-		)
 	}
 	w.Flush()
 }

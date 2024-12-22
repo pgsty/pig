@@ -1,8 +1,12 @@
 package pgext
 
 import (
+	"fmt"
+	"os"
+	"pig/cli/pgsql"
 	"sort"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/sirupsen/logrus"
 )
@@ -29,6 +33,47 @@ var CategoryMap = map[string]string{
 type SearchResult struct {
 	Extension *Extension
 	Score     float64
+}
+
+// Tabulate search results
+func TabulateExtensions(data []*Extension, pg *pgsql.PostgresInstallation) {
+	inquiryInstall := false
+	if pg != nil && pg.Extensions != nil && pg.ExtMap != nil {
+		inquiryInstall = true
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	if inquiryInstall {
+		fmt.Fprintln(w, "Name\tStatus\tVersion\tCate\tFlags\tLicense\tRepo\tPackage\tDescription")
+		fmt.Fprintln(w, "----\t---------\t-------\t----\t------\t-------\t------\t------------\t---------------------")
+	} else {
+		fmt.Fprintln(w, "Name\tStatus\tVersion\tCate\tFlags\tLicense\tRepo\tPackage\tDescription")
+		fmt.Fprintln(w, "----\t---------\t-------\t----\t------\t-------\t------\t------------\t---------------------")
+	}
+
+	for _, ext := range data {
+		desc := ext.EnDesc
+		if len(desc) > 64 {
+			desc = desc[:64]
+		}
+		status := "-"
+		if inquiryInstall {
+			if pg.ExtMap[ext.Name] != nil {
+				status = "Installed"
+			} else {
+				status = "Available"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				ext.Name, status, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.PackageName(pg.MajorVersion), desc)
+		} else {
+			status = "Available"
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				ext.Name, status, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.PackageName(0), desc)
+		}
+	}
+	w.Flush()
+
+	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasSolib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(data))
 }
 
 // SearchExtensions performs fuzzy search on extensions

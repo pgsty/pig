@@ -16,10 +16,9 @@ import (
 )
 
 var (
-	pgextDistro   string
-	pgextCategory string
-	pgextPgVer    int
-	pgextPgConfig string
+	pgextPgVer       int
+	pgextPgConfig    string
+	pgextShowContrib bool
 )
 
 // pgextCmd represents the installation command
@@ -29,47 +28,48 @@ var pgextCmd = &cobra.Command{
 	Aliases: []string{"e", "ex", "ext"},
 	Example: `
 Description:
-  pig ext list                list all available versions     
-  pig ext repo                add extension repo according to distro
+  pig ext list                list & search extension      
   pig ext info    [ext...]    get infomation of a specific extension
   pig ext install [ext...]    install extension for current pg version
   pig ext remove  [ext...]    remove extension for current pg version
   pig ext update  [ext...]    update default extension list
-  pig ext reload              reload postgres to take effect
 `,
 }
 
 var pgextListCmd = &cobra.Command{
 	Use:     "list [query]",
 	Short:   "list & search available extensions",
-	Aliases: []string{"l", "ls"},
+	Aliases: []string{"l", "ls", "find"},
 	Example: `
   pig ext list                # list all extensions
   pig ext list postgis        # search extensions by name/description
-  pig ext list -d el8 vector  # search with distro filter
+  pig ext ls olap             # list extension of olap category
+  pig ext ls gis -v 16        # list gis category for pg 16
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgext.InitExtensionData(nil)
-		filter := pgext.FilterExtensions(pgextDistro, pgextCategory)
+
+		pg, err := pgsql.GetPostgres(pgextPgConfig, pgextPgVer)
+		if err != nil {
+			logrus.Debugf("failed to find installed PostgreSQL: %v", err)
+		}
 
 		// If search query provided
 		if len(args) > 1 {
 			return fmt.Errorf("too many arguments, only one search query allowed")
 		}
+		results := pgext.Extensions
 		if len(args) == 1 {
 			query := args[0]
 			results := pgext.SearchExtensions(query, pgext.Extensions)
 			if len(results) == 0 {
 				logrus.Warnf("no extensions found matching '%s'", query)
 				return nil
+			} else {
+				logrus.Infof("found %d extensions matching '%s':", len(results), query)
 			}
-			logrus.Infof("found %d extensions matching '%s':", len(results), query)
-			pgext.Tabulate(results)
-			return nil
 		}
-
-		// No search query, list all
-		pgext.TabulateExtension(filter)
+		pgext.TabulateExtensions(results, pg)
 		return nil
 	},
 }
@@ -159,14 +159,24 @@ var pgextStatusCmd = &cobra.Command{
 			logrus.Errorf("failed to get PostgreSQL installation: %v", err)
 			return nil
 		}
+		pg.PrintSummary()
+		pgext.InitExtensionData(nil)
+		pgext.ExtensionStatus(pg, pgextShowContrib)
+		return nil
+	},
+}
 
-		fmt.Printf("PostgreSQL     :  %s\n", pg.Version)
-		fmt.Printf("Binary Path    :  %s\n", pg.BinPath)
-		fmt.Printf("Lib Path       :  %s\n", pg.LibPath)
-		fmt.Printf("Share Path     :  %s\n", pg.SharePath)
-		fmt.Printf("Include Path   :  %s\n", pg.IncludePath)
-		fmt.Printf("Extensions     :  %d\n", len(pg.Extensions))
-		fmt.Printf("\nInstalled Extensions (%d) :\n\n", len(pg.Extensions))
+var pgextScanCmd = &cobra.Command{
+	Use:     "scan",
+	Short:   "scan installed extensions for active pg",
+	Aliases: []string{"sc"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		pg, err := pgsql.GetPostgres(pgextPgConfig, pgextPgVer)
+		if err != nil {
+			logrus.Errorf("failed to get PostgreSQL installation: %v", err)
+			return nil
+		}
+		pg.PrintSummary()
 
 		// Sort extensions by name for consistent output
 		extensions := pg.Extensions
@@ -190,6 +200,15 @@ var pgextStatusCmd = &cobra.Command{
 			)
 		}
 		w.Flush()
+
+		// Tabulate unmatched shared libraries
+		fmt.Println("\nUnmatched Shared Libraries:")
+		w = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		for _, lib := range pg.UnmatchedLibs {
+			fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", lib.Name, lib.Size, lib.Mtime, lib.Path)
+		}
+		w.Flush()
+
 		return nil
 	},
 }
@@ -197,9 +216,7 @@ var pgextStatusCmd = &cobra.Command{
 func init() {
 	pgextCmd.PersistentFlags().IntVarP(&pgextPgVer, "version", "v", 0, "specify a postgres by major version")
 	pgextCmd.PersistentFlags().StringVarP(&pgextPgConfig, "path", "p", "", "specify a postgres by pg_config path")
-
-	pgextListCmd.Flags().StringVarP(&pgextDistro, "distro", "d", "", "filter by distribution")
-	pgextListCmd.Flags().StringVarP(&pgextCategory, "category", "c", "", "filter by category")
+	pgextStatusCmd.Flags().BoolVarP(&pgextShowContrib, "contrib", "c", false, "show contrib extensions too")
 
 	pgextCmd.AddCommand(pgextInstallCmd)
 	pgextCmd.AddCommand(pgextRemoveCmd)
@@ -207,5 +224,6 @@ func init() {
 	pgextCmd.AddCommand(pgextInfoCmd)
 	pgextCmd.AddCommand(pgextUpdateCmd)
 	pgextCmd.AddCommand(pgextStatusCmd)
+	pgextCmd.AddCommand(pgextScanCmd)
 	rootCmd.AddCommand(pgextCmd)
 }

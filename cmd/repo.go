@@ -25,12 +25,11 @@ var repoCmd = &cobra.Command{
 	Example: `
   typical usage: (Beware that manage repo require sudo/root privilege)
   
-  sudo pig repo add                 # add all necessary repo (pgdg + pigsty + node)
-  sudo pig repo update              # update yum/apt repo cache (apt update or dnf makecache)
-  sudo pig ext install xxx          # install postgres extensions and (apt install or dnf install)
-
-  pig repo list                     # list current repos
-  pig repo update                   # update repo cache (apt update or dnf makecache, same as '-u|--update' option) 
+  pig repo add                 # add all necessary repo (pgdg + pigsty + node)
+  pig repo rm                  # remove yum/atp repo (move existing repo to backup dir)  
+  pig repo list                # list current system repo dir and active repos  
+  pig repo update              # update yum/apt repo cache (apt update or dnf makecache)
+ 
   pig repo add -u                   # add all necessary repo and update repo cache
   pig repo set -u                   # overwrite repo and update repo cache
   pig repo set all -u               # same as above, but remove(backup) old repos first (same as '-r|--remove' option)
@@ -41,7 +40,7 @@ var repoCmd = &cobra.Command{
   pig repo rm                       # remove old repos (move existing repos to ${repodir}/backup)
   pig repo rm pigsty                # remove pigsty repo
   pig repo rm pgsql infra           # remove two repo module: pgsql & infra
-	`,
+`,
 }
 
 var repoAddCmd = &cobra.Command{
@@ -106,7 +105,10 @@ var repoAddCmd = &cobra.Command{
 		}
 
 		fmt.Printf("======== ls %s\n", repoDir)
-		utils.ShellCommand([]string{"ls", repoDir})
+		if err := utils.ShellCommand([]string{"ls", repoDir}); err != nil {
+			logrus.Errorf("failed to list repo dir: %s", repoDir)
+			os.Exit(1)
+		}
 
 		if repoUpdate {
 			if err := utils.SudoCommand(updateCmd); err != nil {
@@ -138,10 +140,10 @@ var repoSetCmd = &cobra.Command{
 	},
 }
 
-var repoRmCmd = &cobra.Command{
-	Use:     "rm",
+var repoRemoveCmd = &cobra.Command{
+	Use:     "remove",
 	Short:   "remove pigsty yum/apt repository",
-	Aliases: []string{"r", "remove"},
+	Aliases: []string{"r", "rm"},
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			err := repo.BackupRepo()
@@ -229,10 +231,10 @@ func init() {
 	repoAddCmd.Flags().BoolVarP(&repoRemove, "remove", "r", false, "remove exisitng repo")
 	repoSetCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoSetCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
-	repoRmCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
+	repoRemoveCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 	repoCmd.AddCommand(repoAddCmd)
 	repoCmd.AddCommand(repoSetCmd)
-	repoCmd.AddCommand(repoRmCmd)
+	repoCmd.AddCommand(repoRemoveCmd)
 	repoCmd.AddCommand(repoListCmd)
 	repoCmd.AddCommand(repoCacheCmd)
 	rootCmd.AddCommand(repoCmd)

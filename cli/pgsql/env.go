@@ -64,6 +64,7 @@ var (
 		"wal2mongo":              "PostgreSQL logical decoding output plugin for MongoDB",
 		"decoderbufs":            "Logical decoding plugin that delivers WAL stream changes using a Protocol Buffer format",
 		"decoder_raw":            "Output plugin for logical replication in Raw SQL format",
+		"pgoutput":               "Logical Replication output plugin",
 		"test_decoding":          "SQL-based test/example module for WAL logical decoding",
 		"safeupdate":             "Require criteria for UPDATE and DELETE",
 		"sepgsql":                "label-based mandatory access control (MAC) based on SELinux security policy",
@@ -88,9 +89,9 @@ type PostgresInstallation struct {
 	MajorVersion  int
 	MinorVersion  int
 	BinPath       string
+	ExtPath       string
 	LibPath       string
-	SharePath     string
-	IncludePath   string
+	Config        map[string]string
 	Extensions    []*Extension
 	SharedLibs    []*SharedLib
 	UnmatchedLibs []*SharedLib
@@ -128,8 +129,15 @@ func (p *PostgresInstallation) String() string {
 
 }
 
+func (pg *PostgresInstallation) PrintSummary() {
+	fmt.Printf("PostgreSQL     :  %s\n", pg.Version)
+	fmt.Printf("Binary Path    :  %s\n", pg.BinPath)
+	fmt.Printf("Library Path   :  %s\n", pg.LibPath)
+	fmt.Printf("Extension Path :  %s\n", pg.ExtPath)
+}
+
 func (e *Extension) LibName() string {
-	// return human readable size
+	// return human-readable size
 	if e.Library == nil {
 		return ""
 	} else {
@@ -138,7 +146,7 @@ func (e *Extension) LibName() string {
 }
 
 func (e *Extension) Size() string {
-	// return human readable size
+	// return human-readable size
 	if e.Library == nil {
 		return ""
 	} else {
@@ -249,26 +257,40 @@ func DetectPostgresFromConfig(pgConfigPath string) (*PostgresInstallation, error
 
 // detectFromConfig retrieves installation information from the specified pg_config path
 func (p *PostgresInstallation) detectFromConfig(pgConfigPath string) error {
-	paths := map[string]*string{
-		"--version":    &p.Version,
-		"--bindir":     &p.BinPath,
-		"--libdir":     &p.LibPath,
-		"--sharedir":   &p.SharePath,
-		"--includedir": &p.IncludePath,
+	cmd := exec.Command(pgConfigPath)
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to execute pg_config: %v", err)
 	}
 
-	for param, target := range paths {
-		cmd := exec.Command(pgConfigPath, param)
-		output, err := cmd.Output()
-		if err != nil {
-			return fmt.Errorf("failed to execute pg_config %s: %v", param, err)
+	config := strings.TrimSpace(string(output))
+	lines := strings.Split(config, "\n")
+	configMap := make(map[string]string)
+
+	for _, line := range lines {
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+			configMap[key] = value
 		}
-		*target = strings.TrimSpace(string(output))
 	}
 
-	if matches := PostgresVersionRegex.FindStringSubmatch(p.Version); len(matches) >= 3 {
-		p.MajorVersion, _ = strconv.Atoi(matches[1])
-		p.MinorVersion, _ = strconv.Atoi(matches[2])
+	if version, ok := configMap["VERSION"]; ok {
+		p.Version = version
+		if matches := PostgresVersionRegex.FindStringSubmatch(p.Version); len(matches) >= 3 {
+			p.MajorVersion, _ = strconv.Atoi(matches[1])
+			p.MinorVersion, _ = strconv.Atoi(matches[2])
+		}
+	}
+	if bindir, ok := configMap["BINDIR"]; ok {
+		p.BinPath = bindir
+	}
+	if libdir, ok := configMap["PKGLIBDIR"]; ok {
+		p.LibPath = libdir
+	}
+	if sharedir, ok := configMap["SHAREDIR"]; ok {
+		p.ExtPath = filepath.Join(sharedir, "extension")
 	}
 
 	return nil
@@ -276,7 +298,6 @@ func (p *PostgresInstallation) detectFromConfig(pgConfigPath string) error {
 
 // ScanExtensions scans PostgreSQL extensions
 func (p *PostgresInstallation) ScanExtensions() error {
-
 	if err := p.scanSharedLibs(); err != nil {
 		return fmt.Errorf("failed to scan shared libraries: %v", err)
 	}
@@ -305,8 +326,6 @@ func (p *PostgresInstallation) ScanExtensions() error {
 
 func (p *PostgresInstallation) matchExtensionLibs() error {
 	// logrus.Debugf("matching extension libs for PostgreSQL %d.%d", p.MajorVersion, p.MinorVersion)
-
-	// iterrate over extensions
 	for _, ext := range p.Extensions {
 		if ext.Library != nil {
 			continue
@@ -339,7 +358,7 @@ func (p *PostgresInstallation) matchExtensionLibs() error {
 // scanSharedLibs scans shared library files
 func (p *PostgresInstallation) scanExtensions() error {
 	//logrus.Debugf("scanning extension libs for PostgreSQL %d.%d", p.MajorVersion, p.MinorVersion)
-	extensionsPath := filepath.Join(p.SharePath, "extension")
+	extensionsPath := filepath.Join(p.ExtPath)
 	entries, err := os.ReadDir(extensionsPath)
 	if err != nil {
 		return fmt.Errorf("failed to read extensions directory: %v", err)
@@ -370,6 +389,7 @@ func (p *PostgresInstallation) scanExtensions() error {
 				Library:     lib,
 			}
 			extensions = append(extensions, ext)
+			lib.Ext = ext
 		}
 	}
 
@@ -422,7 +442,7 @@ func (p *PostgresInstallation) scanSharedLibs() error {
 
 // parseControlFile parses the control file of an extension
 func (p *PostgresInstallation) parseControlFile(ext *Extension) error {
-	controlPath := filepath.Join(p.SharePath, "extension", ext.Name+".control")
+	controlPath := filepath.Join(p.ExtPath, ext.Name+".control")
 	file, err := os.Open(controlPath)
 	if err != nil {
 		return err
@@ -477,28 +497,15 @@ func detectActiveInstall() (*PostgresInstallation, error) {
 		return nil, fmt.Errorf("pg_config not found in PATH: %v", err)
 	}
 	install := &PostgresInstallation{}
-	paths := map[string]*string{
-		"--version":    &install.Version,
-		"--bindir":     &install.BinPath,
-		"--libdir":     &install.LibPath,
-		"--sharedir":   &install.SharePath,
-		"--includedir": &install.IncludePath,
+
+	// get the absolute path of pg config and detect it
+	absPgConfigPath, err := filepath.Abs(pgConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path of pg_config: %v", err)
 	}
 
-	for param, target := range paths {
-		cmd := exec.Command(pgConfig, param)
-		output, err := cmd.Output()
-		if err != nil {
-			return nil, fmt.Errorf("failed to execute pg_config %s: %v", param, err)
-		}
-		*target = strings.TrimSpace(string(output))
-	}
-
-	versionRegex := regexp.MustCompile(`PostgreSQL (\d+)\.(\d+)`)
-	matches := versionRegex.FindStringSubmatch(install.Version)
-	if len(matches) >= 3 {
-		install.MajorVersion, _ = strconv.Atoi(matches[1])
-		install.MinorVersion, _ = strconv.Atoi(matches[2])
+	if err := install.detectFromConfig(absPgConfigPath); err != nil {
+		return nil, fmt.Errorf("failed to detect PostgreSQL from %s: %v", absPgConfigPath, err)
 	}
 	return install, nil
 }
