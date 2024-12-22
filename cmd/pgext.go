@@ -47,17 +47,19 @@ var pgextListCmd = &cobra.Command{
   pig ext ls gis -v 16        # list gis category for pg 16
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pgext.InitExtensionData(nil)
-
-		pg, err := pgsql.GetPostgres(pgextPgConfig, pgextPgVer)
-		if err != nil {
+		if len(args) > 1 {
+			logrus.Errorf("too many arguments, only one search query allowed")
+			os.Exit(1)
+		}
+		if err := pgext.InitExtension(nil); err != nil {
+			logrus.Errorf("failed to initialize extension data: %v", err)
+			os.Exit(2)
+		}
+		if err := pgext.InitPostgres(pgextPgConfig, pgextPgVer); err != nil {
 			logrus.Debugf("failed to find installed PostgreSQL: %v", err)
 		}
 
 		// If search query provided
-		if len(args) > 1 {
-			return fmt.Errorf("too many arguments, only one search query allowed")
-		}
 		results := pgext.Extensions
 		if len(args) == 1 {
 			query := args[0]
@@ -69,7 +71,7 @@ var pgextListCmd = &cobra.Command{
 				logrus.Infof("found %d extensions matching '%s':", len(results), query)
 			}
 		}
-		pgext.TabulateExtensions(results, pg)
+		pgext.TabulateSearchResult(results)
 		return nil
 	},
 }
@@ -82,7 +84,7 @@ var pgextInfoCmd = &cobra.Command{
 		if len(args) == 0 {
 			return fmt.Errorf("extension name required")
 		}
-		pgext.InitExtensionData(nil)
+		pgext.InitExtension(nil)
 		for _, name := range args {
 			ext, ok := pgext.ExtNameMap[name]
 			if !ok {
@@ -160,7 +162,7 @@ var pgextStatusCmd = &cobra.Command{
 			return nil
 		}
 		pg.PrintSummary()
-		pgext.InitExtensionData(nil)
+		pgext.InitExtension(nil)
 		pgext.ExtensionStatus(pg, pgextShowContrib)
 		return nil
 	},

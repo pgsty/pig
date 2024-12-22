@@ -159,14 +159,12 @@ func GetPostgres(path string, ver int) (pg *PostgresInstallation, err error) {
 	if path != "" {
 		return DetectPostgresFromConfig(path)
 	}
-
 	if !Inited {
 		err = DetectInstalledPostgres()
 		if err != nil {
 			return nil, err
 		}
 	}
-
 	if ver != 0 {
 		if pg, exists := Installs[ver]; exists {
 			return pg, nil
@@ -174,13 +172,11 @@ func GetPostgres(path string, ver int) (pg *PostgresInstallation, err error) {
 			return nil, fmt.Errorf("PostgreSQL version %d is not installed", ver)
 		}
 	}
-
 	if Active == nil {
 		return nil, fmt.Errorf("no active PostgreSQL installation detected")
 	} else {
 		return Active, nil
 	}
-
 }
 
 // DetectInstalledPostgres detects all installed PostgreSQL versions on the system
@@ -324,6 +320,7 @@ func (p *PostgresInstallation) ScanExtensions() error {
 	return nil
 }
 
+// matchExtensionLibs matches extensions with their shared libraries
 func (p *PostgresInstallation) matchExtensionLibs() error {
 	// logrus.Debugf("matching extension libs for PostgreSQL %d.%d", p.MajorVersion, p.MinorVersion)
 	for _, ext := range p.Extensions {
@@ -336,7 +333,6 @@ func (p *PostgresInstallation) matchExtensionLibs() error {
 			if ext.Mtime.IsZero() {
 				ext.Mtime = lib.Mtime
 			}
-			//logrus.Debugf("matched extension %s with lib %s ext=%v lib=%v ext.lib=%v", ext.Name, lib.Name, ext, lib, ext.Library)
 			continue
 		}
 		for _, lib := range p.SharedLibs {
@@ -346,7 +342,6 @@ func (p *PostgresInstallation) matchExtensionLibs() error {
 				if ext.Mtime.IsZero() {
 					ext.Mtime = lib.Mtime
 				}
-				//logrus.Debugf("matched extension %s with lib %s ext=%v lib=%v ext.lib=%v", ext.Name, lib.Name, ext, lib, ext.Library)
 				continue
 			}
 		}
@@ -410,7 +405,6 @@ func (p *PostgresInstallation) scanSharedLibs() error {
 	var sharedLibs []*SharedLib
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".so") {
-
 			libName := strings.TrimSuffix(entry.Name(), ".so")
 			extName := libName
 			if idx := strings.LastIndex(libName, "-"); idx > 0 {

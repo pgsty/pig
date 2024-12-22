@@ -120,7 +120,7 @@ func InstallExtensions(names []string, pg *pgsql.PostgresInstallation) error {
 		return fmt.Errorf("unsupported OS type: %s", config.OSType)
 	}
 
-	if err := InitExtensionData(nil); err != nil {
+	if err := InitExtension(nil); err != nil {
 		return err
 	}
 	if len(names) == 0 {
@@ -186,7 +186,7 @@ func RemoveExtensions(names []string, pg *pgsql.PostgresInstallation) error {
 		return fmt.Errorf("unsupported OS type: %s", config.OSType)
 	}
 
-	if err := InitExtensionData(nil); err != nil {
+	if err := InitExtension(nil); err != nil {
 		return err
 	}
 	if len(names) == 0 {

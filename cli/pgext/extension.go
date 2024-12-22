@@ -9,16 +9,6 @@ import (
 	"strings"
 )
 
-//go:embed assets/pigsty.csv
-var embedExtensionData []byte
-
-var (
-	Extensions  []*Extension
-	ExtNameMap  map[string]*Extension
-	ExtAliasMap map[string]*Extension
-	NeedBy      map[string][]string = make(map[string][]string)
-)
-
 /********************
 * Extension Type
 ********************/
@@ -89,6 +79,28 @@ func (e *Extension) FullTextSearchSummary() string {
 		buf.WriteString(" " + strings.ToLower(e.ZhDesc))
 	}
 	return buf.String()
+}
+
+func (e *Extension) Available(distroCode string, pgVer int) bool {
+	return true
+}
+
+func (e *Extension) Availability(distroCode string) string {
+	if config.OSType == config.DistroEL {
+		if e.RpmRepo == "" {
+			return "n/a"
+		} else {
+			return strings.Join(e.RpmPg, ", ")
+		}
+	}
+	if config.OSType == config.DistroDEB {
+		if e.DebRepo == "" {
+			return "n/a"
+		} else {
+			return strings.Join(e.DebPg, ", ")
+		}
+	}
+	return strings.Join(e.PgVer, ", ")
 }
 
 func (e *Extension) PackageName(pgVer int) string {

@@ -3,7 +3,7 @@ package pgext
 import (
 	"fmt"
 	"os"
-	"pig/cli/pgsql"
+	"pig/internal/config"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -35,15 +35,10 @@ type SearchResult struct {
 	Score     float64
 }
 
-// Tabulate search results
-func TabulateExtensions(data []*Extension, pg *pgsql.PostgresInstallation) {
-	inquiryInstall := false
-	if pg != nil && pg.Extensions != nil && pg.ExtMap != nil {
-		inquiryInstall = true
-	}
-
+// TabulateSearchResult prints a tabulated list of extensions
+func TabulateSearchResult(data []*Extension) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	if inquiryInstall {
+	if PG == nil {
 		fmt.Fprintln(w, "Name\tStatus\tVersion\tCate\tFlags\tLicense\tRepo\tPackage\tDescription")
 		fmt.Fprintln(w, "----\t---------\t-------\t----\t------\t-------\t------\t------------\t---------------------")
 	} else {
@@ -57,16 +52,22 @@ func TabulateExtensions(data []*Extension, pg *pgsql.PostgresInstallation) {
 			desc = desc[:64]
 		}
 		status := "-"
-		if inquiryInstall {
-			if pg.ExtMap[ext.Name] != nil {
+
+		// if there's any active postgres, query if it is installed
+		if PG != nil {
+			if PG.ExtMap[ext.Name] != nil {
 				status = "Installed"
 			} else {
-				status = "Available"
+				if ext.Available(config.OSCode, PG.MajorVersion) {
+					status = "Available"
+				} else {
+					status = "Not Ready"
+				}
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				ext.Name, status, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.PackageName(pg.MajorVersion), desc)
+				ext.Name, status, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.PackageName(PG.MajorVersion), desc)
 		} else {
-			status = "Available"
+			status = ext.Availability(config.OSCode)
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				ext.Name, status, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.PackageName(0), desc)
 		}

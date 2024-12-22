@@ -2,20 +2,43 @@ package pgext
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/csv"
 	"fmt"
 	"github.com/sirupsen/logrus"
+	"pig/cli/pgsql"
 	"sort"
 	"strconv"
 	"strings"
 )
 
+//go:embed assets/pigsty.csv
+var embedExtensionData []byte
+
+var (
+	Extensions  []*Extension
+	ExtNameMap  map[string]*Extension
+	ExtAliasMap map[string]*Extension
+	NeedBy      map[string][]string = make(map[string][]string)
+	PG          *pgsql.PostgresInstallation
+)
+
+/********************
+* Init Postgres
+********************/
+
+// InitPostgres will initialize the Postgres instance
+func InitPostgres(path string, ver int) (err error) {
+	PG, err = pgsql.GetPostgres(path, ver)
+	return
+}
+
 /********************
 * Init Extension
 ********************/
 
-// InitExtensionData initializes extension data from embedded CSV or file
-func InitExtensionData(data []byte) error {
+// InitExtension initializes extension data from embedded CSV or file
+func InitExtension(data []byte) error {
 	var csvReader *csv.Reader
 	if data == nil { // Use embedded data
 		data = embedExtensionData
