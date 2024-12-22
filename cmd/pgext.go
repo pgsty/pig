@@ -210,9 +210,37 @@ var pgextRemoveCmd = &cobra.Command{
 
 var pgextUpdateCmd = &cobra.Command{
 	Use:     "update",
-	Short:   "update default extension list",
-	Aliases: []string{"u"},
+	Short:   "update installed extensions for current pg version",
+	Aliases: []string{"u", "up", "upgrade"},
+	Example: `
+Description:
+  pig ext update                     # update all installed extensions
+  pig ext update postgis             # update specific extension
+  pig ext update postgis timescaledb # update multiple extensions
+  pig ext up pg_vector -y            # update with auto-confirm
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var pgVer int
+		err := pgext.InitPostgres(pgextPgConfig, pgextPgVer)
+		if err != nil {
+			if pgextPgVer != 0 {
+				pgVer = pgextPgVer
+				logrus.Infof("fail to detect active postgres: %v, use given pg version: %d", err, pgVer)
+			} else {
+				logrus.Errorf("fail to detect active postgres, please specify it explicitly")
+				os.Exit(1)
+			}
+		} else {
+			logrus.Debugf("found active postgres, version: %d", pgext.Postgres.MajorVersion)
+			pgVer = pgext.Postgres.MajorVersion
+		}
+
+		pgext.InitExtension(nil)
+		pgext.InitPackageMap(config.OSType)
+		if err = pgext.UpdateExtensions(pgVer, args, pgextYes); err != nil {
+			logrus.Errorf("failed to update extensions: %v", err)
+			return nil
+		}
 		return nil
 	},
 }
