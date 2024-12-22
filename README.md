@@ -176,7 +176,7 @@ $ pig ext info pg_duckdb
 │ Version   : 0.2.0                                                          │
 │ License   : MIT                                                            │
 │ Website   : https://github.com/duckdb/pg_duckdb                            │
-│ Details   : htttps://ext.pigsty.io/#/pg_duckdb                             │
+│ Details   : https://ext.pigsty.io/#/pg_duckdb                              │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Extension Properties                                                       │
 ├────────────────────────────────────────────────────────────────────────────┤

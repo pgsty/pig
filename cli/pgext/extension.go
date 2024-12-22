@@ -54,7 +54,7 @@ type Extension struct {
 
 // SummaryURL returns the URL to the ext.pigsty.io catalog summary page
 func (e *Extension) SummaryURL() string {
-	return fmt.Sprintf("htttps://ext.pigsty.io/#/%s", e.Name)
+	return fmt.Sprintf("https://ext.pigsty.io/#/%s", e.Name)
 }
 
 func (e *Extension) FullTextSearchSummary() string {
