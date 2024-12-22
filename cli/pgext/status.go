@@ -11,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// ExtensionStatus prints the status of installed extensions
 func ExtensionStatus(pg *pgsql.PostgresInstallation, contrib bool) {
 	// join pg.Extensions and pgext Extension Catalog and print the information
 	var exts []*Extension
