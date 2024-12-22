@@ -29,12 +29,12 @@ var pgextCmd = &cobra.Command{
 	Aliases: []string{"e", "ex", "ext"},
 	Example: `
 Description:
-  pig ext list                list & search extension      
-  pig ext info    [ext...]    get infomation of a specific extension
-  pig ext install [ext...]    install extension for current pg version
-  pig ext remove  [ext...]    remove extension for current pg version
-  pig ext update  [ext...]    update default extension list
-  pig ext status              show installed extension and pg status
+  pig ext list                 # list & search extension      
+  pig ext info    [ext...]     # get information of a specific extension
+  pig ext install [ext...]     # install extension for current pg version
+  pig ext remove  [ext...]     # remove extension for current pg version
+  pig ext update  [ext...]     # update extension to the latest version
+  pig ext status               # show installed extension and pg status
 `,
 }
 

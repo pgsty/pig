@@ -232,6 +232,7 @@ func init() {
 	repoSetCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoSetCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 	repoRemoveCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
+
 	repoCmd.AddCommand(repoAddCmd)
 	repoCmd.AddCommand(repoSetCmd)
 	repoCmd.AddCommand(repoRemoveCmd)

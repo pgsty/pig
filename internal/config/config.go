@@ -54,7 +54,7 @@ func InitConfig(inventory string) {
 
 	// set home dir, config dir, config file
 	HomeDir = homeDir
-	ConfigDir = filepath.Join(HomeDir, ".pigsty")
+	ConfigDir = filepath.Join(HomeDir, ".pig")
 	ConfigFile = filepath.Join(ConfigDir, "config.yml")
 	// create that directory if not exists
 	if _, err := os.Stat(ConfigDir); os.IsNotExist(err) {
