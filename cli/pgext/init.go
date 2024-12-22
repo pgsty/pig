@@ -5,22 +5,30 @@ import (
 	_ "embed"
 	"encoding/csv"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"pig/cli/pgsql"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 )
 
 //go:embed assets/pigsty.csv
 var embedExtensionData []byte
 
 var (
-	Extensions  []*Extension
-	ExtNameMap  map[string]*Extension
-	ExtAliasMap map[string]*Extension
-	NeedBy      map[string][]string = make(map[string][]string)
-	PG          *pgsql.PostgresInstallation
+	Extensions         []*Extension
+	ExtNameMap         map[string]*Extension
+	ExtAliasMap        map[string]*Extension
+	NeedBy             map[string][]string = make(map[string][]string)
+	Postgres           *pgsql.PostgresInstallation
+	PostgresPackageMap map[string]string
+	DefaultPgVer       = 17
+)
+
+var (
+	PostgresVersions = []string{"17", "16", "15", "14", "13"}
+	CategoryList     = []string{"TIME", "GIS", "RAG", "FTS", "OLAP", "FEAT", "LANG", "TYPE", "FUNC", "ADMIN", "STAT", "SEC", "FDW", "SIM", "ETL"}
 )
 
 /********************
@@ -29,8 +37,14 @@ var (
 
 // InitPostgres will initialize the Postgres instance
 func InitPostgres(path string, ver int) (err error) {
-	PG, err = pgsql.GetPostgres(path, ver)
-	return
+	Postgres, err = pgsql.GetPostgres(path, ver)
+	if err != nil {
+		return fmt.Errorf("failed to get PostgreSQL installation: %v", err)
+	}
+	if Postgres == nil {
+		return fmt.Errorf("failed to get PostgreSQL installation")
+	}
+	return nil
 }
 
 /********************

@@ -12,12 +12,25 @@ import (
 )
 
 // ExtensionStatus prints the status of installed extensions
-func ExtensionStatus(pg *pgsql.PostgresInstallation, contrib bool) {
-	// join pg.Extensions and pgext Extension Catalog and print the information
+func ExtensionStatus(contrib bool) {
+	if Postgres == nil {
+		logrus.Errorf("PostgreSQL installation not found")
+		return
+	}
+
+	if len(pgsql.Installs) > 0 {
+		fmt.Printf("Installed PG Vers :  %s\n", pgsql.PrintInstalledPostgres())
+	}
+	fmt.Printf("Active PostgreSQL :  %s\n", Postgres.Version)
+	fmt.Printf("PostgreSQL        :  %s\n", Postgres.Version)
+	fmt.Printf("Binary Path       :  %s\n", Postgres.BinPath)
+	fmt.Printf("Library Path      :  %s\n", Postgres.LibPath)
+	fmt.Printf("Extension Path    :  %s\n", Postgres.ExtPath)
+
 	var exts []*Extension
 	var notFound []string
 	repocount := map[string]int{"CONTRIB": 0, "PGDG": 0, "PIGSTY": 0}
-	for _, ext := range pg.Extensions {
+	for _, ext := range Postgres.Extensions {
 		extInfo := ExtNameMap[ext.Name]
 		if extInfo == nil {
 			logrus.Infof("Extension: %s (not found in catalog)", ext.Name)
@@ -56,8 +69,8 @@ func ExtensionStatus(pg *pgsql.PostgresInstallation, contrib bool) {
 			nonContribStr += fmt.Sprintf(", %s %d", repo, count)
 		}
 	}
-	extSummary := fmt.Sprintf("Extension Stat :  %d Installed (%s) + %d CONTRIB = %d Total\n",
-		nonContribCnt, nonContribStr, repocount["CONTRIB"], len(pg.Extensions))
+	extSummary := fmt.Sprintf("Extension Stat    :  %d Installed (%s) + %d CONTRIB = %d Total\n",
+		nonContribCnt, nonContribStr, repocount["CONTRIB"], len(Postgres.Extensions))
 	fmt.Println(extSummary)
 
 	// tabulate installed extensions
@@ -69,7 +82,7 @@ func ExtensionStatus(pg *pgsql.PostgresInstallation, contrib bool) {
 		if len(desc) > 64 {
 			desc = desc[:64]
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", ext.Name, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.PackageName(pg.MajorVersion), desc)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", ext.Name, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.PackageName(Postgres.MajorVersion), desc)
 	}
 	w.Flush()
 

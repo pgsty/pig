@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"pig/internal/config"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -81,8 +82,53 @@ func (e *Extension) FullTextSearchSummary() string {
 	return buf.String()
 }
 
-func (e *Extension) Available(distroCode string, pgVer int) bool {
-	return true
+func (e *Extension) GetStatus(ver int) string {
+	if Postgres != nil {
+		if Postgres.ExtMap[e.Name] != nil {
+			return "added"
+		} else {
+			if e.Available(ver) {
+				return "avail"
+			} else {
+				return "n/a"
+			}
+		}
+	} else {
+		if e.Available(ver) {
+			return "avail"
+		} else {
+			return "n/a"
+		}
+	}
+}
+
+func CompactVersion(pgVers []string) string {
+	// Remove version "12" from the list
+	filteredVers := []int{}
+	for _, ver := range pgVers {
+		if ver != "12" {
+			verInt, err := strconv.Atoi(ver)
+			if err == nil {
+				filteredVers = append(filteredVers, verInt)
+			}
+		}
+	}
+
+	// If no versions left after filtering, return empty string
+	if len(filteredVers) == 0 {
+		return ""
+	}
+
+	// Sort the versions
+	sort.Ints(filteredVers)
+
+	// If only one version, return it
+	if len(filteredVers) == 1 {
+		return strconv.Itoa(filteredVers[0])
+	}
+
+	// Return the range in "min-max" format
+	return fmt.Sprintf("%d-%d", filteredVers[0], filteredVers[len(filteredVers)-1])
 }
 
 func (e *Extension) Availability(distroCode string) string {
@@ -90,17 +136,18 @@ func (e *Extension) Availability(distroCode string) string {
 		if e.RpmRepo == "" {
 			return "n/a"
 		} else {
-			return strings.Join(e.RpmPg, ", ")
+			return CompactVersion(e.RpmPg)
 		}
 	}
 	if config.OSType == config.DistroDEB {
 		if e.DebRepo == "" {
 			return "n/a"
 		} else {
-			return strings.Join(e.DebPg, ", ")
+			return CompactVersion(e.DebPg)
 		}
 	}
-	return strings.Join(e.PgVer, ", ")
+
+	return CompactVersion(e.PgVer)
 }
 
 func (e *Extension) PackageName(pgVer int) string {
@@ -113,12 +160,6 @@ func (e *Extension) PackageName(pgVer int) string {
 	}
 	if config.OSType == config.DistroDEB && e.DebPkg != "" {
 		return strings.Replace(e.DebPkg, "$v", verStr, 1)
-	}
-	// for unknown distro, use rpm pkg if available, otherwise use deb pkg
-	if e.RpmPkg != "" {
-		return e.RpmPkg
-	} else if e.DebPkg != "" {
-		return e.DebPkg
 	}
 	return ""
 }

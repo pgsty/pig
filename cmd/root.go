@@ -32,13 +32,12 @@ var rootCmd = &cobra.Command{
 
 Usage:
 
-  repo      manage pigsty repo    add  |
-  ext       manage pg extension   list | info | add | rm
-  get       download pigsty       list | src  | pkg
+  repo      manage pigsty repo     list | add  | set | rm | update
+  ext       manage pgsql extension list | info | add | rm | status
+  
+  get       download pigsty        list | src  | pkg
   init      install pigsty
-  boot      bootstrap pigsty
   status    show pig status
-
 `,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initAll()

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"pig/internal/config"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -502,4 +503,33 @@ func detectActiveInstall() (*PostgresInstallation, error) {
 		return nil, fmt.Errorf("failed to detect PostgreSQL from %s: %v", absPgConfigPath, err)
 	}
 	return install, nil
+}
+
+func PrintInstalledPostgres() string {
+	if Installs == nil {
+		return ""
+	}
+	var pgVerList []int
+	for v := range Installs {
+		pgVerList = append(pgVerList, v)
+	}
+
+	// sort in reverse
+	sort.Sort(sort.Reverse(sort.IntSlice(pgVerList)))
+	if len(pgVerList) == 0 {
+		return "no installation found"
+	}
+	if len(pgVerList) == 1 {
+		return fmt.Sprintf("%d (active)", pgVerList[0])
+	}
+	var pgVerStrList []string
+	for _, v := range pgVerList {
+		if v == Active.MajorVersion {
+			pgVerStrList = append(pgVerStrList, fmt.Sprintf("%d (active)", v))
+		} else {
+			pgVerStrList = append(pgVerStrList, fmt.Sprintf("%d", v))
+		}
+	}
+
+	return strings.Join(pgVerStrList, ", ")
 }

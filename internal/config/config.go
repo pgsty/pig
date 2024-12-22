@@ -211,7 +211,7 @@ func DetectOS() {
 	}
 	defer f.Close()
 
-	var id, versionID string
+	var versionID string
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -227,7 +227,6 @@ func DetectOS() {
 
 		switch key {
 		case "ID":
-			id = val
 			OSVendor = val
 		case "VERSION_ID":
 			versionID = val
@@ -248,12 +247,12 @@ func DetectOS() {
 		OSVersionCode = OSCode
 	}
 	if OSType == DistroDEB {
-		if id == "ubuntu" {
+		if OSVendor == "ubuntu" {
 			OSCode = "u" + OSVersion
+		} else {
+			OSCode = "d" + OSVersion
 		}
-		OSCode = "d" + OSVersion
 	}
-
 	logrus.Debugf("Detected OS: code=%s arch=%s type=%s vendor=%s version=%s %s",
 		OSCode, OSArch, OSType, OSVendor, OSVersion, OSVersionCode)
 }

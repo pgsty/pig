@@ -27,13 +27,13 @@ var statusCmd = &cobra.Command{
 			logPathStr = logPath
 		}
 
-		fmt.Println("===== Configuration =====")
+		fmt.Println("\nConfiguration ==========")
 		fmt.Printf("Version         = %s\n", config.PigVersion)
 		fmt.Printf("Log Level       = %s\n", logLevel)
 		fmt.Printf("Log Path        = %s\n", logPathStr)
 		fmt.Printf("Config File     = %s\n", config.ConfigFile)
 
-		fmt.Println("\n===== OS Environment =====")
+		fmt.Println("\nOS Environment =====")
 		fmt.Printf("OS Short Code   = %s\n", config.OSCode)
 		fmt.Printf("OS Architecture	= %s\n", config.OSArch)
 		fmt.Printf("OS Package Type = %s\n", config.OSType)
@@ -42,7 +42,7 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("Version (Full)  = %s\n", config.OSVersionFull)
 		fmt.Printf("Version (Code)  = %s\n", config.OSVersionCode)
 
-		fmt.Println("\n===== PG Environment =====")
+		fmt.Println("\nPG Environment =====")
 		pgsql.DetectInstalledPostgres()
 		if len(pgsql.Installs) > 0 {
 			for _, v := range pgsql.Installs {
@@ -52,9 +52,17 @@ var statusCmd = &cobra.Command{
 					fmt.Printf("%s\n", v.String())
 				}
 			}
+		} else {
+			fmt.Println("No PostgreSQL installation found")
+		}
+		if pgsql.Active != nil {
+			fmt.Printf("Postgres (Active) :  %s\n", pgsql.Active.Version)
+			fmt.Printf("Binary Path       :  %s\n", pgsql.Active.BinPath)
+			fmt.Printf("Library Path      :  %s\n", pgsql.Active.LibPath)
+			fmt.Printf("Extension Path    :  %s\n", pgsql.Active.ExtPath)
 		}
 
-		fmt.Println("\n===== Pigsty Config =====")
+		fmt.Println("\nPigsty Config =====")
 		fmt.Printf("Inventory       = %s\n", config.PigstyConfig)
 		fmt.Printf("Pigsty Home     = %s\n", config.PigstyHome)
 		fmt.Printf("Pigsty Embedded = %s\n", config.PigstyVersion)
@@ -64,7 +72,7 @@ var statusCmd = &cobra.Command{
 			license.Manager.DescribeDefault()
 		}
 
-		fmt.Println("\n===== Network Conditions =====")
+		fmt.Println("\nNetwork Conditions =====")
 		get.NetworkCondition()
 		if !get.InternetAccess {
 			fmt.Println("Internet Access = No")

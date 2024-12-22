@@ -36,45 +36,27 @@ type SearchResult struct {
 }
 
 // TabulateSearchResult prints a tabulated list of extensions
-func TabulateSearchResult(data []*Extension) {
+func TabulateSearchResult(pgVer int, data []*Extension) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	if PG == nil {
-		fmt.Fprintln(w, "Name\tStatus\tVersion\tCate\tFlags\tLicense\tRepo\tPackage\tDescription")
-		fmt.Fprintln(w, "----\t---------\t-------\t----\t------\t-------\t------\t------------\t---------------------")
-	} else {
-		fmt.Fprintln(w, "Name\tStatus\tVersion\tCate\tFlags\tLicense\tRepo\tPackage\tDescription")
-		fmt.Fprintln(w, "----\t---------\t-------\t----\t------\t-------\t------\t------------\t---------------------")
+	fmt.Fprintln(w, "Name\tState\tVersion\tCate\tFlags\tLicense\tRepo\tPGVer\tPackage\tDescription")
+	fmt.Fprintln(w, "----\t-----\t-------\t----\t------\t-------\t------\t--------\t------------\t---------------------")
+	if Postgres != nil {
+		pgVer = Postgres.MajorVersion
 	}
-
 	for _, ext := range data {
 		desc := ext.EnDesc
 		if len(desc) > 64 {
 			desc = desc[:64]
 		}
-		status := "-"
-
-		// if there's any active postgres, query if it is installed
-		if PG != nil {
-			if PG.ExtMap[ext.Name] != nil {
-				status = "Installed"
-			} else {
-				if ext.Available(config.OSCode, PG.MajorVersion) {
-					status = "Available"
-				} else {
-					status = "Not Ready"
-				}
-			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				ext.Name, status, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.PackageName(PG.MajorVersion), desc)
-		} else {
-			status = ext.Availability(config.OSCode)
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				ext.Name, status, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.PackageName(0), desc)
+		pkgStr := ext.PackageName(pgVer)
+		if strings.Contains(pkgStr, "$v") {
+			pkgStr = fmt.Sprintf("[%s]", pkgStr)
 		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			ext.Name, ext.GetStatus(pgVer), ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.Availability(config.OSCode), pkgStr, desc)
 	}
 	w.Flush()
-
-	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasSolib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(data))
+	fmt.Printf("\n(%d Rows) (State: added|avail|n/a,Flags: b = HasBin, d = HasDDL, s = HasSolib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(data))
 }
 
 // SearchExtensions performs fuzzy search on extensions
