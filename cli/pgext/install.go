@@ -36,6 +36,13 @@ func InstallExtensions(pgVer int, names []string, yes bool) error {
 
 	var pkgNames []string
 	for _, name := range names {
+		// Check if version is specified (name=version format)
+		var version string
+		if parts := strings.Split(name, "="); len(parts) == 2 {
+			name = parts[0]
+			version = parts[1]
+		}
+
 		ext, ok := ExtNameMap[name]
 		if !ok {
 			ext, ok = ExtAliasMap[name]
@@ -43,7 +50,17 @@ func InstallExtensions(pgVer int, names []string, yes bool) error {
 		if !ok {
 			// try to find in PostgresPackageMap (if it is not a postgres extension)
 			if pgPkg, ok := PostgresPackageMap[name]; ok {
-				pkgNames = append(pkgNames, processPkgName(pgPkg, pgVer)...)
+				pkgNamesProcessed := processPkgName(pgPkg, pgVer)
+				if version != "" {
+					for i, pkg := range pkgNamesProcessed {
+						if config.OSType == config.DistroEL {
+							pkgNamesProcessed[i] = fmt.Sprintf("%s-%s", pkg, version)
+						} else if config.OSType == config.DistroDEB {
+							pkgNamesProcessed[i] = fmt.Sprintf("%s=%s*", pkg, version)
+						}
+					}
+				}
+				pkgNames = append(pkgNames, pkgNamesProcessed...)
 				continue
 			} else {
 				logrus.Debugf("can not found '%s' in extension name or alias", name)
@@ -51,8 +68,23 @@ func InstallExtensions(pgVer int, names []string, yes bool) error {
 			}
 		}
 		pkgName := ext.PackageName(pgVer)
-		pkgNames = append(pkgNames, processPkgName(pkgName, pgVer)...)
+		if pkgName == "" {
+			logrus.Warnf("no package found for extension %s", ext.Name)
+			continue
+		}
 		logrus.Debugf("translate extension %s to package name: %s", ext.Name, pkgName)
+
+		pkgNamesProcessed := processPkgName(pkgName, pgVer)
+		if version != "" {
+			for i, pkg := range pkgNamesProcessed {
+				if config.OSType == config.DistroEL {
+					pkgNamesProcessed[i] = fmt.Sprintf("%s-%s", pkg, version)
+				} else if config.OSType == config.DistroDEB {
+					pkgNamesProcessed[i] = fmt.Sprintf("%s=%s*", pkg, version)
+				}
+			}
+		}
+		pkgNames = append(pkgNames, pkgNamesProcessed...)
 	}
 
 	if len(pkgNames) == 0 {

@@ -1,15 +1,13 @@
 # PIG - Postgres Install Genius
 
-[![Webite: https://ext.pigsty.io](https://img.shields.io/badge/Website-ext.pigsty.io-slategray?style=flat)](https://ext.pigsty.io)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://pigsty.io/docs/pgsql)
-[![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://pigsty.io/docs/node)
-[![EL Support: 8/9](https://img.shields.io/badge/EL-7/8/9-red?style=flat&logo=redhat&logoColor=red)](https://ext.pigsty.io/#/rpm)
-[![Debian Support: 12](https://img.shields.io/badge/Debian-11/12-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pigsty.io/docs/reference/compatibility/)
-[![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-20/22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://ext.pigsty.io/#/deb)
+[![Webite: pigsty.io](https://img.shields.io/badge/website-ext.pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pigsty.io)
+[![Version: v0.0.1](https://img.shields.io/badge/version-v0.0.1-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.0.1)
+[![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
+[![Extensions: 340](https://img.shields.io/badge/extensions-340-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pigsty.io/#/list)
 
-> PostgreSQL Package Manager on Linux
+**pig** is an open-source PostgreSQL Package Manager for [mainstream](#compatibility) Linux distro.
 
-Install PostgreSQL 17-13 with [340 extensions](https://ext.pigsty.io/#/list) on **10** Linux major distro at ease.
+Install PostgreSQL 13-17 with [340 extensions](https://ext.pigsty.io/#/list) on EL/Debian/Ubuntu and amd64/arm64.
 
 ![pig](https://github.com/user-attachments/assets/e377ed91-37a9-4c27-8854-034c81fa1b29)
 
@@ -17,6 +15,12 @@ Install PostgreSQL 17-13 with [340 extensions](https://ext.pigsty.io/#/list) on 
 --------
 
 ## Get Started
+
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://pigsty.io/docs/pgsql)
+[![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://pigsty.io/docs/node)
+[![EL Support: 8/9](https://img.shields.io/badge/EL-8/9-red?style=flat&logo=redhat&logoColor=red)](https://ext.pigsty.io/#/rpm)
+[![Debian Support: 12](https://img.shields.io/badge/Debian-12-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pigsty.io/docs/reference/compatibility/)
+[![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://ext.pigsty.io/#/deb)
 
 [Install](#installation) the `pig` package first, assume you want to install the [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) extension:
 
@@ -127,11 +131,11 @@ And you can recover you old repos at `/etc/apt/backup` or `/etc/yum.repos.d/back
 You can also install PostgreSQL kernel packages with
 
 ```bash
-pig ext install pg17          # install PostgreSQL 17 kernels
-pig ext install pg16          # install PostgreSQL 16 kernels
-pig ext install pg15          # install PostgreSQL 15 kernels
-pig ext install pg14          # install PostgreSQL 14 kernels
-pig ext install pg13          # install PostgreSQL 13 kernels
+pig ext install pg17          # install PostgreSQL 17 kernels (all but devel)
+pig ext install pg16-simple   # install PostgreSQL 16 kernels with minimal packages
+pig ext install pg15 -y       # install PostgreSQL 15 kernels with auto-confirm
+pig ext install pg14=14.3     # install PostgreSQL 14 kernels with an specific minor version
+pig ext install pg13=13.10    # install PostgreSQL 13 kernels
 ```
 
 You can also use other package alias, it will translate to corresponding package on your OS distro
@@ -192,6 +196,19 @@ or passing any `pg_config` path for custom installation.
 pig ext install pg_duckdb -v 16     # install the extension for pg16
 pig ext install pg_duckdb -p /usr/lib/postgresql/17/bin/pg_config    # specify a pg17 pg_config  
 ```
+
+
+**Install a specific Version**
+
+You can also install PostgreSQL kernel packages with
+
+```bash
+pig ext install pgvector=0.7.0 # install pgvector 0.7.0
+pig ext install pg16=16.5      # install PostgreSQL 16 with a specific minor version
+```
+
+> Beware the PGDG **APT** repo may only have the latest minor version for its software
+
 
 **Search Extension**
 
