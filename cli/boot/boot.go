@@ -1,11 +1,10 @@
 package boot
 
 import (
-	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"pig/cli/utils"
 )
 
 var (
@@ -22,7 +21,7 @@ func Bootstrap() error {
 
 	bootstrapPath := filepath.Join(pigstyHome, "bootstrap")
 
-	cmdArgs := []string{"shell"}
+	cmdArgs := []string{bootstrapPath}
 	if region != "" {
 		cmdArgs = append(cmdArgs, "-r", region)
 	}
@@ -33,21 +32,11 @@ func Bootstrap() error {
 		cmdArgs = append(cmdArgs, "-k")
 	}
 
-	// 创建命令
-	command := exec.Command(bootstrapPath, cmdArgs...)
-	command.Dir = pigstyHome
-
-	// 捕获输出
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-
-	// 执行命令
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("bootstrap execution failed: %v\nStderr: %s", err, stderr.String())
+	os.Chdir(pigstyHome)
+	err := utils.ShellCommand(cmdArgs)
+	if err != nil {
+		return fmt.Errorf("bootstrap execution failed: %v", err)
 	}
 
-	// 打印输出
-	fmt.Print(stdout.String())
 	return nil
 }
