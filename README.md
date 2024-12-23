@@ -7,7 +7,7 @@
 
 **pig** is an open-source PostgreSQL Package Manager for [mainstream](#compatibility) Linux distro.
 
-Install PostgreSQL 13-17 with [340 extensions](https://ext.pigsty.io/#/list) on EL/Debian/Ubuntu and amd64/arm64.
+Install PostgreSQL 13-17 with [340 extensions](https://ext.pigsty.io/#/list) on EL / Debian / Ubuntu and `amd64` / `arm64`.
 
 ![pig](https://github.com/user-attachments/assets/e377ed91-37a9-4c27-8854-034c81fa1b29)
 
@@ -22,7 +22,14 @@ Install PostgreSQL 13-17 with [340 extensions](https://ext.pigsty.io/#/list) on 
 [![Debian Support: 12](https://img.shields.io/badge/Debian-12-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pigsty.io/docs/reference/compatibility/)
 [![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://ext.pigsty.io/#/deb)
 
-[Install](#installation) the `pig` package first, assume you want to install the [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) extension:
+[Install](#installation) the `pig` package first, you can also install via [apt/yum](#installation) command.
+
+```bash
+curl -fsSL https://repo.pigsty.io/pig | bash     # cloudflare, default 
+curl -fsSL https://repo.pigsty.cc/pig | bash     # mainland china mirror
+```
+
+Then it's ready to use, assume you want to install the [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) extension:
 
 ```bash
 $ pig repo add pigsty pgdg -u  # add pgdg & pigsty repo, update cache      
@@ -50,7 +57,7 @@ pg_duckdb  0.2.0    OLAP  -dsl--  MIT      PIGSTY  pg_duckdb_17*  DuckDB Embedde
 (1 Rows) (Flags: b = HasBin, d = HasDDL, s = HasSolib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)
 ```
 
-Check the complete list of [340 available extensions](https://ext.pigsty.io/#/list).
+Check the [advanced usage](#advanced-usage) for details and [list 340 available extensions](https://ext.pigsty.io/#/list).
 
 
 
@@ -59,7 +66,6 @@ Check the complete list of [340 available extensions](https://ext.pigsty.io/#/li
 ## Installation
 
 The `pig` util is a standalone go binary with no dependencies. you can just download the binary
-
 or use the following commands to add the repo and install it via package manager (recommended).
 
 For Ubuntu 22.04 / 24.04 & Debian 12 or any compatible platforms:

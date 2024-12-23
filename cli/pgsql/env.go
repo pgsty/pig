@@ -524,7 +524,7 @@ func PrintInstalledPostgres() string {
 	}
 	var pgVerStrList []string
 	for _, v := range pgVerList {
-		if v == Active.MajorVersion {
+		if Active != nil && v == Active.MajorVersion {
 			pgVerStrList = append(pgVerStrList, fmt.Sprintf("%d (active)", v))
 		} else {
 			pgVerStrList = append(pgVerStrList, fmt.Sprintf("%d", v))
