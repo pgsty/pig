@@ -52,12 +52,10 @@ pig repo update              # update yum/apt repo cache (apt update or dnf make
 [Install](#installation) the util via Pigsty Repo or just download and copy the binary to your system path.
 
 ```bash
-$ pig repo add -ur           # enable node,pgdg,pigsty repo and REMOVE existing repo      
-$ pig ext install pg17       # install PostgreSQL 17 kernels with PGDG native packages
-$ pig ext ls olap            # list OLAP category extensions
-
-$ pig ext install pg_duckdb  # install the pg_duckdb extension (for current pg17)
-$ pig ext status             # show installed extension and pg status
+$ pig repo add pigsty pgdg -u  # add pgdg & pigsty repo, update cache      
+$ pig ext install pg17         # install PostgreSQL 17 kernels with PGDG native packages
+$ pig ext install pg_duckdb    # install the pg_duckdb extension (for current pg17)
+$ pig ext status               # show installed extension and pg status
 
 Installed PG Vers :  17 (active)
 Active PostgreSQL :  PostgreSQL 17.2
@@ -92,13 +90,10 @@ You can just download the binary / rpm / deb and install it manually, or use the
 For Ubuntu 22.04 / 24.04 & Debian 12 or any compatible platforms, use the following commands to add the APT repo:
 
 ```bash
-curl -fsSL https://repo.pigsty.io/key | sudo gpg --dearmor -o /etc/apt/keyrings/pigsty.gpg  # add gpg key
-sudo tee /etc/apt/sources.list.d/pigsty-io.list > /dev/null <<EOF
-deb [signed-by=/etc/apt/keyrings/pigsty.gpg] https://repo.pigsty.io/apt/infra generic main 
-deb [signed-by=/etc/apt/keyrings/pigsty.gpg] https://repo.pigsty.io/apt/pgsql/$(lsb_release -cs) $(lsb_release -cs) main
+sudo tee /etc/apt/sources.list.d/pigsty.list > /dev/null <<EOF
+deb [trusted=yes] https://repo.pigsty.io/apt/infra generic main 
 EOF
-sudo apt update
-apt install -y pig
+sudo apt update; sudo apt install -y pig
 ```
 
 ### YUM Repo
@@ -115,10 +110,15 @@ apt install -y pig
 For EL 8/9 and compatible platforms, use the following commands to add the YUM repo:
 
 ```bash
-curl -fsSL https://repo.pigsty.io/key      | sudo tee /etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty >/dev/null  # add gpg key
-curl -fsSL https://repo.pigsty.io/yum/repo | sudo tee /etc/yum.repos.d/pigsty.repo        >/dev/null  # add repo file
-sudo yum makecache
-sudo yum install -y pig
+sudo tee /etc/yum.repos.d/pigsty.repo > /dev/null <<-'EOF'
+[pigsty-infra]
+name=Pigsty Infra for $basearch
+baseurl=https://repo.pigsty.io/yum/infra/$basearch
+enabled = 1
+gpgcheck = 0
+module_hotfixes=1
+EOF
+sudo yum makecache; sudo yum install -y pig
 ```
 
 
