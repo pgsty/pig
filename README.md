@@ -11,6 +11,7 @@ Install PostgreSQL 13-17 with [340 extensions](https://ext.pigsty.io/#/list) on 
 
 ![pig](https://github.com/user-attachments/assets/e377ed91-37a9-4c27-8854-034c81fa1b29)
 
+[![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
 
 --------
 
