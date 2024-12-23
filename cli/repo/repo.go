@@ -44,7 +44,7 @@ const (
 ********************/
 
 var (
-	Repos          []Repository
+	Repos          []*Repository
 	RepoMap        map[string]*Repository
 	ModuleMap      map[string][]string = make(map[string][]string)
 	PigstyGPGCheck bool                = false
@@ -234,10 +234,12 @@ func AddModule(module string, region string) error {
 	moduleContent := ModuleRepoConfig(module, region)
 
 	randomFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s-%s.repo", module, strconv.FormatInt(time.Now().UnixNano(), 36)))
+	logrus.Debugf("write module %s to %s, content: %s", module, randomFile, moduleContent)
 	if err := os.WriteFile(randomFile, []byte(moduleContent), 0644); err != nil {
 		return err
 	}
 	defer os.Remove(randomFile)
+	logrus.Debugf("sudo move %s to %s", randomFile, modulePath)
 	return utils.SudoCommand([]string{"mv", "-f", randomFile, modulePath})
 }
 
@@ -267,6 +269,7 @@ func BackupRepo() error {
 
 	for _, file := range files {
 		dest := filepath.Join(backupDir, filepath.Base(file))
+		logrus.Debugf("backup %s to %s", file, dest)
 		if err := utils.SudoCommand([]string{"mv", "-f", file, dest}); err != nil {
 			logrus.Errorf("failed to backup %s to %s: %v", file, dest, err)
 		}
@@ -554,29 +557,41 @@ func LoadRpmRepo(data []byte) error {
 	if data == nil {
 		data = embedRpmRepo
 	}
-	if err := yaml.Unmarshal(data, &Repos); err != nil {
+	var tmpRepos []Repository
+	if err := yaml.Unmarshal(data, &tmpRepos); err != nil {
 		return fmt.Errorf("failed to parse rpm repo: %v", err)
 	}
+
+	// Filter available repos and build maps
+	Repos = make([]*Repository, 0)
 	RepoMap = make(map[string]*Repository)
 	ModuleMap = make(map[string][]string)
-	for i := range Repos {
-		repo := &Repos[i]
+
+	for i := range tmpRepos {
+		repo := &tmpRepos[i]
 		repo.Distro = config.DistroEL
 		repo.Meta = map[string]string{"enabled": "1", "gpgcheck": "0", "module_hotfixes": "1"}
-		RepoMap[repo.Name] = repo
-		if repo.Module != "" {
-			if _, exists := ModuleMap[repo.Module]; !exists {
-				ModuleMap[repo.Module] = make([]string, 0)
+		if repo.Available(config.OSCode, config.OSArch) {
+			Repos = append(Repos, repo)
+			RepoMap[repo.Name] = repo
+			if repo.Module != "" {
+				if _, exists := ModuleMap[repo.Module]; !exists {
+					ModuleMap[repo.Module] = make([]string, 0)
+				}
+				ModuleMap[repo.Module] = append(ModuleMap[repo.Module], repo.Name)
 			}
-			ModuleMap[repo.Module] = append(ModuleMap[repo.Module], repo.Name)
 		}
 	}
 
 	if PigstyGPGCheck {
-		RepoMap["pigsty-pgsql"].Meta["gpgcheck"] = "1"
-		RepoMap["pigsty-pgsql"].Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
-		RepoMap["pigsty-infra"].Meta["gpgcheck"] = "1"
-		RepoMap["pigsty-infra"].Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
+		if repo, ok := RepoMap["pigsty-pgsql"]; ok {
+			repo.Meta["gpgcheck"] = "1"
+			repo.Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
+		}
+		if repo, ok := RepoMap["pigsty-infra"]; ok {
+			repo.Meta["gpgcheck"] = "1"
+			repo.Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
+		}
 	}
 
 	ModuleMap["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
@@ -592,28 +607,41 @@ func LoadDebRepo(data []byte) error {
 	if data == nil {
 		data = embedDebRepo
 	}
-	if err := yaml.Unmarshal(data, &Repos); err != nil {
-		return fmt.Errorf("failed to parse rpm repo: %v", err)
+	var tmpRepos []Repository
+	if err := yaml.Unmarshal(data, &tmpRepos); err != nil {
+		return fmt.Errorf("failed to parse deb repo: %v", err)
 	}
+
+	// Filter available repos and build maps
+	Repos = make([]*Repository, 0)
 	RepoMap = make(map[string]*Repository)
 	ModuleMap = make(map[string][]string)
-	for i := range Repos {
-		repo := &Repos[i]
+
+	for i := range tmpRepos {
+		repo := &tmpRepos[i]
 		repo.Distro = config.DistroDEB
 		repo.Meta = map[string]string{"trusted": "yes"}
-		RepoMap[repo.Name] = repo
-		if repo.Module != "" {
-			if _, exists := ModuleMap[repo.Module]; !exists {
-				ModuleMap[repo.Module] = make([]string, 0)
+		if repo.Available(config.OSCode, config.OSArch) {
+			Repos = append(Repos, repo)
+			RepoMap[repo.Name] = repo
+			if repo.Module != "" {
+				if _, exists := ModuleMap[repo.Module]; !exists {
+					ModuleMap[repo.Module] = make([]string, 0)
+				}
+				ModuleMap[repo.Module] = append(ModuleMap[repo.Module], repo.Name)
 			}
-			ModuleMap[repo.Module] = append(ModuleMap[repo.Module], repo.Name)
 		}
 	}
+
 	if PigstyGPGCheck {
-		delete(RepoMap["pigsty-pgsql"].Meta, "trusted")
-		RepoMap["pigsty-pgsql"].Meta["signed-by"] = "/etc/apt/keyrings/pigsty.gpg"
-		delete(RepoMap["pigsty-infra"].Meta, "trusted")
-		RepoMap["pigsty-infra"].Meta["signed-by"] = "/etc/apt/keyrings/pigsty.gpg"
+		if repo, ok := RepoMap["pigsty-pgsql"]; ok {
+			delete(repo.Meta, "trusted")
+			repo.Meta["signed-by"] = "/etc/apt/keyrings/pigsty.gpg"
+		}
+		if repo, ok := RepoMap["pigsty-infra"]; ok {
+			delete(repo.Meta, "trusted")
+			repo.Meta["signed-by"] = "/etc/apt/keyrings/pigsty.gpg"
+		}
 	}
 
 	ModuleMap["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}

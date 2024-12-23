@@ -105,7 +105,7 @@ var repoAddCmd = &cobra.Command{
 		}
 
 		fmt.Printf("======== ls %s\n", repoDir)
-		if err := utils.ShellCommand([]string{"ls", repoDir}); err != nil {
+		if err := utils.ShellCommand([]string{"ls", "-l", repoDir}); err != nil {
 			logrus.Errorf("failed to list repo dir: %s", repoDir)
 			os.Exit(1)
 		}

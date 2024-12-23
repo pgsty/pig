@@ -1,7 +1,5 @@
 # PIG - Postgres Install Genius
 
-> PostgreSQL Package Manager on Linux
-
 [![Webite: https://ext.pigsty.io](https://img.shields.io/badge/Website-ext.pigsty.io-slategray?style=flat)](https://ext.pigsty.io)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://pigsty.io/docs/pgsql)
 [![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://pigsty.io/docs/node)
@@ -9,16 +7,9 @@
 [![Debian Support: 12](https://img.shields.io/badge/Debian-11/12-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pigsty.io/docs/reference/compatibility/)
 [![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-20/22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://ext.pigsty.io/#/deb)
 
-Install PostgreSQL 17-13 with [340 extensions](https://ext.pigsty.io/#/list) on **10** Linux major distro
+> PostgreSQL Package Manager on Linux
 
-|  Code   | Distribution                      |  `x86_64`  | `aarch64`  |
-|:-------:|-----------------------------------|:----------:|:----------:|
-| **el9** | RHEL 9 / Rocky9 / Alma9  / ...    | PG 17 - 13 | PG 17 - 13 |
-| **el8** | RHEL 8 / Rocky8 / Alma8 / Anolis8 | PG 17 - 13 | PG 17 - 13 |
-| **u24** | Ubuntu 24.04 (`noble`)            | PG 17 - 13 | PG 17 - 13 |
-| **u22** | Ubuntu 22.04 (`jammy`)            | PG 17 - 13 | PG 17 - 13 |
-| **d12** | Debian 12 (`bookworm`)            | PG 17 - 13 | PG 17 - 13 |
-
+Install PostgreSQL 17-13 with [340 extensions](https://ext.pigsty.io/#/list) on **10** Linux major distro at ease.
 
 ![pig](https://github.com/user-attachments/assets/e377ed91-37a9-4c27-8854-034c81fa1b29)
 
@@ -121,7 +112,7 @@ pig repo update              # update yum/apt repo cache (apt update or dnf make
 **Radical Repo Admin**
 
 The default `pig repo add pigsty pgdg` will add the `PGDG` repo and [`PIGSTY`](https://ext.pigsty.io) repo to your system.
-While the following command will backup & wipe your existing repo and add `PGDG`, `PIGSTY` and Node OS repo to your system.
+While the following command will backup & wipe your existing repo and add all require repo to your system.
 
 ```bash
 pig repo add all --ru        # This will OVERWRITE all existing repo with node,pgdg,pigsty repo
@@ -193,7 +184,9 @@ ivorysql-all: "ivorysql3 ivorysql3-server ivorysql3-contrib ivorysql3-libs ivory
 
 **Install for another PG**
 
-`pig` will use the default postgres installation in your active `PATH`, but you can install extension for a specific postgres installation with `-v` (when using the PGDG convention), or passing any `pg_config` path for custom installation.
+`pig` will use the default postgres installation in your active `PATH`,
+but you can install extension for a specific installation with `-v` (when using the PGDG convention),
+or passing any `pg_config` path for custom installation.
 
 ```bash
 pig ext install pg_duckdb -v 16     # install the extension for pg16
@@ -293,6 +286,29 @@ $ pig ext info pg_duckdb
 ╰────────────────────────────────────────────────────────────────────────────╯
 ```
 
+--------
+
+## Compatibility
+
+`pig` runs on: RHEL 8/9, Ubuntu 22.04/24.04, and Debian 12, on both `amd64/arm64` arch
+
+|  Code   | Distribution                   |  `x86_64`  | `aarch64`  |
+|:-------:|--------------------------------|:----------:|:----------:|
+| **el9** | RHEL 9 / Rocky9 / Alma9  / ... | PG 17 - 13 | PG 17 - 13 |
+| **el8** | RHEL 8 / Rocky8 / Alma8 / ...  | PG 17 - 13 | PG 17 - 13 |
+| **u24** | Ubuntu 24.04 (`noble`)         | PG 17 - 13 | PG 17 - 13 |
+| **u22** | Ubuntu 22.04 (`jammy`)         | PG 17 - 13 | PG 17 - 13 |
+| **d12** | Debian 12 (`bookworm`)         | PG 17 - 13 | PG 17 - 13 |
+
+Here are some bad cases and limitation for above distros:
+
+- [`citus`](https://ext.pigsty.io/#/citus) is not available on `aarch64` and ubuntu 24.04
+- [`pljava`](https://ext.pigsty.io/#/pljava) is missing on `el8`
+- [`jdbc_fdw`](https://ext.pigsty.io/#/jdbc_fdw) is missing on `el8.aarch64` and `el9.aarch64`
+- [`pllua`](https://ext.pigsty.io/#/pllua) is missing on `el8.aarch64` for pg 13,14,15
+- [`topn`](https://ext.pigsty.io/#/topn) is missing on `el8.aarch64` and `el9.aarch64` for pg13, and all `deb.aarch64`
+- [`pg_partman`](https://ext.pigsty.io/#/pg_partman) and [`timeseries`](https://ext.pigsty.io/#/timeseries) is missing on `u24` for pg13
+- [`wiltondb`](https://ext.pigsty.io/#/wiltondb) is missing on `d12`
 
 
 --------
@@ -302,7 +318,7 @@ $ pig ext info pg_duckdb
 [![Author: RuohangFeng](https://img.shields.io/badge/Author-Ruohang_Feng-steelblue?style=flat)](https://vonng.com/)
 [![About: @Vonng](https://img.shields.io/badge/%40Vonng-steelblue?style=flat)](https://vonng.com/en/)
 [![Mail: rh@vonng.com](https://img.shields.io/badge/rh%40vonng.com-steelblue?style=flat)](mailto:rh@vonng.com)
-[![Copyright: 2018-2024 rh@Vonng.com](https://img.shields.io/badge/Copyright-2024--2024_(rh%40vonng.com)-red?logo=c&color=steelblue)](https://github.com/Vonng)
+[![Copyright: 2018-2024 rh@Vonng.com](https://img.shields.io/badge/Copyright-2024_(rh%40vonng.com)-red?logo=c&color=steelblue)](https://github.com/Vonng)
 [![License: Apache](https://img.shields.io/badge/License-Apaehc--2.0-steelblue?style=flat&logo=opensourceinitiative&logoColor=green)](https://github.com/pgsty/pig/blob/main/LICENSE)
 
 ![pig](https://github.com/user-attachments/assets/17333d0d-a77a-4f6a-8fae-9e3f57fa798e)
