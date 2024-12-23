@@ -7,11 +7,12 @@
 
 **pig** is an open-source PostgreSQL Package Manager for [mainstream](#compatibility) Linux distro.
 
-Install PostgreSQL 13-17 with [340 extensions](https://ext.pigsty.io/#/list) on EL / Debian / Ubuntu and `amd64` / `arm64`.
+Install PostgreSQL 13-17 with [340 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) x (EL/Debian/Ubuntu) with native package manager
 
-![pig](https://github.com/user-attachments/assets/e377ed91-37a9-4c27-8854-034c81fa1b29)
+[![pig](https://github.com/user-attachments/assets/e377ed91-37a9-4c27-8854-034c81fa1b29)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
-[![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
+> Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
+
 
 --------
 
@@ -60,6 +61,7 @@ pg_duckdb  0.2.0    OLAP  -dsl--  MIT      PIGSTY  pg_duckdb_17*  DuckDB Embedde
 
 Check the [advanced usage](#advanced-usage) for details and [list 340 available extensions](https://ext.pigsty.io/#/list).
 
+[![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
 
 
 --------
