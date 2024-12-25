@@ -10,26 +10,8 @@ import (
 * Misc Repo Functions
 ********************/
 
-// GetReposByModule returns all repositories for a given module
-func GetReposByModule(module string) []*Repository {
-	result := make([]*Repository, 0)
-	if repoNames, ok := ModuleMap[module]; ok {
-		for _, name := range repoNames {
-			if repo, exists := RepoMap[name]; exists {
-				result = append(result, repo)
-			}
-		}
-	}
-	return result
-}
-
-// GetRepo returns a repository by name
-func GetRepo(name string) *Repository {
-	return RepoMap[name]
-}
-
 func GetModuleList() []string {
-	// get modulle keys and sort them
+	// get module keys and sort them
 	modules := make([]string, 0, len(ModuleMap))
 	for module := range ModuleMap {
 		modules = append(modules, module)

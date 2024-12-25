@@ -1,9 +1,8 @@
-package pgext
+package ext
 
 import (
 	"fmt"
 	"os"
-	"pig/cli/pgsql"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -13,32 +12,25 @@ import (
 
 // ExtensionStatus prints the status of installed extensions
 func ExtensionStatus(contrib bool) {
+	PostgresInstallSummary()
 	if Postgres == nil {
-		logrus.Errorf("PostgreSQL installation not found")
+		logrus.Errorf("no PostgreSQL specified and not active PostgreSQL found")
+		fmt.Printf("hint: use -v or -p to specify PostgreSQL installation\n\n")
 		return
 	}
 
-	if len(pgsql.Installs) > 0 {
-		fmt.Printf("Installed PG Vers :  %s\n", pgsql.PrintInstalledPostgres())
-	}
-	fmt.Printf("Active PostgreSQL :  %s\n", Postgres.Version)
-	fmt.Printf("PostgreSQL        :  %s\n", Postgres.Version)
-	fmt.Printf("Binary Path       :  %s\n", Postgres.BinPath)
-	fmt.Printf("Library Path      :  %s\n", Postgres.LibPath)
-	fmt.Printf("Extension Path    :  %s\n", Postgres.ExtPath)
-
+	// Count extensions by repo
 	var exts []*Extension
 	var notFound []string
 	repocount := map[string]int{"CONTRIB": 0, "PGDG": 0, "PIGSTY": 0}
 	for _, ext := range Postgres.Extensions {
-		extInfo := ExtNameMap[ext.Name]
+		extInfo := Catalog.ExtNameMap[ext.Name]
 		if extInfo == nil {
 			logrus.Infof("Extension: %s (not found in catalog)", ext.Name)
 			notFound = append(notFound, ext.Name)
 			continue
 		}
 		if extInfo.RepoName() != "" {
-			// if not in dict, add a zero count
 			if _, ok := repocount[extInfo.RepoName()]; !ok {
 				repocount[extInfo.RepoName()] = 0
 			}
@@ -49,18 +41,19 @@ func ExtensionStatus(contrib bool) {
 		}
 		exts = append(exts, extInfo)
 	}
-
-	// print not found
-	if len(notFound) > 0 {
-		logrus.Warnf("not found in catalog : %s", strings.Join(notFound, ", "))
-	}
-
-	// sort by id
 	sort.Slice(exts, func(i, j int) bool {
 		return exts[i].ID < exts[j].ID
 	})
 
-	// summary
+	if len(notFound) > 0 {
+		logrus.Warnf("not found in catalog : %s", strings.Join(notFound, ", "))
+	}
+
+	printExtensionSummary(repocount, len(Postgres.Extensions))
+	tabulateExtensions(exts)
+}
+
+func printExtensionSummary(repocount map[string]int, totalExtensions int) {
 	nonContribCnt := repocount["PGDG"] + repocount["PIGSTY"]
 	nonContribStr := fmt.Sprintf("PIGSTY %d, PGDG %d", repocount["PIGSTY"], repocount["PGDG"])
 	for repo, count := range repocount {
@@ -69,11 +62,12 @@ func ExtensionStatus(contrib bool) {
 			nonContribStr += fmt.Sprintf(", %s %d", repo, count)
 		}
 	}
-	extSummary := fmt.Sprintf("Extension Stat    :  %d Installed (%s) + %d CONTRIB = %d Total\n",
-		nonContribCnt, nonContribStr, repocount["CONTRIB"], len(Postgres.Extensions))
+	extSummary := fmt.Sprintf("Extension Stat  :  %d Installed (%s) + %d CONTRIB = %d Total\n",
+		nonContribCnt, nonContribStr, repocount["CONTRIB"], totalExtensions)
 	fmt.Println(extSummary)
+}
 
-	// tabulate installed extensions
+func tabulateExtensions(exts []*Extension) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "Name\tVersion\tCate\tFlags\tLicense\tRepo\tPackage\tDescription")
 	fmt.Fprintln(w, "----\t-------\t----\t------\t-------\t------\t------------\t---------------------")
@@ -87,5 +81,4 @@ func ExtensionStatus(contrib bool) {
 	w.Flush()
 
 	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasSolib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(exts))
-
 }

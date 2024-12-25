@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"pig/internal/config"
+	"strings"
 )
 
 var (
@@ -44,4 +45,29 @@ func SudoCommand(args []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// PadKV pads a key-value pair with spaces to the right
+func PadKV(key string, value string) {
+	fmt.Printf("%-16s : %s\n", key, value)
+}
+
+// PadRight pads a string with spaces to the right to a given length
+func PadHeader(str string, length int) string {
+	var buf strings.Builder
+	buf.WriteByte('#')
+	buf.WriteByte(' ')
+	buf.WriteByte('[')
+	buf.WriteString(str)
+	buf.WriteByte(']')
+	if buf.Len() >= length {
+		return buf.String()
+	}
+	// pad with '='
+	pad := length - buf.Len() - 1
+	buf.WriteByte(' ')
+	for i := 0; i < pad; i++ {
+		buf.WriteByte('=')
+	}
+	return buf.String()
 }

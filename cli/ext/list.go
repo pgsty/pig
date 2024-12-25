@@ -1,4 +1,4 @@
-package pgext
+package ext
 
 import (
 	"fmt"
@@ -35,11 +35,11 @@ type SearchResult struct {
 	Score     float64
 }
 
-// TabulateSearchResult prints a tabulated list of extensions
-func TabulateSearchResult(pgVer int, data []*Extension) {
+// TabulteVersion prints a tabulated list of extensions available to given version
+func TabulteVersion(pgVer int, data []*Extension) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "Name\tState\tVersion\tCate\tFlags\tLicense\tRepo\tPGVer\tPackage\tDescription")
-	fmt.Fprintln(w, "----\t-----\t-------\t----\t------\t-------\t------\t--------\t------------\t---------------------")
+	fmt.Fprintln(w, "----\t-----\t-------\t----\t------\t-------\t------\t-----\t------------\t---------------------")
 	if Postgres != nil {
 		pgVer = Postgres.MajorVersion
 	}
@@ -57,6 +57,22 @@ func TabulateSearchResult(pgVer int, data []*Extension) {
 	}
 	w.Flush()
 	fmt.Printf("\n(%d Rows) (State: added|avail|n/a,Flags: b = HasBin, d = HasDDL, s = HasSolib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(data))
+}
+
+func TabulteCommon(data []*Extension) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "Name\tVersion\tCate\tFlags\tLicense\tRPM\tDEB\tPG Ver\tDescription")
+	fmt.Fprintln(w, "----\t-------\t----\t------\t-------\t------\t------\t------\t---------------------")
+	for _, ext := range data {
+		desc := ext.EnDesc
+		if len(desc) > 64 {
+			desc = desc[:64] + "..."
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			ext.Name, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RpmRepo, ext.DebRepo, CompactVersion(ext.PgVer), desc)
+	}
+	w.Flush()
+	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasSolib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(data))
 }
 
 // SearchExtensions performs fuzzy search on extensions

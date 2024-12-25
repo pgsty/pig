@@ -18,15 +18,16 @@ import (
 )
 
 var (
+	// Inited is a global flag to indicate if the PostgreSQL environment has been detected
 	Inited = false
 
-	// the active PostgreSQL installation in the PATH
+	// Active is the active PostgreSQL installation in the PATH
 	Active *PostgresInstallation
 
-	// all PostgreSQL installations in the system
+	// Installs is all PostgreSQL installations in the system
 	Installs map[int]*PostgresInstallation
 
-	// the major versions of PostgreSQL to be detected
+	// PostgresActiveMajorVersions is the major versions of PostgreSQL to be detected
 	PostgresActiveMajorVersions = []int{17, 16, 15, 14, 13}
 
 	// the search paths for PostgreSQL installations
@@ -43,6 +44,7 @@ var (
 	// the regex for parsing the PostgreSQL version
 	PostgresVersionRegex = regexp.MustCompile(`PostgreSQL (\d+)\.(\d+)`)
 
+	// sqlLessExtensions is a map of extensions that do not have control files (so lib only)
 	sqlLessExtensions = map[string]string{
 		"plan_filter":            "filter statements by their execution plans.",
 		"pg_checksums":           "Activate/deactivate/verify checksums in offline Postgres clusters",
@@ -72,7 +74,8 @@ var (
 		"pg_failover_slots":      "PG Failover Slots extension",
 	}
 
-	ExtensionBadCase = map[string]bool{
+	// badCaseExtensions is a map of extensions that are known to be problematic and should be handled explicitly
+	badCaseExtensions = map[string]bool{
 		"address_standardizer-3":         true,
 		"address_standardizer_data_us-3": true,
 		"postgis-3":                      true,
@@ -92,17 +95,18 @@ type PostgresInstallation struct {
 	BinPath       string
 	ExtPath       string
 	LibPath       string
+	PgConfig      string
 	Config        map[string]string
-	Extensions    []*Extension
+	Extensions    []*ExtensionCtrl
 	SharedLibs    []*SharedLib
 	UnmatchedLibs []*SharedLib
-	UnmatchedExts []*Extension
-	ExtMap        map[string]*Extension
+	UnmatchedExts []*ExtensionCtrl
+	ExtMap        map[string]*ExtensionCtrl
 	LibMap        map[string]*SharedLib
 }
 
 // Extension stores information about a PostgreSQL extension
-type Extension struct {
+type ExtensionCtrl struct {
 	Name        string            // Extension name
 	Version     string            // Extension version
 	Description string            // Extension description
@@ -113,12 +117,12 @@ type Extension struct {
 
 // SharedLib stores information about a shared library
 type SharedLib struct {
-	Name    string     // Library name
-	ExtName string     // Extension name (strip version suffix)
-	Path    string     // Full path
-	Size    int64      // File size (bytes)
-	Mtime   time.Time  // Creation time
-	Ext     *Extension // Associated extension
+	Name    string         // Library name
+	ExtName string         // Extension name (strip version suffix)
+	Path    string         // Full path
+	Size    int64          // File size (bytes)
+	Mtime   time.Time      // Creation time
+	Ext     *ExtensionCtrl // Associated extension
 }
 
 func (p *PostgresInstallation) String() string {
@@ -134,10 +138,11 @@ func (pg *PostgresInstallation) PrintSummary() {
 	fmt.Printf("PostgreSQL     :  %s\n", pg.Version)
 	fmt.Printf("Binary Path    :  %s\n", pg.BinPath)
 	fmt.Printf("Library Path   :  %s\n", pg.LibPath)
+	fmt.Printf("PgConfig Path  :  %s\n", pg.PgConfig)
 	fmt.Printf("Extension Path :  %s\n", pg.ExtPath)
 }
 
-func (e *Extension) LibName() string {
+func (e *ExtensionCtrl) LibName() string {
 	// return human-readable size
 	if e.Library == nil {
 		return ""
@@ -146,12 +151,53 @@ func (e *Extension) LibName() string {
 	}
 }
 
-func (e *Extension) Size() string {
+func (e *ExtensionCtrl) Size() string {
 	// return human-readable size
 	if e.Library == nil {
 		return ""
 	} else {
 		return humanize.Bytes(uint64(e.Library.Size))
+	}
+}
+
+// PostgresInstallSummary print the summary of PostgreSQL installation
+func PostgresInstallSummary() {
+	if !Inited {
+		fmt.Printf("PostgreSQL Environment not initialized\n")
+		return
+	}
+
+	// print installed PostgreSQL versions
+	if len(Installs) > 0 {
+		fmt.Printf("Installed:\n")
+		for _, v := range Installs {
+			if v == Active {
+				fmt.Printf("* %-17s\t%s\n", fmt.Sprintf("%d.%d", v.MajorVersion, v.MinorVersion), v.PgConfig)
+			}
+		}
+		for _, v := range Installs {
+			if v != Active {
+				fmt.Printf("- %-15s\t%s\n", fmt.Sprintf("%d.%d", v.MajorVersion, v.MinorVersion), v.PgConfig)
+			}
+		}
+	} else {
+		fmt.Println("No PostgreSQL installtion found")
+	}
+
+	// print active PostgreSQL detail
+	if Active != nil {
+		fmt.Printf("\nActive:\n")
+		fmt.Printf("PG Version        :  %s\n", Active.Version)
+		fmt.Printf("Config Path       :  %s\n", Active.PgConfig)
+		fmt.Printf("Binary Path       :  %s\n", Active.BinPath)
+		fmt.Printf("Library Path      :  %s\n", Active.LibPath)
+		fmt.Printf("Extension Path    :  %s\n", Active.ExtPath)
+		if len(Active.Extensions) > 0 {
+			fmt.Printf("Extension Stat    :  Installed %d\n", len(Active.Extensions))
+		}
+	} else {
+		fmt.Println("No PostgreSQL installation actiavated")
+		fmt.Printf("PATH: %s\n", os.Getenv("PATH"))
 	}
 }
 
@@ -207,6 +253,7 @@ func DetectInstalledPostgres() error {
 			}
 
 			install := &PostgresInstallation{}
+			install.PgConfig = pgConfigPath
 			if err := install.detectFromConfig(pgConfigPath); err != nil {
 				continue
 			}
@@ -304,7 +351,7 @@ func (p *PostgresInstallation) ScanExtensions() error {
 	if err := p.matchExtensionLibs(); err != nil {
 		return fmt.Errorf("failed to match extension libs: %v", err)
 	}
-	var unmatchedExts []*Extension
+	var unmatchedExts []*ExtensionCtrl
 	var unmatchedLibs []*SharedLib
 	for _, ext := range p.Extensions {
 		if ext.Library == nil {
@@ -359,14 +406,14 @@ func (p *PostgresInstallation) scanExtensions() error {
 	if err != nil {
 		return fmt.Errorf("failed to read extensions directory: %v", err)
 	}
-	var extensions []*Extension
+	var extensions []*ExtensionCtrl
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".control") {
 			extName := strings.TrimSuffix(entry.Name(), ".control")
-			if ExtensionBadCase[extName] {
+			if badCaseExtensions[extName] {
 				continue
 			}
-			ext := &Extension{
+			ext := &ExtensionCtrl{
 				Name: extName,
 			}
 			if err := p.parseControlFile(ext); err != nil {
@@ -379,7 +426,7 @@ func (p *PostgresInstallation) scanExtensions() error {
 	for name, description := range sqlLessExtensions {
 		// if found shared lib, add it to extension
 		if lib, exists := p.LibMap[name]; exists {
-			ext := &Extension{
+			ext := &ExtensionCtrl{
 				Name:        name,
 				Description: description,
 				Library:     lib,
@@ -390,7 +437,7 @@ func (p *PostgresInstallation) scanExtensions() error {
 	}
 
 	p.Extensions = extensions
-	p.ExtMap = make(map[string]*Extension)
+	p.ExtMap = make(map[string]*ExtensionCtrl)
 	for _, ext := range extensions {
 		p.ExtMap[ext.Name] = ext
 	}
@@ -403,40 +450,20 @@ func (p *PostgresInstallation) scanSharedLibs() error {
 	if err != nil {
 		return err
 	}
-	var sharedLibs []*SharedLib
+	shareLibs := make(map[string]bool)
+
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".so") {
+		if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".so") || strings.HasSuffix(entry.Name(), ".dylib")) {
 			libName := strings.TrimSuffix(entry.Name(), ".so")
-			extName := libName
-			if idx := strings.LastIndex(libName, "-"); idx > 0 {
-				extName = libName[:idx]
-			}
-			fullPath := filepath.Join(p.LibPath, entry.Name())
-			info, err := entry.Info()
-			if err != nil {
-				continue
-			}
-			// Create the shared library object
-			lib := &SharedLib{
-				Name:    libName,
-				ExtName: extName,
-				Path:    fullPath,
-				Size:    info.Size(),
-				Mtime:   info.ModTime(),
-			}
-			sharedLibs = append(sharedLibs, lib)
+			libName = strings.TrimSuffix(libName, ".dylib")
+			shareLibs[libName] = true
 		}
-	}
-	p.SharedLibs = sharedLibs
-	p.LibMap = make(map[string]*SharedLib)
-	for _, lib := range sharedLibs {
-		p.LibMap[lib.Name] = lib
 	}
 	return nil
 }
 
 // parseControlFile parses the control file of an extension
-func (p *PostgresInstallation) parseControlFile(ext *Extension) error {
+func (p *PostgresInstallation) parseControlFile(ext *ExtensionCtrl) error {
 	controlPath := filepath.Join(p.ExtPath, ext.Name+".control")
 	file, err := os.Open(controlPath)
 	if err != nil {
@@ -492,12 +519,14 @@ func detectActiveInstall() (*PostgresInstallation, error) {
 		return nil, fmt.Errorf("pg_config not found in PATH: %v", err)
 	}
 	install := &PostgresInstallation{}
+	install.PgConfig = pgConfig
 
 	// get the absolute path of pg config and detect it
 	absPgConfigPath, err := filepath.Abs(pgConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path of pg_config: %v", err)
 	}
+	install.PgConfig = absPgConfigPath
 
 	if err := install.detectFromConfig(absPgConfigPath); err != nil {
 		return nil, fmt.Errorf("failed to detect PostgreSQL from %s: %v", absPgConfigPath, err)

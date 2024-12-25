@@ -1,7 +1,8 @@
-package pgext
+package ext
 
 import (
 	"fmt"
+	"os"
 	"pig/cli/utils"
 	"pig/internal/config"
 	"strconv"
@@ -12,44 +13,53 @@ import (
 
 // InstallExtensions installs extensions based on provided names, aliases, or categories
 func InstallExtensions(pgVer int, names []string, yes bool) error {
+	logrus.Debugf("installing extensions: pgVer=%d, names=%s, yes=%v", pgVer, strings.Join(names, ", "), yes)
+	if len(names) == 0 {
+		return fmt.Errorf("no extension names provided")
+	}
+	if pgVer == 0 {
+		logrus.Debugf("no PostgreSQL version specified, set target version to the latest major version: %d", PostgresLatestMajorVersion)
+		pgVer = PostgresLatestMajorVersion
+	}
+
 	var installCmds []string
-	if config.OSType == config.DistroEL {
+	Catalog.LoadAliasMap(config.OSType)
+	switch config.OSType {
+	case config.DistroEL:
 		installCmds = append(installCmds, []string{"yum", "install"}...)
+		if config.OSVersion == "8" || config.OSVersion == "9" {
+			installCmds[0] = "dnf"
+		}
 		if yes {
 			installCmds = append(installCmds, "-y")
 		}
-	} else if config.OSType == config.DistroDEB {
+	case config.DistroDEB:
 		installCmds = append(installCmds, []string{"apt-get", "install"}...)
 		if yes {
 			installCmds = append(installCmds, "-y")
 		}
-	} else {
+	case config.DistroMAC:
+		logrus.Warnf("macOS brew installation is not supported yet")
+		os.Exit(1)
+	default:
 		return fmt.Errorf("unsupported OS type: %s", config.OSType)
-	}
-
-	if err := InitExtension(nil); err != nil {
-		return err
-	}
-	if len(names) == 0 {
-		return fmt.Errorf("no extension names provided")
 	}
 
 	var pkgNames []string
 	for _, name := range names {
-		// Check if version is specified (name=version format)
+		// package version is specified in (name=version format)
 		var version string
 		if parts := strings.Split(name, "="); len(parts) == 2 {
 			name = parts[0]
 			version = parts[1]
 		}
-
-		ext, ok := ExtNameMap[name]
+		ext, ok := Catalog.ExtNameMap[name]
 		if !ok {
-			ext, ok = ExtAliasMap[name]
+			ext, ok = Catalog.ExtAliasMap[name]
 		}
 		if !ok {
-			// try to find in PostgresPackageMap (if it is not a postgres extension)
-			if pgPkg, ok := PostgresPackageMap[name]; ok {
+			// try to find in AliasMap (if it is not a postgres extension)
+			if pgPkg, ok := Catalog.AliasMap[name]; ok {
 				pkgNamesProcessed := processPkgName(pgPkg, pgVer)
 				if version != "" {
 					for i, pkg := range pkgNamesProcessed {
@@ -96,6 +106,7 @@ func InstallExtensions(pgVer int, names []string, yes bool) error {
 	return utils.SudoCommand(installCmds)
 }
 
+// processPkgName processes the package name and returns the list of package names according to the given version
 func processPkgName(pkgName string, pgVer int) []string {
 	if pkgName == "" {
 		return []string{}

@@ -1,4 +1,4 @@
-package pgext
+package ext
 
 import (
 	"fmt"
@@ -55,6 +55,8 @@ func (e *Extension) Available(pgVer int) bool {
 				return false
 			}
 		}
+	case config.DistroMAC:
+		return true
 	}
 
 	// test2 will check bad base according to DistroCode and OSArch

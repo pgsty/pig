@@ -31,13 +31,16 @@ type PostgresInstall struct {
 }
 
 var (
-	Inited   = false
-	Active   *PostgresInstall
-	Installs map[int]*PostgresInstall
+	Installs map[int]*PostgresInstall    // All installed PostgreSQL installations
+	PathMap  map[string]*PostgresInstall // real pg_config path to pi map
+	Active   *PostgresInstall            // The active PostgreSQL installation (in PATH)
+	Postgres *PostgresInstall            // The designated PostgreSQL installation
+	Inited   = false                     // Whether the PostgreSQL installation has been initialized
 )
 
 var (
 	PostgresActiveMajorVersions = []int{17, 16, 15, 14, 13}
+	PostgresLatestMajorVersion  = 17
 	PostgresElSearchPath        = []string{"/usr/pgsql-%s/bin/pg_config"}
 	PostgresDEBSearchPath       = []string{"/usr/lib/postgresql/%s/bin/pg_config"}
 	PostgresMACSearchPath       = []string{"/opt/homebrew/opt/postgresql@%s/bin/pg_config"}
@@ -221,6 +224,10 @@ func DetectPostgres() error {
 	}
 
 	Installs = allPostgres
+	PathMap = make(map[string]*PostgresInstall)
+	for _, pi := range allPostgres {
+		PathMap[pi.PgConfigPath] = pi
+	}
 	Inited = true
 	return nil
 }
@@ -262,7 +269,7 @@ func PostgresInstallSummary() {
 		fmt.Fprintf(writer, "Library Path\t:  %s\n", Active.LibPath)
 		fmt.Fprintf(writer, "Extension Path\t:  %s\n", Active.ExtPath)
 	} else {
-		fmt.Fprintln(writer, "No active PostgreSQL found in PATH:")
+		fmt.Fprintln(writer, "\nNo active PostgreSQL found in PATH:")
 		// split the PATH and print each path
 		paths := strings.Split(os.Getenv("PATH"), ":")
 		for _, path := range paths {
@@ -271,4 +278,63 @@ func PostgresInstallSummary() {
 	}
 
 	writer.Flush()
+}
+
+func GetPostgres(args ...string) (pi *PostgresInstall, err error) {
+	// you can give at most 1 arg, could be a path, or version
+	if len(args) == 0 {
+		if Active != nil {
+			Postgres = Active
+			return Active, nil
+		} else {
+			return nil, fmt.Errorf("no args & no active postgres")
+		}
+	}
+	if len(args) > 1 {
+		return nil, fmt.Errorf("too many arguments, only one path/version is allowed")
+	}
+
+	arg := args[0]
+	if strings.HasSuffix(arg, "pg_config") {
+		// read the path and check if it eix
+		realPath, err := validatePgConfigPath(arg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to validate pg_config path %s: %v", arg, err)
+		}
+		// if it can be found in PathMap, return it
+		if pi, ok := PathMap[realPath]; ok {
+			Postgres = pi
+			return pi, nil
+		} else {
+			Postgres, err = NewPostgresInstall(realPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to detect PostgreSQL from %s: %v", realPath, err)
+			}
+			return Postgres, nil
+		}
+	}
+
+	// treat it as a version string
+	major, _, err := ParsePostgresVersion(arg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse PostgreSQL version %s: %v", arg, err)
+	}
+	if pi, ok := Installs[major]; ok {
+		Postgres = pi
+		return pi, nil
+	}
+	return nil, fmt.Errorf("PostgreSQL %d not found", major)
+}
+
+func validatePgConfigPath(path string) (string, error) {
+	if info, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("pg_config %s is not executable: %v", path, err)
+	} else if info.Mode()&0111 == 0 {
+		return "", fmt.Errorf("pg_config %s is not executable", path)
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve symbolic link %s: %v", path, err)
+	}
+	return realPath, nil
 }

@@ -1,4 +1,4 @@
-package pgext
+package ext
 
 import (
 	"bytes"
@@ -51,11 +51,11 @@ const extensionInfoTmpl = `
 {{- else }}
 │ Depend  :  No  │                                                           │
 {{- end }}
-{{- if .NeedBy }}
+{{- if .DependsOn }}
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Required By                                                                │
 ├────────────────────────────────────────────────────────────────────────────┤
-{{- range .NeedBy }}
+{{- range .DependsOn }}
 │ - {{ printf "%-72s" . }} │
 {{- end }}
 {{- end }}

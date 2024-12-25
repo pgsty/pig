@@ -275,29 +275,34 @@ func (e *Extension) GetFlag() string {
 	return b + d + s + l + t + r
 }
 
-// func (e *Extension) GetStatus(ver int) string {
-// 	if Postgres != nil {
-// 		if Postgres.ExtMap[e.Name] != nil {
-// 			return "added"
-// 		} else {
-// 			if e.Available(ver) {
-// 				return "avail"
-// 			} else {
-// 				return "n/a"
-// 			}
-// 		}
-// 	} else {
-// 		if e.Available(ver) {
-// 			return "avail"
-// 		} else {
-// 			return "n/a"
-// 		}
-// 	}
-// }
+func (e *Extension) GetStatus(ver int) string {
+	if Postgres != nil {
+		if Postgres.ExtensionMap[e.Name] != nil {
+			return "added"
+		} else {
+			if e.Available(ver) {
+				return "avail"
+			} else {
+				return "n/a"
+			}
+		}
+	} else {
+		if e.Available(ver) {
+			return "avail"
+		} else {
+			return "n/a"
+		}
+	}
+}
 
-// func (e *Extension) NeedBy() []string {
-// 	if len(NeedBy[e.Name]) == 0 {
-// 		return []string{}
-// 	}
-// 	return NeedBy[e.Name]
-// }
+// NeedBy returns the list of extensions that depend on this extension
+// This function depends on the global Catalog.DependsMap
+func (e *Extension) DependsOn() []string {
+	if Catalog == nil || Catalog.Dependency == nil {
+		return []string{}
+	}
+	if v, ok := Catalog.Dependency[e.Name]; ok {
+		return v
+	}
+	return nil
+}

@@ -29,13 +29,18 @@ func TestParsePostgresVersion(t *testing.T) {
 		{"PostgreSQL 19alpha", 19, 0, false},           // Alpha without number
 		{"PostgreSQL 19(alpha1)", 19, 0, false},        // Alpha with shit
 		{"PostgreSQL 12(foo)", 12, 0, false},           // 12
-		{"PostgreSQL 193", 193, 0, false},              // redic
-		{"someotherfork 16", 16, 0, false},             // redic
-		{"PostgreSQL 19alpha2.3-lalala", 19, 3, false}, // redic
-		{"anyprefix 99.10", 99, 10, false},             // redic
-		{"anyprefix 0.10", 0, 10, true},                // redic
-		{"PostgreSQL 123", 0, 0, true},                 // redic
-		{"PostgreSQL 9.6.5", 9, 6, false},              // redic
+		{"PostgreSQL 193", 0, 0, true},                 // insane version
+		{"someotherfork 16", 16, 0, false},             // insane prefix
+		{"PostgreSQL 19alpha2.3-lalala", 19, 3, false}, // insane version
+		{"anyprefix 99.10", 99, 10, false},             // terrible prefix
+		{"anyprefix 0.10", 0, 0, true},                 // terrible prefix
+		{"PostgreSQL 123", 0, 0, true},                 // terrible prefix
+		{"PostgreSQL 9.6.5", 9, 6, false},              // terrible prefix
+		{"12.7", 12, 7, false},                         // major.minor
+		{"13", 13, 0, false},                           // just major
+		{"13beta0", 13, 0, false},                      // just major
+		{"14alpha1", 14, 0, false},                     // just major
+		{"15rc2", 15, 0, false},                        // just major
 
 	}
 

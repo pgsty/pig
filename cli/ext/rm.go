@@ -1,4 +1,4 @@
-package pgext
+package ext
 
 import (
 	"fmt"
@@ -9,12 +9,25 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// RemoveExtension	remove extension based on provided names, aliases, or categories
+// RemoveExtensions will remove extension based on provided names, aliases, or categories
 func RemoveExtensions(pgVer int, names []string, yes bool) error {
+	logrus.Debugf("removing extensions: pgVer=%d, names=%s, yes=%v", pgVer, strings.Join(names, ", "), yes)
+	if len(names) == 0 {
+		return fmt.Errorf("no extension names provided")
+	}
+	if pgVer == 0 {
+		logrus.Debugf("no PostgreSQL version specified, set target version to the latest major version: %d", PostgresLatestMajorVersion)
+		pgVer = PostgresLatestMajorVersion
+	}
+
 	var removeCmds []string
+	Catalog.LoadAliasMap(config.OSType)
 	switch config.OSType {
 	case config.DistroEL:
 		removeCmds = append(removeCmds, []string{"yum", "remove"}...)
+		if config.OSVersion == "8" || config.OSVersion == "9" {
+			removeCmds[0] = "dnf"
+		}
 		if yes {
 			removeCmds = append(removeCmds, "-y")
 		}
@@ -27,23 +40,16 @@ func RemoveExtensions(pgVer int, names []string, yes bool) error {
 		return fmt.Errorf("unsupported OS type: %s", config.OSType)
 	}
 
-	if err := InitExtension(nil); err != nil {
-		return err
-	}
-	if len(names) == 0 {
-		return fmt.Errorf("no extension names provided")
-	}
-
 	var pkgNames []string
 	for _, name := range names {
-		ext, ok := ExtNameMap[name]
+		ext, ok := Catalog.ExtNameMap[name]
 		if !ok {
-			ext, ok = ExtAliasMap[name]
+			ext, ok = Catalog.ExtAliasMap[name]
 		}
 
 		if !ok {
 			// try to find in PostgresPackageMap (if it is not a postgres extension)
-			if pgPkg, ok := PostgresPackageMap[name]; ok {
+			if pgPkg, ok := Catalog.AliasMap[name]; ok {
 				pkgNames = append(pkgNames, processPkgName(pgPkg, pgVer)...)
 				continue
 			} else {
