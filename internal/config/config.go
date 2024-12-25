@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"pig/cli/license"
 	"runtime"
 	"strings"
 
@@ -38,10 +39,11 @@ const (
 	PigstyVersion = "3.2.0"
 	DistroEL      = "rpm"
 	DistroDEB     = "deb"
-	DistroMac     = "brew"
+	DistroMAC     = "brew"
 )
 
 func InitConfig(inventory string) {
+	DetectEnvironment()
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		logrus.Debug("Failed to get user home directory, trying user.Current()")
@@ -73,6 +75,7 @@ func InitConfig(inventory string) {
 	viper.SetEnvPrefix("PIGSTY")
 	viper.AutomaticEnv()
 
+	// load config file
 	if err := viper.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
 		if errors.As(err, &configFileNotFoundError) {
@@ -84,11 +87,13 @@ func InitConfig(inventory string) {
 		logrus.Debugf("Load config from %s", ConfigFile)
 	}
 
+	// load config file
 	cfgPath := viper.GetString("config")
 	if cfgPath != "" {
-		InitInventory(cfgPath)
+		InitConfigFile(cfgPath)
 	}
 
+	// setup inventory & pigsty home
 	if inventory != "" {
 		PigstyConfig = inventory
 		PigstyHome = filepath.Dir(inventory)
@@ -105,33 +110,37 @@ func InitConfig(inventory string) {
 		}
 	}
 
-	DetectOS()
+	// setup license if provided
+	lic := viper.GetString("license")
+	if lic != "" {
+		license.InitLicense(lic)
+	}
 }
 
-func InitInventory(configFile string) {
+// InitConfigFile will init the config file with provided path
+func InitConfigFile(cfgPath string) {
 	viper.SetConfigType("yml")
 	viper.SetDefault("license", "")
 	viper.SetDefault("region", "default")
 	viper.SetDefault("home", "~/pigsty")
 
-	var configSource string
-	if configFile != "" {
-		configSource = "CLI"
-		logrus.Debugf("config file %s is given through CLI", configFile)
+	var cfgSource string
+	if cfgPath != "" {
+		cfgSource = "CLI"
+		logrus.Debugf("config file %s is given through CLI", cfgPath)
 	} else {
-		configFile = os.Getenv("PIGSTY_CONFIG")
-		if configFile != "" {
-			logrus.Debugf("config file %s is given through ENV", configFile)
-			configSource = "ENV"
+		cfgPath = os.Getenv("PIGSTY_CONFIG")
+		if cfgPath != "" {
+			logrus.Debugf("config file %s is given through ENV", cfgPath)
+			cfgSource = "ENV"
 		}
 	}
-	if configFile != "" && filepath.Ext(configFile) != ".yml" {
-		logrus.Errorf("Given config file '%s' does not have .yml extension, ignoring it", configFile)
-		configFile = ""
+	if cfgPath != "" && filepath.Ext(cfgPath) != ".yml" {
+		logrus.Errorf("Given config file '%s' does not have .yml extension, ignoring it", cfgPath)
+		cfgPath = ""
 	}
 
-	if configFile == "" {
-		// 优先级3: PIGSTY_HOME 环境变量或默认值
+	if cfgPath == "" {
 		pigstyHome := os.Getenv("PIGSTY_HOME")
 		if pigstyHome == "" {
 			homeDir, err := os.UserHomeDir()
@@ -143,13 +152,13 @@ func InitInventory(configFile string) {
 				logrus.Debugf("config file is infer from ENV: PIGSTY_HOME=%s", pigstyHome)
 			}
 		}
-		configFile = filepath.Join(pigstyHome, "pigsty.yml")
-		configSource = "HOME"
+		cfgPath = filepath.Join(pigstyHome, "pigsty.yml")
+		cfgSource = "HOME"
 	}
 
-	PigstyConfig = configFile
-	PigstyHome = filepath.Base(configFile)
-	viper.SetConfigFile(configFile)
+	PigstyConfig = cfgPath
+	PigstyHome = filepath.Base(cfgPath)
+	viper.SetConfigFile(cfgPath)
 
 	viper.SetEnvPrefix("PIGSTY")
 	viper.AutomaticEnv()
@@ -158,15 +167,15 @@ func InitInventory(configFile string) {
 		if errors.As(err, &configFileNotFoundError) {
 			logrus.WithError(err).Debugf("Config file not found, will rely on environment variables and defaults")
 		} else {
-			logrus.WithError(err).Debugf("Error reading config file from %s", configSource)
+			logrus.WithError(err).Debugf("Error reading config file from %s", cfgSource)
 		}
 	} else {
-		logrus.Debugf("Load config from %s: %s", configSource, configFile)
+		logrus.Debugf("Load config from %s: %s", cfgSource, cfgPath)
 	}
 }
 
-// DetectOS detects the OS and sets the global variables
-func DetectOS() {
+// DetectEnvironment detects the OS and sets the global variables
+func DetectEnvironment() {
 	OSArch = runtime.GOARCH
 	NodeHostname, _ = os.Hostname()
 	NodeCPUCount = runtime.NumCPU()
@@ -176,7 +185,7 @@ func DetectOS() {
 	if runtime.GOOS != "linux" {
 		if runtime.GOOS == "darwin" {
 			OSVendor = "macos"
-			OSType = DistroMac
+			OSType = DistroMAC
 			osVersion, err := exec.Command("uname", "-r").Output()
 			if err != nil {
 				logrus.Debugf("Failed to get os version from uname: %s", err)
