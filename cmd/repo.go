@@ -20,7 +20,7 @@ var (
 // repoCmd represents the top-level `repo` command
 var repoCmd = &cobra.Command{
 	Use:     "repo",
-	Short:   "Manage OS Software Repositories",
+	Short:   "Manage Linux Repositories",
 	Aliases: []string{"r"},
 	Example: `
   typical usage: (Beware that manage repo require sudo/root privilege)
@@ -45,7 +45,7 @@ var repoCmd = &cobra.Command{
 
 var repoAddCmd = &cobra.Command{
 	Use:     "add",
-	Short:   "add pigsty yum/apt repository",
+	Short:   "add new repository",
 	Aliases: []string{"a", "append"},
 	Example: `
   pig repo add                      # = pig repo add all
@@ -123,8 +123,8 @@ var repoAddCmd = &cobra.Command{
 
 var repoSetCmd = &cobra.Command{
 	Use:     "set",
-	Short:   "set pigsty software repository",
-	Aliases: []string{"s", "overwrite"},
+	Short:   "wipe and overwrite repository",
+	Aliases: []string{"overwrite"},
 	Example: `
   pig repo set all                  # set repo to node,pgsql,infra  (recommended)
   pig repo set all -u               # set repo to above repo and update repo cache (or --update)
@@ -140,10 +140,10 @@ var repoSetCmd = &cobra.Command{
 	},
 }
 
-var repoRemoveCmd = &cobra.Command{
-	Use:     "remove",
-	Short:   "remove pigsty yum/apt repository",
-	Aliases: []string{"r", "rm"},
+var repoRmCmd = &cobra.Command{
+	Use:     "rm",
+	Short:   "remove repository",
+	Aliases: []string{"remove"},
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			err := repo.BackupRepo()
@@ -181,7 +181,7 @@ var repoRemoveCmd = &cobra.Command{
 
 var repoListCmd = &cobra.Command{
 	Use:     "list",
-	Short:   "list pigsty yum/apt repository",
+	Short:   "list active repository",
 	Aliases: []string{"l", "ls"},
 	Run: func(cmd *cobra.Command, args []string) {
 		if config.OSType == config.DistroEL {
@@ -203,7 +203,7 @@ var repoListCmd = &cobra.Command{
 
 var repoCacheCmd = &cobra.Command{
 	Use:     "update",
-	Short:   "update pigsty yum/apt repo cache",
+	Short:   "update repo cache",
 	Aliases: []string{"u", "cache"},
 	Run: func(cmd *cobra.Command, args []string) {
 		if config.OSType == config.DistroEL {
@@ -231,11 +231,11 @@ func init() {
 	repoAddCmd.Flags().BoolVarP(&repoRemove, "remove", "r", false, "remove exisitng repo")
 	repoSetCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoSetCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
-	repoRemoveCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
+	repoRmCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 
 	repoCmd.AddCommand(repoAddCmd)
 	repoCmd.AddCommand(repoSetCmd)
-	repoCmd.AddCommand(repoRemoveCmd)
+	repoCmd.AddCommand(repoRmCmd)
 	repoCmd.AddCommand(repoListCmd)
 	repoCmd.AddCommand(repoCacheCmd)
 	rootCmd.AddCommand(repoCmd)
