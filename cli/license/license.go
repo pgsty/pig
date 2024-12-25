@@ -62,6 +62,29 @@ type LicenseManager struct {
 	privateKey *ecdsa.PrivateKey
 }
 
+// InitLicense will init the license manager with viper config
+func InitLicense(lic string) {
+	if lic == "" {
+		lic := viper.GetString("license")
+		if lic == "" {
+			// logrus.Debugf("no active license configured")
+			return
+		}
+	}
+	if err := Manager.Register(lic); err != nil {
+		logrus.Debugf("Failed to register license: %v", err)
+		return
+	}
+	if Manager.Active != nil && Manager.Active.Claims != nil {
+		claims := Manager.Active.Claims
+		aud, _ := claims.GetAudience()
+		sub, _ := claims.GetSubject()
+		exp, _ := claims.GetExpirationTime()
+		logrus.Debugf("License registered: aud = %s, sub = %s, exp = %s", aud, sub, exp)
+	}
+
+}
+
 // GetDefaultPublicKey will return a default public key object
 func GetDefaultPublicKey() *ecdsa.PublicKey {
 	pk := fmt.Sprintf("%s\n%s\n%s\n%s", `-----BEGIN PUBLIC KEY-----`,

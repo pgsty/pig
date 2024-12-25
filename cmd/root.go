@@ -6,7 +6,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"pig/cli/license"
 	"pig/internal/config"
 
 	"github.com/sirupsen/logrus"
@@ -32,10 +31,10 @@ var rootCmd = &cobra.Command{
 
 Usage:
 
-  repo      manage pigsty repo     list | add  | set | rm | update
-  ext       manage pgsql extension list | info | add | rm | status
+  repo      manage apt/yum repo  add | rm | list | set  | update
+  ext       manage pg extension  add | rm | list | info | status
   
-  get       download pigsty        list | src  | pkg
+  get       download pigsty      list | src  | pkg
   init      install pigsty
   status    show pig status
 `,
@@ -52,29 +51,7 @@ func initAll() error {
 		return err
 	}
 	config.InitConfig(inventory)
-	// config.InitInventory(inventory)
-	initLicense()
 	return nil
-}
-
-func initLicense() {
-	lic := viper.GetString("license")
-	if lic == "" {
-		logrus.Debugf("No active license configured")
-		return
-	}
-	if err := license.Manager.Register(lic); err != nil {
-		logrus.Debugf("Failed to register license: %v", err)
-		return
-	}
-	if license.Manager.Active != nil && license.Manager.Active.Claims != nil {
-		claims := license.Manager.Active.Claims
-		aud, _ := claims.GetAudience()
-		sub, _ := claims.GetSubject()
-		exp, _ := claims.GetExpirationTime()
-		logrus.Debugf("License registered: aud = %s, sub = %s, exp = %s", aud, sub, exp)
-	}
-
 }
 
 // initLogger will init logger according to logLevel and logPath
