@@ -1,29 +1,70 @@
 package cmd
 
 import (
-	"pig/cli/boot"
+	"fmt"
+	"os"
+	"path/filepath"
+	"pig/cli/utils"
+	"pig/internal/config"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
+var (
+	bootRegion  string
+	bootPackage string
+	booKeep     bool
+)
+
+// A thin wrapper around the bootstrap script
 var bootCmd = &cobra.Command{
-	Use:   "boot",
-	Short: "Bootstrap Pigsty",
+	Use:     "boot",
+	Short:   "Bootstrap Pigsty",
+	Aliases: []string{"b", "bootstrap"},
 	Long: `Bootstrap pigsty with ./bootstrap script
 https://pigsty.io/docs/setup/offline/#bootstrap
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logrus.Info("Starting pigsty bootstrap")
-		if err := boot.Bootstrap(); err != nil {
-			logrus.Errorf("Bootstrap failed: %v", err)
-			return err
+		if len(args) > 0 {
+			return fmt.Errorf("unexpected argument: %v", args)
 		}
-		logrus.Info("Bootstrap completed successfully")
+		if config.PigstyHome == "" {
+			logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
+			os.Exit(1)
+		}
+		bootstrapPath := filepath.Join(config.PigstyHome, "bootstrap")
+		if _, err := os.Stat(bootstrapPath); os.IsNotExist(err) {
+			logrus.Errorf("bootstrap script not found: %s", bootstrapPath)
+			os.Exit(1)
+		}
+
+		cmdArgs := []string{bootstrapPath}
+		if bootRegion != "" {
+			cmdArgs = append(cmdArgs, "-r", bootRegion)
+		}
+		if bootPackage != "" {
+			cmdArgs = append(cmdArgs, "-p", bootPackage)
+		}
+		if booKeep {
+			cmdArgs = append(cmdArgs, "-k")
+		}
+		cmdArgs = append(cmdArgs, args...)
+		os.Chdir(config.PigstyHome)
+		logrus.Infof("bootstrap with: %s", strings.Join(cmdArgs, " "))
+		err := utils.ShellCommand(cmdArgs)
+		if err != nil {
+			logrus.Errorf("bootstrap execution failed: %v", err)
+			os.Exit(1)
+		}
 		return nil
 	},
 }
 
 func init() {
+	bootCmd.Flags().StringVarP(&bootRegion, "region", "r", "", "default,china,europe,...")
+	bootCmd.Flags().StringVarP(&bootPackage, "path", "p", "", "offline package path")
+	bootCmd.Flags().BoolVarP(&booKeep, "keep", "k", false, "keep existing repo")
 	rootCmd.AddCommand(bootCmd)
 }
