@@ -35,7 +35,7 @@ var repoCmd = &cobra.Command{
   pig repo set -u              # overwrite repo and update repo cache
   pig repo set all -u          # same as above, but remove(backup) old repos first (same as '-r|--remove' option)
   pig repo add all -u          # same as 'pig repo add', also update repo cache 
-  pig repo add pigsty pgdg     # add pigsty extension repo + pgdg offical repo
+  pig repo add pigsty pgdg     # add pigsty extension repo + pgdg official repo
   pig repo add pgsql node      # add os + pgdg postgres repo
   pig repo add infra           # add observability, grafana & prometheus stack, pg bin utils
   pig repo rm                  # remove old repos (move existing repos to ${repodir}/backup)
@@ -238,7 +238,7 @@ var repoStatusCmd = &cobra.Command{
 func init() {
 	repoAddCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoAddCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
-	repoAddCmd.Flags().BoolVarP(&repoRemove, "remove", "r", false, "remove exisitng repo")
+	repoAddCmd.Flags().BoolVarP(&repoRemove, "remove", "r", false, "remove existing repo")
 	repoSetCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoSetCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 	repoRmCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")

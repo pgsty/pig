@@ -85,7 +85,7 @@ Examples:
 }
 
 func init() {
-	installCmd.Flags().StringVarP(&path, "path", "p", "~/pigsty", "target diectory")
+	installCmd.Flags().StringVarP(&path, "path", "p", "~/pigsty", "target directory")
 	installCmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite existing pigsty (false by default)")
 	installCmd.Flags().StringVarP(&version, "version", "v", "", "pigsty version")
 	installCmd.Flags().StringVarP(&downloadDir, "dir", "d", "/tmp", "download directory")
