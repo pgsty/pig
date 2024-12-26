@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"pig/cli/license"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -27,6 +28,7 @@ var (
 	OSType        string // rpm / deb
 	OSVendor      string // rocky/debian/ubuntu from ID
 	OSVersion     string // 7/8/9/11/12/20/22/24
+	OSMajor       int    // 7/8/9/11/12/20/22/24 (int format)
 	OSVersionFull string // 9.3 / 22.04 / 12 from VERSION_ID
 	OSVersionCode string // OS full version string
 	CurrentUser   string // current user
@@ -195,6 +197,7 @@ func DetectEnvironment() {
 			}
 			if OSVersionFull != "" {
 				OSVersion = strings.Split(OSVersionFull, ".")[0]
+				OSMajor, _ = strconv.Atoi(OSVersion)
 				OSCode = fmt.Sprintf("a%s", OSVersion)
 				OSVersionCode = OSCode
 			}

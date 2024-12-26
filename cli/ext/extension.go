@@ -111,18 +111,24 @@ func CompactVersion(pgVers []string) string {
 }
 
 func (e *Extension) Availability(distroCode string) string {
-	if config.OSType == config.DistroEL {
+	switch config.OSType {
+	case config.DistroEL:
 		if e.RpmRepo == "" {
 			return "n/a"
 		} else {
 			return CompactVersion(e.RpmPg)
 		}
-	}
-	if config.OSType == config.DistroDEB {
+	case config.DistroDEB:
 		if e.DebRepo == "" {
 			return "n/a"
 		} else {
 			return CompactVersion(e.DebPg)
+		}
+	case config.DistroMAC:
+		if e.Repo == "" {
+			return "n/a"
+		} else {
+			return CompactVersion(e.PgVer)
 		}
 	}
 
@@ -134,11 +140,19 @@ func (e *Extension) PackageName(pgVer int) string {
 	if pgVer == 0 {
 		verStr = "$v"
 	}
-	if config.OSType == config.DistroEL && e.RpmPkg != "" {
-		return strings.Replace(e.RpmPkg, "$v", verStr, 1)
-	}
-	if config.OSType == config.DistroDEB && e.DebPkg != "" {
-		return strings.Replace(e.DebPkg, "$v", verStr, 1)
+	switch config.OSType {
+	case config.DistroEL:
+		if e.RpmPkg != "" {
+			return strings.Replace(e.RpmPkg, "$v", verStr, 1)
+		}
+	case config.DistroDEB:
+		if e.DebPkg != "" {
+			return strings.Replace(e.DebPkg, "$v", verStr, 1)
+		}
+	case config.DistroMAC:
+		if e.Repo != "" {
+			return strings.Replace(e.Repo, "$v", verStr, 1)
+		}
 	}
 	return ""
 }
@@ -152,11 +166,19 @@ func (e *Extension) GuessDebNamePattern(pgVer int) string {
 }
 
 func (e *Extension) RepoName() string {
-	if config.OSType == config.DistroEL && e.RpmRepo != "" {
-		return e.RpmRepo
-	}
-	if config.OSType == config.DistroDEB && e.DebRepo != "" {
-		return e.DebRepo
+	switch config.OSType {
+	case config.DistroEL:
+		if e.RpmRepo != "" {
+			return e.RpmRepo
+		}
+	case config.DistroDEB:
+		if e.DebRepo != "" {
+			return e.DebRepo
+		}
+	case config.DistroMAC:
+		if e.Repo != "" {
+			return e.Repo
+		}
 	}
 	return ""
 }

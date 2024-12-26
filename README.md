@@ -5,7 +5,7 @@
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 340](https://img.shields.io/badge/extensions-340-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pigsty.io/#/list)
 
-**pig** is an open-source PostgreSQL Package Manager for [mainstream](#compatibility) Linux distro.
+[**pig**](https://github.com/pgsty/pig) is an open-source PostgreSQL Package Manager for [mainstream](#compatibility) Linux distro.
 
 Install PostgreSQL 13-17 with [340 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) x (EL/Debian/Ubuntu) with native package manager
 
