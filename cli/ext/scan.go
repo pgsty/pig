@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"pig/internal/config"
 	"sort"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/sirupsen/logrus"
 )
@@ -34,12 +36,52 @@ type ExtensionInstall struct {
 	Libraries      map[string]bool   // Associated shared library
 }
 
+func (e *ExtensionInstall) Found() bool {
+	return e.Extension != nil
+}
+
 // ExtName returns the name of the extension
 func (e *ExtensionInstall) ExtName() string {
 	if e.Extension != nil {
 		return e.Extension.Name
 	}
 	return e.ControlName
+}
+
+// Description returns the description of the extension
+func (e *ExtensionInstall) Description() string {
+	if e.ControlDesc != "" {
+		return e.ControlDesc
+	} else if e.Extension != nil {
+		return e.Extension.EnDesc
+	}
+	return ""
+}
+
+// VersionString returns the version string of the extension
+func (e *ExtensionInstall) VersionString() string {
+	if e.InstallVersion != "" {
+		return e.InstallVersion
+	} else if e.Extension != nil {
+		return e.Extension.Version
+	}
+	return ""
+}
+
+// SharedLibraries returns the shared libraries list of the extension
+func (e *ExtensionInstall) SharedLibraries() []string {
+	var libs []string
+	switch config.OSType {
+	case config.DistroEL, config.DistroDEB:
+		for lib := range e.Libraries {
+			libs = append(libs, lib+".so")
+		}
+	case config.DistroMAC:
+		for lib := range e.Libraries {
+			libs = append(libs, lib+".dylib")
+		}
+	}
+	return libs
 }
 
 // ActiveVersion returns the active version of the extension (fallback to the catalog version)
@@ -107,7 +149,7 @@ func (p *PostgresInstall) ScanExtensions() error {
 		if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".so") || strings.HasSuffix(entry.Name(), ".dylib")) {
 			libName := strings.TrimSuffix(entry.Name(), ".so")
 			libName = strings.TrimSuffix(libName, ".dylib")
-			shareLibs[libName] = true
+			shareLibs[libName] = false
 		}
 	}
 
@@ -142,19 +184,6 @@ func (p *PostgresInstall) ScanExtensions() error {
 		}
 	}
 
-	// match existing extensions with shared libraries
-	for lib := range shareLibs {
-		if ext, exists := extMap[lib]; exists {
-			ext.Libraries[lib] = true
-		} else {
-			for _, ext := range extensions {
-				if MatchExtensionWithLibs(ext.ExtName(), lib) {
-					ext.Libraries[lib] = true
-				}
-			}
-		}
-	}
-
 	// add control less extensions if found
 	for name := range Catalog.ControlLess {
 		if _, exists := shareLibs[name]; exists {
@@ -166,10 +195,96 @@ func (p *PostgresInstall) ScanExtensions() error {
 		}
 	}
 
+	// match existing extensions with shared libraries
+	for lib := range shareLibs {
+		if ext, exists := extMap[lib]; exists {
+			ext.Libraries[lib] = true
+			shareLibs[lib] = true
+		} else {
+			for _, ext := range extensions {
+				if MatchExtensionWithLibs(ext.ExtName(), lib) {
+					ext.Libraries[lib] = true
+					shareLibs[lib] = true
+				}
+			}
+		}
+	}
+
 	// update extension map
 	p.Extensions = extensions
 	p.ExtensionMap = extMap
+	p.SharedLibs = shareLibs
 	return nil
+}
+
+// ExtensionInstallSummary prints a summary of the PostgreSQL installation and its extensions & shared libraries
+func (pg *PostgresInstall) ExtensionInstallSummary() {
+	// Sort extensions by name for consistent output
+	extensions := pg.Extensions
+	sort.Slice(extensions, func(i, j int) bool {
+		return extensions[i].ExtName() < extensions[j].ExtName()
+	})
+
+	// Print extension details including shared libraries in a tabulated format
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "Name\tVersion\tSharedLibs\tDescription\tMeta")
+	fmt.Fprintln(w, "----\t-------\t----------\t---------------------\t------")
+
+	for _, ext := range extensions {
+		if !ext.Found() {
+			logrus.Warnf("extension %s not found in catalog", ext.ExtName())
+		}
+		extDescHead := ext.Description()
+		if len(extDescHead) > 64 {
+			extDescHead = extDescHead[:64] + "..."
+		}
+		meta := ""
+		for k, v := range ext.ControlMeta {
+			meta += fmt.Sprintf("%s=%s ", k, v)
+		}
+		if len(ext.SharedLibraries()) > 0 {
+			meta += fmt.Sprintf("lib=%s", strings.Join(ext.SharedLibraries(), ", "))
+		}
+		meta = strings.TrimSpace(meta)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			ext.ExtName(),
+			ext.VersionString(),
+			extDescHead,
+			meta,
+		)
+
+	}
+	w.Flush()
+
+	w = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	var unmatchedLibs []string
+	var encodingLibs []string
+	var builtInLibs []string
+	for libName, matched := range pg.SharedLibs {
+		if isEncodingLib(libName) {
+			encodingLibs = append(encodingLibs, libName)
+			continue
+		}
+		if isBuiltInLib(libName) {
+			builtInLibs = append(builtInLibs, libName)
+			continue
+		}
+		if !matched {
+			unmatchedLibs = append(unmatchedLibs, libName)
+		}
+	}
+	sort.Strings(encodingLibs)
+	sort.Strings(builtInLibs)
+	sort.Strings(unmatchedLibs)
+	fmt.Printf("\nEncoding Libs: %s\n", strings.Join(encodingLibs, ", "))
+	fmt.Printf("\nBuilt-in Libs: %s\n", strings.Join(builtInLibs, ", "))
+	if len(unmatchedLibs) > 0 {
+		fmt.Printf("\nUnmatched Shared Libraries: %s\n", strings.Join(unmatchedLibs, ", "))
+		for _, libName := range unmatchedLibs {
+			fmt.Fprintf(w, "%s\n", libName)
+		}
+	}
+	w.Flush()
 }
 
 func PrintInstalledPostgres() string {
@@ -201,75 +316,77 @@ func PrintInstalledPostgres() string {
 	return strings.Join(pgVerStrList, ", ")
 }
 
-// // PostgresInstallSummary print the summary of PostgreSQL installation
-// func PostgresInstallSummary() {
-// 	if !Inited {
-// 		fmt.Printf("PostgreSQL Environment not initialized\n")
-// 		return
-// 	}
+// lib name to ext name mapping, special case
+var matchSpecialCase = map[string]string{
+	"pgxml":                         "xml2",
+	"_int":                          "intarray",
+	"hstore_plpython3":              "hstore_plpython3u",
+	"jsonb_plpython3":               "jsonb_plpython3u",
+	"libMobilityDB-1.2":             "mobilitydb",
+	"libduckdb":                     "pg_duckdb",
+	"libpgrouting-3.7":              "pgrouting",
+	"libpljava-so-1.6.8":            "pljava",
+	"llvmjit":                       "llvmjit",
+	"pg_partman_bgw":                "pg_partman",
+	"pgcryptokey_acpass":            "pgcryptokey",
+	"pglogical_output":              "pglogical",
+	"pgq_lowlevel":                  "pgq",
+	"pgq_triggers":                  "pgq",
+	"pgroonga_check":                "pgroonga",
+	"pgroonga_crash_safer":          "pgroonga",
+	"pgroonga_standby_maintainer":   "pgroonga",
+	"pgroonga_wal_applier":          "pgroonga",
+	"pgroonga_wal_resource_manager": "pgroonga",
+	"plugin_debugger":               "pldbgapi",
+	"timescaledb-tsl-2.17.0":        "timescaledb",
+	"timescaledb-tsl-2.17.1":        "timescaledb",
+	"timescaledb-tsl-2.17.2":        "timescaledb",
+	"ddl_deparse":                   "pgl_ddl_deploy",
+}
 
-// 	// print installed PostgreSQL versions
-// 	if len(Installs) > 0 {
-// 		fmt.Printf("Installed:\n")
-// 		for _, v := range Installs {
-// 			if v == Active {
-// 				fmt.Printf("* %-17s\t%s\n", fmt.Sprintf("%d.%d", v.MajorVersion, v.MinorVersion), v.PgConfig)
-// 			}
-// 		}
-// 		for _, v := range Installs {
-// 			if v != Active {
-// 				fmt.Printf("- %-15s\t%s\n", fmt.Sprintf("%d.%d", v.MajorVersion, v.MinorVersion), v.PgConfig)
-// 			}
-// 		}
-// 	} else {
-// 		fmt.Println("No PostgreSQL installation found")
-// 	}
+var matchBuiltInLib = map[string]bool{
+	"libpqwalreceiver": true,
+	"dict_snowball":    true,
+	"llvmjit":          true,
+	"libecpg":          true,
+	"libpgtypes":       true,
+}
 
-// 	// print active PostgreSQL detail
-// 	if Active != nil {
-// 		fmt.Printf("\nActive:\n")
-// 		fmt.Printf("PG Version        :  %s\n", Active.Version)
-// 		fmt.Printf("Config Path       :  %s\n", Active.PgConfig)
-// 		fmt.Printf("Binary Path       :  %s\n", Active.BinPath)
-// 		fmt.Printf("Library Path      :  %s\n", Active.LibPath)
-// 		fmt.Printf("Extension Path    :  %s\n", Active.ExtPath)
-// 		if len(Active.Extensions) > 0 {
-// 			fmt.Printf("Extension Stat    :  Installed %d\n", len(Active.Extensions))
-// 		}
-// 	} else {
-// 		fmt.Println("No PostgreSQL installation activated")
-// 		fmt.Printf("PATH: %s\n", os.Getenv("PATH"))
-// 	}
-// }
+func isEncodingLib(libname string) bool {
+	if strings.HasPrefix(libname, "euc") || strings.HasPrefix(libname, "utf8") || strings.HasPrefix(libname, "latin") || libname == "cyrillic_and_mic" {
+		return true
+	}
+	return false
+}
 
-// // GetPostgres returns the active PostgreSQL installation (via pg_config path or major version)
-// func GetPostgres(path string, ver int) (pg *PostgresInstall, err error) {
-// 	if path != "" {
-// 		return DetectPostgresFromConfig(path)
-// 	}
-// 	if !Inited {
-// 		err = DetectPostgresEnv()
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 	}
-// 	if ver != 0 {
-// 		if pg, exists := Installs[ver]; exists {
-// 			return pg, nil
-// 		} else {
-// 			return nil, fmt.Errorf("PostgreSQL version %d is not installed", ver)
-// 		}
-// 	}
-// 	if Active == nil {
-// 		return nil, fmt.Errorf("no active PostgreSQL installation detected")
-// 	} else {
-// 		return Active, nil
-// 	}
-// }
+func isBuiltInLib(libname string) bool {
+	if _, exists := matchBuiltInLib[libname]; exists {
+		return true
+	}
+	return false
+}
 
 func MatchExtensionWithLibs(extname, libname string) bool {
 	if extname == libname {
 		return true
 	}
+	if ename, exists := matchSpecialCase[libname]; exists {
+		if extname == ename {
+			return true
+		}
+	}
+	if libname+"u" == extname || extname+"u" == libname {
+		return true
+	}
+	// remove lib-version... then match
+	// Check if libname has a version suffix and remove it
+	if idx := strings.LastIndex(libname, "-"); idx != -1 {
+		libnameWithoutVersion := libname[:idx]
+		if extname == libnameWithoutVersion {
+			return true
+		}
+	}
+
 	return false
+
 }
