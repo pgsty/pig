@@ -7,18 +7,8 @@ import (
 	"pig/internal/config"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
-)
-
-var (
-	//go:embed assets/rpm.yml
-	embedRpmRepo []byte
-
-	//go:embed assets/deb.yml
-	embedDebRepo []byte
-
-	//go:embed assets/key.gpg
-	embedGPGKey []byte
 )
 
 const (
@@ -60,6 +50,41 @@ func (r *Repository) SupportArm64() bool {
 	return slices.Contains(r.Arch, "aarch64")
 }
 
+// ToInlineYAML Will output a single line yaml string
+func (r *Repository) ToInlineYAML() string {
+	name := r.Name
+	desc := fmt.Sprintf("'%s'", r.Description) // description 里加上单引号
+	module := r.Module
+	releases := formatReleases(r.Releases)
+	arch := formatArch(r.Arch)
+	return fmt.Sprintf("- { name: %-14s ,description: %-20s ,module: %-8s ,releases: %-16s ,arch: %-18s ,baseurl: '%s' }",
+		name, desc, module, releases, arch, r.BaseURL["default"])
+}
+
+// InferOS infers the OS type from the repository releases fields and base URL
+func (r *Repository) InferOS() string {
+	if len(r.Releases) == 0 {
+		return ""
+	}
+	if slices.Contains(r.Releases, 11) || slices.Contains(r.Releases, 12) || slices.Contains(r.Releases, 20) || slices.Contains(r.Releases, 22) || slices.Contains(r.Releases, 24) {
+		return config.DistroDEB
+	}
+	if slices.Contains(r.Releases, 7) || slices.Contains(r.Releases, 8) || slices.Contains(r.Releases, 9) {
+		return config.DistroEL
+	}
+
+	// Infer from base URL if releases do not provide enough information
+	for _, url := range r.BaseURL {
+		if strings.Contains(url, "debian") || strings.Contains(url, "ubuntu") || strings.Contains(url, "/deb/") || strings.Contains(url, "/apt/") {
+			return config.DistroDEB
+		}
+		if strings.Contains(url, "centos") || strings.Contains(url, "redhat") || strings.Contains(url, "fedora") || strings.Contains(url, "/yum/") || strings.Contains(url, "/rpm/") {
+			return config.DistroEL
+		}
+	}
+	return ""
+}
+
 func (r *Repository) GetBaseURL(region string) string {
 	if url, ok := r.BaseURL[region]; ok {
 		return url
@@ -67,15 +92,23 @@ func (r *Repository) GetBaseURL(region string) string {
 	return r.BaseURL["default"]
 }
 
+// AvailableInCurrentOS checks if the repository is available for the current OS
+func (r *Repository) AvailableInCurrentOS() bool {
+	return r.Available(config.OSCode, config.OSArch)
+}
+
 // Available checks if the repository is available for a given distribution and architecture
 func (r *Repository) Available(code string, arch string) bool {
 	code = strings.ToLower(code)
 	arch = strings.ToLower(arch)
-	if arch == "amd64" || arch == "x86_64" {
-		// convert arch to x86_64 or aarch64
-		arch = "x86_64"
-	} else if arch == "arm64" || arch == "aarch64" {
-		arch = "aarch64"
+	switch arch {
+	case "amd64", "x86_64":
+		arch = "x86_64" // convert arch to x86_64 or aarch64
+	case "arm64", "aarch64", "arm64v8":
+		arch = "aarch64" // convert arm64 arch to aarch64
+	}
+	if config.OSType == config.DistroMAC {
+		return false
 	}
 	major := GetMajorVersionFromCode(code)
 	if code != "" && (major == -1 || !slices.Contains(r.Releases, major)) {
@@ -135,4 +168,22 @@ func (r *Repository) Content(region ...string) string {
 		return fmt.Sprintf("# %s %s\ndeb [%s] %s", r.Name, r.Description, debMeta, repoURL)
 	}
 	return ""
+}
+
+func formatReleases(rs []int) string {
+	if len(rs) == 0 {
+		return "[]"
+	}
+	s := make([]string, len(rs))
+	for i, v := range rs {
+		s[i] = strconv.Itoa(v)
+	}
+	return "[" + strings.Join(s, ",") + "]"
+}
+
+func formatArch(a []string) string {
+	if len(a) == 0 {
+		return "[]"
+	}
+	return "[" + strings.Join(a, ", ") + "]"
 }

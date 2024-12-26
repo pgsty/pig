@@ -44,6 +44,28 @@ var repoCmd = &cobra.Command{
 `,
 }
 
+var repoListCmd = &cobra.Command{
+	Use:     "list",
+	Short:   "print available repo list",
+	Aliases: []string{"l", "ls"},
+	Example: `
+  pig repo list                # list available repos on current system
+  pig repo list all            # list all unfiltered repo raw data
+  pig repo list update         # get updated repo data to ~/pig/repo.yml
+`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return repo.ListRepo()
+		} else if args[0] == "all" {
+			repo.ListRepoData()
+		} else if args[0] == "update" {
+			// TODO: implement repo update
+			fmt.Println("not implemented yet")
+		}
+		return nil
+	},
+}
+
 var repoAddCmd = &cobra.Command{
 	Use:     "add",
 	Short:   "add new repository",
@@ -179,19 +201,10 @@ var repoRmCmd = &cobra.Command{
 	},
 }
 
-var repoListCmd = &cobra.Command{
-	Use:     "list",
-	Short:   "list active repository",
-	Aliases: []string{"l", "ls"},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return repo.ListRepo()
-	},
-}
-
-var repoCacheCmd = &cobra.Command{
+var repoUpdateCmd = &cobra.Command{
 	Use:     "update",
 	Short:   "update repo cache",
-	Aliases: []string{"u", "cache"},
+	Aliases: []string{"u"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if config.OSType == config.DistroEL {
 			err := utils.SudoCommand([]string{"yum", "makecache"})
@@ -213,6 +226,15 @@ var repoCacheCmd = &cobra.Command{
 	},
 }
 
+var repoStatusCmd = &cobra.Command{
+	Use:     "status",
+	Short:   "show current repo status",
+	Aliases: []string{"s", "st"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return repo.RepoStatus()
+	},
+}
+
 func init() {
 	repoAddCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoAddCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
@@ -225,5 +247,6 @@ func init() {
 	repoCmd.AddCommand(repoSetCmd)
 	repoCmd.AddCommand(repoRmCmd)
 	repoCmd.AddCommand(repoListCmd)
-	repoCmd.AddCommand(repoCacheCmd)
+	repoCmd.AddCommand(repoUpdateCmd)
+	repoCmd.AddCommand(repoStatusCmd)
 }

@@ -3,9 +3,15 @@ package repo
 import (
 	"bytes"
 	"fmt"
-	"golang.org/x/crypto/openpgp/armor"
 	"io"
+
+	_ "embed"
+
+	"golang.org/x/crypto/openpgp/armor"
 )
+
+//go:embed assets/key.gpg
+var embedGPGKey []byte
 
 // AddDebGPGKey adds the Pigsty GPG key to the Debian repository
 func AddDebGPGKey() error {

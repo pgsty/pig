@@ -1,64 +1,64 @@
 package repo
 
 import (
+	_ "embed"
 	"fmt"
-	"os"
-	"pig/internal/config"
-	"pig/internal/utils"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
-// ListRepo lists the active repository according to the OS type
 func ListRepo() error {
-	switch config.OSType {
-	case config.DistroEL:
-		return ListELRepo()
-	case config.DistroDEB:
-		return ListDebianRepo()
-	default:
-		return fmt.Errorf("unsupported OS type: %s", config.OSType)
+	rm, err := NewRepoManager()
+	if err != nil {
+		return err
 	}
-}
+	fmt.Printf("os_environment: {type: %s, major: %d, code: %s, arch: %s}\n", rm.OsType, rm.OsMajorVersion, rm.OsDistroCode, rm.OsArch)
+	fmt.Printf("repo_upstream:  # Available Repo: %d\n", len(rm.List))
+	for _, r := range rm.List {
+		fmt.Println("  " + r.ToInlineYAML())
+	}
 
-// ListELRepo lists the RHEL OS family repository
-func ListELRepo() error {
-	if err := RpmPrecheck(); err != nil {
-		return err
-	}
-	fmt.Println("\n======== ls /etc/yum.repos.d/ ")
-	if err := utils.ShellCommand([]string{"ls", "/etc/yum.repos.d/"}); err != nil {
-		return err
-	}
-	fmt.Println("\n======== yum repolist")
-	if err := utils.ShellCommand([]string{"yum", "repolist"}); err != nil {
-		return err
+	// sort module list and print
+	modules := rm.ModuleOrder()
+	fmt.Printf("repo_modules:   # Available Modules: %d\n", len(modules))
+	for _, module := range modules {
+		fmt.Printf("  - %s: %s\n", module, strings.Join(rm.Module[module], ", "))
 	}
 	return nil
 }
 
-// ListDebianRepo lists the Debian OS family repository
-func ListDebianRepo() error {
-	if err := DebPrecheck(); err != nil {
-		return err
+func MarshalRepos(repos []Repository) ([]byte, error) {
+	seqNode := &yaml.Node{
+		Kind:  yaml.SequenceNode,
+		Style: yaml.FoldedStyle,
 	}
-
-	fmt.Println("\n======== ls /etc/apt/sources.list.d/")
-	if err := utils.ShellCommand([]string{"ls", "/etc/apt/sources.list.d/"}); err != nil {
-		return err
-	}
-
-	// also check /etc/apt/sources.list if exists and non-empty, print it
-	if fileInfo, err := os.Stat("/etc/apt/sources.list"); err == nil {
-		if fileInfo.Size() > 0 {
-			fmt.Println("\n======== /etc/apt/sources.list")
-			if err := utils.ShellCommand([]string{"cat", "/etc/apt/sources.list"}); err != nil {
-				return err
-			}
+	for _, r := range repos {
+		mapNode := &yaml.Node{}
+		if err := mapNode.Encode(r); err != nil {
+			return nil, err
 		}
+		mapNode.Style = yaml.FlowStyle
+		seqNode.Content = append(seqNode.Content, mapNode)
+	}
+	return yaml.Marshal(seqNode)
+}
+
+// ListRepoData prints the repository data in a formatted manner
+func ListRepoData() error {
+	rm, err := NewRepoManager()
+	if err != nil {
+		return err
 	}
 
-	fmt.Println("\n===== [apt-cache policy] =========================")
-	if err := utils.ShellCommand([]string{"apt-cache", "policy"}); err != nil {
-		return err
+	fmt.Printf("repo_rawdata:  # {total: %d, available: %d, source: %s}\n", len(rm.Data), len(rm.List), rm.DataSource)
+	for _, r := range rm.Data {
+		line := r.ToInlineYAML()
+		if r.AvailableInCurrentOS() {
+			fmt.Println(strings.Replace(line, "- ", "  o ", 1))
+		} else {
+			fmt.Println(strings.Replace(line, "- ", "  x ", 1))
+		}
 	}
 	return nil
 }

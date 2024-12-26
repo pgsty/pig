@@ -29,20 +29,15 @@ func AddRepo(region string, modules ...string) error {
 	modules = slices.Compact(modules)
 	slices.Sort(modules)
 
-	// load repo data according to OS type
-	var err error
-	if config.OSType == config.DistroEL {
-		err = LoadRpmRepo(embedRpmRepo)
-	} else if config.OSType == config.DistroDEB {
-		err = LoadDebRepo(embedDebRepo)
-	}
+	// Global Reference
+	rm, err := NewRepoManager()
 	if err != nil {
 		return err
 	}
 
 	// check module availability
 	for _, module := range modules {
-		if _, ok := ModuleMap[module]; !ok {
+		if _, ok := rm.Module[module]; !ok {
 			logrus.Warnf("available modules: %v", strings.Join(GetModuleList(), ", "))
 			return fmt.Errorf("module %s not found", module)
 		}
@@ -60,19 +55,21 @@ func AddRepo(region string, modules ...string) error {
 			region = get.Region
 		}
 	}
+
 	logrus.Infof("add repo for %s.%s , region = %s", config.OSCode, config.OSArch, region)
+
 	// we don't check gpg key by default (since you may have to sudo to add keys)
-	if config.PigstyGPGCheck && (slices.Contains(modules, "pgsql") || slices.Contains(modules, "infra") || slices.Contains(modules, "pigsty") || slices.Contains(modules, "all")) {
-		switch config.OSType {
-		case config.DistroDEB:
-			err = AddDebGPGKey()
-		case config.DistroEL:
-			err = AddRpmGPGKey()
-		}
-		if err != nil {
-			return err
-		}
-	}
+	// if config.PigstyGPGCheck && (slices.Contains(modules, "pgsql") || slices.Contains(modules, "infra") || slices.Contains(modules, "pigsty") || slices.Contains(modules, "all")) {
+	// 	switch config.OSType {
+	// 	case config.DistroDEB:
+	// 		err = AddDebGPGKey()
+	// 	case config.DistroEL:
+	// 		err = AddRpmGPGKey()
+	// 	}
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	for _, module := range modules {
 		if err := AddModule(module, region); err != nil {

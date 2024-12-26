@@ -1,21 +1,8 @@
 package repo
 
 import (
-	"fmt"
 	"testing"
 )
-
-func TestLoadRepoConfig(t *testing.T) {
-	//LoadRpmRepo(nil)
-	LoadDebRepo(nil)
-	fmt.Println(Repos)
-	fmt.Println(RepoMap)
-
-	// print module map
-	for k, v := range ModuleMap {
-		fmt.Println(k, v)
-	}
-}
 
 func TestRepoAvailable(t *testing.T) {
 	tests := []struct {
