@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"pig/cli/repo"
-	"pig/cli/utils"
 	"pig/internal/config"
+	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -184,7 +184,7 @@ var repoListCmd = &cobra.Command{
 	Use:     "list",
 	Short:   "list active repository",
 	Aliases: []string{"l", "ls"},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if config.OSType == config.DistroEL {
 			if err := repo.ListPigstyRpmRepo(); err != nil {
 				logrus.Error(err)
@@ -199,6 +199,7 @@ var repoListCmd = &cobra.Command{
 			logrus.Errorf("unsupported OS type: %s", config.OSType)
 			os.Exit(1)
 		}
+		return nil
 	},
 }
 
@@ -206,7 +207,7 @@ var repoCacheCmd = &cobra.Command{
 	Use:     "update",
 	Short:   "update repo cache",
 	Aliases: []string{"u", "cache"},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if config.OSType == config.DistroEL {
 			err := utils.SudoCommand([]string{"yum", "makecache"})
 			if err != nil {
@@ -223,6 +224,7 @@ var repoCacheCmd = &cobra.Command{
 			logrus.Errorf("unsupported OS type: %s", config.OSType)
 			os.Exit(1)
 		}
+		return nil
 	},
 }
 

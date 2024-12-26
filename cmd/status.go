@@ -5,8 +5,8 @@ import (
 	"pig/cli/ext"
 	"pig/cli/get"
 	"pig/cli/license"
-	"pig/cli/utils"
 	"pig/internal/config"
+	"pig/internal/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -58,19 +58,5 @@ var statusCmd = &cobra.Command{
 		fmt.Println("\n" + utils.PadHeader("Network Conditions", padding))
 		get.Details = true
 		get.NetworkCondition()
-		// get.NetworkCondition()
-		// if !get.InternetAccess {
-		// 	fmt.Println("Internet Access  : No")
-		// 	return
-		// }
-		// fmt.Println("Internet Access   :  Yes")
-		// fmt.Println("Pigsty Repo       : ", get.Source)
-		// fmt.Println("Inferred Region   : ", get.Region)
-		// fmt.Println("Latest Pigsty Ver : ", get.LatestVersion)
-		// fmt.Println("\n" + utils.PadHeader("Done", padding) + "\n")
 	},
-}
-
-func RunTest() {
-	// TODO:
 }

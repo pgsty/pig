@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"pig/cli/utils"
 	"pig/internal/config"
+	"pig/internal/utils"
 	"strings"
 
 	"github.com/sirupsen/logrus"

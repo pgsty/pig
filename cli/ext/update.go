@@ -2,8 +2,8 @@ package ext
 
 import (
 	"fmt"
-	"pig/cli/utils"
 	"pig/internal/config"
+	"pig/internal/utils"
 	"strings"
 
 	"github.com/sirupsen/logrus"

@@ -3,8 +3,8 @@ package ext
 import (
 	"fmt"
 	"os"
-	"pig/cli/utils"
 	"pig/internal/config"
+	"pig/internal/utils"
 	"strconv"
 	"strings"
 
