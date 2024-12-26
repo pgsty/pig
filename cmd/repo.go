@@ -31,16 +31,16 @@ var repoCmd = &cobra.Command{
   pig repo list                # list current system repo dir and active repos  
   pig repo update              # update yum/apt repo cache (apt update or dnf makecache)
  
-  pig repo add -u                   # add all necessary repo and update repo cache
-  pig repo set -u                   # overwrite repo and update repo cache
-  pig repo set all -u               # same as above, but remove(backup) old repos first (same as '-r|--remove' option)
-  pig repo add all -u               # same as 'pig repo add', also update repo cache 
-  pig repo add pigsty pgdg          # add pigsty extension repo + pgdg offical repo
-  pig repo add pgsql node           # add os + pgdg postgres repo
-  pig repo add infra                # add observability, grafana & prometheus stack, pg bin utils
-  pig repo rm                       # remove old repos (move existing repos to ${repodir}/backup)
-  pig repo rm pigsty                # remove pigsty repo
-  pig repo rm pgsql infra           # remove two repo module: pgsql & infra
+  pig repo add -u              # add all necessary repo and update repo cache
+  pig repo set -u              # overwrite repo and update repo cache
+  pig repo set all -u          # same as above, but remove(backup) old repos first (same as '-r|--remove' option)
+  pig repo add all -u          # same as 'pig repo add', also update repo cache 
+  pig repo add pigsty pgdg     # add pigsty extension repo + pgdg offical repo
+  pig repo add pgsql node      # add os + pgdg postgres repo
+  pig repo add infra           # add observability, grafana & prometheus stack, pg bin utils
+  pig repo rm                  # remove old repos (move existing repos to ${repodir}/backup)
+  pig repo rm pigsty           # remove pigsty repo
+  pig repo rm pgsql infra      # remove two repo module: pgsql & infra
 `,
 }
 
@@ -65,7 +65,6 @@ var repoAddCmd = &cobra.Command{
     - pigsty :  PostgreSQL Extension Repo (default)
     - pgdg   :  PGDG the Official PostgreSQL Repo (official)
     - node   :  operating system official repo (el/debian/ubuntu)
-
   - pgsql    :  pigsty + pgdg (all available pg extensions) 
   - extra    :  extra postgres modules, non-free, citus, timescaledb upstream 
   - infra    :  observability, grafana & prometheus stack, pg bin utils
@@ -185,21 +184,7 @@ var repoListCmd = &cobra.Command{
 	Short:   "list active repository",
 	Aliases: []string{"l", "ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if config.OSType == config.DistroEL {
-			if err := repo.ListPigstyRpmRepo(); err != nil {
-				logrus.Error(err)
-				os.Exit(1)
-			}
-		} else if config.OSType == config.DistroDEB {
-			if err := repo.ListPigstyDebRepo(); err != nil {
-				logrus.Error(err)
-				os.Exit(1)
-			}
-		} else {
-			logrus.Errorf("unsupported OS type: %s", config.OSType)
-			os.Exit(1)
-		}
-		return nil
+		return repo.ListRepo()
 	},
 }
 

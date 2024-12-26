@@ -37,11 +37,12 @@ var (
 )
 
 const (
-	PigVersion    = "0.0.2"
-	PigstyVersion = "3.2.0"
-	DistroEL      = "rpm"
-	DistroDEB     = "deb"
-	DistroMAC     = "brew"
+	PigVersion     = "0.0.2"
+	PigstyVersion  = "3.2.0"
+	PigstyGPGCheck = false
+	DistroEL       = "rpm"
+	DistroDEB      = "deb"
+	DistroMAC      = "brew"
 )
 
 func InitConfig(inventory string) {
