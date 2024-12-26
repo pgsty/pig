@@ -13,7 +13,7 @@ func ListRepo() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("os_environment: {type: %s, major: %d, code: %s, arch: %s}\n", rm.OsType, rm.OsMajorVersion, rm.OsDistroCode, rm.OsArch)
+	fmt.Printf("os_environment: {code: %s, arch: %s, type: %s, major: %d}\n", rm.OsDistroCode, rm.OsArch, rm.OsType, rm.OsMajorVersion)
 	fmt.Printf("repo_upstream:  # Available Repo: %d\n", len(rm.List))
 	for _, r := range rm.List {
 		fmt.Println("  " + r.ToInlineYAML())

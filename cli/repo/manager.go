@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"pig/cli/get"
 	"pig/internal/config"
 	"slices"
 	"sort"
@@ -28,10 +29,13 @@ type RepoManager struct {
 	List           []*Repository
 	Map            map[string]*Repository
 	Module         map[string][]string
+	Region         string
 	OsDistroCode   string
 	OsType         string
 	OsArch         string
 	OsMajorVersion int
+	RepoDir        string
+	RepoPattern    string
 	BackupDir      string
 	DataSource     string
 }
@@ -47,11 +51,20 @@ func NewRepoManager(paths ...string) (rm *RepoManager, err error) {
 	rm.OsMajorVersion = GetMajorVersionFromCode(rm.OsDistroCode)
 	rm.OsType = config.OSType
 	rm.OsArch = config.OSArch
+	rm.Region = "default"
+
 	switch config.OSType {
 	case config.DistroEL:
+		rm.RepoDir = "/etc/yum.repos.d"
 		rm.BackupDir = "/etc/yum.repos.d/backup"
+		rm.RepoPattern = "/etc/yum.repos.d/*.repo"
 	case config.DistroDEB:
+		rm.RepoDir = "/etc/apt/sources.list.d"
 		rm.BackupDir = "/etc/apt/sources.list.d/backup"
+		rm.RepoPattern = "/etc/apt/sources.list.d/*.list"
+	default:
+		rm.RepoDir = "/tmp/"
+		rm.RepoDir = "/tmp/repo-backup"
 	}
 
 	var data []byte
@@ -198,4 +211,19 @@ func (rm *RepoManager) ModuleOrder() []string {
 	})
 
 	return modules
+}
+
+// if region is given, use it, otherwise detect from network condition
+func (rm *RepoManager) DetectRegion(region string) {
+	if region != "" {
+		rm.Region = region
+		return
+	}
+	get.NetworkCondition()
+	if !get.InternetAccess {
+		logrus.Warn("no internet access, assume region = default")
+		rm.Region = "default"
+	} else {
+		rm.Region = get.Region
+	}
 }

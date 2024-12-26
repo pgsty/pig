@@ -128,6 +128,7 @@ func (r *Repository) String() string {
 	return string(json)
 }
 
+// Content returns the repo file content for a given region
 func (r *Repository) Content(region ...string) string {
 	regionStr := "default"
 	if len(region) > 0 {

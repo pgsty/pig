@@ -23,24 +23,26 @@ var repoCmd = &cobra.Command{
 	Short:   "Manage Linux Software Repo (apt/dnf)",
 	Aliases: []string{"r"},
 	GroupID: "pgext",
-	Example: `
-  typical usage: (Beware that manage repo require sudo/root privilege)
+	Long: `
+typical usage:
+
+  # info
+  pig repo list                  # available repo list             (info)
+  pig repo info [repo...]        # show repo info                  (info)
+  pig repo status                # show current repo status        (info)
+
+  # admin
+  pig repo add  [repo|module...] # add repo and modules            (root)
+  pig repo set  [repo|module...] # overwrite existing repo and add (root)
+  pig repo rm   [repo|module...] # remove repo & modules           (root)
+  pig repo update                # update repo pkg cache           (root)
   
-  pig repo add                 # add all necessary repo (pgdg + pigsty + node)
-  pig repo rm                  # remove yum/atp repo (move existing repo to backup dir)  
-  pig repo list                # list current system repo dir and active repos  
-  pig repo update              # update yum/apt repo cache (apt update or dnf makecache)
- 
-  pig repo add -u              # add all necessary repo and update repo cache
-  pig repo set -u              # overwrite repo and update repo cache
-  pig repo set all -u          # same as above, but remove(backup) old repos first (same as '-r|--remove' option)
-  pig repo add all -u          # same as 'pig repo add', also update repo cache 
-  pig repo add pigsty pgdg     # add pigsty extension repo + pgdg offical repo
-  pig repo add pgsql node      # add os + pgdg postgres repo
-  pig repo add infra           # add observability, grafana & prometheus stack, pg bin utils
-  pig repo rm                  # remove old repos (move existing repos to ${repodir}/backup)
-  pig repo rm pigsty           # remove pigsty repo
-  pig repo rm pgsql infra      # remove two repo module: pgsql & infra
+  # cache
+  pig repo create                # create repo on current system   (root) TBD 
+  pig repo setup [-p]            # setup repo from offline package (root) TBD
+  pig repo cache                 # cache repo as offline package   (root) TBD
+  pig repo fetch                 # get pre-made offline package    (root) TBD PRO
+
 `,
 }
 
@@ -51,7 +53,7 @@ var repoListCmd = &cobra.Command{
 	Example: `
   pig repo list                # list available repos on current system
   pig repo list all            # list all unfiltered repo raw data
-  pig repo list update         # get updated repo data to ~/pig/repo.yml
+  pig repo list update         # get updated repo data to ~/pig/repo.yml (TBD)
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
@@ -88,12 +90,7 @@ var repoAddCmd = &cobra.Command{
     - pgdg   :  PGDG the Official PostgreSQL Repo (official)
     - node   :  operating system official repo (el/debian/ubuntu)
   - pgsql    :  pigsty + pgdg (all available pg extensions) 
-  - extra    :  extra postgres modules, non-free, citus, timescaledb upstream 
-  - infra    :  observability, grafana & prometheus stack, pg bin utils
-  - local    :  local pigsty repo on 127.0.0.1/pigsty
-  - mssql    :  babelfish by wiltondb, MS SQL Server compatible postgres (el + ubuntu)
-  - ivory    :  ivorysql, the oracle compatible postgres kernel fork (el only)
-  - other    :  pgml, kube, docker, grafana mysql, ...
+  # check available repo & modules with pig repo list
 `,
 	// Long: moduleNotice,
 
@@ -112,7 +109,11 @@ var repoAddCmd = &cobra.Command{
 			logrus.Errorf("unsupported OS type: %s", config.OSType)
 			os.Exit(1)
 		}
-
+		_, err := repo.NewRepoManager()
+		if err != nil {
+			logrus.Errorf("failed to get repo manager: %v", err)
+			os.Exit(1)
+		}
 		if repoRemove {
 			logrus.Infof("move existing repo to backup dir")
 			if err := repo.BackupRepo(); err != nil {
