@@ -36,6 +36,7 @@ var (
 	InternetAccess = false
 	LatestVersion  = config.PigstyVersion
 	AllVersions    []VersionInfo
+	Details        = false
 )
 
 // VersionInfo represents version metadata including checksum and download URL
@@ -60,13 +61,20 @@ func NetworkCondition() string {
 		url := baseURL + "/src/checksums"
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
+			if Details {
+				fmt.Printf("%-10s request error\n", tag)
+			}
 			resultChan <- result{"", nil}
 			return
 		}
 
 		client := &http.Client{Timeout: Timeout}
+		start := time.Now()
 		resp, err := client.Do(req)
 		if err != nil {
+			if Details {
+				fmt.Printf("%-10s unreachable\n", tag)
+			}
 			resultChan <- result{"", nil}
 			return
 		}
@@ -75,8 +83,14 @@ func NetworkCondition() string {
 		if resp.StatusCode == http.StatusOK {
 			versions, err := ParseChecksums(resp.Body, tag)
 			if err != nil {
+				if Details {
+					fmt.Printf("%-10s parse error: %v\n", tag, err)
+				}
 				resultChan <- result{"", nil}
 				return
+			}
+			if Details {
+				fmt.Printf("%s  ping ok: %d ms\n", tag, time.Since(start).Milliseconds())
 			}
 			resultChan <- result{tag, versions}
 			return
@@ -85,22 +99,36 @@ func NetworkCondition() string {
 	}
 
 	probeGoogle := func(ctx context.Context) {
+		tag := "google.com"
 		url := "https://www.google.com"
 		req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
 		if err != nil {
+			if Details {
+				fmt.Printf("%-10s request error\n", tag)
+			}
 			resultChan <- result{"google", nil}
 			return
 		}
 		client := &http.Client{Timeout: Timeout}
+		start := time.Now()
 		resp, err := client.Do(req)
 		if err != nil {
+			if Details {
+				fmt.Printf("%-10s request error\n", tag)
+			}
 			resultChan <- result{"google", nil}
 			return
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {
+			if Details {
+				fmt.Printf("%-10s ping ok: %d ms\n", tag, time.Since(start).Milliseconds())
+			}
 			resultChan <- result{"google_ok", nil}
 		} else {
+			if Details {
+				fmt.Printf("%-10s ping fail: %d ms\n", tag, time.Since(start).Milliseconds())
+			}
 			resultChan <- result{"google_fail", nil}
 		}
 	}
@@ -157,13 +185,18 @@ DONE:
 	}
 
 	// Find latest stable version from AllVersions
-	if AllVersions != nil {
-		for _, v := range AllVersions {
-			if !strings.Contains(v.Version, "-") {
-				LatestVersion = v.Version
-				break
-			}
+	for _, v := range AllVersions {
+		if !strings.Contains(v.Version, "-") {
+			LatestVersion = v.Version
+			break
 		}
+	}
+
+	if Details {
+		fmt.Println("Internet Access   : ", InternetAccess)
+		fmt.Println("Pigsty Repo       : ", Source)
+		fmt.Println("Inferred Region   : ", Region)
+		fmt.Println("Latest Pigsty Ver : ", LatestVersion)
 	}
 
 	return Source
