@@ -13,8 +13,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-const PigstyVersion = "3.2.0"
-
 // log level parameters
 var (
 	logLevel  string
@@ -36,6 +34,7 @@ Usage:
   get       download pigsty      	list | src  | pkg
   init      install pigsty
   status    show pig, os, pg status
+  version   show version information
 `,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initAll()
@@ -117,5 +116,6 @@ func init() {
 		configureCmd,
 		statusCmd,
 		licenseCmd,
+		versionCmd,
 	)
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"pig/cli/get"
 	"pig/cli/install"
+	"pig/internal/config"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -42,7 +43,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 
 		if version == "" {
-			logrus.Debugf("install embedded pigsty %s to %s with force=%v", PigstyVersion, path, force)
+			logrus.Debugf("install embedded pigsty %s to %s with force=%v", config.PigstyVersion, path, force)
 			err := install.InstallPigsty(nil, path, force)
 			if err != nil {
 				logrus.Errorf("failed to install pigsty: %v", err)
