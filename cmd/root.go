@@ -31,12 +31,11 @@ var rootCmd = &cobra.Command{
 
 Usage:
 
-  repo      manage apt/yum repo  add | rm | list | set  | update
-  ext       manage pg extension  add | rm | list | info | status
-  
-  get       download pigsty      list | src  | pkg
+  repo      manage apt/yum repo  	add | rm | list | set  | update
+  ext       manage pg extension  	add | rm | list | info | status
+  get       download pigsty      	list | src  | pkg
   init      install pigsty
-  status    show pig status
+  status    show pig, os, pg status
 `,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initAll()
@@ -103,7 +102,20 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug mode")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "log level: debug, info, warn, error, fatal, panic")
 	rootCmd.PersistentFlags().StringVar(&logPath, "log-path", "", "log file path, terminal by default")
-
 	rootCmd.PersistentFlags().StringVarP(&inventory, "inventory", "i", "", "config inventory path")
 
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "pgext", Title: "PostgreSQL Extension Manager"},
+		&cobra.Group{ID: "pigsty", Title: "Pigsty Management Commands"},
+	)
+	rootCmd.AddCommand(
+		repoCmd,
+		extCmd,
+		installCmd,
+		getCmd,
+		bootCmd,
+		configureCmd,
+		statusCmd,
+		licenseCmd,
+	)
 }

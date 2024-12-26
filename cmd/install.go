@@ -24,6 +24,7 @@ var installCmd = &cobra.Command{
 	Use:     "install",
 	Short:   "Install Pigsty Software",
 	Aliases: []string{"init", "i"},
+	GroupID: "pigsty",
 	Long: `
 Description:
     pig install [-p path] [-v version] [-d download_dir] [-f]
@@ -87,5 +88,4 @@ func init() {
 	installCmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite existing pigsty (false by default)")
 	installCmd.Flags().StringVarP(&version, "version", "v", "", "pigsty version")
 	installCmd.Flags().StringVarP(&downloadDir, "dir", "d", "/tmp", "download directory")
-	rootCmd.AddCommand(installCmd)
 }

@@ -19,14 +19,15 @@ var (
 
 // getCmd represents the installation command
 var getCmd = &cobra.Command{
-	Use:     "get",
+	Use:     "download",
 	Short:   "Download Pigsty src & pkg",
-	Aliases: []string{"g", "download"},
+	Aliases: []string{"get", "g", "down"},
+	GroupID: "pigsty",
 	Long: `
 Description:
-    pig get info [-v ver]   list available versions [since ver]
-    pig get src  [-v ver]   download pigsty source package
-    pig get pkg  [-v ver]   download pigsty offline package (pro)
+    pig download info [-v ver] list available versions [since ver]
+    pig download src  [-v ver] download pigsty source package
+    pig download pkg  [-v ver] download pigsty offline package (pro)
 `,
 }
 
@@ -129,5 +130,4 @@ func init() {
 	getCmd.AddCommand(getListCmd)
 	getCmd.AddCommand(getSrcCmd)
 	getCmd.AddCommand(getPkgCmd)
-	rootCmd.AddCommand(getCmd)
 }

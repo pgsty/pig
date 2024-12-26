@@ -20,8 +20,9 @@ var (
 // repoCmd represents the top-level `repo` command
 var repoCmd = &cobra.Command{
 	Use:     "repo",
-	Short:   "Manage Linux Repositories",
+	Short:   "Manage Linux Software Repo (apt/dnf)",
 	Aliases: []string{"r"},
+	GroupID: "pgext",
 	Example: `
   typical usage: (Beware that manage repo require sudo/root privilege)
   
@@ -238,5 +239,4 @@ func init() {
 	repoCmd.AddCommand(repoRmCmd)
 	repoCmd.AddCommand(repoListCmd)
 	repoCmd.AddCommand(repoCacheCmd)
-	rootCmd.AddCommand(repoCmd)
 }

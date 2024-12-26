@@ -25,8 +25,19 @@ var (
 var configureCmd = &cobra.Command{
 	Use:     "configure",
 	Short:   "Configure Pigsty",
-	Aliases: []string{"c"},
+	GroupID: "pigsty",
+	Aliases: []string{"c", "conf"},
 	Long: `Configure pigsty with ./configure
+
+pig configure (alias: c|conf)
+  [-c|--conf <confname>   [meta|dual|trio|full|prod]
+  [-i|--ip <ip>]          # primary IP address (skip with -s)
+  [-v|--version <pgver>   [17|16|15|14|13|12]
+  [-r|--region <region>   [default|china|europe]
+  [-s|--skip]             # skip IP address probing
+  [-x|--proxy]            # write proxy env from environment
+  [-n|--non-interactive]  # non-interactively mode
+
 https://pigsty.io/docs/setup/install/#configure
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -74,11 +85,10 @@ https://pigsty.io/docs/setup/install/#configure
 
 func init() {
 	configureCmd.Flags().StringVarP(&confName, "conf", "c", "", "config template name")
-	configureCmd.Flags().StringVarP(&confIP, "ip", "i", "", "primary ip address")
+	configureCmd.Flags().StringVar(&confIP, "ip", "", "primary ip address")
 	configureCmd.Flags().StringVarP(&confVer, "version", "v", "", "postgres major version")
 	configureCmd.Flags().StringVarP(&confRegion, "region", "r", "", "upstream repo region")
 	configureCmd.Flags().BoolVarP(&confSkip, "skip", "s", false, "skip ip probe")
 	configureCmd.Flags().BoolVarP(&confProxy, "proxy", "p", false, "configure proxy env")
 	configureCmd.Flags().BoolVarP(&confNonInteractive, "non-interactive", "n", false, "configure non-interactive")
-	rootCmd.AddCommand(configureCmd)
 }

@@ -36,6 +36,7 @@ var licenseCmd = &cobra.Command{
 	Use:     "license",
 	Short:   "Manage Pigsty Licenses",
 	Aliases: []string{"lic", "l"},
+	Hidden:  true,
 	Long: `Description:
     $ pig license status    
     $ pig license verify <jwt|path>
@@ -215,7 +216,6 @@ var licenseAddCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(licenseCmd)
 	defaultDate := time.Now().Format(dateFormat)
 	licenseIssueCmd.Flags().StringVarP(&issueKey, "key", "k", "", "Private key path")
 	licenseIssueCmd.Flags().StringVarP(&issueBy, "by", "b", "pigsty", "License issuer")

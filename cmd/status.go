@@ -2,9 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"pig/cli/ext"
 	"pig/cli/get"
 	"pig/cli/license"
-	"pig/cli/pgsql"
+	"pig/cli/utils"
 	"pig/internal/config"
 
 	"github.com/spf13/cobra"
@@ -13,78 +14,61 @@ import (
 var statusCmd = &cobra.Command{
 	Use:     "status",
 	Aliases: []string{"s", "st"},
-	Short:   "Show current pigsty status",
+	Short:   "Show Environment Status",
 	Long: `Display current pigsty status, including:
-    - License information
-    - Configuration files
-    - Environment variables
-    - Network conditions
-    - System information`,
+    - Configuration
+    - OS Environment
+	- PG Environment
+    - Network Conditions
+`,
 	Run: func(cmd *cobra.Command, args []string) {
-
 		logPathStr := "stderr"
 		if logPath != "" {
 			logPathStr = logPath
 		}
+		padding := 50
+		fmt.Println(utils.PadHeader("Configuration", padding))
+		utils.PadKV("Pig Version", config.PigVersion)
+		utils.PadKV("Pig Config", config.ConfigFile)
+		utils.PadKV("Log Level", logLevel)
+		utils.PadKV("Log Path", logPathStr)
 
-		fmt.Println("\nConfiguration ==========")
-		fmt.Printf("Version         = %s\n", config.PigVersion)
-		fmt.Printf("Log Level       = %s\n", logLevel)
-		fmt.Printf("Log Path        = %s\n", logPathStr)
-		fmt.Printf("Config File     = %s\n", config.ConfigFile)
+		fmt.Println("\n" + utils.PadHeader("OS Environment", padding))
+		utils.PadKV("OS Distro Code", config.OSCode)
+		utils.PadKV("OS Architecture", config.OSArch)
+		utils.PadKV("OS Package Type", config.OSType)
+		utils.PadKV("OS Vendor ID", config.OSVendor)
+		utils.PadKV("OS Version", config.OSVersion)
+		utils.PadKV("OS Version Full", config.OSVersionFull)
+		utils.PadKV("OS Version Code", config.OSVersionCode)
 
-		fmt.Println("\nOS Environment =====")
-		fmt.Printf("OS Short Code   = %s\n", config.OSCode)
-		fmt.Printf("OS Architecture	= %s\n", config.OSArch)
-		fmt.Printf("OS Package Type = %s\n", config.OSType)
-		fmt.Printf("OS Vendor ID    = %s\n", config.OSVendor)
-		fmt.Printf("Version (Major) = %s\n", config.OSVersion)
-		fmt.Printf("Version (Full)  = %s\n", config.OSVersionFull)
-		fmt.Printf("Version (Code)  = %s\n", config.OSVersionCode)
+		fmt.Println("\n" + utils.PadHeader("PG Environment", padding))
+		ext.PostgresInstallSummary()
 
-		fmt.Println("\nPG Environment =====")
-		pgsql.DetectInstalledPostgres()
-		if len(pgsql.Installs) > 0 {
-			for _, v := range pgsql.Installs {
-				if v == pgsql.Active {
-					fmt.Printf("%s (Active)\n", v.String())
-				} else {
-					fmt.Printf("%s\n", v.String())
-				}
-			}
-		} else {
-			fmt.Println("No PostgreSQL installation found")
-		}
-		if pgsql.Active != nil {
-			fmt.Printf("Postgres (Active) :  %s\n", pgsql.Active.Version)
-			fmt.Printf("Binary Path       :  %s\n", pgsql.Active.BinPath)
-			fmt.Printf("Library Path      :  %s\n", pgsql.Active.LibPath)
-			fmt.Printf("Extension Path    :  %s\n", pgsql.Active.ExtPath)
-		}
-
-		fmt.Println("\nPigsty Config =====")
-		fmt.Printf("Inventory       = %s\n", config.PigstyConfig)
-		fmt.Printf("Pigsty Home     = %s\n", config.PigstyHome)
-		fmt.Printf("Pigsty Embedded = %s\n", config.PigstyVersion)
+		fmt.Println("\n" + utils.PadHeader("Pigsty Environment", padding))
+		utils.PadKV("Inventory Path", config.PigstyConfig)
+		utils.PadKV("Pigsty Home", config.PigstyHome)
+		utils.PadKV("Embedded Version", config.PigstyVersion)
 		if license.Manager.Active != nil && license.Manager.Active.Claims != nil {
-			// fmt.Println("\n===== License Information =====")
+			fmt.Printf("Active License:\n")
 			license.Manager.Hide = true
 			license.Manager.DescribeDefault()
 		}
 
-		fmt.Println("\nNetwork Conditions =====")
+		fmt.Println("\n" + utils.PadHeader("Network Conditions", padding))
 		get.NetworkCondition()
 		if !get.InternetAccess {
-			fmt.Println("Internet Access = No")
+			fmt.Println("Internet Access  : No")
 			return
 		}
-		fmt.Println("Internet Access = Yes")
-		fmt.Println("Pigsty Repo     = ", get.Source)
-		fmt.Println("Inferred Region = ", get.Region)
-		fmt.Println("Latest Pigsty   = ", get.LatestVersion)
+		fmt.Println("Internet Access   :  Yes")
+		fmt.Println("Pigsty Repo       : ", get.Source)
+		fmt.Println("Inferred Region   : ", get.Region)
+		fmt.Println("Latest Pigsty Ver : ", get.LatestVersion)
+		fmt.Println("\n" + utils.PadHeader("Done", padding) + "\n")
 	},
 }
 
-func init() {
-	rootCmd.AddCommand(statusCmd)
+func RunTest() {
+	// TODO:
 }

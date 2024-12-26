@@ -20,10 +20,16 @@ var (
 
 // A thin wrapper around the bootstrap script
 var bootCmd = &cobra.Command{
-	Use:     "boot",
+	Use:     "bootstrap",
 	Short:   "Bootstrap Pigsty",
-	Aliases: []string{"b", "bootstrap"},
+	Aliases: []string{"b", "boot"},
+	GroupID: "pigsty",
 	Long: `Bootstrap pigsty with ./bootstrap script
+
+bootstrap (alias: b|boot)
+  [-r|--region <region]   [default,china,europe]
+  [-p|--path <path>]      specify another offline pkg path
+  [-k|--keep]             keep existing upstream repo during bootstrap
 https://pigsty.io/docs/setup/offline/#bootstrap
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -66,5 +72,4 @@ func init() {
 	bootCmd.Flags().StringVarP(&bootRegion, "region", "r", "", "default,china,europe,...")
 	bootCmd.Flags().StringVarP(&bootPackage, "path", "p", "", "offline package path")
 	bootCmd.Flags().BoolVarP(&booKeep, "keep", "k", false, "keep existing repo")
-	rootCmd.AddCommand(bootCmd)
 }
