@@ -109,7 +109,7 @@ func InitConfig(inventory string) {
 		} else {
 			PigstyConfig = filepath.Join(HomeDir, "pigsty", "pigsty.yml")
 			PigstyHome = filepath.Join(HomeDir, "pigsty")
-			logrus.Debugf("inventory = %s, home = %s, from defualt", PigstyConfig, PigstyHome)
+			logrus.Debugf("inventory = %s, home = %s, from default", PigstyConfig, PigstyHome)
 		}
 	}
 

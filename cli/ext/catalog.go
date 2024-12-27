@@ -140,7 +140,7 @@ func (ec *ExtensionCatalog) Load(data []byte) error {
 	return nil
 }
 
-// GetDependency returns the dependant extension with the given extensino name
+// GetDependency returns the dependent extension with the given extensino name
 func GetDependency(name string) []string {
 	return Catalog.Dependency[name]
 }
