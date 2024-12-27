@@ -25,7 +25,7 @@ var Manager *RepoManager
 
 // RepoManager represents a package repository configuration
 type RepoManager struct {
-	Data           []Repository
+	Data           []*Repository
 	List           []*Repository
 	Map            map[string]*Repository
 	Module         map[string][]string
@@ -107,18 +107,44 @@ func (rm *RepoManager) LoadRepo(data []byte) error {
 		data = embedRepoData
 	}
 
-	if err := yaml.Unmarshal(data, &rm.Data); err != nil {
+	var tmpData []Repository
+	if err := yaml.Unmarshal(data, &tmpData); err != nil {
 		return fmt.Errorf("failed to parse %s repo: %v", rm.OsType, err)
 	}
 
 	// Filter available repos and build maps
+	rm.Data = make([]*Repository, 0)
 	rm.List = make([]*Repository, 0)
 	rm.Map = make(map[string]*Repository)
 	rm.Module = make(map[string][]string)
+	for i := range tmpData {
+		repoPointer := &tmpData[i]
+		repoPointer.Distro = repoPointer.InferOS()
+		rm.Data = append(rm.Data, repoPointer)
+	}
 
-	// now filter out the data that fit current OS & Arch
-	for i := range rm.Data {
-		repo := &rm.Data[i]
+	for _, repo := range rm.Data {
+		repo.Distro = repo.InferOS()
+		switch repo.Distro {
+		case config.DistroEL:
+			meta := map[string]string{"enabled": "1", "gpgcheck": "0", "module_hotfixes": "1"}
+			if repo.Meta != nil {
+				for k, v := range repo.Meta {
+					meta[k] = v
+				}
+			}
+			repo.Meta = meta
+		case config.DistroDEB:
+			meta := map[string]string{"trusted": "yes"}
+			if repo.Meta != nil {
+				for k, v := range repo.Meta {
+					meta[k] = v
+				}
+			}
+			repo.Meta = meta
+		default:
+			logrus.Debugf("found unsupported distro in repo %s: %v", repo.Name, repo)
+		}
 
 		// It's user's responsibility to ensure the repo name is unique for all the combinations of os, arch
 		if repo.Available(rm.OsDistroCode, rm.OsArch) {
@@ -133,7 +159,7 @@ func (rm *RepoManager) LoadRepo(data []byte) error {
 		}
 	}
 
-	rm.adjustRepoMeta()
+	rm.addDefaultModules()
 	rm.adjustPigstyRepoMeta()
 
 	logrus.Debugf("load %d %s repo, %d modules", len(rm.Map), rm.OsType, len(rm.Module))
@@ -141,7 +167,7 @@ func (rm *RepoManager) LoadRepo(data []byte) error {
 }
 
 // adjustRepoMeta adjusts the repository metadata
-func (rm *RepoManager) adjustRepoMeta() {
+func (rm *RepoManager) addDefaultModules() {
 	if rm.OsType == config.DistroEL {
 		rm.Module["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
 		rm.Module["pgdg"] = []string{"pgdg-common", "pgdg-el8fix", "pgdg-el9fix", "pgdg17", "pgdg16", "pgdg15", "pgdg14", "pgdg13"}
@@ -178,6 +204,7 @@ func (rm *RepoManager) adjustPigstyRepoMeta() {
 	}
 }
 
+// ModuleOrder returns the order of modules in given precedence
 func (rm *RepoManager) ModuleOrder() []string {
 	// Define the desired order of specific modules
 	desiredOrder := []string{"all", "pigsty", "pgdg", "node", "infra", "pgsql", "extra", "mssql", "mysql", "docker", "kube", "grafana", "pgml"}

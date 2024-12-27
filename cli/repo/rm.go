@@ -29,6 +29,42 @@ func (rm *RepoManager) RemoveRepo(modules ...string) error {
 }
 
 // BackupRepo makes a backup of the current repo files (sudo required)
+func (rm *RepoManager) BackupRepo(modules ...string) error {
+	logrus.Infof("backup repos: %s to %s", rm.RepoPattern, rm.BackupDir)
+
+	// Create backup directory and move files using sudo
+	if err := utils.SudoCommand([]string{"mkdir", "-p", rm.BackupDir}); err != nil {
+		return err
+	}
+	files, err := filepath.Glob(rm.RepoPattern)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		dest := filepath.Join(rm.BackupDir, filepath.Base(file))
+		logrus.Debugf("mv -f %s %s", file, dest)
+		if err := utils.SudoCommand([]string{"mv", "-f", file, dest}); err != nil {
+			logrus.Errorf("failed to mv %s to %s: %v", file, dest, err)
+		}
+	}
+
+	// for debian, also backup sources.list
+	if config.OSType == config.DistroDEB {
+		debSourcesList := "/etc/apt/sources.list"
+		if fileInfo, err := os.Stat(debSourcesList); err == nil && fileInfo.Size() > 0 {
+			if err := utils.SudoCommand([]string{"mv", "-f", debSourcesList, filepath.Join(rm.BackupDir, "sources.list")}); err != nil {
+				return err
+			}
+			if err := utils.SudoCommand([]string{"touch", debSourcesList}); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// BackupRepo makes a backup of the current repo files (sudo required)
 func BackupRepo() error {
 	var backupDir, repoPattern string
 
@@ -60,43 +96,6 @@ func BackupRepo() error {
 		}
 	}
 
-	if config.OSType == config.DistroDEB {
-		debSourcesList := "/etc/apt/sources.list"
-		if fileInfo, err := os.Stat(debSourcesList); err == nil && fileInfo.Size() > 0 {
-			if err := utils.SudoCommand([]string{"mv", "-f", debSourcesList, filepath.Join(backupDir, "sources.list")}); err != nil {
-				return err
-			}
-			if err := utils.SudoCommand([]string{"touch", debSourcesList}); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func (rm *RepoManager) BackupRepo(modules ...string) error {
-	var backupDir, repoPattern string
-
-	logrus.Infof("backup repos: %s to %s", rm.RepoPattern, rm.BackupDir)
-
-	// Create backup directory and move files using sudo
-	if err := utils.SudoCommand([]string{"mkdir", "-p", backupDir}); err != nil {
-		return err
-	}
-	files, err := filepath.Glob(repoPattern)
-	if err != nil {
-		return err
-	}
-	for _, file := range files {
-		dest := filepath.Join(backupDir, filepath.Base(file))
-		logrus.Debugf("mv -f %s %s", file, dest)
-		if err := utils.SudoCommand([]string{"mv", "-f", file, dest}); err != nil {
-			logrus.Errorf("failed to mv %s to %s: %v", file, dest, err)
-		}
-	}
-
-	// for debian, also backup sources.list
 	if config.OSType == config.DistroDEB {
 		debSourcesList := "/etc/apt/sources.list"
 		if fileInfo, err := os.Stat(debSourcesList); err == nil && fileInfo.Size() > 0 {

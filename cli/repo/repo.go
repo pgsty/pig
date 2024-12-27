@@ -2,13 +2,14 @@ package repo
 
 import (
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"pig/internal/config"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -38,7 +39,7 @@ type Repository struct {
 	Releases    []int             `yaml:"releases"`
 	Arch        []string          `yaml:"arch"`
 	BaseURL     map[string]string `yaml:"baseurl"`
-	Meta        map[string]string `yaml:"-"`
+	Meta        map[string]string `yaml:"meta"`
 	Distro      string            `yaml:"-"` // el|deb
 }
 
@@ -85,9 +86,12 @@ func (r *Repository) InferOS() string {
 	return ""
 }
 
-func (r *Repository) GetBaseURL(region string) string {
-	if url, ok := r.BaseURL[region]; ok {
-		return url
+// GetBaseURL returns the base URL for given regions, tries one by one and falls back to default
+func (r *Repository) GetBaseURL(regions ...string) string {
+	for _, region := range regions {
+		if url, ok := r.BaseURL[region]; ok {
+			return url
+		}
 	}
 	return r.BaseURL["default"]
 }
@@ -120,13 +124,13 @@ func (r *Repository) Available(code string, arch string) bool {
 	return true
 }
 
-func (r *Repository) String() string {
-	json, err := json.Marshal(r)
-	if err != nil {
-		return fmt.Sprintf("%s: %s", r.Name, r.Description)
-	}
-	return string(json)
-}
+// func (r *Repository) String() string {
+// 	json, err := json.Marshal(r)
+// 	if err != nil {
+// 		return fmt.Sprintf("%s: %s", r.Name, r.Description)
+// 	}
+// 	return string(json)
+// }
 
 // Content returns the repo file content for a given region
 func (r *Repository) Content(region ...string) string {
@@ -134,7 +138,12 @@ func (r *Repository) Content(region ...string) string {
 	if len(region) > 0 {
 		regionStr = region[0]
 	}
-	if r.Distro == config.DistroEL {
+	if r.Distro == "" {
+		return ""
+	}
+	switch r.Distro {
+	case config.DistroEL:
+		logrus.Debugf("generate EL repo content for %s.%s", r.Name, r.Distro)
 		rpmMeta := ""
 		// Get sorted keys
 		keys := make([]string, 0, len(r.Meta))
@@ -148,8 +157,9 @@ func (r *Repository) Content(region ...string) string {
 			rpmMeta += fmt.Sprintf("%s=%s\n", k, r.Meta[k])
 		}
 		return fmt.Sprintf("[%s]\nname=%s\nbaseurl=%s\n%s", r.Name, r.Name, r.GetBaseURL(regionStr), rpmMeta)
-	}
-	if r.Distro == config.DistroDEB {
+
+	case config.DistroDEB:
+		logrus.Debugf("generate DEB repo content for %s.%s", r.Name, r.Distro)
 		// Get sorted keys
 		keys := make([]string, 0, len(r.Meta))
 		for k := range r.Meta {

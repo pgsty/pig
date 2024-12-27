@@ -6,6 +6,7 @@ import (
 	"pig/cli/repo"
 	"pig/internal/config"
 	"pig/internal/utils"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -94,7 +95,8 @@ var repoAddCmd = &cobra.Command{
 `,
 	// Long: moduleNotice,
 
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		if len(args) == 0 {
 			args = []string{"all"}
 		}
@@ -107,40 +109,47 @@ var repoAddCmd = &cobra.Command{
 			repoDir, updateCmd = "/etc/apt/sources.list.d/", []string{"apt-get", "update"}
 		default:
 			logrus.Errorf("unsupported OS type: %s", config.OSType)
-			os.Exit(1)
+			return fmt.Errorf("unsupported OS type: %s", config.OSType)
+			// os.Exit(1)
 		}
-		_, err := repo.NewRepoManager()
+		manager, err := repo.NewRepoManager()
 		if err != nil {
 			logrus.Errorf("failed to get repo manager: %v", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to get repo manager: %v", err)
+			// os.Exit(1)
 		}
 		if repoRemove {
 			logrus.Infof("move existing repo to backup dir")
-			if err := repo.BackupRepo(); err != nil {
+			if err := manager.BackupRepo(); err != nil {
 				logrus.Error(err)
-				os.Exit(1)
+				return fmt.Errorf("failed to backup repo: %v", err)
+				// os.Exit(1)
 			}
 		}
 
-		if err := repo.AddRepo(repoRegion, args...); err != nil {
+		if err := manager.AddModules(args...); err != nil {
 			logrus.Error(err)
-			os.Exit(1)
+			return fmt.Errorf("failed to add repo: %v", err)
+			// os.Exit(1)
 		}
 
 		fmt.Printf("======== ls %s\n", repoDir)
 		if err := utils.ShellCommand([]string{"ls", "-l", repoDir}); err != nil {
 			logrus.Errorf("failed to list repo dir: %s", repoDir)
-			os.Exit(1)
+			return fmt.Errorf("failed to list repo dir: %s", repoDir)
+			// os.Exit(1)
 		}
 
 		if repoUpdate {
 			if err := utils.SudoCommand(updateCmd); err != nil {
 				logrus.Error(err)
-				os.Exit(1)
+				return fmt.Errorf("failed to update repo: %v", err)
+				// os.Exit(1)
 			}
 		} else {
-			logrus.Infof("repo added, consider run: sudo %s", updateCmd)
+			logrus.Infof("repo added, run: sudo %s", strings.Join(updateCmd, " "))
 		}
+		return nil
 	},
 }
 
@@ -168,37 +177,37 @@ var repoRmCmd = &cobra.Command{
 	Short:   "remove repository",
 	Aliases: []string{"remove"},
 	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) == 0 {
-			err := repo.BackupRepo()
-			if err != nil {
-				logrus.Error(err)
-				os.Exit(1)
-			}
-			return
-		}
-		err := repo.RemoveRepo(args...)
-		if err != nil {
-			logrus.Error(err)
-			os.Exit(1)
-		}
+		// if len(args) == 0 {
+		// 	err := repo.BackupRepo()
+		// 	if err != nil {
+		// 		logrus.Error(err)
+		// 		os.Exit(1)
+		// 	}
+		// 	return
+		// }
+		// // err := repo.RemoveRepo(args...)
+		// if err != nil {
+		// 	logrus.Error(err)
+		// 	os.Exit(1)
+		// }
 
-		if repoUpdate {
-			var updateCmd []string
-			if config.OSType == config.DistroEL {
-				updateCmd = []string{"yum", "makecache"}
-			} else if config.OSType == config.DistroDEB {
-				updateCmd = []string{"apt-get", "update"}
-			} else {
-				logrus.Errorf("unsupported OS type: %s", config.OSType)
-				os.Exit(1)
-			}
+		// if repoUpdate {
+		// 	var updateCmd []string
+		// 	if config.OSType == config.DistroEL {
+		// 		updateCmd = []string{"yum", "makecache"}
+		// 	} else if config.OSType == config.DistroDEB {
+		// 		updateCmd = []string{"apt-get", "update"}
+		// 	} else {
+		// 		logrus.Errorf("unsupported OS type: %s", config.OSType)
+		// 		os.Exit(1)
+		// 	}
 
-			err = utils.SudoCommand(updateCmd)
-			if err != nil {
-				logrus.Error(err)
-				os.Exit(1)
-			}
-		}
+		// 	err = utils.SudoCommand(updateCmd)
+		// 	if err != nil {
+		// 		logrus.Error(err)
+		// 		os.Exit(1)
+		// 	}
+		// }
 	},
 }
 
