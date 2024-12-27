@@ -166,9 +166,9 @@ var repoSetCmd = &cobra.Command{
 
   (Beware that system repo management require sudo/root privilege)
 	`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		repoRemove = true
-		repoAddCmd.Run(cmd, args)
+		return repoAddCmd.RunE(cmd, args)
 	},
 }
 

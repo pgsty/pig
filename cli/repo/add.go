@@ -41,6 +41,9 @@ func (rm *RepoManager) AddModules(modules ...string) error {
 // addModule adds a module to the system (require sudo/root privilege to move)
 func (rm *RepoManager) AddModule(module string) error {
 	modulePath := rm.getModulePath(module)
+	if modulePath == "" {
+		return fmt.Errorf("fail to get module path for %s", module)
+	}
 	moduleContent := rm.getModuleContent(module)
 	randomFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s-%s.repo", module, strconv.FormatInt(time.Now().UnixNano(), 36)))
 
@@ -55,7 +58,14 @@ func (rm *RepoManager) AddModule(module string) error {
 
 // getModulePath returns the path to the repository configuration file for a given module
 func (rm *RepoManager) getModulePath(module string) string {
-	return filepath.Join(rm.RepoDir, fmt.Sprintf("%s.repo", module))
+	switch config.OSType {
+	case config.DistroEL:
+		return filepath.Join(rm.RepoDir, fmt.Sprintf("%s.repo", module))
+	case config.DistroDEB:
+		return filepath.Join(rm.RepoDir, fmt.Sprintf("%s.list", module))
+	default:
+		return ""
+	}
 }
 
 // getModuleContent returns the multiple repo content together
@@ -66,9 +76,6 @@ func (rm *RepoManager) getModuleContent(module string) string {
 			if repo, ok := rm.Map[repoName]; ok {
 				if repo.Available(config.OSCode, config.OSArch) {
 					logrus.Debugf("repo %s is available for %s.%s: %v", repoName, config.OSCode, config.OSArch, repo)
-					// fmt.Println(repo)
-					fmt.Println(repo.Meta)
-					fmt.Println(repo.Content())
 					moduleContent += repo.Content(rm.Region) + "\n"
 				} else {
 					logrus.Debugf("repo %s is not available for %s.%s: %v", repoName, config.OSCode, config.OSArch, repo)
