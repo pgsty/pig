@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"pig/cli/get"
 	"pig/internal/config"
 	"slices"
 	"sort"
@@ -24,14 +25,17 @@ var Manager *RepoManager
 
 // RepoManager represents a package repository configuration
 type RepoManager struct {
-	Data           []Repository
+	Data           []*Repository
 	List           []*Repository
 	Map            map[string]*Repository
 	Module         map[string][]string
+	Region         string
 	OsDistroCode   string
 	OsType         string
 	OsArch         string
 	OsMajorVersion int
+	RepoDir        string
+	RepoPattern    string
 	BackupDir      string
 	DataSource     string
 }
@@ -47,11 +51,20 @@ func NewRepoManager(paths ...string) (rm *RepoManager, err error) {
 	rm.OsMajorVersion = GetMajorVersionFromCode(rm.OsDistroCode)
 	rm.OsType = config.OSType
 	rm.OsArch = config.OSArch
+	rm.Region = "default"
+
 	switch config.OSType {
 	case config.DistroEL:
+		rm.RepoDir = "/etc/yum.repos.d"
 		rm.BackupDir = "/etc/yum.repos.d/backup"
+		rm.RepoPattern = "/etc/yum.repos.d/*.repo"
 	case config.DistroDEB:
+		rm.RepoDir = "/etc/apt/sources.list.d"
 		rm.BackupDir = "/etc/apt/sources.list.d/backup"
+		rm.RepoPattern = "/etc/apt/sources.list.d/*.list"
+	default:
+		rm.RepoDir = "/tmp/"
+		rm.RepoDir = "/tmp/repo-backup"
 	}
 
 	var data []byte
@@ -94,18 +107,44 @@ func (rm *RepoManager) LoadRepo(data []byte) error {
 		data = embedRepoData
 	}
 
-	if err := yaml.Unmarshal(data, &rm.Data); err != nil {
+	var tmpData []Repository
+	if err := yaml.Unmarshal(data, &tmpData); err != nil {
 		return fmt.Errorf("failed to parse %s repo: %v", rm.OsType, err)
 	}
 
 	// Filter available repos and build maps
+	rm.Data = make([]*Repository, 0)
 	rm.List = make([]*Repository, 0)
 	rm.Map = make(map[string]*Repository)
 	rm.Module = make(map[string][]string)
+	for i := range tmpData {
+		repoPointer := &tmpData[i]
+		repoPointer.Distro = repoPointer.InferOS()
+		rm.Data = append(rm.Data, repoPointer)
+	}
 
-	// now filter out the data that fit current OS & Arch
-	for i := range rm.Data {
-		repo := &rm.Data[i]
+	for _, repo := range rm.Data {
+		repo.Distro = repo.InferOS()
+		switch repo.Distro {
+		case config.DistroEL:
+			meta := map[string]string{"enabled": "1", "gpgcheck": "0", "module_hotfixes": "1"}
+			if repo.Meta != nil {
+				for k, v := range repo.Meta {
+					meta[k] = v
+				}
+			}
+			repo.Meta = meta
+		case config.DistroDEB:
+			meta := map[string]string{"trusted": "yes"}
+			if repo.Meta != nil {
+				for k, v := range repo.Meta {
+					meta[k] = v
+				}
+			}
+			repo.Meta = meta
+		default:
+			logrus.Debugf("found unsupported distro in repo %s: %v", repo.Name, repo)
+		}
 
 		// It's user's responsibility to ensure the repo name is unique for all the combinations of os, arch
 		if repo.Available(rm.OsDistroCode, rm.OsArch) {
@@ -120,7 +159,7 @@ func (rm *RepoManager) LoadRepo(data []byte) error {
 		}
 	}
 
-	rm.adjustRepoMeta()
+	rm.addDefaultModules()
 	rm.adjustPigstyRepoMeta()
 
 	logrus.Debugf("load %d %s repo, %d modules", len(rm.Map), rm.OsType, len(rm.Module))
@@ -128,7 +167,7 @@ func (rm *RepoManager) LoadRepo(data []byte) error {
 }
 
 // adjustRepoMeta adjusts the repository metadata
-func (rm *RepoManager) adjustRepoMeta() {
+func (rm *RepoManager) addDefaultModules() {
 	if rm.OsType == config.DistroEL {
 		rm.Module["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
 		rm.Module["pgdg"] = []string{"pgdg-common", "pgdg-el8fix", "pgdg-el9fix", "pgdg17", "pgdg16", "pgdg15", "pgdg14", "pgdg13"}
@@ -165,6 +204,7 @@ func (rm *RepoManager) adjustPigstyRepoMeta() {
 	}
 }
 
+// ModuleOrder returns the order of modules in given precedence
 func (rm *RepoManager) ModuleOrder() []string {
 	// Define the desired order of specific modules
 	desiredOrder := []string{"all", "pigsty", "pgdg", "node", "infra", "pgsql", "extra", "mssql", "mysql", "docker", "kube", "grafana", "pgml"}
@@ -198,4 +238,19 @@ func (rm *RepoManager) ModuleOrder() []string {
 	})
 
 	return modules
+}
+
+// if region is given, use it, otherwise detect from network condition
+func (rm *RepoManager) DetectRegion(region string) {
+	if region != "" {
+		rm.Region = region
+		return
+	}
+	get.NetworkCondition()
+	if !get.InternetAccess {
+		logrus.Warn("no internet access, assume region = default")
+		rm.Region = "default"
+	} else {
+		rm.Region = get.Region
+	}
 }
