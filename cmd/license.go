@@ -38,7 +38,7 @@ var licenseCmd = &cobra.Command{
 	Aliases: []string{"lic", "l"},
 	Hidden:  true,
 	Long: `Description:
-    $ pig license status    
+    $ pig license status
     $ pig license verify <jwt|path>
     $ pig license issue [-mnbst] <aud>
 	$ pig license history
@@ -165,8 +165,8 @@ var licenseVerifyCmd = &cobra.Command{
 	},
 }
 
-// licensListCmd displays the license issue history
-var licensListCmd = &cobra.Command{
+// licenseListCmd displays the license issue history
+var licenseListCmd = &cobra.Command{
 	Use:     "list",
 	Short:   "List of license issue",
 	Aliases: []string{"l", "ls"},
@@ -227,6 +227,6 @@ func init() {
 	licenseCmd.AddCommand(licenseStatusCmd)
 	licenseCmd.AddCommand(licenseIssueCmd)
 	licenseCmd.AddCommand(licenseVerifyCmd)
-	licenseCmd.AddCommand(licensListCmd)
+	licenseCmd.AddCommand(licenseListCmd)
 	licenseCmd.AddCommand(licenseAddCmd)
 }

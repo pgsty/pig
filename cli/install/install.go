@@ -98,7 +98,7 @@ func extractPigsty(data []byte, dst string) error {
 
 		// Skip protected files and directories
 		if isProtectedFile(relPath, dst) {
-			logrus.Warnf("Skipping overwritting existing file: %s", relPath)
+			logrus.Warnf("Skipping overwriting existing file: %s", relPath)
 			continue
 		}
 

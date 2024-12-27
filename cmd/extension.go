@@ -206,7 +206,7 @@ func extProbeVersion() int {
 		return extPgVer
 	}
 
-	// if pg_config is specified, we must find the actual installtion, to get the major version
+	// if pg_config is specified, we must find the actual installation, to get the major version
 	if extPgConfig != "" {
 		_, err := ext.GetPostgres(extPgConfig)
 		if err != nil {

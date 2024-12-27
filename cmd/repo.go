@@ -43,7 +43,6 @@ typical usage:
   pig repo setup [-p]            # setup repo from offline package (root) TBD
   pig repo cache                 # cache repo as offline package   (root) TBD
   pig repo fetch                 # get pre-made offline package    (root) TBD PRO
-
 `,
 }
 
@@ -248,7 +247,7 @@ var repoStatusCmd = &cobra.Command{
 func init() {
 	repoAddCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoAddCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
-	repoAddCmd.Flags().BoolVarP(&repoRemove, "remove", "r", false, "remove exisitng repo")
+	repoAddCmd.Flags().BoolVarP(&repoRemove, "remove", "r", false, "remove existing repo")
 	repoSetCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoSetCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 	repoRmCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")

@@ -181,7 +181,7 @@ func PostgresInstallSummary() {
 			}
 		}
 	} else {
-		fmt.Println("No PostgreSQL installtion found")
+		fmt.Println("No PostgreSQL installation found")
 	}
 
 	// print active PostgreSQL detail
