@@ -326,6 +326,7 @@ var matchSpecialCase = map[string]string{
 	"libduckdb":                     "pg_duckdb",
 	"libpgrouting-3.7":              "pgrouting",
 	"libpljava-so-1.6.8":            "pljava",
+	"libhive":                       "hdfs_fdw",
 	"llvmjit":                       "llvmjit",
 	"pg_partman_bgw":                "pg_partman",
 	"pgcryptokey_acpass":            "pgcryptokey",
@@ -349,7 +350,9 @@ var matchBuiltInLib = map[string]bool{
 	"dict_snowball":    true,
 	"llvmjit":          true,
 	"libecpg":          true,
+	"libecpg_compat":   true,
 	"libpgtypes":       true,
+	"libpq":            true,
 }
 
 func isEncodingLib(libname string) bool {
