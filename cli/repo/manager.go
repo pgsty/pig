@@ -37,6 +37,7 @@ type RepoManager struct {
 	RepoDir        string
 	RepoPattern    string
 	BackupDir      string
+	UpdateCmd      []string
 	DataSource     string
 }
 
@@ -58,10 +59,12 @@ func NewRepoManager(paths ...string) (rm *RepoManager, err error) {
 		rm.RepoDir = "/etc/yum.repos.d"
 		rm.BackupDir = "/etc/yum.repos.d/backup"
 		rm.RepoPattern = "/etc/yum.repos.d/*.repo"
+		rm.UpdateCmd = []string{"yum", "makecache"}
 	case config.DistroDEB:
 		rm.RepoDir = "/etc/apt/sources.list.d"
 		rm.BackupDir = "/etc/apt/sources.list.d/backup"
 		rm.RepoPattern = "/etc/apt/sources.list.d/*.list"
+		rm.UpdateCmd = []string{"apt-get", "update"}
 	default:
 		rm.RepoDir = "/tmp/"
 		rm.RepoDir = "/tmp/repo-backup"

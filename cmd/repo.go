@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"pig/cli/repo"
 	"pig/internal/config"
 	"pig/internal/utils"
@@ -100,12 +99,11 @@ var repoAddCmd = &cobra.Command{
 			args = []string{"all"}
 		}
 		var repoDir string
-		var updateCmd []string
 		switch config.OSType {
 		case config.DistroEL:
-			repoDir, updateCmd = "/etc/yum.repos.d/", []string{"yum", "makecache"}
+			repoDir = "/etc/yum.repos.d/"
 		case config.DistroDEB:
-			repoDir, updateCmd = "/etc/apt/sources.list.d/", []string{"apt-get", "update"}
+			repoDir = "/etc/apt/sources.list.d/"
 		default:
 			logrus.Errorf("unsupported OS type: %s", config.OSType)
 			return fmt.Errorf("unsupported OS type: %s", config.OSType)
@@ -140,13 +138,13 @@ var repoAddCmd = &cobra.Command{
 		}
 
 		if repoUpdate {
-			if err := utils.SudoCommand(updateCmd); err != nil {
+			if err := utils.SudoCommand(manager.UpdateCmd); err != nil {
 				logrus.Error(err)
 				return fmt.Errorf("failed to update repo: %v", err)
 				// os.Exit(1)
 			}
 		} else {
-			logrus.Infof("repo added, run: sudo %s", strings.Join(updateCmd, " "))
+			logrus.Infof("repo added, run: sudo %s", strings.Join(manager.UpdateCmd, " "))
 		}
 		return nil
 	},
@@ -172,64 +170,59 @@ var repoSetCmd = &cobra.Command{
 }
 
 var repoRmCmd = &cobra.Command{
-	Use:     "rm",
-	Short:   "remove repository",
-	Aliases: []string{"remove"},
-	Run: func(cmd *cobra.Command, args []string) {
-		// if len(args) == 0 {
-		// 	err := repo.BackupRepo()
-		// 	if err != nil {
-		// 		logrus.Error(err)
-		// 		os.Exit(1)
-		// 	}
-		// 	return
-		// }
-		// // err := repo.RemoveRepo(args...)
-		// if err != nil {
-		// 	logrus.Error(err)
-		// 	os.Exit(1)
-		// }
+	Use:          "rm",
+	Short:        "remove repository",
+	Aliases:      []string{"remove"},
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		manager, err := repo.NewRepoManager()
+		if err != nil {
+			logrus.Errorf("failed to get repo manager: %v", err)
+			return fmt.Errorf("failed to get repo manager: %v", err)
 
-		// if repoUpdate {
-		// 	var updateCmd []string
-		// 	if config.OSType == config.DistroEL {
-		// 		updateCmd = []string{"yum", "makecache"}
-		// 	} else if config.OSType == config.DistroDEB {
-		// 		updateCmd = []string{"apt-get", "update"}
-		// 	} else {
-		// 		logrus.Errorf("unsupported OS type: %s", config.OSType)
-		// 		os.Exit(1)
-		// 	}
+		}
+		if len(args) == 0 {
+			logrus.Debugf("repo remove called with no args, remove all modules & repos")
+			if err := manager.BackupRepo(); err != nil {
+				logrus.Error(err)
+				return err
+			}
+			return nil
+		} else {
+			for _, module := range args {
+				if err := manager.RemoveRepo(module); err != nil {
+					logrus.Error(err)
+					return err
+				}
+			}
+		}
 
-		// 	err = utils.SudoCommand(updateCmd)
-		// 	if err != nil {
-		// 		logrus.Error(err)
-		// 		os.Exit(1)
-		// 	}
-		// }
+		if repoUpdate {
+			if err := utils.SudoCommand(manager.UpdateCmd); err != nil {
+				logrus.Error(err)
+				return err
+			}
+		}
+		return nil
 	},
 }
 
 var repoUpdateCmd = &cobra.Command{
-	Use:     "update",
-	Short:   "update repo cache",
-	Aliases: []string{"u"},
+	Use:          "update",
+	Short:        "update repo cache",
+	Aliases:      []string{"u"},
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if config.OSType == config.DistroEL {
-			err := utils.SudoCommand([]string{"yum", "makecache"})
-			if err != nil {
-				logrus.Error(err)
-				os.Exit(1)
-			}
-		} else if config.OSType == config.DistroDEB {
-			err := utils.SudoCommand([]string{"apt", "update"})
-			if err != nil {
-				logrus.Error(err)
-				os.Exit(1)
-			}
-		} else {
-			logrus.Errorf("unsupported OS type: %s", config.OSType)
-			os.Exit(1)
+		manager, err := repo.NewRepoManager()
+		if err != nil {
+			logrus.Errorf("failed to get repo manager: %v", err)
+			return fmt.Errorf("failed to get repo manager: %v", err)
+
+		}
+
+		if err := utils.SudoCommand(manager.UpdateCmd); err != nil {
+			logrus.Error(err)
+			return fmt.Errorf("failed to update repo: %v", err)
 		}
 		return nil
 	},
@@ -248,8 +241,10 @@ func init() {
 	repoAddCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoAddCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 	repoAddCmd.Flags().BoolVarP(&repoRemove, "remove", "r", false, "remove existing repo")
+
 	repoSetCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoSetCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
+
 	repoRmCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 
 	repoCmd.AddCommand(repoAddCmd)
