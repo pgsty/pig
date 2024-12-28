@@ -312,6 +312,15 @@ $ pig ext info pg_duckdb
 ╰────────────────────────────────────────────────────────────────────────────╯
 ```
 
+**Self-Update**
+
+To update pig itself to the latest version, you can use the following command:
+
+```bash
+pig update
+```
+
+
 --------
 
 ## Compatibility

@@ -30,8 +30,14 @@ func Create(dirPath string) error {
 		dirPath = "/www/pigsty"
 	}
 	// check if source directory exists
-	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		return fmt.Errorf("source directory not found: %s", dirPath)
+	if _, err := os.Stat(dirPath); err != nil {
+		if os.IsNotExist(err) {
+			if err = utils.SudoCommand([]string{"mkdir", "-p", dirPath}); err != nil {
+				return fmt.Errorf("failed to create repo dir %s: %v", dirPath, err)
+			}
+		} else {
+			return fmt.Errorf("failed to check repo dir %s: %v", dirPath, err)
+		}
 	}
 
 	switch config.OSType {

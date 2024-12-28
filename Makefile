@@ -3,7 +3,7 @@
 # Mtime     :   2024-12-25
 # Copyright (C) 2018-2024 Ruohang Feng
 #==============================================================#
-VERSION=v0.0.2
+VERSION=v0.1.0
 
 ###############################################################
 #                     Build & Release                         #
@@ -20,6 +20,7 @@ build-linux-amd64:
 build-linux-arm64:
 	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -a -ldflags '-extldflags "-static"' -o pig
 
+r: release
 release: release-linux
 release-linux: linux-amd64 linux-arm64
 linux-amd64: clean build-linux-amd64

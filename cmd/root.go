@@ -24,17 +24,16 @@ var (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "pig",
-	Short: "Pigsty CLI",
-	Long: `pig - the cli for PostgreSQL & Pigsty
+	Short: "Postgres Install Guide",
+	Long:  `pig - the Missing Linux Package Manager for PostgreSQL and CLI tool for Pigsty`,
+	Example: `
+  # get started: check https://github.com/pgsty/pig for details  
+  pig repo add -ru      # overwrite existing repo & update cache
+  pig ext  add pg17     # install optional postgresql 17 package
+  pig ext  add vector   # install certain postgresql extension
 
-Usage:
-
-  repo      manage apt/yum repo  	add | rm | list | set  | update
-  ext       manage pg extension  	add | rm | list | info | status
-  get       download pigsty      	list | src  | pkg
-  init      install pigsty
-  status    show pig, os, pg status
-  version   show version information
+  pig repo : add | rm  | list | info | update | status | create | boot | cache
+  pig ext  : add | rm  | list | info | update | status | import | link | build
 `,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initAll()

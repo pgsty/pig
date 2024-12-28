@@ -41,7 +41,6 @@ typical usage:
 
   # admin
   pig repo add    [repo|module...] # add repo and modules            (root)
-  pig repo set    [repo|module...] # overwrite existing repo and add (root)
   pig repo rm     [repo|module...] # remove repo & modules           (root)
   pig repo update                  # update repo pkg cache           (root)
   
@@ -316,17 +315,6 @@ var repoCreateCmd = &cobra.Command{
 	},
 }
 
-var repoFetchCmd = &cobra.Command{
-	Use:          "fetch",
-	Short:        "fetch offline package from Pigsty Github",
-	Aliases:      []string{"f"},
-	SilenceUsage: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		logrus.Errorf("not implemented yet")
-		return nil
-	},
-}
-
 func init() {
 	repoAddCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoAddCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
@@ -345,8 +333,6 @@ func init() {
 	repoCacheCmd.Flags().StringVarP(&repoCacheDir, "dir", "d", "/www/", "source repo path")
 	repoCacheCmd.Flags().StringVarP(&repoCachePkg, "path", "p", "/tmp/pkg.tgz", "offline package path")
 
-	repoFetchCmd.Flags().StringVarP(&repoPkgURL, "url", "u", "", "package URL (default: latest from Pigsty Github)")
-
 	repoCmd.AddCommand(repoAddCmd)
 	repoCmd.AddCommand(repoSetCmd)
 	repoCmd.AddCommand(repoRmCmd)
@@ -357,5 +343,4 @@ func init() {
 	repoCmd.AddCommand(repoBootCmd)
 	repoCmd.AddCommand(repoCacheCmd)
 	repoCmd.AddCommand(repoCreateCmd)
-	repoCmd.AddCommand(repoFetchCmd)
 }
