@@ -32,8 +32,8 @@ var rootCmd = &cobra.Command{
   pig ext  add pg17     # install optional postgresql 17 package
   pig ext  add vector   # install certain postgresql extension
 
-  pig repo : add | rm  | list | info | update | status | create | boot | cache
-  pig ext  : add | rm  | list | info | update | status | import | link | build
+  pig repo : add | rm | update | list | info | status | create | boot | cache
+  pig ext  : add | rm | update | list | info | status | import | link | build
 `,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initAll()

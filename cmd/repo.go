@@ -32,8 +32,6 @@ var repoCmd = &cobra.Command{
 	Aliases: []string{"r"},
 	GroupID: "pgext",
 	Long: `
-typical usage:
-
   # info
   pig repo list                    # available repo list             (info)
   pig repo info   [repo|module...] # show repo info                  (info)

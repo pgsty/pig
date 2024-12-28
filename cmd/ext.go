@@ -17,6 +17,7 @@ var (
 	extPgConfig    string
 	extShowContrib bool
 	extYes         bool
+	extRepoDir     string
 )
 
 // extCmd represents the installation command
@@ -26,13 +27,20 @@ var extCmd = &cobra.Command{
 	Aliases: []string{"e", "ex", "pgext", "extension"},
 	GroupID: "pgext",
 	Example: `
-Description:
-  pig ext list                 # list & search extension      
+  # info
+  pig ext list    [query]      # list & search extension      
   pig ext info    [ext...]     # get information of a specific extension
-  pig ext install [ext...]     # install extension for current pg version
-  pig ext remove  [ext...]     # remove extension for current pg version
+  pig ext status  [-v]         # show installed extension and pg status
+
+  # admin
+  pig ext add     [ext...]     # install extension for current pg version
+  pig ext rm      [ext...]     # remove extension for current pg version
   pig ext update  [ext...]     # update extension to the latest version
-  pig ext status               # show installed extension and pg status
+
+  # extra
+  pig ext import  [ext...]     # download extension to local repo
+  pig ext link    [ext...]     # link postgres installation to path
+  pig ext build   [ext...]     # setup building env for extension
 `,
 }
 
@@ -98,6 +106,33 @@ var extInfoCmd = &cobra.Command{
 	},
 }
 
+var extStatusCmd = &cobra.Command{
+	Use:     "status",
+	Short:   "show installed extension on active pg",
+	Aliases: []string{"s", "st", "stat"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		extProbeVersion()
+		ext.ExtensionStatus(extShowContrib)
+		return nil
+	},
+}
+
+var extScanCmd = &cobra.Command{
+	Use:     "scan",
+	Short:   "scan installed extensions for active pg",
+	Aliases: []string{"sc"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		pgVer := extProbeVersion()
+		ext.PostgresInstallSummary()
+		if pgVer == 0 || ext.Postgres == nil {
+			logrus.Debugf("no active PostgreSQL found, specify pg_config path or pg version to get more details")
+			os.Exit(1)
+		}
+		ext.Postgres.ExtensionInstallSummary()
+		return nil
+	},
+}
+
 var extAddCmd = &cobra.Command{
 	Use:     "add",
 	Short:   "install postgres extension",
@@ -143,7 +178,7 @@ var extRmCmd = &cobra.Command{
 var extUpdateCmd = &cobra.Command{
 	Use:     "update",
 	Short:   "update installed extensions for current pg version",
-	Aliases: []string{"u", "up", "upgrade"},
+	Aliases: []string{"u", "upgrade"},
 	Example: `
 Description:
   pig ext update                     # update all installed extensions
@@ -161,29 +196,65 @@ Description:
 	},
 }
 
-var extStatusCmd = &cobra.Command{
-	Use:     "status",
-	Short:   "show installed extension on active pg",
-	Aliases: []string{"s", "st", "stat"},
+var extImportCmd = &cobra.Command{
+	Use:          "import [ext...]",
+	Short:        "import extension packages to local repo",
+	Aliases:      []string{"get"},
+	SilenceUsage: true,
+	Example: `
+  pig ext import postgis                # import postgis extension packages
+  pig ext import timescaledb pg_cron    # import multiple extensions
+  pig ext import pg16                   # import postgresql 16 packages
+  pig ext import pgsql-common           # import common utilities
+  pig ext import -d /www/pigsty postgis # import to specific path
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		extProbeVersion()
-		ext.ExtensionStatus(extShowContrib)
+		pgVer := extProbeVersion()
+		if err := ext.ImportExtensions(pgVer, args, extRepoDir); err != nil {
+			logrus.Errorf("failed to import extensions: %v", err)
+			return nil
+		}
 		return nil
 	},
 }
 
-var extScanCmd = &cobra.Command{
-	Use:     "scan",
-	Short:   "scan installed extensions for active pg",
-	Aliases: []string{"sc"},
+var extLinkCmd = &cobra.Command{
+	Use:          "link <-v pgver|-p pgpath>",
+	Short:        "link postgres to active PATH",
+	Aliases:      []string{"ln"},
+	SilenceUsage: true,
+	Example: `
+  pig ext link                         # link active postgres to /usr/pgsql
+  pig ext link -v 16                   # link postgresql 16 to /usr/pgsql
+  pig ext link -p /path/to/pg_config   # link specific pg to /usr/pgsql
+  pig ext link nil                     # unlink current postgres install
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgVer := extProbeVersion()
-		ext.PostgresInstallSummary()
-		if pgVer == 0 || ext.Postgres == nil {
-			logrus.Debugf("no active PostgreSQL found, specify pg_config path or pg version to get more details")
-			os.Exit(1)
+		if err := ext.LinkPostgres(pgVer, extPgConfig); err != nil {
+			logrus.Errorf("failed to link postgres: %v", err)
+			return nil
 		}
-		ext.Postgres.ExtensionInstallSummary()
+		return nil
+	},
+}
+
+var extBuildCmd = &cobra.Command{
+	Use:          "build [ext...]",
+	Short:        "setup building env for extension",
+	Aliases:      []string{"b"},
+	SilenceUsage: true,
+	Example: `
+  pig ext build postgis                # install build deps for postgis
+  pig ext build timescaledb pg_cron    # install build deps for multiple extensions
+  pig ext build -y                     # auto confirm installation
+`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		pgVer := extProbeVersion()
+		if err := ext.BuildExtensions(pgVer, args, extYes); err != nil {
+			logrus.Errorf("failed to setup build env: %v", err)
+			return nil
+		}
 		return nil
 	},
 }
@@ -242,6 +313,9 @@ func init() {
 	extRmCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm removal")
 	extUpdateCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm update")
 
+	extImportCmd.Flags().StringVarP(&extRepoDir, "repo", "d", "/www/pigsty", "specify repo dir")
+	extBuildCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm installation")
+
 	extCmd.AddCommand(extAddCmd)
 	extCmd.AddCommand(extRmCmd)
 	extCmd.AddCommand(extListCmd)
@@ -249,4 +323,7 @@ func init() {
 	extCmd.AddCommand(extScanCmd)
 	extCmd.AddCommand(extUpdateCmd)
 	extCmd.AddCommand(extStatusCmd)
+	extCmd.AddCommand(extImportCmd)
+	extCmd.AddCommand(extLinkCmd)
+	extCmd.AddCommand(extBuildCmd)
 }
