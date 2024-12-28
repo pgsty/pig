@@ -46,9 +46,10 @@ typical usage:
 }
 
 var repoListCmd = &cobra.Command{
-	Use:     "list",
-	Short:   "print available repo list",
-	Aliases: []string{"l", "ls"},
+	Use:          "list",
+	Short:        "print available repo list",
+	Aliases:      []string{"l", "ls"},
+	SilenceUsage: true,
 	Example: `
   pig repo list                # list available repos on current system
   pig repo list all            # list all unfiltered repo raw data
@@ -58,12 +59,27 @@ var repoListCmd = &cobra.Command{
 		if len(args) == 0 {
 			return repo.List()
 		} else if args[0] == "all" {
-			repo.ListAll()
+			return repo.ListAll()
 		} else if args[0] == "update" {
 			// TODO: implement repo update
 			fmt.Println("not implemented yet")
 		}
 		return nil
+	},
+}
+
+var repoInfoCmd = &cobra.Command{
+	Use:          "info",
+	Short:        "get repo detailed information",
+	Aliases:      []string{"i"},
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			logrus.Errorf("repo or module name is required, check available repo list:")
+			repo.ListAll()
+			return fmt.Errorf("repo or module name is required")
+		}
+		return repo.Info(args...)
 	},
 }
 
@@ -242,4 +258,5 @@ func init() {
 	repoCmd.AddCommand(repoListCmd)
 	repoCmd.AddCommand(repoUpdateCmd)
 	repoCmd.AddCommand(repoStatusCmd)
+	repoCmd.AddCommand(repoInfoCmd)
 }

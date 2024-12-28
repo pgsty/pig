@@ -175,3 +175,49 @@ func compactStrArray(a []string) string {
 	}
 	return "[" + strings.Join(a, ", ") + "]"
 }
+
+// Info prints the information of a repository
+func (r *Repository) Info() string {
+	metaInfo := ""
+	if r.Meta != nil {
+		for key, value := range r.Meta {
+			metaInfo += fmt.Sprintf("%s=%s ", key, value)
+		}
+	}
+	availInfo := fmt.Sprintf("No (%s %d %s)", config.OSVendor, config.OSMajor, config.OSArch)
+	if r.AvailableInCurrentOS() {
+		availInfo = fmt.Sprintf("Yes (%s %s %s)", config.OSVendor, config.OSVersionCode, config.OSArch)
+	}
+	info := fmt.Sprintf(
+		"Name       : %s\n"+
+			"Summary    : %s\n"+
+			"Available  : %s\n"+
+			"Module     : %s\n"+
+			"OS Arch    : %s\n"+
+			"OS Distro  : %s\n"+
+			"Meta       : %s\n"+
+			"Base URL   : %s\n",
+		r.Name, r.Description, availInfo, r.Module, compactStrArray(r.Arch), r.InferOS()+" "+compactIntArray(r.Releases), metaInfo, r.BaseURL["default"])
+	if len(r.BaseURL) > 1 {
+		for key, value := range r.BaseURL {
+			if key != "default" {
+				// replace continues space into one space of value
+				if strings.Contains(value, " ") {
+					value = strings.Join(strings.Fields(value), " ")
+				}
+				info += fmt.Sprintf("%10s : %s\n", key, value)
+			}
+		}
+	}
+
+	info += fmt.Sprintf("\n# default repo content\n%s\n", r.Content("default"))
+	if len(r.BaseURL) > 1 {
+		for region := range r.BaseURL {
+			if region != "default" {
+				info += fmt.Sprintf("\n# %s mirror repo content\n%s\n", region, r.Content(region))
+			}
+		}
+	}
+
+	return info
+}

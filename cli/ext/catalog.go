@@ -35,7 +35,7 @@ type ExtensionCatalog struct {
 
 // NewExtensionCatalog creates a new ExtensionCatalog, using embedded data if any error occurs
 func NewExtensionCatalog(paths ...string) (*ExtensionCatalog, error) {
-	ec := &ExtensionCatalog{}
+	ec := &ExtensionCatalog{DataPath: "embedded"}
 	var data []byte
 	var defaultCsvPath string
 	if config.ConfigDir != "" {

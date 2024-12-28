@@ -4,7 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
-	"golang.org/x/crypto/openpgp/armor"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +13,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"golang.org/x/crypto/openpgp/armor"
 
 	"github.com/sirupsen/logrus"
 
@@ -47,9 +48,10 @@ type Manager struct {
 // NewManager creates a new repo Manager
 func NewManager(paths ...string) (m *Manager, err error) {
 	m = &Manager{
-		List:   make([]*Repository, 0),
-		Map:    make(map[string]*Repository),
-		Module: make(map[string][]string),
+		List:       make([]*Repository, 0),
+		Map:        make(map[string]*Repository),
+		Module:     make(map[string][]string),
+		DataSource: "embedded",
 	}
 	m.OsDistroCode = strings.ToLower(config.OSCode)
 	m.OsMajorVersion = GetMajorVersionFromCode(m.OsDistroCode)
@@ -102,7 +104,7 @@ func NewManager(paths ...string) (m *Manager, err error) {
 		return nil, err
 
 	}
-	logrus.Debugf("load extension data from %s", m.DataSource)
+	logrus.Debugf("load repo data from %s", m.DataSource)
 	return m, nil
 }
 
@@ -156,12 +158,12 @@ func (m *Manager) LoadData(data []byte) error {
 		if repo.Available(m.OsDistroCode, m.OsArch) {
 			m.List = append(m.List, repo)
 			m.Map[repo.Name] = repo
-			if repo.Module != "" {
-				if _, exists := m.Module[repo.Module]; !exists {
-					m.Module[repo.Module] = make([]string, 0)
-				}
-				m.Module[repo.Module] = append(m.Module[repo.Module], repo.Name)
+		}
+		if repo.Module != "" {
+			if _, exists := m.Module[repo.Module]; !exists {
+				m.Module[repo.Module] = make([]string, 0)
 			}
+			m.Module[repo.Module] = append(m.Module[repo.Module], repo.Name)
 		}
 	}
 
@@ -174,14 +176,19 @@ func (m *Manager) LoadData(data []byte) error {
 
 // adjustRepoMeta adjusts the repository metadata
 func (m *Manager) addDefaultModules() {
-	if m.OsType == config.DistroEL {
+	switch m.OsType {
+	case config.DistroEL:
 		m.Module["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
 		m.Module["pgdg"] = []string{"pgdg-common", "pgdg-el8fix", "pgdg-el9fix", "pgdg17", "pgdg16", "pgdg15", "pgdg14", "pgdg13"}
 		m.Module["all"] = append(m.Module["pigsty"], append(m.Module["pgdg"], m.Module["node"]...)...)
-	} else if m.OsType == config.DistroDEB {
+	case config.DistroDEB:
 		m.Module["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
 		m.Module["pgdg"] = []string{"pgdg"}
 		m.Module["all"] = append(m.Module["pigsty"], append(m.Module["pgdg"], m.Module["node"]...)...)
+	default:
+		m.Module["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
+		m.Module["pgdg"] = m.Module["pgsql"]
+		m.Module["all"] = append([]string{"pigsty-infra"}, append(m.Module["pgsql"], m.Module["node"]...)...)
 	}
 }
 
