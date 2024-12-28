@@ -117,5 +117,6 @@ func init() {
 		statusCmd,
 		licenseCmd,
 		versionCmd,
+		updateCmd,
 	)
 }

@@ -152,3 +152,21 @@ func PadHeader(str string, length int) string {
 	}
 	return buf.String()
 }
+
+// SudoRunShellScript will run a shell script with sudo
+func SudoRunShellScript(script string) error {
+	// generate tmp file name with timestamp
+	tmpFile := fmt.Sprintf("sciprt-%s.sh", time.Now().Format("20240101120000"))
+	scriptPath := filepath.Join(os.TempDir(), tmpFile)
+	logrus.Debugf("create tmp script: %s", scriptPath)
+
+	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+		return fmt.Errorf("failed to create tmp script %s: %s", scriptPath, err)
+	}
+
+	err := SudoCommand([]string{"bash", scriptPath})
+	if err != nil {
+		return fmt.Errorf("failed to run script: %v", err)
+	}
+	return nil
+}
