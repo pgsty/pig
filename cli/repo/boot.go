@@ -7,7 +7,7 @@ import (
 )
 
 // Boot will bootstrap a local repo from offline package
-func Boot(targetDir, offlinePkg string) error {
+func Boot(offlinePkg, targetDir string) error {
 	if targetDir == "" {
 		targetDir = "/www/pigsty"
 	}

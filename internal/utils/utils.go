@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"pig/internal/config"
 	"strings"
@@ -151,4 +152,15 @@ func PadHeader(str string, length int) string {
 		buf.WriteByte('=')
 	}
 	return buf.String()
+}
+
+// EnsureRoot ensures the current user is root or exits with error
+func EnsureRoot() {
+	currentUser, err := user.Current()
+	if err != nil {
+		logrus.Fatalf("failed to get current user: %v", err)
+	}
+	if currentUser.Uid != "0" {
+		logrus.Fatal("this command requires root privileges")
+	}
 }
