@@ -5,43 +5,52 @@ import (
 	"os"
 	"pig/internal/config"
 	"pig/internal/utils"
+	"runtime"
 )
 
-// RepoStatus shows the current repo status
-func RepoStatus() error {
+// Status shows the current repo status
+func Status() error {
 	switch config.OSType {
 	case config.DistroEL:
-		return ListELRepo()
+		return StatusEL()
 	case config.DistroDEB:
-		return ListDebianRepo()
+		return StatusDebian()
 	default:
-		return fmt.Errorf("unsupported OS type: %s", config.OSType)
+		return fmt.Errorf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull)
 	}
 }
 
-// ListELRepo lists the RHEL OS family repository
-func ListELRepo() error {
-	if err := RpmPrecheck(); err != nil {
-		return err
+// StatusEL lists the RHEL OS family repository
+func StatusEL() error {
+	if runtime.GOOS != "linux" { // check if linux
+		return fmt.Errorf("pigsty works on linux, unsupported os: %s", runtime.GOOS)
 	}
-	fmt.Println("\n======== ls /etc/yum.repos.d/ ")
+	if config.OSType != config.DistroEL { // check if EL distro
+		return fmt.Errorf("can not add rpm repo to %s distro", config.OSType)
+	}
+
+	utils.PadHeader("ls /etc/yum.repos.d/", 48)
 	if err := utils.ShellCommand([]string{"ls", "/etc/yum.repos.d/"}); err != nil {
 		return err
 	}
-	fmt.Println("\n======== yum repolist")
+
+	utils.PadHeader("yum repolist", 48)
 	if err := utils.ShellCommand([]string{"yum", "repolist"}); err != nil {
 		return err
 	}
 	return nil
 }
 
-// ListDebianRepo lists the Debian OS family repository
-func ListDebianRepo() error {
-	if err := DebPrecheck(); err != nil {
-		return err
+// StatusDebian lists the Debian OS family repository
+func StatusDebian() error {
+	if runtime.GOOS != "linux" { // check if linux
+		return fmt.Errorf("pigsty works on linux, unsupported os: %s", runtime.GOOS)
+	}
+	if config.OSType != config.DistroDEB { // check if DEB distro
+		return fmt.Errorf("can not add deb repo to %s distro", config.OSType)
 	}
 
-	fmt.Println("\n======== ls /etc/apt/sources.list.d/")
+	utils.PadHeader("ls /etc/apt/sources.list.d/", 48)
 	if err := utils.ShellCommand([]string{"ls", "/etc/apt/sources.list.d/"}); err != nil {
 		return err
 	}
@@ -49,14 +58,14 @@ func ListDebianRepo() error {
 	// also check /etc/apt/sources.list if exists and non-empty, print it
 	if fileInfo, err := os.Stat("/etc/apt/sources.list"); err == nil {
 		if fileInfo.Size() > 0 {
-			fmt.Println("\n======== /etc/apt/sources.list")
+			utils.PadHeader("/etc/apt/sources.list", 48)
 			if err := utils.ShellCommand([]string{"cat", "/etc/apt/sources.list"}); err != nil {
 				return err
 			}
 		}
 	}
 
-	fmt.Println("\n===== [apt-cache policy] =========================")
+	utils.PadHeader("apt-cache policy", 48)
 	if err := utils.ShellCommand([]string{"apt-cache", "policy"}); err != nil {
 		return err
 	}

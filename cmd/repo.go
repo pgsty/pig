@@ -56,9 +56,9 @@ var repoListCmd = &cobra.Command{
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return repo.ListRepo()
+			return repo.List()
 		} else if args[0] == "all" {
-			repo.ListRepoData()
+			repo.ListAll()
 		} else if args[0] == "update" {
 			// TODO: implement repo update
 			fmt.Println("not implemented yet")
@@ -68,9 +68,10 @@ var repoListCmd = &cobra.Command{
 }
 
 var repoAddCmd = &cobra.Command{
-	Use:     "add",
-	Short:   "add new repository",
-	Aliases: []string{"a", "append"},
+	Use:          "add",
+	Short:        "add new repository",
+	Aliases:      []string{"a", "append"},
+	SilenceUsage: true,
 	Example: `
   pig repo add                      # = pig repo add all
   pig repo add all                  # add node,pgsql,infra repo (recommended)
@@ -94,54 +95,41 @@ var repoAddCmd = &cobra.Command{
 	// Long: moduleNotice,
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
+		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
+			return fmt.Errorf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull)
+		}
 		if len(args) == 0 {
 			args = []string{"all"}
 		}
-		var repoDir string
-		switch config.OSType {
-		case config.DistroEL:
-			repoDir = "/etc/yum.repos.d/"
-		case config.DistroDEB:
-			repoDir = "/etc/apt/sources.list.d/"
-		default:
-			logrus.Errorf("unsupported OS type: %s", config.OSType)
-			return fmt.Errorf("unsupported OS type: %s", config.OSType)
-			// os.Exit(1)
-		}
-		manager, err := repo.NewRepoManager()
+		modules := repo.ExpandModuleArgs(args)
+		manager, err := repo.NewManager()
 		if err != nil {
 			logrus.Errorf("failed to get repo manager: %v", err)
 			return fmt.Errorf("failed to get repo manager: %v", err)
-			// os.Exit(1)
 		}
 		if repoRemove {
 			logrus.Infof("move existing repo to backup dir")
 			if err := manager.BackupRepo(); err != nil {
 				logrus.Error(err)
 				return fmt.Errorf("failed to backup repo: %v", err)
-				// os.Exit(1)
 			}
 		}
 
-		if err := manager.AddModules(args...); err != nil {
+		if err := manager.AddModules(modules...); err != nil {
 			logrus.Error(err)
 			return fmt.Errorf("failed to add repo: %v", err)
-			// os.Exit(1)
 		}
 
-		fmt.Printf("======== ls %s\n", repoDir)
-		if err := utils.ShellCommand([]string{"ls", "-l", repoDir}); err != nil {
-			logrus.Errorf("failed to list repo dir: %s", repoDir)
-			return fmt.Errorf("failed to list repo dir: %s", repoDir)
-			// os.Exit(1)
+		utils.PadHeader("ls -l "+manager.RepoDir, 48)
+		if err := utils.ShellCommand([]string{"ls", "-l", manager.RepoDir}); err != nil {
+			logrus.Errorf("failed to list repo dir: %s", manager.RepoDir)
+			return fmt.Errorf("failed to list repo dir: %s", manager.RepoDir)
 		}
 
 		if repoUpdate {
 			if err := utils.SudoCommand(manager.UpdateCmd); err != nil {
 				logrus.Error(err)
 				return fmt.Errorf("failed to update repo: %v", err)
-				// os.Exit(1)
 			}
 		} else {
 			logrus.Infof("repo added, run: sudo %s", strings.Join(manager.UpdateCmd, " "))
@@ -175,13 +163,14 @@ var repoRmCmd = &cobra.Command{
 	Aliases:      []string{"remove"},
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		manager, err := repo.NewRepoManager()
+		modules := repo.ExpandModuleArgs(args)
+		manager, err := repo.NewManager()
 		if err != nil {
 			logrus.Errorf("failed to get repo manager: %v", err)
 			return fmt.Errorf("failed to get repo manager: %v", err)
 
 		}
-		if len(args) == 0 {
+		if len(modules) == 0 {
 			logrus.Debugf("repo remove called with no args, remove all modules & repos")
 			if err := manager.BackupRepo(); err != nil {
 				logrus.Error(err)
@@ -189,7 +178,7 @@ var repoRmCmd = &cobra.Command{
 			}
 			return nil
 		} else {
-			for _, module := range args {
+			for _, module := range modules {
 				if err := manager.RemoveRepo(module); err != nil {
 					logrus.Error(err)
 					return err
@@ -213,13 +202,12 @@ var repoUpdateCmd = &cobra.Command{
 	Aliases:      []string{"u"},
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		manager, err := repo.NewRepoManager()
+		manager, err := repo.NewManager()
 		if err != nil {
 			logrus.Errorf("failed to get repo manager: %v", err)
 			return fmt.Errorf("failed to get repo manager: %v", err)
 
 		}
-
 		if err := utils.SudoCommand(manager.UpdateCmd); err != nil {
 			logrus.Error(err)
 			return fmt.Errorf("failed to update repo: %v", err)
@@ -229,11 +217,12 @@ var repoUpdateCmd = &cobra.Command{
 }
 
 var repoStatusCmd = &cobra.Command{
-	Use:     "status",
-	Short:   "show current repo status",
-	Aliases: []string{"s", "st"},
+	Use:          "status",
+	Short:        "show current repo status",
+	Aliases:      []string{"s", "st"},
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return repo.RepoStatus()
+		return repo.Status()
 	},
 }
 

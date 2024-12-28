@@ -12,25 +12,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const (
-	pigstyRpmGPGPath = "/etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
-	pigstyDebGPGPath = "/etc/apt/keyrings/pigsty.gpg"
-)
-
-/********************
-* Global Vars
-********************/
-
-var (
-	Repos     []*Repository
-	RepoMap   map[string]*Repository
-	ModuleMap map[string][]string = make(map[string][]string)
-)
-
-/********************
-* Repo Data Type
-********************/
-
 // Repository represents a package repository configuration
 type Repository struct {
 	Name        string            `yaml:"name"`
@@ -43,10 +24,12 @@ type Repository struct {
 	Distro      string            `yaml:"-"` // el|deb
 }
 
+// SupportAmd64 checks if the repository supports amd64 architecture
 func (r *Repository) SupportAmd64() bool {
 	return slices.Contains(r.Arch, "x86_64")
 }
 
+// SupportArm64 checks if the repository supports arm64 architecture
 func (r *Repository) SupportArm64() bool {
 	return slices.Contains(r.Arch, "aarch64")
 }
@@ -56,8 +39,8 @@ func (r *Repository) ToInlineYAML() string {
 	name := r.Name
 	desc := fmt.Sprintf("'%s'", r.Description) // description 里加上单引号
 	module := r.Module
-	releases := formatReleases(r.Releases)
-	arch := formatArch(r.Arch)
+	releases := compactIntArray(r.Releases)
+	arch := compactStrArray(r.Arch)
 	return fmt.Sprintf("- { name: %-14s ,description: %-20s ,module: %-8s ,releases: %-16s ,arch: %-18s ,baseurl: '%s' }",
 		name, desc, module, releases, arch, r.BaseURL["default"])
 }
@@ -124,14 +107,6 @@ func (r *Repository) Available(code string, arch string) bool {
 	return true
 }
 
-// func (r *Repository) String() string {
-// 	json, err := json.Marshal(r)
-// 	if err != nil {
-// 		return fmt.Sprintf("%s: %s", r.Name, r.Description)
-// 	}
-// 	return string(json)
-// }
-
 // Content returns the repo file content for a given region
 func (r *Repository) Content(region ...string) string {
 	regionStr := "default"
@@ -181,7 +156,8 @@ func (r *Repository) Content(region ...string) string {
 	return ""
 }
 
-func formatReleases(rs []int) string {
+// compactArray formats the releases to a compact inline string
+func compactIntArray(rs []int) string {
 	if len(rs) == 0 {
 		return "[]"
 	}
@@ -192,7 +168,8 @@ func formatReleases(rs []int) string {
 	return "[" + strings.Join(s, ",") + "]"
 }
 
-func formatArch(a []string) string {
+// compactStrArray formats the releases to a compact inline string
+func compactStrArray(a []string) string {
 	if len(a) == 0 {
 		return "[]"
 	}

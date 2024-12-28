@@ -9,9 +9,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ListRepo prints the repository data in a formatted manner (list available only) (invode by repo list)
-func ListRepo() error {
-	rm, err := NewRepoManager()
+// List prints the repository data in a formatted manner (list available only) (invoke by repo list)
+func List() error {
+	rm, err := NewManager()
 	if err != nil {
 		return err
 	}
@@ -31,9 +31,9 @@ func ListRepo() error {
 	return nil
 }
 
-// ListRepoData prints the repository data in a formatted manner (invode by repo list all)
-func ListRepoData() error {
-	rm, err := NewRepoManager()
+// ListAll prints the repository data in a formatted manner (invoke by repo list all)
+func ListAll() error {
+	rm, err := NewManager()
 	if err != nil {
 		return err
 	}

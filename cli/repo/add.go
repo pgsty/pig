@@ -2,34 +2,31 @@ package repo
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
 // AddModules adds multiple modules to the system
-func (rm *RepoManager) AddModules(modules ...string) error {
-	modules = rm.normalizeModules(modules...)
+func (m *Manager) AddModules(modules ...string) error {
+	modules = m.normalizeModules(modules...)
 
 	// check module availability
 	for _, module := range modules {
-		if _, ok := rm.Module[module]; !ok {
-			logrus.Warnf("available modules: %v", strings.Join(GetModuleList(), ", "))
+		if _, ok := m.Module[module]; !ok {
+			logrus.Warnf("available modules: %v", strings.Join(m.GetModuleList(), ", "))
 			return fmt.Errorf("module %s not found", module)
 		}
 	}
 
-	logrus.Infof("add repo for %s.%s , region = %s", config.OSCode, config.OSArch, rm.Region)
+	logrus.Infof("add repo for %s.%s , region = %s", config.OSCode, config.OSArch, m.Region)
 	for _, module := range modules {
-		if err := rm.AddModule(module); err != nil {
+		if err := m.AddModule(module); err != nil {
 			logrus.Errorf("failed to add repo module: %s", module)
 			return err
 		}
@@ -38,45 +35,37 @@ func (rm *RepoManager) AddModules(modules ...string) error {
 	return nil
 }
 
-// addModule adds a module to the system (require sudo/root privilege to move)
-func (rm *RepoManager) AddModule(module string) error {
-	modulePath := rm.getModulePath(module)
+// AddModule handles adding a single module to the system
+func (m *Manager) AddModule(module string) error {
+	modulePath := m.getModulePath(module)
 	if modulePath == "" {
 		return fmt.Errorf("fail to get module path for %s", module)
 	}
-	moduleContent := rm.getModuleContent(module)
-	randomFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s-%s.repo", module, strconv.FormatInt(time.Now().UnixNano(), 36)))
-
-	logrus.Debugf("write module %s to %s, content: %s", module, randomFile, moduleContent)
-	if err := os.WriteFile(randomFile, []byte(moduleContent), 0644); err != nil {
-		return err
-	}
-	defer os.Remove(randomFile)
-	logrus.Debugf("sudo move %s to %s", randomFile, modulePath)
-	return utils.SudoCommand([]string{"mv", "-f", randomFile, modulePath})
+	moduleContent := m.getModuleContent(module)
+	return utils.PutFile(modulePath, []byte(moduleContent))
 }
 
 // getModulePath returns the path to the repository configuration file for a given module
-func (rm *RepoManager) getModulePath(module string) string {
+func (m *Manager) getModulePath(module string) string {
 	switch config.OSType {
 	case config.DistroEL:
-		return filepath.Join(rm.RepoDir, fmt.Sprintf("%s.repo", module))
+		return filepath.Join(m.RepoDir, fmt.Sprintf("%s.repo", module))
 	case config.DistroDEB:
-		return filepath.Join(rm.RepoDir, fmt.Sprintf("%s.list", module))
+		return filepath.Join(m.RepoDir, fmt.Sprintf("%s.list", module))
 	default:
 		return ""
 	}
 }
 
 // getModuleContent returns the multiple repo content together
-func (rm *RepoManager) getModuleContent(module string) string {
+func (m *Manager) getModuleContent(module string) string {
 	var moduleContent string
-	if module, ok := rm.Module[module]; ok {
+	if module, ok := m.Module[module]; ok {
 		for _, repoName := range module {
-			if repo, ok := rm.Map[repoName]; ok {
+			if repo, ok := m.Map[repoName]; ok {
 				if repo.Available(config.OSCode, config.OSArch) {
 					logrus.Debugf("repo %s is available for %s.%s: %v", repoName, config.OSCode, config.OSArch, repo)
-					moduleContent += repo.Content(rm.Region) + "\n"
+					moduleContent += repo.Content(m.Region) + "\n"
 				} else {
 					logrus.Debugf("repo %s is not available for %s.%s: %v", repoName, config.OSCode, config.OSArch, repo)
 				}
@@ -87,7 +76,7 @@ func (rm *RepoManager) getModuleContent(module string) string {
 }
 
 // normalizeModules normalizes the module list, deduplicates and sorts
-func (rm *RepoManager) normalizeModules(modules ...string) []string {
+func (m *Manager) normalizeModules(modules ...string) []string {
 	// if "all" in modules, replace it with node, pgsql
 	if slices.Contains(modules, "all") {
 		modules = append(modules, "node", "pigsty", "pgdg")
@@ -106,11 +95,25 @@ func (rm *RepoManager) normalizeModules(modules ...string) []string {
 	return modules
 }
 
-func GetModuleList() []string {
-	modules := make([]string, 0, len(ModuleMap))
-	for module := range ModuleMap {
+// GetModuleList returns a sorted list of available modules
+func (m *Manager) GetModuleList() []string {
+	modules := make([]string, 0, len(m.Module))
+	for module := range m.Module {
 		modules = append(modules, module)
 	}
 	sort.Strings(modules)
 	return modules
+}
+
+// ExpandModuleArgs will split the input arguments by comma if necessary
+func ExpandModuleArgs(args []string) []string {
+	var newArgs []string
+	for _, arg := range args {
+		if strings.Contains(arg, ",") {
+			newArgs = append(newArgs, strings.Split(arg, ",")...)
+		} else {
+			newArgs = append(newArgs, arg)
+		}
+	}
+	return newArgs
 }

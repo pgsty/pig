@@ -1,19 +1,21 @@
 package repo
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
+	"golang.org/x/crypto/openpgp/armor"
+	"io"
 	"os"
 	"path/filepath"
 	"pig/cli/get"
 	"pig/internal/config"
+	"pig/internal/utils"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/sirupsen/logrus"
-
-	_ "embed"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,10 +23,11 @@ import (
 //go:embed assets/repo.yml
 var embedRepoData []byte
 
-var Manager *RepoManager
+//go:embed assets/key.gpg
+var embedGPGKey []byte
 
-// RepoManager represents a package repository configuration
-type RepoManager struct {
+// Manager represents a package repository manager
+type Manager struct {
 	Data           []*Repository
 	List           []*Repository
 	Map            map[string]*Repository
@@ -41,33 +44,33 @@ type RepoManager struct {
 	DataSource     string
 }
 
-// NewRepoManager creates a new RepoManager
-func NewRepoManager(paths ...string) (rm *RepoManager, err error) {
-	rm = &RepoManager{
+// NewManager creates a new repo Manager
+func NewManager(paths ...string) (m *Manager, err error) {
+	m = &Manager{
 		List:   make([]*Repository, 0),
 		Map:    make(map[string]*Repository),
 		Module: make(map[string][]string),
 	}
-	rm.OsDistroCode = strings.ToLower(config.OSCode)
-	rm.OsMajorVersion = GetMajorVersionFromCode(rm.OsDistroCode)
-	rm.OsType = config.OSType
-	rm.OsArch = config.OSArch
-	rm.Region = "default"
+	m.OsDistroCode = strings.ToLower(config.OSCode)
+	m.OsMajorVersion = GetMajorVersionFromCode(m.OsDistroCode)
+	m.OsType = config.OSType
+	m.OsArch = config.OSArch
+	m.Region = "default"
 
 	switch config.OSType {
 	case config.DistroEL:
-		rm.RepoDir = "/etc/yum.repos.d"
-		rm.BackupDir = "/etc/yum.repos.d/backup"
-		rm.RepoPattern = "/etc/yum.repos.d/*.repo"
-		rm.UpdateCmd = []string{"yum", "makecache"}
+		m.RepoDir = "/etc/yum.repos.d"
+		m.BackupDir = "/etc/yum.repos.d/backup"
+		m.RepoPattern = "/etc/yum.repos.d/*.repo"
+		m.UpdateCmd = []string{"yum", "makecache"}
 	case config.DistroDEB:
-		rm.RepoDir = "/etc/apt/sources.list.d"
-		rm.BackupDir = "/etc/apt/sources.list.d/backup"
-		rm.RepoPattern = "/etc/apt/sources.list.d/*.list"
-		rm.UpdateCmd = []string{"apt-get", "update"}
+		m.RepoDir = "/etc/apt/sources.list.d"
+		m.BackupDir = "/etc/apt/sources.list.d/backup"
+		m.RepoPattern = "/etc/apt/sources.list.d/*.list"
+		m.UpdateCmd = []string{"apt-get", "update"}
 	default:
-		rm.RepoDir = "/tmp/"
-		rm.RepoDir = "/tmp/repo-backup"
+		m.RepoDir = "/tmp/"
+		m.RepoDir = "/tmp/repo-backup"
 	}
 
 	var data []byte
@@ -81,30 +84,30 @@ func NewRepoManager(paths ...string) (rm *RepoManager, err error) {
 	for _, path := range paths {
 		if fileData, err := os.ReadFile(path); err == nil {
 			data = fileData
-			rm.DataSource = path
+			m.DataSource = path
 			break
 		}
 	}
-	if err := rm.LoadRepo(data); err != nil {
-		if rm.DataSource != defaultCsvPath {
-			logrus.Debugf("failed to load extension data from %s: %v, fallback to embedded data", rm.DataSource, err)
+	if err := m.LoadData(data); err != nil {
+		if m.DataSource != defaultCsvPath {
+			logrus.Debugf("failed to load extension data from %s: %v, fallback to embedded data", m.DataSource, err)
 		} else {
 			logrus.Debugf("failed to load extension data from default path: %s, fallback to embedded data", defaultCsvPath)
 		}
-		err = rm.LoadRepo(nil)
-		rm.DataSource = "embedded"
+		err = m.LoadData(nil)
+		m.DataSource = "embedded"
 		if err != nil {
 			logrus.Debugf("not likely to happen: failed on parsing embedded data: %v", err)
 		}
 		return nil, err
 
 	}
-	logrus.Debugf("load extension data from %s", rm.DataSource)
-	return rm, nil
+	logrus.Debugf("load extension data from %s", m.DataSource)
+	return m, nil
 }
 
-// LoadRepo loads repository configurations for a given OS type
-func (rm *RepoManager) LoadRepo(data []byte) error {
+// LoadData loads repository configurations for a given OS type
+func (m *Manager) LoadData(data []byte) error {
 	if data == nil {
 		logrus.Debugf("load repo with nil data, fallback to embedded repo.yml")
 		data = embedRepoData
@@ -112,21 +115,21 @@ func (rm *RepoManager) LoadRepo(data []byte) error {
 
 	var tmpData []Repository
 	if err := yaml.Unmarshal(data, &tmpData); err != nil {
-		return fmt.Errorf("failed to parse %s repo: %v", rm.OsType, err)
+		return fmt.Errorf("failed to parse %s repo: %v", m.OsType, err)
 	}
 
 	// Filter available repos and build maps
-	rm.Data = make([]*Repository, 0)
-	rm.List = make([]*Repository, 0)
-	rm.Map = make(map[string]*Repository)
-	rm.Module = make(map[string][]string)
+	m.Data = make([]*Repository, 0)
+	m.List = make([]*Repository, 0)
+	m.Map = make(map[string]*Repository)
+	m.Module = make(map[string][]string)
 	for i := range tmpData {
 		repoPointer := &tmpData[i]
 		repoPointer.Distro = repoPointer.InferOS()
-		rm.Data = append(rm.Data, repoPointer)
+		m.Data = append(m.Data, repoPointer)
 	}
 
-	for _, repo := range rm.Data {
+	for _, repo := range m.Data {
 		repo.Distro = repo.InferOS()
 		switch repo.Distro {
 		case config.DistroEL:
@@ -150,57 +153,57 @@ func (rm *RepoManager) LoadRepo(data []byte) error {
 		}
 
 		// It's user's responsibility to ensure the repo name is unique for all the combinations of os, arch
-		if repo.Available(rm.OsDistroCode, rm.OsArch) {
-			rm.List = append(rm.List, repo)
-			rm.Map[repo.Name] = repo
+		if repo.Available(m.OsDistroCode, m.OsArch) {
+			m.List = append(m.List, repo)
+			m.Map[repo.Name] = repo
 			if repo.Module != "" {
-				if _, exists := rm.Module[repo.Module]; !exists {
-					rm.Module[repo.Module] = make([]string, 0)
+				if _, exists := m.Module[repo.Module]; !exists {
+					m.Module[repo.Module] = make([]string, 0)
 				}
-				rm.Module[repo.Module] = append(rm.Module[repo.Module], repo.Name)
+				m.Module[repo.Module] = append(m.Module[repo.Module], repo.Name)
 			}
 		}
 	}
 
-	rm.addDefaultModules()
-	rm.adjustPigstyRepoMeta()
+	m.addDefaultModules()
+	m.adjustPigstyRepoMeta()
 
-	logrus.Debugf("load %d %s repo, %d modules", len(rm.Map), rm.OsType, len(rm.Module))
+	logrus.Debugf("load %d %s repo, %d modules", len(m.Map), m.OsType, len(m.Module))
 	return nil
 }
 
 // adjustRepoMeta adjusts the repository metadata
-func (rm *RepoManager) addDefaultModules() {
-	if rm.OsType == config.DistroEL {
-		rm.Module["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
-		rm.Module["pgdg"] = []string{"pgdg-common", "pgdg-el8fix", "pgdg-el9fix", "pgdg17", "pgdg16", "pgdg15", "pgdg14", "pgdg13"}
-		rm.Module["all"] = append(rm.Module["pigsty"], append(rm.Module["pgdg"], rm.Module["node"]...)...)
-	} else if rm.OsType == config.DistroDEB {
-		rm.Module["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
-		rm.Module["pgdg"] = []string{"pgdg"}
-		rm.Module["all"] = append(rm.Module["pigsty"], append(rm.Module["pgdg"], rm.Module["node"]...)...)
+func (m *Manager) addDefaultModules() {
+	if m.OsType == config.DistroEL {
+		m.Module["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
+		m.Module["pgdg"] = []string{"pgdg-common", "pgdg-el8fix", "pgdg-el9fix", "pgdg17", "pgdg16", "pgdg15", "pgdg14", "pgdg13"}
+		m.Module["all"] = append(m.Module["pigsty"], append(m.Module["pgdg"], m.Module["node"]...)...)
+	} else if m.OsType == config.DistroDEB {
+		m.Module["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
+		m.Module["pgdg"] = []string{"pgdg"}
+		m.Module["all"] = append(m.Module["pigsty"], append(m.Module["pgdg"], m.Module["node"]...)...)
 	}
 }
 
 // adjustPigstyRepoMeta adjusts the Pigsty repository metadata if use GPG flag is set
-func (rm *RepoManager) adjustPigstyRepoMeta() {
+func (m *Manager) adjustPigstyRepoMeta() {
 	if !config.PigstyGPGCheck {
 		return
 	}
-	if repo, ok := rm.Map["pigsty-pgsql"]; ok {
-		if rm.OsType == config.DistroEL {
+	if repo, ok := m.Map["pigsty-pgsql"]; ok {
+		if m.OsType == config.DistroEL {
 			repo.Meta["gpgcheck"] = "1"
 			repo.Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
-		} else if rm.OsType == config.DistroDEB {
+		} else if m.OsType == config.DistroDEB {
 			delete(repo.Meta, "trusted")
 			repo.Meta["signed-by"] = "/etc/apt/keyrings/pigsty.gpg"
 		}
 	}
-	if repo, ok := rm.Map["pigsty-infra"]; ok {
-		if rm.OsType == config.DistroEL {
+	if repo, ok := m.Map["pigsty-infra"]; ok {
+		if m.OsType == config.DistroEL {
 			repo.Meta["gpgcheck"] = "1"
 			repo.Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
-		} else if rm.OsType == config.DistroDEB {
+		} else if m.OsType == config.DistroDEB {
 			delete(repo.Meta, "trusted")
 			repo.Meta["signed-by"] = "/etc/apt/keyrings/pigsty.gpg"
 		}
@@ -208,7 +211,7 @@ func (rm *RepoManager) adjustPigstyRepoMeta() {
 }
 
 // ModuleOrder returns the order of modules in given precedence
-func (rm *RepoManager) ModuleOrder() []string {
+func (m *Manager) ModuleOrder() []string {
 	// Define the desired order of specific modules
 	desiredOrder := []string{"all", "pigsty", "pgdg", "node", "infra", "pgsql", "extra", "mssql", "mysql", "docker", "kube", "grafana", "pgml"}
 
@@ -218,9 +221,9 @@ func (rm *RepoManager) ModuleOrder() []string {
 		orderMap[module] = i
 	}
 
-	// Collect all modules from rm.Module
-	modules := make([]string, 0, len(rm.Module))
-	for module := range rm.Module {
+	// Collect all modules from m.Module
+	modules := make([]string, 0, len(m.Module))
+	for module := range m.Module {
 		modules = append(modules, module)
 	}
 
@@ -243,17 +246,34 @@ func (rm *RepoManager) ModuleOrder() []string {
 	return modules
 }
 
-// if region is given, use it, otherwise detect from network condition
-func (rm *RepoManager) DetectRegion(region string) {
+// DetectRegion if region is given, use it, otherwise detect from network condition
+func (m *Manager) DetectRegion(region string) {
 	if region != "" {
-		rm.Region = region
+		m.Region = region
 		return
 	}
 	get.NetworkCondition()
 	if !get.InternetAccess {
 		logrus.Warn("no internet access, assume region = default")
-		rm.Region = "default"
+		m.Region = "default"
 	} else {
-		rm.Region = get.Region
+		m.Region = get.Region
+	}
+}
+
+// AddPigstyGPG adds the Pigsty GPG key to the os key ring
+func (m *Manager) AddPigstyGPG() error {
+	switch m.OsType {
+	case config.DistroEL:
+		return utils.PutFile("/etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty", embedGPGKey)
+	case config.DistroDEB:
+		block, _ := armor.Decode(bytes.NewReader(embedGPGKey))
+		keyBytes, err := io.ReadAll(block.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read GPG key: %v", err)
+		}
+		return utils.PutFile("/etc/apt/keyrings/pigsty.gpg", keyBytes)
+	default:
+		return fmt.Errorf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull)
 	}
 }
