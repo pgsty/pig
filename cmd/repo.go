@@ -35,21 +35,20 @@ var repoCmd = &cobra.Command{
 typical usage:
 
   # info
-  pig repo list                  # available repo list             (info)
-  pig repo info [repo...]        # show repo info                  (info)
-  pig repo status                # show current repo status        (info)
+  pig repo list                    # available repo list             (info)
+  pig repo info   [repo|module...] # show repo info                  (info)
+  pig repo status                  # show current repo status        (info)
 
   # admin
-  pig repo add  [repo|module...] # add repo and modules            (root)
-  pig repo set  [repo|module...] # overwrite existing repo and add (root)
-  pig repo rm   [repo|module...] # remove repo & modules           (root)
-  pig repo update                # update repo pkg cache           (root)
+  pig repo add    [repo|module...] # add repo and modules            (root)
+  pig repo set    [repo|module...] # overwrite existing repo and add (root)
+  pig repo rm     [repo|module...] # remove repo & modules           (root)
+  pig repo update                  # update repo pkg cache           (root)
   
   # cache
-  pig repo create                # create repo on current system   (root) TBD 
-  pig repo boot   [-p]           # boot repo from offline package  (root) TBD
-  pig repo cache                 # cache repo as offline package   (root) TBD
-  pig repo fetch                 # get pre-made offline package    (root) TBD PRO
+  pig repo create                  # create repo on current system   (root)
+  pig repo boot                    # boot repo from offline package  (root)
+  pig repo cache                   # cache repo as offline package   (root)
 `,
 }
 
@@ -186,6 +185,11 @@ var repoRmCmd = &cobra.Command{
 	Short:        "remove repository",
 	Aliases:      []string{"remove"},
 	SilenceUsage: true,
+	Example: `
+  pig repo rm                      # remove (backup) all existing repo to backup dir
+  pig repo rm all --update         # remove module 'all' and update repo cache
+  pig repo rm node pigsty -u       # remove module 'node' & 'pigsty' and update repo cache
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		modules := repo.ExpandModuleArgs(args)
 		manager, err := repo.NewManager()
@@ -225,6 +229,9 @@ var repoUpdateCmd = &cobra.Command{
 	Short:        "update repo cache",
 	Aliases:      []string{"u"},
 	SilenceUsage: true,
+	Example: `
+  pig repo update                  # yum makecache or apt update
+  `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		manager, err := repo.NewManager()
 		if err != nil {
@@ -314,7 +321,8 @@ var repoFetchCmd = &cobra.Command{
 	Aliases:      []string{"f"},
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return repo.Fetch(repoPkgURL, "")
+		logrus.Errorf("not implemented yet")
+		return nil
 	},
 }
 
