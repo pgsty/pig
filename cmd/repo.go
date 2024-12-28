@@ -15,6 +15,9 @@ var (
 	repoRegion string
 	repoUpdate bool
 	repoRemove bool
+
+	repoSrc string
+	repoDst string
 )
 
 // repoCmd represents the top-level `repo` command
@@ -242,6 +245,30 @@ var repoStatusCmd = &cobra.Command{
 	},
 }
 
+var repoBootCmd = &cobra.Command{
+	Use:   "boot",
+	Short: "bootstrap repo from offline package",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		targetDir := ""
+		if len(args) > 0 {
+			targetDir = args[0]
+		}
+		return repo.Boot(targetDir, "")
+	},
+}
+
+var repoCacheCmd = &cobra.Command{
+	Use:   "cache",
+	Short: "create offline package from local repo",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		sourceDir := ""
+		if len(args) > 0 {
+			sourceDir = args[0]
+		}
+		return repo.Cache(sourceDir, "")
+	},
+}
+
 func init() {
 	repoAddCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoAddCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
@@ -252,6 +279,12 @@ func init() {
 
 	repoRmCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 
+	repoBootCmd.Flags().StringVarP(&repoSrc, "src", "s", "/tmp/pkg.tgz", "offline package path")
+	repoBootCmd.Flags().StringVarP(&repoDst, "dst", "d", "/www/pigsty", "target repo path")
+
+	repoCacheCmd.Flags().StringVarP(&repoSrc, "src", "s", "/www/pigsty", "source repo directory")
+	repoCacheCmd.Flags().StringVarP(&repoDst, "dst", "d", "/tmp/pkg.tgz", "offline package path")
+
 	repoCmd.AddCommand(repoAddCmd)
 	repoCmd.AddCommand(repoSetCmd)
 	repoCmd.AddCommand(repoRmCmd)
@@ -259,4 +292,6 @@ func init() {
 	repoCmd.AddCommand(repoUpdateCmd)
 	repoCmd.AddCommand(repoStatusCmd)
 	repoCmd.AddCommand(repoInfoCmd)
+	repoCmd.AddCommand(repoBootCmd)
+	repoCmd.AddCommand(repoCacheCmd)
 }
