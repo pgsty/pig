@@ -4,107 +4,55 @@ import (
 	"fmt"
 	"pig/internal/config"
 	"pig/internal/utils"
-	"strings"
 
 	"github.com/sirupsen/logrus"
 )
 
-// Common build dependencies for different distributions
-var (
-	commonBuildDeps = []string{
-		"gcc", "make", "git", "curl", "wget", "tar", "gzip", "bzip2", "xz",
-		"autoconf", "automake", "libtool", "pkg-config", "patch",
-	}
+var buildTools = map[string][]string{
 
-	elBuildDeps = []string{
-		"postgresql-devel", "postgresql-server-devel",
-		"gcc-c++", "clang", "llvm", "cmake", "bison", "flex", "readline-devel",
-		"zlib-devel", "openssl-devel", "libxml2-devel", "libxslt-devel",
-		"perl-ExtUtils-Embed", "python3-devel", "tcl-devel", "pam-devel",
-		"krb5-devel", "openldap-devel", "gettext-devel", "uuid-devel",
-	}
+	"el8": {
+		"rpmdevtools", "createrepo_c", "wget", "dnf-utils", "dnf-plugins-core", "sshpass", "modulemd-tools", "ninja-build", "openssl-devel", "pkg-config", "make", "cmake",
+		"pgdg-srpm-macros", "postgresql1*-devel", "postgresql1*-server", "readline-devel", "zlib-devel", "lz4", "lz4-devel", "libzstd-devel", "openssl-devel",
+	},
+	"el9": {
+		"rpmdevtools", "createrepo_c", "wget", "dnf-utils", "dnf-plugins-core", "sshpass", "modulemd-tools", "ninja-build", "openssl-devel", "pkg-config", "make", "cmake",
+		"pgdg-srpm-macros", "postgresql1*-devel", "postgresql1*-server", "readline-devel", "zlib-devel", "lz4", "lz4-devel", "libzstd-devel", "openssl-devel",
+	},
+	"d12": {
+		"lz4", "unzip", "wget", "patch", "bash", "lsof", "sshpass", "debhelper", "devscripts", "fakeroot", "pkg-config", "make", "cmake", "ncdu", "rsync",
+		"postgresql-all", "postgresql-server-dev-all", "libreadline-dev", "flex", "bison", "libxml2-dev", "libxml2-utils", "xsltproc", "libc++-dev", "libc++abi-dev", "libglib2.0-dev", "libtinfo5", "libstdc++-12-dev", "liblz4-dev", "ninja-build",
+	},
+	"u22": {
+		"lz4", "unzip", "wget", "patch", "bash", "lsof", "sshpass", "debhelper", "devscripts", "fakeroot", "pkg-config", "make", "cmake", "ncdu", "rsync",
+		"postgresql-all", "postgresql-server-dev-all", "libreadline-dev", "flex", "bison", "libxml2-dev", "libxml2-utils", "xsltproc", "libc++-dev", "libc++abi-dev", "libglib2.0-dev", "libtinfo6", "libstdc++-12-dev", "liblz4-dev", "ninja-build",
+	},
+	"u24": {
+		"lz4", "unzip", "wget", "patch", "bash", "lsof", "sshpass", "debhelper", "devscripts", "fakeroot", "pkg-config", "make", "cmake", "ncdu", "rsync",
+		"postgresql-all", "postgresql-server-dev-all", "libreadline-dev", "flex", "bison", "libxml2-dev", "libxml2-utils", "xsltproc", "libc++-dev", "libc++abi-dev", "libglib2.0-dev", "libtinfo6", "libstdc++-12-dev", "liblz4-dev", "ninja-build",
+	},
+}
 
-	debBuildDeps = []string{
-		"postgresql-server-dev-all",
-		"g++", "clang", "llvm", "cmake", "bison", "flex", "libreadline-dev",
-		"zlib1g-dev", "libssl-dev", "libxml2-dev", "libxslt1-dev",
-		"libperl-dev", "python3-dev", "tcl-dev", "libpam0g-dev",
-		"libkrb5-dev", "libldap2-dev", "gettext", "uuid-dev",
-	}
-)
+// BuildEnv will install build dependencies for different distributions
+func BuildEnv() error {
+	distro := config.OSCode
+	logrus.Infof("prepare building environment for distro %s", distro)
 
-// BuildExtensions installs build dependencies for extensions
-func BuildExtensions(pgVer int, names []string, yes bool) error {
-	logrus.Debugf("setting up build environment: pgVer=%d, names=%s, yes=%v", pgVer, strings.Join(names, ", "), yes)
+	if buildTools[distro] == nil {
+		return fmt.Errorf("unsupported distribution: %s", distro)
+	}
 
 	var installCmds []string
 	switch config.OSType {
 	case config.DistroEL:
-		installCmds = append(installCmds, []string{"yum", "install"}...)
+		installCmds = append(installCmds, []string{"yum", "install", "-y"}...)
 		if config.OSVersion == "8" || config.OSVersion == "9" {
 			installCmds[0] = "dnf"
 		}
-		if yes {
-			installCmds = append(installCmds, "-y")
-		}
-		// Add EL-specific build dependencies
-		installCmds = append(installCmds, commonBuildDeps...)
-		installCmds = append(installCmds, elBuildDeps...)
-		if pgVer != 0 {
-			installCmds = append(installCmds,
-				fmt.Sprintf("postgresql%d-devel", pgVer),
-				fmt.Sprintf("postgresql%d-server-devel", pgVer),
-			)
-		}
-
 	case config.DistroDEB:
-		installCmds = append(installCmds, []string{"apt-get", "install"}...)
-		if yes {
-			installCmds = append(installCmds, "-y")
-		}
-		// Add Debian-specific build dependencies
-		installCmds = append(installCmds, commonBuildDeps...)
-		installCmds = append(installCmds, debBuildDeps...)
-		if pgVer != 0 {
-			installCmds = append(installCmds, fmt.Sprintf("postgresql-%d-dev", pgVer))
-		}
-
+		installCmds = append(installCmds, []string{"apt-get", "install", "-y"}...)
 	default:
-		return fmt.Errorf("unsupported OS type: %s", config.OSType)
+		return fmt.Errorf("unsupported distribution: %s", config.OSType)
 	}
-
-	// Add extension-specific build dependencies if specified
-	if len(names) > 0 {
-		Catalog.LoadAliasMap(config.OSType)
-		var pkgNames []string
-		for _, name := range names {
-			ext, ok := Catalog.ExtNameMap[name]
-			if !ok {
-				ext, ok = Catalog.ExtAliasMap[name]
-			}
-			if !ok {
-				logrus.Debugf("cannot find '%s' in extension name or alias", name)
-				continue
-			}
-
-			// Add extension package with -devel suffix for RPM or -dev suffix for DEB
-			pkgName := ext.PackageName(pgVer)
-			if pkgName == "" {
-				logrus.Warnf("no package found for extension %s", ext.Name)
-				continue
-			}
-			logrus.Debugf("translate extension %s to package name: %s", ext.Name, pkgName)
-
-			switch config.OSType {
-			case config.DistroEL:
-				pkgNames = append(pkgNames, processPkgName(pkgName+"-devel", pgVer)...)
-			case config.DistroDEB:
-				pkgNames = append(pkgNames, processPkgName(pkgName+"-dev", pgVer)...)
-			}
-		}
-		installCmds = append(installCmds, pkgNames...)
-	}
-
-	logrus.Infof("installing build dependencies: %s", strings.Join(installCmds, " "))
+	installCmds = append(installCmds, buildTools[distro]...)
 	return utils.SudoCommand(installCmds)
 }

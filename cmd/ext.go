@@ -224,18 +224,16 @@ var extLinkCmd = &cobra.Command{
 	Aliases:      []string{"ln"},
 	SilenceUsage: true,
 	Example: `
-  pig ext link                         # link active postgres to /usr/pgsql
-  pig ext link -v 16                   # link postgresql 16 to /usr/pgsql
-  pig ext link -p /path/to/pg_config   # link specific pg to /usr/pgsql
-  pig ext link nil                     # unlink current postgres install
+  pig ext link 16                      # link pgdg postgresql 16 to /usr/pgsql
+  pig ext link /usr/pgsql-16           # link specific pg to /usr/pgsql
+  pig ext link /u01/polardb_pg         # link polardb pg to /usr/pgsql
+  pig ext link /u01/polardb_pg         # link polardb pg to /usr/pgsql
+  pig ext link /u01/polardb_pg         # link polardb pg to /usr/pgsql
+  pig ext link /u01/polardb_pg         # link polardb pg to /usr/pgsql
+  pig ext link null|none|nil|nop|no    # unlink current postgres install
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pgVer := extProbeVersion()
-		if err := ext.LinkPostgres(pgVer, extPgConfig); err != nil {
-			logrus.Errorf("failed to link postgres: %v", err)
-			return nil
-		}
-		return nil
+		return ext.LinkPostgres(args...)
 	},
 }
 
@@ -245,17 +243,10 @@ var extBuildCmd = &cobra.Command{
 	Aliases:      []string{"b"},
 	SilenceUsage: true,
 	Example: `
-  pig ext build postgis                # install build deps for postgis
-  pig ext build timescaledb pg_cron    # install build deps for multiple extensions
-  pig ext build -y                     # auto confirm installation
+  pig ext build                        # prepare building environment
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pgVer := extProbeVersion()
-		if err := ext.BuildExtensions(pgVer, args, extYes); err != nil {
-			logrus.Errorf("failed to setup build env: %v", err)
-			return nil
-		}
-		return nil
+		return ext.BuildEnv()
 	},
 }
 
@@ -308,6 +299,7 @@ func extProbeVersion() int {
 func init() {
 	extCmd.PersistentFlags().IntVarP(&extPgVer, "version", "v", 0, "specify a postgres by major version")
 	extCmd.PersistentFlags().StringVarP(&extPgConfig, "path", "p", "", "specify a postgres by pg_config path")
+
 	extStatusCmd.Flags().BoolVarP(&extShowContrib, "contrib", "c", false, "show contrib extensions too")
 	extAddCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm install")
 	extRmCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm removal")
