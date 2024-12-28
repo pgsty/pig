@@ -35,6 +35,16 @@ func ShellCommand(args []string) error {
 	return cmd.Run()
 }
 
+// ShellOutput runs a command and returns the output
+func ShellOutput(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	return out.String(), err
+}
+
 // SudoCommand runs a command with sudo if the current user is not root
 func SudoCommand(args []string) error {
 	if len(args) == 0 {
@@ -126,6 +136,21 @@ func DelFile(filePath string) error {
 		return fmt.Errorf("failed to sudo rm %q: %w", filePath, serr)
 	}
 	return nil
+}
+
+// Mkdir creates a directory, if permission denied, try to create with sudo
+func Mkdir(path string) error {
+	logrus.Debugf("mkdir -p %s", path)
+	// check if dir exists, if exists, return nil
+	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+		return nil
+	}
+	err := os.MkdirAll(path, 0755)
+	if err == nil {
+		return nil
+	}
+	// otherwise, try sudo
+	return SudoCommand([]string{"mkdir", "-p", path})
 }
 
 // PadKV pads a key-value pair with spaces to the right
