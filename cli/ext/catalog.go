@@ -33,13 +33,6 @@ type ExtensionCatalog struct {
 	AliasMap    map[string]string
 }
 
-// DefaultExtensionCatalog creates a new ExtensionCatalog with embedded data which (may) never fails
-func DefaultExtensionCatalog() *ExtensionCatalog {
-	ec, _ := NewExtensionCatalog()
-	_ = ec.Load(embedExtensionData)
-	return ec
-}
-
 // NewExtensionCatalog creates a new ExtensionCatalog, using embedded data if any error occurs
 func NewExtensionCatalog(paths ...string) (*ExtensionCatalog, error) {
 	ec := &ExtensionCatalog{}

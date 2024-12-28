@@ -39,7 +39,7 @@ typical usage:
   
   # cache
   pig repo create                # create repo on current system   (root) TBD 
-  pig repo setup [-p]            # setup repo from offline package (root) TBD
+  pig repo boot   [-p]           # boot repo from offline package  (root) TBD
   pig repo cache                 # cache repo as offline package   (root) TBD
   pig repo fetch                 # get pre-made offline package    (root) TBD PRO
 `,

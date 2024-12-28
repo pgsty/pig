@@ -23,7 +23,7 @@ var (
 var extCmd = &cobra.Command{
 	Use:     "ext",
 	Short:   "Manage PostgreSQL Extensions (pgext)",
-	Aliases: []string{"e", "ex", "extension"},
+	Aliases: []string{"e", "ex", "pgext", "extension"},
 	GroupID: "pgext",
 	Example: `
 Description:
@@ -190,10 +190,16 @@ var extScanCmd = &cobra.Command{
 
 // extProbeVersion returns the PostgreSQL version to use
 func extProbeVersion() int {
-	ext.DetectPostgres()
+	// check args
 	if extPgVer != 0 && extPgConfig != "" {
 		logrus.Errorf("both pg version and pg_config path are specified, please specify only one")
 		os.Exit(1)
+	}
+
+	// detect postgres installation, but don't fail if not found
+	err := ext.DetectPostgres()
+	if err != nil {
+		logrus.Debugf("failed to detect PostgreSQL: %v", err)
 	}
 
 	// if pg version is specified, try if we can find the actual installation
@@ -217,7 +223,7 @@ func extProbeVersion() int {
 		}
 	}
 
-	// if none given, we can fallback to active installation, or if we can't infer the version, we can fallback to no version tabulate
+	// if none given, we can fall back to active installation, or if we can't infer the version, we can fallback to no version tabulate
 	if ext.Active != nil {
 		logrus.Debugf("fallback to active PostgreSQL: %d", ext.Active.MajorVersion)
 		ext.Postgres = ext.Active

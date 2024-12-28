@@ -97,7 +97,7 @@ func (p *PostgresInstall) ScanMeta() error {
 	// parse the version
 	if version, ok := configMap["VERSION"]; ok {
 		p.Version = version
-		p.MajorVersion, p.MinorVersion, err = ParsePostgresVersion(p.Version)
+		p.MajorVersion, p.MinorVersion, err = utils.ParsePostgresVersion(p.Version)
 		if err != nil {
 			return fmt.Errorf("failed to parse PostgreSQL version: %v", err)
 		}
@@ -315,7 +315,7 @@ func GetPostgres(args ...string) (pi *PostgresInstall, err error) {
 	}
 
 	// treat it as a version string
-	major, _, err := ParsePostgresVersion(arg)
+	major, _, err := utils.ParsePostgresVersion(arg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse PostgreSQL version %s: %v", arg, err)
 	}

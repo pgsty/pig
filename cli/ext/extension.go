@@ -1,7 +1,6 @@
 package ext
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
 	"pig/internal/config"
@@ -9,10 +8,6 @@ import (
 	"strconv"
 	"strings"
 )
-
-/********************
-* Extension Type
-********************/
 
 // Extension represents a PostgreSQL extension record
 type Extension struct {
@@ -57,31 +52,7 @@ func (e *Extension) SummaryURL() string {
 	return fmt.Sprintf("https://ext.pigsty.io/#/%s", e.Name)
 }
 
-func (e *Extension) FullTextSearchSummary() string {
-	var buf bytes.Buffer
-	buf.WriteString(e.Name)
-	if strings.Contains(e.Name, "-") || strings.Contains(e.Name, "_") {
-		buf.WriteString(" " + strings.Replace(strings.ReplaceAll(e.Name, "-", " "), "_", " ", -1))
-	}
-	if e.Alias != e.Name {
-		buf.WriteString(" " + strings.ToLower(e.Alias))
-	}
-	buf.WriteString(" " + strings.ToLower(e.Category))
-	if e.RpmPkg != "" {
-		buf.WriteString(" " + strings.ToLower(e.RpmPkg))
-	}
-	if e.DebPkg != "" {
-		buf.WriteString(" " + strings.ToLower(e.DebPkg))
-	}
-	if e.EnDesc != "" {
-		buf.WriteString(" " + strings.ToLower(e.EnDesc))
-	}
-	if e.ZhDesc != "" {
-		buf.WriteString(" " + strings.ToLower(e.ZhDesc))
-	}
-	return buf.String()
-}
-
+// CompactVersion returns the compact version string like 17-13
 func CompactVersion(pgVers []string) string {
 	// Remove version "12" from the list
 	filteredVers := []int{}
@@ -110,7 +81,10 @@ func CompactVersion(pgVers []string) string {
 	return fmt.Sprintf("%d-%d", filteredVers[0], filteredVers[len(filteredVers)-1])
 }
 
+// Availability returns the availability hint string according to the extension availability
 func (e *Extension) Availability(distroCode string) string {
+	// TODO: check via distroCode
+
 	switch config.OSType {
 	case config.DistroEL:
 		if e.RpmRepo == "" {
@@ -135,6 +109,7 @@ func (e *Extension) Availability(distroCode string) string {
 	return CompactVersion(e.PgVer)
 }
 
+// PackageName returns the package name of the extension according to the OS type
 func (e *Extension) PackageName(pgVer int) string {
 	verStr := strconv.Itoa(pgVer)
 	if pgVer == 0 {
@@ -157,14 +132,17 @@ func (e *Extension) PackageName(pgVer int) string {
 	return ""
 }
 
+// GuessRpmNamePattern returns the guessed RPM package name pattern
 func (e *Extension) GuessRpmNamePattern(pgVer int) string {
 	return strings.Replace(e.Name, "-", "_", -1) + "_$v"
 }
 
+// GuessDebNamePattern returns the guessed DEB package name pattern
 func (e *Extension) GuessDebNamePattern(pgVer int) string {
 	return fmt.Sprintf("postgresql-$v-%s", strings.Replace(e.Name, "_", "-", -1))
 }
 
+// RepoName returns the repository name of the extension according to the OS type
 func (e *Extension) RepoName() string {
 	switch config.OSType {
 	case config.DistroEL:
@@ -183,6 +161,7 @@ func (e *Extension) RepoName() string {
 	return ""
 }
 
+// CreateSQL returns the SQL command to create the extension
 func (e *Extension) CreateSQL() string {
 	if len(e.Requires) > 0 {
 		return fmt.Sprintf("CREATE EXTENSION %s CASCADE;", e.Name)
@@ -191,6 +170,7 @@ func (e *Extension) CreateSQL() string {
 	}
 }
 
+// Availability returns the shared library hint string according to the extension availability
 func (e *Extension) SharedLib() string {
 	if e.NeedLoad {
 		return fmt.Sprintf("SET shared_preload_libraries = '%s'", e.Name)
@@ -201,6 +181,7 @@ func (e *Extension) SharedLib() string {
 	return "no shared library"
 }
 
+// SuperUser returns the superuser hint string according to the extension trust level
 func (e *Extension) SuperUser() string {
 	if e.Trusted == "t" {
 		return "TRUST   :  Yes │  does not require superuser to install"
@@ -211,6 +192,7 @@ func (e *Extension) SuperUser() string {
 	return "TRUST   :  N/A │ unknown, may require dbsu to install"
 }
 
+// SchemaStr returns the schema hint string according to the extension schema list
 func (e *Extension) SchemaStr() string {
 	if len(e.Schemas) == 0 {
 		return "Schemas: []"
@@ -297,6 +279,8 @@ func (e *Extension) GetFlag() string {
 	return b + d + s + l + t + r
 }
 
+// GetStatus returns the status of the extension
+// If the global Postgres is not nil, it will check the installation status
 func (e *Extension) GetStatus(ver int) string {
 	if Postgres != nil {
 		if Postgres.ExtensionMap[e.Name] != nil {
@@ -317,7 +301,7 @@ func (e *Extension) GetStatus(ver int) string {
 	}
 }
 
-// NeedBy returns the list of extensions that depend on this extension
+// DependsOn returns the list of extensions that depend on this extension
 // This function depends on the global Catalog.DependsMap
 func (e *Extension) DependsOn() []string {
 	if Catalog == nil || Catalog.Dependency == nil {
@@ -327,4 +311,164 @@ func (e *Extension) DependsOn() []string {
 		return v
 	}
 	return nil
+}
+
+/********************
+* Parse Extension
+********************/
+
+// ParseExtension parses a CSV record into an Extension struct
+func ParseExtension(record []string) (*Extension, error) {
+	if len(record) != 34 {
+		return nil, fmt.Errorf("invalid record length: got %d, want 34", len(record))
+	}
+
+	id, err := strconv.Atoi(record[0])
+	if err != nil {
+		return nil, fmt.Errorf("invalid ID: %v", err)
+	}
+
+	// Helper function to parse boolean values
+	parseBool := func(s string) bool {
+		return strings.ToLower(strings.TrimSpace(s)) == "t"
+	}
+
+	ext := &Extension{
+		ID:          id,
+		Name:        strings.TrimSpace(record[1]),
+		Alias:       strings.TrimSpace(record[2]),
+		Category:    strings.TrimSpace(record[3]),
+		URL:         strings.TrimSpace(record[4]),
+		License:     strings.TrimSpace(record[5]),
+		Tags:        splitAndTrim(record[6]),
+		Version:     strings.TrimSpace(record[7]),
+		Repo:        strings.TrimSpace(record[8]),
+		Lang:        strings.TrimSpace(record[9]),
+		Utility:     parseBool(record[10]),
+		Lead:        parseBool(record[11]),
+		HasSolib:    parseBool(record[12]),
+		NeedDDL:     parseBool(record[13]),
+		NeedLoad:    parseBool(record[14]),
+		Trusted:     record[15],
+		Relocatable: record[16],
+		Schemas:     splitAndTrim(record[17]),
+		PgVer:       splitAndTrim(record[18]),
+		Requires:    splitAndTrim(record[19]),
+		RpmVer:      strings.TrimSpace(record[20]),
+		RpmRepo:     strings.TrimSpace(record[21]),
+		RpmPkg:      strings.TrimSpace(record[22]),
+		RpmPg:       splitAndTrim(record[23]),
+		RpmDeps:     splitAndTrim(record[24]),
+		DebVer:      strings.TrimSpace(record[25]),
+		DebRepo:     strings.TrimSpace(record[26]),
+		DebPkg:      strings.TrimSpace(record[27]),
+		DebDeps:     splitAndTrim(record[28]),
+		DebPg:       splitAndTrim(record[29]),
+		BadCase:     splitAndTrim(record[30]),
+		EnDesc:      strings.TrimSpace(record[31]),
+		ZhDesc:      strings.TrimSpace(record[32]),
+		Comment:     strings.TrimSpace(record[33]),
+	}
+
+	return ext, nil
+}
+
+// splitAndTrim splits a comma-separated string and trims whitespace
+// used as auxiliary function for parsing extension data
+func splitAndTrim(s string) []string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "{")
+	s = strings.TrimSuffix(s, "}")
+	if s == "" {
+		return []string{}
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+/********************
+* Distro Availability
+********************/
+
+// DistroBadCase is a map of bad cases for extensions
+var DistroBadCase = map[string]map[string][]int{
+	"el8.amd64": {"pljava": {}, "timescaledb_toolkit": {}},
+	"el9.amd64": {},
+	"u24.amd64": {"pgml": {}, "citus": {}, "topn": {}, "timescaledb_toolkit": {}, "pg_partman": {13}, "timeseries": {13}},
+	"u22.amd64": {},
+	"d12.amd64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}},
+	"el8.arm64": {"pg_dbms_job": {}, "pljava": {}, "timescaledb_toolkit": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}, "topn": {13}},
+	"el9.arm64": {"pg_dbms_job": {}, "timescaledb_toolkit": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}, "topn": {13}},
+	"u24.arm64": {"pgml": {}, "citus": {}, "topn": {}, "timescaledb_toolkit": {}, "pg_partman": {13}, "timeseries": {13}},
+	"u22.arm64": {"topn": {}},
+	"d12.arm64": {"topn": {}, "babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}},
+}
+
+// RpmRenameMap is a map of RPM package rename rules
+var RpmRenameMap = map[string]map[int]string{
+	"pgaudit": {15: "pgaudit17_15*", 14: "pgaudit17_14*", 13: "pgaudit17_13*"},
+}
+
+// Available check if the extension is available for the given pg version
+func (e *Extension) Available(pgVer int) bool {
+	verStr := strconv.Itoa(pgVer)
+
+	// test1: check rpm/deb version compatibility
+	switch config.OSType {
+	case config.DistroEL:
+		if e.RpmPg != nil {
+			found := false
+			for _, ver := range e.RpmPg {
+				if ver == verStr {
+					found = true
+					continue
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+	case config.DistroDEB:
+		if e.DebPg != nil {
+			found := false
+			for _, ver := range e.DebPg {
+				if ver == verStr {
+					found = true
+					continue
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+	case config.DistroMAC:
+		return true
+	}
+
+	// test2 will check bad base according to DistroCode and OSArch
+	distroCodeArch := fmt.Sprintf("%s.%s", config.OSCode, config.OSArch)
+	badCases := DistroBadCase[distroCodeArch]
+	if badCases == nil {
+		return true
+	}
+	v, ok := badCases[e.Name]
+	if !ok {
+		return true
+	} else {
+		if len(v) == 0 { // match all version
+			return false
+		}
+		for _, ver := range v {
+			if ver == pgVer {
+				return false
+			}
+		}
+		return true
+	}
 }
