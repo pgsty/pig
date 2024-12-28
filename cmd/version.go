@@ -16,6 +16,5 @@ var versionCmd = &cobra.Command{
 		fmt.Printf("Pig version: %s\n", config.PigVersion)
 		fmt.Printf("Go version: %s\n", runtime.Version())
 		fmt.Printf("Pigsty version: %s (embedded)\n", config.PigstyVersion)
-		// print go version for building this binary
 	},
 }

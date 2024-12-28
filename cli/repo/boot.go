@@ -69,7 +69,7 @@ func addLocalRepo(targetDir string) error {
 	case config.DistroDEB:
 		logrus.Infof("add %s to %s", fmt.Sprintf("file:%s ./", targetDir), "/etc/apt/sources.list.d/local.list")
 		repoFile := "/etc/apt/sources.list.d/local.list"
-		repoContent := fmt.Sprintf("deb [trusted=yes] file:%s ./", targetDir)
+		repoContent := fmt.Sprintf("deb [trusted=yes] file://%s ./", targetDir)
 		return utils.PutFile(repoFile, []byte(repoContent))
 	default:
 		return fmt.Errorf("unsupported OS for adding local repo: %s", config.OSType)

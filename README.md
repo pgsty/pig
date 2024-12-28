@@ -1,11 +1,11 @@
 # PIG - Postgres Install Genius
 
 [![Webite: pigsty.io](https://img.shields.io/badge/website-ext.pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pigsty.io)
-[![Version: v0.0.1](https://img.shields.io/badge/version-v0.0.1-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.0.1)
+[![Version: v0.1.0](https://img.shields.io/badge/version-v0.1.0-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.1.0)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 340](https://img.shields.io/badge/extensions-340-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pigsty.io/#/list)
 
-[**pig**](https://github.com/pgsty/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux distro.
+[**pig**](https://ext.pigsty.io/#/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux distro.
 
 Install PostgreSQL 13-17 along with [340 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) with native package manager
 
@@ -34,8 +34,10 @@ curl -fsSL https://repo.pigsty.cc/pig | bash     # mainland china mirror
 Then it's ready to use, assume you want to install the [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) extension:
 
 ```bash
-$ pig repo add pigsty pgdg -u  # add pgdg & pigsty repo, update cache      
-$ pig ext install pg17         # install PostgreSQL 17 kernels with PGDG native packages
+$ pig repo add pigsty pgdg -u  # add pgdg & pigsty repo, update cache
+$ pig repo set -u              # alternatively, you can overwrite all existing repos, brute but effective
+
+$ pig ext install pg17         # install PostgreSQL 17 kernels with native PGDG packages
 $ pig ext install pg_duckdb    # install the pg_duckdb extension (for current pg17)
 ```
 

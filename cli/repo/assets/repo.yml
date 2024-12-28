@@ -1,5 +1,5 @@
 # EL 7/8/9 REPOS
-- { name: pigsty-local   ,description: 'Pigsty Local'      ,module: local   ,releases: [7,8,9]          ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://127.0.0.1/pigsty'  }, meta: {skip_if_unavailable: 1}} # used by intranet nodes
+- { name: pigsty-local   ,description: 'Pigsty Local'      ,module: local   ,releases: [7,8,9]          ,arch: [x86_64, aarch64] ,baseurl: { default: 'file:///www/pigsty'  }, meta: {skip_if_unavailable: 1}} # used by intranet nodes
 - { name: pigsty-infra   ,description: 'Pigsty INFRA'      ,module: infra   ,releases: [7,8,9]          ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.pigsty.io/yum/infra/$basearch' ,china: 'https://repo.pigsty.cc/yum/infra/$basearch' }}
 - { name: pigsty-pgsql   ,description: 'Pigsty PGSQL'      ,module: pgsql   ,releases: [7,8,9]          ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.pigsty.io/yum/pgsql/el$releasever.$basearch' ,china: 'https://repo.pigsty.cc/yum/pgsql/el$releasever.$basearch' }}
 - { name: nginx          ,description: 'Nginx Repo'        ,module: infra   ,releases: [7,8,9]          ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://nginx.org/packages/rhel/$releasever/$basearch/' }}
@@ -33,7 +33,7 @@
 - { name: mysql          ,description: 'MySQL'             ,module: mysql   ,releases: [7,8,9]          ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.mysql.com/yum/mysql-8.0-community/el/$releasever/$basearch/', china: 'https://mirrors.tuna.tsinghua.edu.cn/mysql/yum/mysql-8.0-community-el7-$basearch/' }}
 - { name: grafana        ,description: 'Grafana'           ,module: grafana ,releases: [7,8,9]          ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://rpm.grafana.com' }}
 # DEB 7/8/9 REPOS
-- { name: pigsty-local  ,description: 'Pigsty Local'       ,module: local   ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://127.0.0.1/pigsty ./' }, meta: {skip_if_unavailable: 1}}
+- { name: pigsty-local  ,description: 'Pigsty Local'       ,module: local   ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: { default: 'file:///www/pigsty ./' }, meta: {skip_if_unavailable: 1}}
 - { name: pigsty-pgsql  ,description: 'Pigsty PgSQL'       ,module: pgsql   ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.pigsty.io/apt/pgsql/${distro_codename} ${distro_codename} main', china: 'https://repo.pigsty.cc/apt/pgsql/${distro_codename} ${distro_codename} main' }}
 - { name: pigsty-infra  ,description: 'Pigsty Infra'       ,module: infra   ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.pigsty.io/apt/infra/ generic main' ,china: 'https://repo.pigsty.cc/apt/infra/ generic main' }}
 - { name: nginx         ,description: 'Nginx'              ,module: infra   ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://nginx.org/packages/${distro_name} ${distro_codename} nginx' }}

@@ -163,7 +163,10 @@ func (m *Manager) LoadData(data []byte) error {
 			if _, exists := m.Module[repo.Module]; !exists {
 				m.Module[repo.Module] = make([]string, 0)
 			}
-			m.Module[repo.Module] = append(m.Module[repo.Module], repo.Name)
+			// append repo name to module list if not already present
+			if !slices.Contains(m.Module[repo.Module], repo.Name) {
+				m.Module[repo.Module] = append(m.Module[repo.Module], repo.Name)
+			}
 		}
 	}
 
