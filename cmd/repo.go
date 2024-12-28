@@ -255,6 +255,11 @@ var repoBootCmd = &cobra.Command{
 	Short:        "bootstrap repo from offline package",
 	Aliases:      []string{"b", "bt"},
 	SilenceUsage: true,
+	Example: `
+  pig repo boot                    # boot repo from /tmp/pkg.tgz to /www
+  pig repo boot -p /tmp/pkg.tgz    # boot repo from given package path
+  pig repo boot -d /srv            # boot repo to another directory /srv
+  `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return repo.Boot(repoBootPkg, repoBootDir)
 	},
