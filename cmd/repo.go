@@ -16,9 +16,13 @@ var (
 	repoUpdate bool
 	repoRemove bool
 
-	repoDirPath string
-	repoPkgPath string
-	repoPkgURL  string
+	repoCacheDir string
+	repoCachePkg string
+
+	repoBootDir string
+	repoBootPkg string
+
+	repoPkgURL string
 )
 
 // repoCmd represents the top-level `repo` command
@@ -252,7 +256,7 @@ var repoBootCmd = &cobra.Command{
 	Aliases:      []string{"b", "bt"},
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return repo.Boot(repoPkgPath, repoDirPath)
+		return repo.Boot(repoBootPkg, repoBootDir)
 	},
 }
 
@@ -261,8 +265,21 @@ var repoCacheCmd = &cobra.Command{
 	Short:        "create offline package from local repo",
 	Aliases:      []string{"c"},
 	SilenceUsage: true,
+	Example: `
+  pig repo cache                    # create /tmp/pkg.tgz offline package from /www/pigsty 
+  pig repo cache -f                 # force overwrite existing package
+  pig repo cache -d /srv            # overwrite default content dir /www to /srv
+  pig repo cache pigsty mssql       # create the tarball with both pigsty & mssql repo
+  pig repo c -f                     # the simplest use case to make offline package
+  
+  (Beware that system repo management require sudo/root privilege)
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return repo.Cache(repoDirPath, repoPkgPath)
+		repos := []string{"pigsty"}
+		if len(args) > 0 {
+			repos = args
+		}
+		return repo.Cache(repoCacheDir, repoCachePkg, repos)
 	},
 }
 
@@ -271,8 +288,18 @@ var repoCreateCmd = &cobra.Command{
 	Short:        "create local YUM/APT repository",
 	Aliases:      []string{"cr"},
 	SilenceUsage: true,
+	Example: `
+  pig repo create                    # create repo on /www/pigsty
+  pig repo create /www/mssql /www/b  # create repo on multiple locations
+  
+  (Beware that system repo management require sudo/root privilege)
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return repo.Create(repoDirPath)
+		repos := []string{"/www/pigsty"}
+		if len(args) > 0 {
+			repos = args
+		}
+		return repo.CreateRepos(repos...)
 	},
 }
 
@@ -282,7 +309,7 @@ var repoFetchCmd = &cobra.Command{
 	Aliases:      []string{"f"},
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return repo.Fetch(repoPkgURL, repoPkgPath)
+		return repo.Fetch(repoPkgURL, "")
 	},
 }
 
@@ -296,15 +323,14 @@ func init() {
 
 	repoRmCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 
-	repoBootCmd.Flags().StringVarP(&repoDirPath, "dir", "d", "/www/pigsty", "target repo path")
-	repoBootCmd.Flags().StringVarP(&repoPkgPath, "path", "p", "/tmp/pkg.tgz", "offline package path")
+	// boot command flags
+	repoBootCmd.Flags().StringVarP(&repoBootDir, "dir", "d", "/www/", "target repo path")
+	repoBootCmd.Flags().StringVarP(&repoBootPkg, "path", "p", "/tmp/pkg.tgz", "offline package path")
 
-	repoCacheCmd.Flags().StringVarP(&repoDirPath, "dir", "d", "/www/pigsty", "source repo path")
-	repoCacheCmd.Flags().StringVarP(&repoPkgPath, "path", "p", "/tmp/pkg.tgz", "offline package path")
+	// cache command flags
+	repoCacheCmd.Flags().StringVarP(&repoCacheDir, "dir", "d", "/www/", "source repo path")
+	repoCacheCmd.Flags().StringVarP(&repoCachePkg, "path", "p", "/tmp/pkg.tgz", "offline package path")
 
-	repoCreateCmd.Flags().StringVarP(&repoDirPath, "dir", "d", "/www/pigsty", "target repo path")
-
-	repoFetchCmd.Flags().StringVarP(&repoPkgPath, "path", "p", "/tmp/pkg.tgz", "offline package path")
 	repoFetchCmd.Flags().StringVarP(&repoPkgURL, "url", "u", "", "package URL (default: latest from Pigsty Github)")
 
 	repoCmd.AddCommand(repoAddCmd)
