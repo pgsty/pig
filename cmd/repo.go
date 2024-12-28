@@ -138,6 +138,7 @@ var repoAddCmd = &cobra.Command{
 			}
 		}
 
+		manager.DetectRegion(repoRegion)
 		if err := manager.AddModules(modules...); err != nil {
 			logrus.Error(err)
 			return fmt.Errorf("failed to add repo: %v", err)
