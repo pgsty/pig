@@ -162,7 +162,7 @@ func Cache(dirPath, pkgPath string, repos []string) error {
 	fmt.Println()
 
 	logrus.Infof("offline package created")
-	printFinalPackageInfo(pkgPath)
+	_ = printFinalPackageInfo(pkgPath)
 	return nil
 }
 

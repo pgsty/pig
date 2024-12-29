@@ -21,8 +21,6 @@ var (
 
 	repoBootDir string
 	repoBootPkg string
-
-	repoPkgURL string
 )
 
 // repoCmd represents the top-level `repo` command
@@ -31,21 +29,29 @@ var repoCmd = &cobra.Command{
 	Short:   "Manage Linux Software Repo (apt/dnf)",
 	Aliases: []string{"r"},
 	GroupID: "pgext",
-	Long: `
-  # info
+	Long: `pig repo - Manage Linux APT/YUM Repo
+
   pig repo list                    # available repo list             (info)
   pig repo info   [repo|module...] # show repo info                  (info)
   pig repo status                  # show current repo status        (info)
-
-  # admin
   pig repo add    [repo|module...] # add repo and modules            (root)
   pig repo rm     [repo|module...] # remove repo & modules           (root)
   pig repo update                  # update repo pkg cache           (root)
-  
-  # cache
   pig repo create                  # create repo on current system   (root)
   pig repo boot                    # boot repo from offline package  (root)
   pig repo cache                   # cache repo as offline package   (root)
+`,
+	Example: `
+  Get Started: https://ext.pigsty.io/#/pig/
+  pig repo add -ru                 # add all repo and update cache (brute but effective)
+  pig repo add pigsty -u           # gentle version, only add pigsty repo and update cache
+  pig repo add node pgdg pigsty    # essential repo to install postgres packages
+  pig repo add all                 # all = node + pgdg + pigsty
+  pig repo add all extra           # extra module has non-free and some 3rd repo for certain extensions
+  pig repo update                  # update repo cache
+  pig repo create                  # update local repo /www/pigsty meta
+  pig repo boot                    # extract /tmp/pkg.tgz to /www/pigsty
+  pig repo cache                   # cache /www/pigsty into /tmp/pkg.tgz
 `,
 }
 
@@ -63,9 +69,6 @@ var repoListCmd = &cobra.Command{
 			return repo.List()
 		} else if args[0] == "all" {
 			return repo.ListAll()
-		} else if args[0] == "update" {
-			// TODO: implement repo update
-			fmt.Println("not implemented yet")
 		}
 		return nil
 	},
@@ -79,7 +82,7 @@ var repoInfoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			logrus.Errorf("repo or module name is required, check available repo list:")
-			repo.ListAll()
+			_ = repo.ListAll()
 			return fmt.Errorf("repo or module name is required")
 		}
 		return repo.Info(args...)
@@ -111,8 +114,6 @@ var repoAddCmd = &cobra.Command{
   - pgsql    :  pigsty + pgdg (all available pg extensions) 
   # check available repo & modules with pig repo list
 `,
-	// Long: moduleNotice,
-
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
 			return fmt.Errorf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull)

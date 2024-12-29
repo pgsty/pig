@@ -41,7 +41,7 @@ var styCmd = &cobra.Command{
 	Short:   "Manage Pigsty Installation",
 	Aliases: []string{"s", "pigsty"},
 	GroupID: "pigsty",
-	Long: `Init (Download), Bootstrap, Configure, and Install Pigsty
+	Long: `pig sty -Init (Download), Bootstrap, Configure, and Install Pigsty
 
   pig sty init    [-pfvd]      # install pigsty (~/pigsty by default)
   pig sty boot    [-rpk]       # install ansible and prepare offline pkg
@@ -230,13 +230,7 @@ Check https://pigsty.io/docs/setup/install/#configure for details
 		cmdArgs = append(cmdArgs, args...)
 		os.Chdir(config.PigstyHome)
 		logrus.Infof("configure with: %s", strings.Join(cmdArgs, " "))
-		err := utils.ShellCommand(cmdArgs)
-		if err != nil {
-			logrus.Errorf("configure execution failed: %v", err)
-			os.Exit(1)
-		}
-		return nil
-
+		return utils.ShellCommand(cmdArgs)
 	},
 }
 

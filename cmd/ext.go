@@ -26,18 +26,22 @@ var extCmd = &cobra.Command{
 	Short:   "Manage PostgreSQL Extensions (pgext)",
 	Aliases: []string{"e", "ex", "pgext", "extension"},
 	GroupID: "pgext",
+	Long: `pig ext - Manage PostgreSQL Extensions
+
+  Get Started: https://ext.pigsty.io/#/pig/
+  pig repo add -ru                 # add all repo and update cache (brute but effective)
+  pig ext add pg17                 # install optional postgresql 17 package
+  pig ext list duck                # search extension in catalog
+  pig ext scan -v 17               # scan installed extension for pg 17
+  pig ext add pg_duckdb            # install certain postgresql extension
+	`,
 	Example: `
-  # info
   pig ext list    [query]      # list & search extension      
   pig ext info    [ext...]     # get information of a specific extension
   pig ext status  [-v]         # show installed extension and pg status
-
-  # admin
   pig ext add     [ext...]     # install extension for current pg version
   pig ext rm      [ext...]     # remove extension for current pg version
   pig ext update  [ext...]     # update extension to the latest version
-
-  # extra
   pig ext import  [ext...]     # download extension to local repo
   pig ext link    [ext...]     # link postgres installation to path
   pig ext build   [ext...]     # setup building env for extension
