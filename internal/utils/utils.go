@@ -20,6 +20,18 @@ var (
 	TrySudo = false
 )
 
+// Command runs a command with current user
+func Command(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no command to run")
+	}
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // ShellCommand runs a command without sudo
 func ShellCommand(args []string) error {
 	if len(args) == 0 {

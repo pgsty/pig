@@ -27,12 +27,12 @@ func UpdatePig(pigVer, region string) error {
 	// Fetch the latest version if not specified
 	if pigVer == "" {
 		pigVer, err = getLatestPigVersion(region)
-		if err != nil || !isValidVersion(pigVer) {
+		if err != nil || !ValidVersion(pigVer) {
 			return fmt.Errorf("failed to fetch latest version: %v", err)
 		}
 		logrus.Infof("get latest pig version: %s", pigVer)
 	} else {
-		if !isValidVersion(pigVer) {
+		if !ValidVersion(pigVer) {
 			return fmt.Errorf("invalid pig version given: %s", pigVer)
 		}
 		logrus.Infof("update pig to desired version %s", pigVer)
@@ -144,8 +144,8 @@ func downloadFile(srcURL, destPath string) error {
 	return nil
 }
 
-func isValidVersion(version string) bool {
-	re := regexp.MustCompile(`^\d+\.\d+\.\d+(?:-(?:a|b|c|alpha|beta|rc)\d+)?$`)
+func ValidVersion(version string) bool {
+	re := regexp.MustCompile(`^v?\d+\.\d+\.\d+(?:-(?:a|b|c|alpha|beta|rc)\d+)?$`)
 	return re.MatchString(version)
 }
 
