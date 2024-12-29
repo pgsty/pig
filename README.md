@@ -383,7 +383,19 @@ repo_modules:   # Available Modules: 15
   - local     : pigsty-local
 ```
 
-**Self-Update**
+**Install Pigsty**
+
+The **pig** can also be used as a cli tool for [Pigsty](https://pigsty.io) - the battery-include free PostgreSQL RDS
+
+```bash
+pig sty init     # install embed pigsty to ~/pigsty 
+pig sty boot     # install ansible and other pre-deps 
+pig sty conf     # auto-generate pigsty.yml config file
+pig sty install  # run the install.yml playbook
+```
+
+You can use the `pig sty` subcommand to bootstrap pigsty on current node.
+
 
 **Self-Updating**
 
