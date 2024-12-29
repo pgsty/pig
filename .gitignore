@@ -7,6 +7,4 @@ bin/dist
 tmp/
 dist/
 pig
-cli/install/assets/
-cli/pgext/assets/
 .DS_Store
