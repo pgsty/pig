@@ -28,9 +28,9 @@ var rootCmd = &cobra.Command{
 	Long:  `pig - the Missing Linux Package Manager for PostgreSQL and CLI tool for Pigsty`,
 	Example: `
   # get started: check https://github.com/pgsty/pig for details  
-  pig repo add -ru      # overwrite existing repo & update cache
-  pig ext  add pg17     # install optional postgresql 17 package
-  pig ext  add vector   # install certain postgresql extension
+  pig repo add -ru        # overwrite existing repo & update cache
+  pig ext  add pg17       # install optional postgresql 17 package
+  pig ext  add pg_duckdb  # install certain postgresql extension
 
   pig repo : add | rm | update | list | info | status | create | boot | cache
   pig ext  : add | rm | update | list | info | status | import | link | build

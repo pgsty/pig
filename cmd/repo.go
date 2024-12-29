@@ -57,7 +57,6 @@ var repoListCmd = &cobra.Command{
 	Example: `
   pig repo list                # list available repos on current system
   pig repo list all            # list all unfiltered repo raw data
-  pig repo list update         # get updated repo data to ~/pig/repo.yml (TBD)
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {

@@ -23,8 +23,8 @@ var (
 // installCmd represents the installation command
 var installCmd = &cobra.Command{
 	Use:     "install",
-	Short:   "Install Pigsty Software",
-	Aliases: []string{"init", "i"},
+	Short:   "Install Pigsty",
+	Aliases: []string{},
 	GroupID: "pigsty",
 	Long: `
 Description:
@@ -80,6 +80,7 @@ Examples:
 		if err != nil {
 			logrus.Errorf("failed to install pigsty src %s: %v", version, err)
 		}
+		logrus.Infof("proceed with pig boot & pig conf")
 		return nil
 	},
 }

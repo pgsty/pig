@@ -32,7 +32,7 @@ var configureCmd = &cobra.Command{
 pig configure (alias: c|conf)
   [-c|--conf <confname>   [meta|dual|trio|full|prod]
   [-i|--ip <ip>]          # primary IP address (skip with -s)
-  [-v|--version <pgver>   [17|16|15|14|13|12]
+  [-v|--version <pgver>   [17|16|15|14|13]
   [-r|--region <region>   [default|china|europe]
   [-s|--skip]             # skip IP address probing
   [-x|--proxy]            # write proxy env from environment

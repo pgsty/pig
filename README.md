@@ -104,24 +104,40 @@ sudo yum makecache; sudo yum install -y pig
 
 ## Advanced Usage
 
+**Environment Status**
+
+```bash
+pig status                       # show os & pg status
+pig repo status                  # show upstream repo status
+pig ext  status                  # show extension status 
+```
+
 **Extension Management**
 
 ```bash
-pig ext list                 # list & search extension      
+pig ext list    [query]      # list & search extension      
 pig ext info    [ext...]     # get information of a specific extension
-pig ext install [ext...]     # install extension for current pg version
-pig ext remove  [ext...]     # remove extension for current pg version
+pig ext status  [-v]         # show installed extension and pg status
+pig ext add     [ext...]     # install extension for current pg version
+pig ext rm      [ext...]     # remove extension for current pg version
 pig ext update  [ext...]     # update extension to the latest version
-pig ext status               # show installed extension and pg status
+pig ext import  [ext...]     # download extension to local repo
+pig ext link    [ext...]     # link postgres installation to path
+pig ext build   [ext...]     # setup building env for extension
 ```
 
 **Repo Management**
 
 ```bash
-pig repo add                 # add all necessary repo (pgdg + pigsty + node)
-pig repo rm                  # remove yum/atp repo (move existing repo to backup dir)  
-pig repo list                # list current system repo dir and active repos  
-pig repo update              # update yum/apt repo cache (apt update or dnf makecache)
+pig repo list                    # available repo list             (info)
+pig repo info   [repo|module...] # show repo info                  (info)
+pig repo status                  # show current repo status        (info)
+pig repo add    [repo|module...] # add repo and modules            (root)
+pig repo rm     [repo|module...] # remove repo & modules           (root)
+pig repo update                  # update repo pkg cache           (root)
+pig repo create                  # create repo on current system   (root)
+pig repo boot                    # boot repo from offline package  (root)
+pig repo cache                   # cache repo as offline package   (root)
 ```
 
 **Radical Repo Admin**
@@ -207,7 +223,6 @@ or passing any `pg_config` path for custom installation.
 pig ext install pg_duckdb -v 16     # install the extension for pg16
 pig ext install pg_duckdb -p /usr/lib/postgresql/17/bin/pg_config    # specify a pg17 pg_config  
 ```
-
 
 **Install a specific Version**
 
@@ -314,7 +329,63 @@ $ pig ext info pg_duckdb
 ╰────────────────────────────────────────────────────────────────────────────╯
 ```
 
+**List Repo**
+
+```bash
+os_environment: {code: el9, arch: amd64, type: rpm, major: 9}
+repo_upstream:  # Available Repo: 31
+  - { name: pigsty-local   ,description: 'Pigsty Local'       ,module: local    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'file:///www/pigsty' }
+  - { name: pigsty-infra   ,description: 'Pigsty INFRA'       ,module: infra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.pigsty.io/yum/infra/$basearch' }
+  - { name: pigsty-pgsql   ,description: 'Pigsty PGSQL'       ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.pigsty.io/yum/pgsql/el$releasever.$basearch' }
+  - { name: nginx          ,description: 'Nginx Repo'         ,module: infra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://nginx.org/packages/rhel/$releasever/$basearch/' }
+  - { name: baseos         ,description: 'EL 8+ BaseOS'       ,module: node     ,releases: [8,9]            ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/' }
+  - { name: appstream      ,description: 'EL 8+ AppStream'    ,module: node     ,releases: [8,9]            ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/AppStream/$basearch/os/' }
+  - { name: extras         ,description: 'EL 8+ Extras'       ,module: node     ,releases: [8,9]            ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/extras/$basearch/os/' }
+  - { name: crb            ,description: 'EL 9 CRB'           ,module: node     ,releases: [9]              ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/CRB/$basearch/os/' }
+  - { name: epel           ,description: 'EL 8+ EPEL'         ,module: node     ,releases: [8,9]            ,arch: [x86_64, aarch64]  ,baseurl: 'http://download.fedoraproject.org/pub/epel/$releasever/Everything/$basearch/' }
+  - { name: pgdg-common    ,description: 'PostgreSQL Common'  ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/common/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg-el9fix    ,description: 'PostgreSQL EL9FIX'  ,module: pgsql    ,releases: [9]              ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/common/pgdg-rocky9-sysupdates/redhat/rhel-9-x86_64/' }
+  - { name: pgdg12         ,description: 'PostgreSQL 12'      ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/12/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg13         ,description: 'PostgreSQL 13'      ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/13/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg14         ,description: 'PostgreSQL 14'      ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/14/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg15         ,description: 'PostgreSQL 15'      ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/15/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg16         ,description: 'PostgreSQL 16'      ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/16/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg17         ,description: 'PostgreSQL 17'      ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/17/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg-extras    ,description: 'PostgreSQL Extra'   ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/common/pgdg-rhel$releasever-extras/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg12-nonfree ,description: 'PostgreSQL 12+'     ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/12/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg13-nonfree ,description: 'PostgreSQL 13+'     ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/13/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg14-nonfree ,description: 'PostgreSQL 14+'     ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/14/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg15-nonfree ,description: 'PostgreSQL 15+'     ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/15/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg16-nonfree ,description: 'PostgreSQL 16+'     ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/16/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg17-nonfree ,description: 'PostgreSQL 17+'     ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64]           ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/17/redhat/rhel-$releasever-$basearch' }
+  - { name: timescaledb    ,description: 'TimescaleDB'        ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://packagecloud.io/timescale/timescaledb/el/$releasever/$basearch' }
+  - { name: docker-ce      ,description: 'Docker CE'          ,module: docker   ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.docker.com/linux/centos/$releasever/$basearch/stable' }
+  - { name: kubernetes     ,description: 'Kubernetes'         ,module: kube     ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://pkgs.k8s.io/core:/stable:/v1.31/rpm/' }
+  - { name: wiltondb       ,description: 'WiltonDB'           ,module: mssql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.copr.fedorainfracloud.org/results/wiltondb/wiltondb/epel-$releasever-$basearch/' }
+  - { name: ivorysql       ,description: 'IvorySQL'           ,module: ivory    ,releases: [7,8,9]          ,arch: [x86_64]           ,baseurl: 'https://repo.pigsty.io/yum/ivory/el$releasever.$basearch' }
+  - { name: mysql          ,description: 'MySQL'              ,module: mysql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.mysql.com/yum/mysql-8.0-community/el/$releasever/$basearch/' }
+  - { name: grafana        ,description: 'Grafana'            ,module: grafana  ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://rpm.grafana.com' }
+repo_modules:   # Available Modules: 15
+  - all       : pigsty-infra, pigsty-pgsql, pgdg-common, pgdg-el8fix, pgdg-el9fix, pgdg17, pgdg16, pgdg15, pgdg14, pgdg13, baseos, appstream, extras, powertools, crb, epel, base, updates, security, backports
+  - pigsty    : pigsty-infra, pigsty-pgsql
+  - pgdg      : pgdg-common, pgdg-el8fix, pgdg-el9fix, pgdg17, pgdg16, pgdg15, pgdg14, pgdg13
+  - node      : baseos, appstream, extras, powertools, crb, epel, base, updates, security, backports
+  - infra     : pigsty-infra, nginx
+  - pgsql     : pigsty-pgsql, pgdg-common, pgdg-el8fix, pgdg-el9fix, pgdg12, pgdg13, pgdg14, pgdg15, pgdg16, pgdg17, pgdg
+  - extra     : pgdg-extras, pgdg12-nonfree, pgdg13-nonfree, pgdg14-nonfree, pgdg15-nonfree, pgdg16-nonfree, pgdg17-nonfree, timescaledb, citus
+  - mssql     : wiltondb
+  - mysql     : mysql
+  - docker    : docker-ce
+  - kube      : kubernetes
+  - grafana   : grafana
+  - pgml      : pgml
+  - ivory     : ivorysql
+  - local     : pigsty-local
+```
+
 **Self-Update**
+
+**Self-Updating**
 
 To update pig itself to the latest version, you can use the following command:
 
