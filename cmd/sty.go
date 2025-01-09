@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"pig/cli/get"
-	"pig/cli/install"
+	"pig/cli/sty"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"strings"
@@ -80,7 +80,7 @@ pig sty init
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if pigstyVersion == "" {
 			logrus.Debugf("install embedded pigsty %s to %s with force=%v", config.PigstyVersion, pigstyInitPath, pigstyInitForce)
-			err := install.InstallPigsty(nil, pigstyInitPath, pigstyInitForce)
+			err := sty.InstallPigsty(nil, pigstyInitPath, pigstyInitForce)
 			if err != nil {
 				logrus.Errorf("failed to install pigsty: %v", err)
 			}
@@ -108,12 +108,12 @@ pig sty init
 		}
 
 		// downloaded, then extract & install it
-		srcTarball, err := install.LoadPigstySrc(filepath.Join(pigstyDownloadDir, fmt.Sprintf("pigsty-%s.tgz", pigstyVersion)))
+		srcTarball, err := sty.LoadPigstySrc(filepath.Join(pigstyDownloadDir, fmt.Sprintf("pigsty-%s.tgz", pigstyVersion)))
 		if err != nil {
 			logrus.Errorf("failed to load pigsty src %s: %v", pigstyVersion, err)
 			os.Exit(3)
 		}
-		err = install.InstallPigsty(srcTarball, pigstyInitPath, pigstyInitForce)
+		err = sty.InstallPigsty(srcTarball, pigstyInitPath, pigstyInitForce)
 		if err != nil {
 			logrus.Errorf("failed to install pigsty src %s: %v", pigstyVersion, err)
 		}
@@ -228,7 +228,10 @@ Check https://pigsty.io/docs/setup/install/#configure for details
 			cmdArgs = append(cmdArgs, "-p")
 		}
 		cmdArgs = append(cmdArgs, args...)
-		os.Chdir(config.PigstyHome)
+		if err := os.Chdir(config.PigstyHome); err != nil {
+			logrus.Errorf("failed to change directory to %s: %v", config.PigstyHome, err)
+		}
+
 		logrus.Infof("configure with: %s", strings.Join(cmdArgs, " "))
 		return utils.ShellCommand(cmdArgs)
 	},

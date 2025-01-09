@@ -1,14 +1,15 @@
-package install
+package sty
 
 import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"embed"
+	_ "embed"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"pig/cli/license"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -17,11 +18,10 @@ import (
 //go:embed assets/pigsty-v3.2.0.tgz
 var embeddedTarball []byte
 
-const DefaultDir = "~/pigsty"
+//go:embed assets/EULA.md
+var embeddedEULA []byte
 
-func dummy() {
-	_ = embed.FS{}
-}
+const DefaultDir = "~/pigsty"
 
 // InstallPigsty installs pigsty to the specified directory.
 // If targetDir is empty, it defaults to ~/pigsty.
@@ -54,12 +54,49 @@ func InstallPigsty(srcTarball []byte, targetDir string, overwrite bool) error {
 		return fmt.Errorf("failed to create target directory %s: %v", targetDir, err)
 	}
 
+	// if a valid license is found, goes to pro mode, ask user to agree the EULA
+	if license.Manager.Valid {
+		// fmt.Println("------------------------------------------------------------------------------")
+		fmt.Println("##############################################################################")
+		fmt.Println(string(embeddedEULA))
+		fmt.Println("##############################################################################")
+
+		logrus.Warnf("Using the pigsty pro edition requires your consent to the EULA")
+		fmt.Printf("(answer by input 'yes' or 'no')> ")
+		var response string
+		fmt.Scanln(&response)
+		response = strings.ToLower(strings.TrimSpace(response))
+		switch strings.ToLower(response) {
+		case "no", "n", "nay", "off", "false":
+			logrus.Errorf("Installation aborted due to EULA rejection.")
+			logrus.Warnf("Consider using the AGPLv3 OSS version instead (remove the license file)")
+			return fmt.Errorf("installation aborted due to EULA rejection")
+		case "yes", "y", "ok", "true":
+			logrus.Infof("EULA accepted, continue pigsty pro installation")
+		default:
+			logrus.Errorf("Invalid response: %s", response)
+			return fmt.Errorf("invalid response to EULA inquiry")
+		}
+	}
+
 	// Extract content to target directory
 	if err := extractPigsty(srcTarball, targetDir); err != nil {
 		return fmt.Errorf("failed to extract pigsty: %v", err)
 	}
 
+	if license.Manager.Valid {
+		licensePath := filepath.Join(targetDir, "EULA.md")
+		if err := os.WriteFile(licensePath, embeddedEULA, 0644); err != nil {
+			return fmt.Errorf("failed to write EULA file: %v", err)
+		}
+		logrus.Infof("the EULA is generated at %s", licensePath)
+	}
+
 	logrus.Infof("Pigsty installed @ %s", targetDir)
+	logrus.Infof("pig sty boot   # install ansible and prepare offline pkg")
+	logrus.Infof("pig sty conf    # configure pigsty and generate config")
+	logrus.Infof("pig sty install # install & provisioning env (DANGEROUS!)")
+
 	return nil
 }
 
