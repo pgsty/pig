@@ -125,9 +125,7 @@ func (e *Extension) PackageName(pgVer int) string {
 			return strings.Replace(e.DebPkg, "$v", verStr, 1)
 		}
 	case config.DistroMAC:
-		if e.Repo != "" {
-			return strings.Replace(e.Repo, "$v", verStr, 1)
-		}
+		return ""
 	}
 	return ""
 }

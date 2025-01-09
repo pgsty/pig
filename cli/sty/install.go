@@ -59,10 +59,10 @@ func InstallPigsty(srcTarball []byte, targetDir string, overwrite bool) error {
 		// fmt.Println("------------------------------------------------------------------------------")
 		fmt.Println("##############################################################################")
 		fmt.Println(string(embeddedEULA))
-		fmt.Println("##############################################################################")
-
-		logrus.Warnf("Using the pigsty pro edition requires your consent to the EULA")
-		fmt.Printf("(answer by input 'yes' or 'no')> ")
+		fmt.Println("##############################################################################\n\n")
+		logrus.Warnf("To proceed with the installation of Pigsty Pro Edition, you must agree to the End User License Agreement (EULA).")
+		logrus.Infof("Do you accept the terms of the EULA? Please type 'yes' to accept or 'no' to decline:")
+		fmt.Printf("> ")
 		var response string
 		fmt.Scanln(&response)
 		response = strings.ToLower(strings.TrimSpace(response))
@@ -147,7 +147,7 @@ func extractPigsty(data []byte, dst string) error {
 	return nil
 }
 
-// LoadPigsty loads pigsty source tarball from given path and returns the byte array
+// LoadPigstySrc loads pigsty source tarball from given path and returns the byte array
 func LoadPigstySrc(path string) ([]byte, error) {
 	// Open and read the file
 	f, err := os.Open(path)
