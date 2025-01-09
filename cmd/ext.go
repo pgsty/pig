@@ -29,11 +29,11 @@ var extCmd = &cobra.Command{
 	Long: `pig ext - Manage PostgreSQL Extensions
 
   Get Started: https://ext.pigsty.io/#/pig/
-  pig repo add -ru                 # add all repo and update cache (brute but effective)
-  pig ext add pg17                 # install optional postgresql 17 package
-  pig ext list duck                # search extension in catalog
-  pig ext scan -v 17               # scan installed extension for pg 17
-  pig ext add pg_duckdb            # install certain postgresql extension
+  pig repo add -ru             # add all repo and update cache (brute but effective)
+  pig ext add pg17             # install optional postgresql 17 package
+  pig ext list duck            # search extension in catalog
+  pig ext scan -v 17           # scan installed extension for pg 17
+  pig ext add pg_duckdb        # install certain postgresql extension
 	`,
 	Example: `
   pig ext list    [query]      # list & search extension      
@@ -45,6 +45,7 @@ var extCmd = &cobra.Command{
   pig ext import  [ext...]     # download extension to local repo
   pig ext link    [ext...]     # link postgres installation to path
   pig ext build   [ext...]     # setup building env for extension
+  pig ext upgrade              # upgrade to the latest extension catalog
 `, PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if err := initAll(); err != nil {
 			return err
@@ -188,7 +189,7 @@ var extRmCmd = &cobra.Command{
 var extUpdateCmd = &cobra.Command{
 	Use:     "update",
 	Short:   "update installed extensions for current pg version",
-	Aliases: []string{"u", "upgrade"},
+	Aliases: []string{"u", "upd"},
 	Example: `
 Description:
   pig ext update                     # update all installed extensions
@@ -260,6 +261,16 @@ var extBuildCmd = &cobra.Command{
 	},
 }
 
+var extUpgradeCmd = &cobra.Command{
+	Use:          "upgrade",
+	Short:        "upgrade extension catalog to the latest version",
+	SilenceUsage: true,
+	Aliases:      []string{"ug"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return ext.UpgradeCatalog()
+	},
+}
+
 // extProbeVersion returns the PostgreSQL version to use
 func extProbeVersion() int {
 	// check args
@@ -328,4 +339,5 @@ func init() {
 	extCmd.AddCommand(extImportCmd)
 	extCmd.AddCommand(extLinkCmd)
 	extCmd.AddCommand(extBuildCmd)
+	extCmd.AddCommand(extUpgradeCmd)
 }
