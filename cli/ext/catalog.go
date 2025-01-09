@@ -33,6 +33,11 @@ type ExtensionCatalog struct {
 	AliasMap    map[string]string
 }
 
+// ReloadCatalog reloads the extension catalog from the default data path
+func ReloadCatalog(paths ...string) {
+	Catalog, _ = NewExtensionCatalog(paths...)
+}
+
 // NewExtensionCatalog creates a new ExtensionCatalog, using embedded data if any error occurs
 func NewExtensionCatalog(paths ...string) (*ExtensionCatalog, error) {
 	ec := &ExtensionCatalog{DataPath: "embedded"}
@@ -44,8 +49,10 @@ func NewExtensionCatalog(paths ...string) (*ExtensionCatalog, error) {
 			paths = append(paths, defaultCsvPath)
 		}
 	}
+
 	for _, path := range paths {
 		if fileData, err := os.ReadFile(path); err == nil {
+			logrus.Debugf("check extension csv data file: %s", path)
 			data = fileData
 			ec.DataPath = path
 			break

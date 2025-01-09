@@ -45,7 +45,13 @@ var extCmd = &cobra.Command{
   pig ext import  [ext...]     # download extension to local repo
   pig ext link    [ext...]     # link postgres installation to path
   pig ext build   [ext...]     # setup building env for extension
-`,
+`, PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := initAll(); err != nil {
+			return err
+		}
+		ext.ReloadCatalog()
+		return nil
+	},
 }
 
 var extListCmd = &cobra.Command{
