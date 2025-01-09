@@ -37,7 +37,7 @@ var (
 )
 
 const (
-	PigVersion     = "0.1.0"
+	PigVersion     = "0.1.1"
 	PigstyVersion  = "3.2.0"
 	PigstyGPGCheck = false
 	DistroEL       = "rpm"
