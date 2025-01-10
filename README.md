@@ -3,7 +3,7 @@
 [![Webite: pigsty.io](https://img.shields.io/badge/website-ext.pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pigsty.io)
 [![Version: v0.1.1](https://img.shields.io/badge/version-v0.1.1-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.1.1)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 350](https://img.shields.io/badge/extensions-350-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pigsty.io/#/list)
+[![Extensions: 351](https://img.shields.io/badge/extensions-350-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pigsty.io/#/list)
 
 [**pig**](https://ext.pigsty.io/#/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
@@ -406,13 +406,13 @@ You can use the `pig sty` subcommand to bootstrap pigsty on current node.
 
 Here are some bad cases and limitation for above Linux distros:
 
-- [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) `el8:all:all`
-- [`h3`](https://ext.pigsty.io/#/h3): `el8.amd.17`
-- [`pljava`](https://ext.pigsty.io/#/pljava): `el8:all:*`
+- [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) `el8:*:*`
+- [`pljava`](https://ext.pigsty.io/#/pljava): `el8:*:*`
 - [`pllua`](https://ext.pigsty.io/#/pllua): `el8:arm:13,14,15`
+- [`h3`](https://ext.pigsty.io/#/h3): `el8.amd.pg17`
 - [`jdbc_fdw`](https://ext.pigsty.io/#/jdbc_fdw): `el:arm:*`
-- [`pg_partman`](https://ext.pigsty.io/#/pg_partman): `u24:all:13`
-- [`wiltondb`](https://ext.pigsty.io/#/wiltondb): `d12:all:*`
+- [`pg_partman`](https://ext.pigsty.io/#/pg_partman): `u24:*:13`
+- [`wiltondb`](https://ext.pigsty.io/#/wiltondb): `d12:*:*`
 
 
 --------

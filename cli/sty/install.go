@@ -92,8 +92,8 @@ func InstallPigsty(srcTarball []byte, targetDir string, overwrite bool) error {
 		logrus.Infof("the EULA is generated at %s", licensePath)
 	}
 
-	logrus.Infof("Pigsty installed @ %s", targetDir)
-	logrus.Infof("pig sty boot   # install ansible and prepare offline pkg")
+	logrus.Infof("pigsty installed @ %s", targetDir)
+	logrus.Infof("pig sty boot    # install ansible and prepare offline pkg")
 	logrus.Infof("pig sty conf    # configure pigsty and generate config")
 	logrus.Infof("pig sty install # install & provisioning env (DANGEROUS!)")
 
