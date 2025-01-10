@@ -111,7 +111,7 @@ func init() {
 		repoCmd,
 		extCmd,
 		styCmd,
-		infoCmd,
+		statusCmd,
 		licenseCmd,
 		versionCmd,
 		updateCmd,

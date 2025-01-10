@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var infoCmd = &cobra.Command{
+var statusCmd = &cobra.Command{
 	Use:     "status",
-	Aliases: []string{"info"},
+	Aliases: []string{"st", "info"},
 	Short:   "Show Environment Status",
 	Long: `Display current pigsty status info, including:
     - Configuration
