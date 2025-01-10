@@ -13,10 +13,11 @@ Install PostgreSQL 13-17 along with [350 extensions](https://ext.pigsty.io/#/lis
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
-| Entry / Filter | All | PGDG | PIGSTY | CONTRIB | MISC | MISS | PG17 | PG16 | PG15 | PG14 | PG13 |
-|:--------------:|:---:|:----:|:------:|:-------:|:----:|:----:|:----:|:----:|:----:|:----:|:----:|
-| RPM Extension  | 336 | 116  |  147   |   69    |  4   |  14  | 312  | 332  | 335  | 323  | 305  |
-| DEB Extension  | 337 | 103  |  161   |   69    |  4   |  13  | 318  | 332  | 335  | 328  | 309  |
+| Entry / Filter | All | PGDG | PIGSTY | PG17 | PG16 | PG15 | PG14 | PG13 |
+|:--------------:|:---:|:----:|:------:|:----:|:----:|:----:|:----:|:----:|
+| RPM Extension  | 345 | 116  |  156   | 321  | 340  | 343  | 331  | 313  |
+| DEB Extension  | 338 | 103  |  162   | 319  | 333  | 336  | 329  | 310  |
+
 
 --------
 
@@ -405,13 +406,13 @@ You can use the `pig sty` subcommand to bootstrap pigsty on current node.
 
 Here are some bad cases and limitation for above Linux distros:
 
-- [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) `el8:*:*`
-- [`h3`](https://ext.pigsty.io/#/h3): `el8.amd.pg17`
-- [`pljava`](https://ext.pigsty.io/#/pljava): `el8:*:*`
+- [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) `el8:all:all`
+- [`h3`](https://ext.pigsty.io/#/h3): `el8.amd.17`
+- [`pljava`](https://ext.pigsty.io/#/pljava): `el8:all:*`
 - [`pllua`](https://ext.pigsty.io/#/pllua): `el8:arm:13,14,15`
 - [`jdbc_fdw`](https://ext.pigsty.io/#/jdbc_fdw): `el:arm:*`
-- [`pg_partman`](https://ext.pigsty.io/#/pg_partman) and [`timeseries`](https://ext.pigsty.io/#/timeseries): `u24:*:13`
-- [`wiltondb`](https://ext.pigsty.io/#/wiltondb): `d12:*:*`
+- [`pg_partman`](https://ext.pigsty.io/#/pg_partman): `u24:all:13`
+- [`wiltondb`](https://ext.pigsty.io/#/wiltondb): `d12:all:*`
 
 
 --------
