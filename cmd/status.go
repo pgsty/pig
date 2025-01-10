@@ -12,9 +12,9 @@ import (
 )
 
 var infoCmd = &cobra.Command{
-	Use:     "info",
-	Aliases: []string{"i"},
-	Short:   "Show Environment Info",
+	Use:     "status",
+	Aliases: []string{"info"},
+	Short:   "Show Environment Status",
 	Long: `Display current pigsty status info, including:
     - Configuration
     - OS Environment

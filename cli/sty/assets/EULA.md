@@ -258,9 +258,9 @@ To the fullest extent permitted by law:
    all use and destroy or delete all copies of the Licensed Software.
 
 6.3 Survival
-Provisions regarding Intellectual Property & Confidentiality (Section 4),
-Warranties & Liability (Section 5), and any clauses which by nature should
-continue, shall survive the termination of this EULA.
+ - Provisions regarding Intellectual Property & Confidentiality (Section 4),
+   Warranties & Liability (Section 5), and any clauses which by nature should
+   continue, shall survive the termination of this EULA.
 
 ------------------------------------------------------------------------------
 
@@ -287,9 +287,7 @@ continue, shall survive the termination of this EULA.
 
 8.2 Amendments
  - The Licensor may reasonably amend this EULA for business or compliance
-   reasons and announce such amendments via its code repository or official
-   website. If an amendment would materially adversely affect the User’s
-   rights, the Licensor shall provide prior notice or consult with the User.
+   reasons and announce such amendments via its code repository or website.
  - The User’s continued use of the Licensed Software after the amendment’s
    effective date constitutes acceptance of the revised terms. If the User
    disagrees, the User must cease using the Licensed Software immediately.
