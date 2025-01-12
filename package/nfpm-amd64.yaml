@@ -1,7 +1,7 @@
 name: "pig"
 arch: "amd64"
 platform: "linux"
-version: "v0.1.1"
+version: "v0.1.2"
 version_schema: semver
 maintainer: Ruohang Feng <rh@vonng.com>
 description: |
