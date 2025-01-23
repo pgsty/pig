@@ -1,13 +1,13 @@
 # PIG - Postgres Install Genius
 
 [![Webite: pigsty.io](https://img.shields.io/badge/website-ext.pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pigsty.io)
-[![Version: v0.1.2](https://img.shields.io/badge/version-v0.1.2-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.1.2)
+[![Version: v0.1.3](https://img.shields.io/badge/version-v0.1.3-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.1.3)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 351](https://img.shields.io/badge/extensions-350-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pigsty.io/#/list)
+[![Extensions: 386](https://img.shields.io/badge/extensions-350-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pigsty.io/#/list)
 
 [**pig**](https://ext.pigsty.io/#/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13-17 along with [351 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13-17 along with [386 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) with native OS package manager
 
 [![pig](https://github.com/user-attachments/assets/e377ed91-37a9-4c27-8854-034c81fa1b29)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
@@ -413,6 +413,11 @@ Here are some bad cases and limitation for above Linux distros:
 - [`jdbc_fdw`](https://ext.pigsty.io/#/jdbc_fdw): `el:arm:*`
 - [`pg_partman`](https://ext.pigsty.io/#/pg_partman): `u24:*:13`
 - [`wiltondb`](https://ext.pigsty.io/#/wiltondb): `d12:*:*`
+
+- `citus` and `hydra` are mutually exclusive
+- `pg_duckdb` and `pg_mooncake` are mutually exclusive
+- `pg_duckdb` will invalidate `duckdb_fdw`
+- `pg_anon` the new 2.0 rust version is conflict with previous 1.x C version
 
 
 --------
