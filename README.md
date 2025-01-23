@@ -13,10 +13,12 @@ Install PostgreSQL 13-17 along with [386 extensions](https://ext.pigsty.io/#/lis
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
-| Entry / Filter | All | PGDG | PIGSTY | PG17 | PG16 | PG15 | PG14 | PG13 |
-|:--------------:|:---:|:----:|:------:|:----:|:----:|:----:|:----:|:----:|
-| RPM Extension  | 345 | 116  |  156   | 321  | 340  | 343  | 331  | 313  |
-| DEB Extension  | 338 | 103  |  162   | 319  | 333  | 336  | 329  | 310  |
+|Entry / Filter | All | PGDG | PIGSTY | CONTRIB | MISC | MISS | PG17 | PG16 | PG15 | PG14 | PG13|
+|:----:|:----:|:----:|:----:|:----:|:----:|:----:|:----:|:----:|:----:|:----:|:----:|
+| RPM Extension | 380 | 114 | 193 | 69 | 4 | 6 | 356 | 375 | 378 | 366 | 347 |
+| DEB Extension | 373 | 103 | 197 | 69 | 4 | 13 | 354 | 368 | 371 | 364 | 344 |
+
+[![PostgreSQL Extension Ecosystem](https://pigsty.io/img/pigsty/ecosystem.jpg)](https://medium.com/@fengruohang/postgres-is-eating-the-database-world-157c204dcfc4)
 
 
 --------
@@ -375,7 +377,7 @@ repo_modules:   # Available Modules: 15
 
 **Pigsty Management**
 
-The **pig** can also be used as a cli tool for [Pigsty](https://pigsty.io) - the battery-include free PostgreSQL RDS.
+The **pig** can also be used as a cli tool for [Pigsty](https://www.pigsty.io) - the battery-include free PostgreSQL RDS.
 Which brings HA, PITR, Monitoring, IaC, and all the extensions to your PostgreSQL cluster.
 
 ```bash
@@ -413,7 +415,6 @@ Here are some bad cases and limitation for above Linux distros:
 - [`jdbc_fdw`](https://ext.pigsty.io/#/jdbc_fdw): `el:arm:*`
 - [`pg_partman`](https://ext.pigsty.io/#/pg_partman): `u24:*:13`
 - [`wiltondb`](https://ext.pigsty.io/#/wiltondb): `d12:*:*`
-
 - `citus` and `hydra` are mutually exclusive
 - `pg_duckdb` and `pg_mooncake` are mutually exclusive
 - `pg_duckdb` will invalidate `duckdb_fdw`
