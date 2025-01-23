@@ -2,21 +2,17 @@
 
 [![Webite: pigsty.io](https://img.shields.io/badge/website-ext.pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pigsty.io)
 [![Version: v0.1.3](https://img.shields.io/badge/version-v0.1.3-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.1.3)
+[![Pigsty: v3.2.1](https://img.shields.io/badge/Pigsty-v3.2.1-slategray?style=flat&logo=cilium&logoColor=white)](https://www.pigsty.io)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 386](https://img.shields.io/badge/extensions-350-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pigsty.io/#/list)
+[![Extensions: 390](https://img.shields.io/badge/extensions-390-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pigsty.io/#/list)
 
 [**pig**](https://ext.pigsty.io/#/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13-17 along with [386 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13-17 along with [390 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) with native OS package manager
 
 [![pig](https://github.com/user-attachments/assets/e377ed91-37a9-4c27-8854-034c81fa1b29)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
-
-|Entry / Filter | All | PGDG | PIGSTY | CONTRIB | MISC | MISS | PG17 | PG16 | PG15 | PG14 | PG13|
-|:----:|:----:|:----:|:----:|:----:|:----:|:----:|:----:|:----:|:----:|:----:|:----:|
-| RPM Extension | 380 | 114 | 193 | 69 | 4 | 6 | 356 | 375 | 378 | 366 | 347 |
-| DEB Extension | 373 | 103 | 197 | 69 | 4 | 13 | 354 | 368 | 371 | 364 | 344 |
 
 [![PostgreSQL Extension Ecosystem](https://pigsty.io/img/pigsty/ecosystem.jpg)](https://medium.com/@fengruohang/postgres-is-eating-the-database-world-157c204dcfc4)
 
