@@ -1,5 +1,5 @@
 /*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
+Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
 */
 package cmd
 

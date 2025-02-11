@@ -2,13 +2,13 @@
 
 [![Webite: pigsty.io](https://img.shields.io/badge/website-ext.pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pigsty.io)
 [![Version: v0.1.3](https://img.shields.io/badge/version-v0.1.3-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.1.3)
-[![Pigsty: v3.2.2](https://img.shields.io/badge/Pigsty-v3.2.2-slategray?style=flat&logo=cilium&logoColor=white)](https://www.pigsty.io)
+[![Pigsty: v3.2.2](https://img.shields.io/badge/Pigsty-v3.2.2-slategray?style=flat&logo=cilium&logoColor=white)](https://pgsty.com)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 390](https://img.shields.io/badge/extensions-390-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pigsty.io/#/list)
 
 [**pig**](https://ext.pigsty.io/#/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13-17 along with [390 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13-17 along with [400 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) with native OS package manager
 
 [![pig](https://github.com/user-attachments/assets/e377ed91-37a9-4c27-8854-034c81fa1b29)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
@@ -414,7 +414,6 @@ Here are some bad cases and limitation for above Linux distros:
 - `citus` and `hydra` are mutually exclusive
 - `pg_duckdb` and `pg_mooncake` are mutually exclusive
 - `pg_duckdb` will invalidate `duckdb_fdw`
-- `pg_anon` the new 2.0 rust version is conflict with previous 1.x C version
 
 
 --------
@@ -424,7 +423,7 @@ Here are some bad cases and limitation for above Linux distros:
 [![Author: RuohangFeng](https://img.shields.io/badge/Author-Ruohang_Feng-steelblue?style=flat)](https://vonng.com/)
 [![About: @Vonng](https://img.shields.io/badge/%40Vonng-steelblue?style=flat)](https://vonng.com/en/)
 [![Mail: rh@vonng.com](https://img.shields.io/badge/rh%40vonng.com-steelblue?style=flat)](mailto:rh@vonng.com)
-[![Copyright: 2018-2024 rh@Vonng.com](https://img.shields.io/badge/Copyright-2024_(rh%40vonng.com)-red?logo=c&color=steelblue)](https://github.com/Vonng)
-[![License: Apache](https://img.shields.io/badge/License-Apaehc--2.0-steelblue?style=flat&logo=opensourceinitiative&logoColor=green)](https://github.com/pgsty/pig/blob/main/LICENSE)
+[![Copyright: 2018-2025 rh@Vonng.com](https://img.shields.io/badge/Copyright-2025_(rh%40vonng.com)-red?logo=c&color=steelblue)](https://github.com/Vonng)
+[![License: Apache](https://img.shields.io/badge/License-Apache--2.0-steelblue?style=flat&logo=opensourceinitiative&logoColor=green)](https://github.com/pgsty/pig/blob/main/LICENSE)
 
 ![pig](https://github.com/user-attachments/assets/17333d0d-a77a-4f6a-8fae-9e3f57fa798e)
