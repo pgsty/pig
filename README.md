@@ -410,11 +410,12 @@ Here are some bad cases and limitation for above Linux distros:
 - [`h3`](https://ext.pigsty.io/#/h3): `el8.amd.pg17`
 - [`jdbc_fdw`](https://ext.pigsty.io/#/jdbc_fdw): `el:arm:*`
 - [`pg_partman`](https://ext.pigsty.io/#/pg_partman): `u24:*:13`
-- [`wiltondb`](https://ext.pigsty.io/#/wiltondb): `d12:*:*`
-- `citus` and `hydra` are mutually exclusive
-- `pg_duckdb` and `pg_mooncake` are mutually exclusive
-- `pg_duckdb` will invalidate `duckdb_fdw`
-
+- [`wiltondb`](https://ext.pigsty.io/#/babelfishpg_common): `d12:*:*`
+- [`citus`](https://ext.pigsty.io/#/citus) and [`hydra`](https://ext.pigsty.io/#/hydra) are mutually exclusive
+- [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) and [`pg_mooncake`](https://ext.pigsty.io/#/pg_mooncake) are mutually exclusive
+- [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) will invalidate [`duckdb_fdw`](https://ext.pigsty.io/#/duckdb_fdw)
+- [`documentdb_core`](https://ext.pigsty.io/#/documentdb_core) is not available on `arm` arch
+- [`vchord`](https://ext.pigsty.io/#/vchord) 0.2+ is not available on `d12/u22` (0.1 available)
 
 --------
 
