@@ -10,7 +10,7 @@
 
 Install PostgreSQL 13-17 along with [400 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) with native OS package manager
 
-[![pig](https://github.com/user-attachments/assets/e377ed91-37a9-4c27-8854-034c81fa1b29)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
+[![pig-meme](https://github.com/user-attachments/assets/6d6e8740-0474-4f9e-8960-a141f90986b9)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
