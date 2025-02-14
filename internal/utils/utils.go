@@ -193,7 +193,7 @@ func PadHeader(str string, length int) string {
 // SudoRunShellScript will run a shell script with sudo
 func SudoRunShellScript(script string) error {
 	// generate tmp file name with timestamp
-	tmpFile := fmt.Sprintf("sciprt-%s.sh", time.Now().Format("20240101120000"))
+	tmpFile := fmt.Sprintf("script-%s.sh", time.Now().Format("20240101120000"))
 	scriptPath := filepath.Join(os.TempDir(), tmpFile)
 	logrus.Debugf("create tmp script: %s", scriptPath)
 
