@@ -44,7 +44,6 @@ var extCmd = &cobra.Command{
   pig ext update  [ext...]     # update extension to the latest version
   pig ext import  [ext...]     # download extension to local repo
   pig ext link    [ext...]     # link postgres installation to path
-  pig ext build   [ext...]     # setup building env for extension
   pig ext upgrade              # upgrade to the latest extension catalog
 `, PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if err := initAll(); err != nil {
@@ -325,9 +324,7 @@ func init() {
 	extAddCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm install")
 	extRmCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm removal")
 	extUpdateCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm update")
-
 	extImportCmd.Flags().StringVarP(&extRepoDir, "repo", "d", "/www/pigsty", "specify repo dir")
-	extBuildCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm installation")
 
 	extCmd.AddCommand(extAddCmd)
 	extCmd.AddCommand(extRmCmd)
