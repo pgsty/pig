@@ -1,6 +1,6 @@
 # PIG - Postgres Install Genius
 
-[![Webite: pigsty.io](https://img.shields.io/badge/website-ext.pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pigsty.io)
+[![Catalog: pigsty.io](https://img.shields.io/badge/catalog-ext.pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pigsty.io)
 [![Version: v0.1.4](https://img.shields.io/badge/version-v0.1.4-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.1.4)
 [![Pigsty: v3.2.2](https://img.shields.io/badge/Pigsty-v3.2.2-slategray?style=flat&logo=cilium&logoColor=white)](https://pgsty.com)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
@@ -9,8 +9,6 @@
 [**pig**](https://ext.pigsty.io/#/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
 Install PostgreSQL 13-17 along with [400 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) with native OS package manager
-
-[![pig-meme](https://github.com/user-attachments/assets/6d6e8740-0474-4f9e-8960-a141f90986b9)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
@@ -417,6 +415,7 @@ Here are some bad cases and limitation for above Linux distros:
 - [`documentdb_core`](https://ext.pigsty.io/#/documentdb_core) is not available on `arm` arch
 - [`vchord`](https://ext.pigsty.io/#/vchord) 0.2+ is not available on `d12/u22` (0.1 available)
 
+
 --------
 
 ## About
@@ -428,3 +427,5 @@ Here are some bad cases and limitation for above Linux distros:
 [![License: Apache](https://img.shields.io/badge/License-Apache--2.0-steelblue?style=flat&logo=opensourceinitiative&logoColor=green)](https://github.com/pgsty/pig/blob/main/LICENSE)
 
 ![pig](https://github.com/user-attachments/assets/17333d0d-a77a-4f6a-8fae-9e3f57fa798e)
+
+[![pig-meme](https://github.com/user-attachments/assets/6d6e8740-0474-4f9e-8960-a141f90986b9)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
