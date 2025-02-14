@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"pig/internal/config"
 	"pig/internal/utils"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -59,5 +60,6 @@ func BuildEnv() error {
 		return fmt.Errorf("unsupported distribution: %s", config.OSType)
 	}
 	installCmds = append(installCmds, buildTools[distro]...)
+	logrus.Infof("install build utils: %s", strings.Join(installCmds, " "))
 	return utils.SudoCommand(installCmds)
 }
