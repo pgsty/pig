@@ -247,19 +247,6 @@ var extLinkCmd = &cobra.Command{
 	},
 }
 
-var extBuildCmd = &cobra.Command{
-	Use:          "build [ext...]",
-	Short:        "setup building env for extension",
-	Aliases:      []string{"b"},
-	SilenceUsage: true,
-	Example: `
-  pig ext build                        # prepare building environment
-`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return ext.BuildEnv()
-	},
-}
-
 var extUpgradeCmd = &cobra.Command{
 	Use:          "upgrade",
 	Short:        "upgrade extension catalog to the latest version",
@@ -335,6 +322,5 @@ func init() {
 	extCmd.AddCommand(extStatusCmd)
 	extCmd.AddCommand(extImportCmd)
 	extCmd.AddCommand(extLinkCmd)
-	extCmd.AddCommand(extBuildCmd)
 	extCmd.AddCommand(extUpgradeCmd)
 }
