@@ -87,7 +87,7 @@ func CreateRepoEL(dir string) error {
 func CreateRepoDEB(dir string) error {
 	logrus.Infof("create %s %s repo in %s", config.OSVendor, config.OSCode, dir)
 
-	// chekc dpkg-scanpackages exists, if not, hint to install it and exit
+	// check dpkg-scanpackages exists, if not, hint to install it and exit
 	if _, err := exec.LookPath("dpkg-scanpackages"); err != nil {
 		return fmt.Errorf("dpkg-scanpackages not found, please install it first: apt install -y dpkg-dev")
 	}
