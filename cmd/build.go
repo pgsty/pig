@@ -25,13 +25,8 @@ var buildCmd = &cobra.Command{
   pig build proxy [user@host:port] # init build proxy (optional)
   pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.12.9)
   pig build spec                   # init build spec repo
-  pig build code  [all|prefix]     # download extension source code
-  pig build deps  [extname...]     # init build dependencies   (TBD)
-  pig build deps  [extname...]     # init build dependencies   (TBD)
-  pig build new   [extname...]     # new extension boilerplate (TBD)
-  pig build ext   [extname...] -v  # build extensions          (TBD)
-  pig build list  [extname...]     # list built extensions     (TBD)
-  pig build pub   [extname...]     # publish extensions        (TBD)
+  pig build get   [all|std|..]     # get ext code tarball with prefixes
+  pig build ext   [extname...]     # build extension
 `,
 }
 
@@ -103,13 +98,23 @@ var buildSpecCmd = &cobra.Command{
 	},
 }
 
-// buildCodeCmd represents the `build code` command
-var buildCodeCmd = &cobra.Command{
-	Use:     "code",
-	Short:   "Download extension source code tarball",
-	Aliases: []string{"c"},
+// buildGetCmd represents the `build get` command
+var buildGetCmd = &cobra.Command{
+	Use:     "get",
+	Short:   "Download source code tarball",
+	Aliases: []string{"get"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.DownloadSourceTarball(args)
+		return build.DownloadCodeTarball(args)
+	},
+}
+
+// buildExtCmd represents the `build ext` command
+var buildExtCmd = &cobra.Command{
+	Use:     "ext",
+	Short:   "Build extension",
+	Aliases: []string{"e"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return build.BuildExtension(args)
 	},
 }
 
@@ -121,5 +126,6 @@ func init() {
 	buildCmd.AddCommand(buildProxyCmd)
 	buildCmd.AddCommand(buildRustCmd)
 	buildCmd.AddCommand(buildSpecCmd)
-	buildCmd.AddCommand(buildCodeCmd)
+	buildCmd.AddCommand(buildGetCmd)
+	buildCmd.AddCommand(buildExtCmd)
 }

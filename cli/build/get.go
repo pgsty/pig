@@ -23,13 +23,29 @@ type downloadTask struct {
 const parallelWorkers = 8
 
 // DownloadExtensions downloads extension source tarballs from repository
-func DownloadSourceTarball(args []string) error {
-	downloadAll := len(args) == 1 && args[0] == "all"
-	prefix := ""
-	if !downloadAll && len(args) == 1 && args[0] != "" {
-		prefix = args[0]
+func DownloadCodeTarball(args []string) error {
+	if len(args) == 0 {
+		// Default to 'std' behavior when no arguments provided
+		args = []string{"std"}
 	}
 
+	// Handle special cases
+	if len(args) == 1 {
+		switch args[0] {
+		case "all":
+			// Download all packages
+			return downloadWithPrefixes([]string{}, true)
+		case "std":
+			// Download standard packages (excluding large ones)
+			return downloadWithPrefixes([]string{}, false)
+		}
+	}
+
+	// Handle multiple prefixes
+	return downloadWithPrefixes(args, false)
+}
+
+func downloadWithPrefixes(prefixes []string, downloadAll bool) error {
 	source := get.NetworkCondition()
 	var baseURL string
 	switch source {
@@ -54,7 +70,7 @@ func DownloadSourceTarball(args []string) error {
 	}
 
 	// Create download tasks
-	tasks := createDownloadTasks(baseURL, tarballDir, packages, downloadAll, prefix)
+	tasks := createDownloadTasks(baseURL, tarballDir, packages, downloadAll, prefixes)
 	if len(tasks) == 0 {
 		logrus.Info("No packages to download")
 		return nil
@@ -91,19 +107,26 @@ func getTarballDir() string {
 	}
 }
 
-func createDownloadTasks(baseURL, tarballDir string, packages []string, downloadAll bool, prefix string) []downloadTask {
+func createDownloadTasks(baseURL, tarballDir string, packages []string, downloadAll bool, prefixes []string) []downloadTask {
 	var tasks []downloadTask
 	skipPrefixes := []string{"pg_duckdb", "pg_mooncake", "omnigres", "plv8"}
 
 	for _, pkg := range packages {
 		if !downloadAll {
-			// If prefix is specified, only download packages with that prefix
-			if prefix != "" {
-				if !strings.HasPrefix(pkg, prefix) {
+			if len(prefixes) > 0 {
+				// Check if package matches any of the provided prefixes
+				matched := false
+				for _, prefix := range prefixes {
+					if strings.HasPrefix(pkg, prefix) {
+						matched = true
+						break
+					}
+				}
+				if !matched {
 					continue
 				}
 			} else {
-				// Otherwise use the default skip logic
+				// Use the default skip logic when no prefixes specified (std mode)
 				skip := false
 				for _, skipPrefix := range skipPrefixes {
 					if strings.HasPrefix(pkg, skipPrefix) {
@@ -120,7 +143,7 @@ func createDownloadTasks(baseURL, tarballDir string, packages []string, download
 
 		srcURL := fmt.Sprintf("%s/%s", baseURL, pkg)
 		dstPath := filepath.Join(tarballDir, pkg)
-		logrus.Infof("scheduling download task %s -> %s", srcURL, dstPath)
+		logrus.Debugf("scheduling download task %s -> %s", srcURL, dstPath)
 		tasks = append(tasks, downloadTask{SrcURL: srcURL, DstPath: dstPath})
 	}
 	return tasks
@@ -162,7 +185,25 @@ func downloadWorker(wg *sync.WaitGroup, taskCh <-chan downloadTask) {
 }
 
 func downloadFile(task downloadTask) error {
-	resp, err := http.Get(task.SrcURL)
+	// Check remote file size first
+	resp, err := http.Head(task.SrcURL)
+	if err != nil {
+		return fmt.Errorf("failed to check remote file: %v", err)
+	}
+	remoteSize := resp.ContentLength
+
+	// Check if local file exists and has the same size
+	if fi, err := os.Stat(task.DstPath); err == nil {
+		localSize := fi.Size()
+		if localSize == remoteSize {
+			logrus.Infof("Downloaded %s: local file exists with same size", task.DstPath)
+			return nil
+		}
+		logrus.Debugf("Size mismatch for %s: local=%d, remote=%d", task.DstPath, localSize, remoteSize)
+	}
+
+	// Download the file
+	resp, err = http.Get(task.SrcURL)
 	if err != nil {
 		return fmt.Errorf("download failed: %v", err)
 	}
@@ -172,16 +213,33 @@ func downloadFile(task downloadTask) error {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	out, err := os.Create(task.DstPath)
+	// Create the file with a temporary name first
+	tmpPath := task.DstPath + ".tmp"
+	out, err := os.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("failed to create file: %v", err)
+		return fmt.Errorf("failed to create temporary file: %v", err)
 	}
-	defer out.Close()
 
-	if _, err = io.Copy(out, resp.Body); err != nil {
+	// Copy the content
+	written, err := io.Copy(out, resp.Body)
+	out.Close() // Close before rename
+	if err != nil {
+		os.Remove(tmpPath) // Clean up on error
 		return fmt.Errorf("failed to save file: %v", err)
 	}
 
-	logrus.Infof("Downloaded %s", task.DstPath)
+	// Verify downloaded size
+	if written != remoteSize {
+		os.Remove(tmpPath)
+		return fmt.Errorf("size mismatch after download: got %d, expected %d", written, remoteSize)
+	}
+
+	// Rename temporary file to final destination
+	if err := os.Rename(tmpPath, task.DstPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temporary file: %v", err)
+	}
+
+	logrus.Infof("Downloaded %s (%d bytes)", task.DstPath, written)
 	return nil
 }
