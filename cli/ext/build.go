@@ -12,27 +12,27 @@ import (
 // essential build tools for different linux distros
 var buildTools = map[string][]string{
 	"el8": {
-		"make", "cmake", "ninja-build", "pkg-config", "git", "lz4", "unzip", "ncdu", "rsync",
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray",
 		"rpmdevtools", "dnf-utils", "pgdg-srpm-macros", "postgresql1*-devel", "postgresql1*-server",
 		"readline-devel", "zlib-devel", "libxml2-devel", "lz4-devel", "libzstd-devel", "krb5-devel",
 	},
 	"el9": {
-		"make", "cmake", "ninja-build", "pkg-config", "git", "lz4", "unzip", "ncdu", "rsync",
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray",
 		"rpmdevtools", "dnf-utils", "pgdg-srpm-macros", "postgresql1*-devel", "postgresql1*-server",
 		"readline-devel", "zlib-devel", "libxml2-devel", "lz4-devel", "libzstd-devel", "krb5-devel",
 	},
 	"d12": {
-		"make", "cmake", "ninja-build", "pkg-config", "git", "lz4", "unzip", "ncdu", "rsync",
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray",
 		"debhelper", "devscripts", "fakeroot", "postgresql-all", "postgresql-server-dev-all",
-		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz·4-dev", "libzstd-dev", "libkrb5-dev",
+		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev",
 	},
 	"u22": {
-		"make", "cmake", "ninja-build", "pkg-config", "git", "lz4", "unzip", "ncdu", "rsync",
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray",
 		"debhelper", "devscripts", "fakeroot", "postgresql-all", "postgresql-server-dev-all",
 		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev",
 	},
 	"u24": {
-		"make", "cmake", "ninja-build", "pkg-config", "git", "lz4", "unzip", "ncdu", "rsync",
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray",
 		"debhelper", "devscripts", "fakeroot", "postgresql-all", "postgresql-server-dev-all",
 		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev",
 	},
