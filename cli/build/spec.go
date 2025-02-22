@@ -3,6 +3,7 @@ package build
 import (
 	"fmt"
 	"os"
+	"path"
 	"pig/internal/config"
 	"pig/internal/utils"
 
@@ -27,8 +28,7 @@ func GetSpecRepo() error {
 }
 
 func SetupELBuildEnv() error {
-	targetDir := config.HomeDir + "/rpm"
-	// check if targetDir exists, skip if exists
+	targetDir := path.Join("/tmp", "rpm")
 	if _, err := os.Stat(targetDir); err == nil {
 		logrus.Infof("rpm repo already exists in %s, skip", targetDir)
 		return nil
