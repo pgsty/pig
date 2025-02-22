@@ -1,14 +1,14 @@
 # PIG - Postgres Install Genius
 
 [![Catalog: pigsty.io](https://img.shields.io/badge/catalog-ext.pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pigsty.io)
-[![Version: v0.2.1](https://img.shields.io/badge/version-v0.2.1-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.2.1)
-[![Pigsty: v3.2.2](https://img.shields.io/badge/Pigsty-v3.2.2-slategray?style=flat&logo=cilium&logoColor=white)](https://pgsty.com)
+[![Version: v0.2.2](https://img.shields.io/badge/version-v0.2.2-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.2.2)
+[![Pigsty: v3.2.2](https://img.shields.io/badge/Pigsty-v3.2.2-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 400](https://img.shields.io/badge/extensions-400-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pigsty.io/#/list)
+[![Extensions: 404](https://img.shields.io/badge/extensions-404-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
 
 [**pig**](https://ext.pigsty.io/#/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13-17 along with [400 extensions](https://ext.pigsty.io/#/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13-17 along with [404 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
@@ -410,10 +410,8 @@ Here are some bad cases and limitation for above Linux distros:
 - [`pg_partman`](https://ext.pigsty.io/#/pg_partman): `u24:*:13`
 - [`wiltondb`](https://ext.pigsty.io/#/babelfishpg_common): `d12:*:*`
 - [`citus`](https://ext.pigsty.io/#/citus) and [`hydra`](https://ext.pigsty.io/#/hydra) are mutually exclusive
-- [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) and [`pg_mooncake`](https://ext.pigsty.io/#/pg_mooncake) are mutually exclusive
 - [`pg_duckdb`](https://ext.pigsty.io/#/pg_duckdb) will invalidate [`duckdb_fdw`](https://ext.pigsty.io/#/duckdb_fdw)
 - [`documentdb_core`](https://ext.pigsty.io/#/documentdb_core) is not available on `arm` arch
-- [`vchord`](https://ext.pigsty.io/#/vchord) 0.2+ is not available on `d12/u22` (0.1 available)
 
 
 --------
