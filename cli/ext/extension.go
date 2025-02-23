@@ -47,9 +47,9 @@ type Extension struct {
 	Comment     string   `csv:"comment"`     // Additional comments
 }
 
-// SummaryURL returns the URL to the ext.pigsty.io catalog summary page
+// SummaryURL returns the URL to the pigsty.io catalog summary page
 func (e *Extension) SummaryURL() string {
-	return fmt.Sprintf("https://ext.pigsty.io/#/%s", e.Name)
+	return fmt.Sprintf("https://pigsty.io/%s/%s", strings.ToLower(e.Category), e.Name)
 }
 
 // CompactVersion returns the compact version string like 17-13
