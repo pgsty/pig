@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -205,5 +207,64 @@ func SudoRunShellScript(script string) error {
 	if err != nil {
 		return fmt.Errorf("failed to run script: %v", err)
 	}
+	return nil
+}
+
+func DownloadFile(srcURL, dstPath string) error {
+	// Check remote file size first
+	resp, err := http.Head(srcURL)
+	if err != nil {
+		return fmt.Errorf("failed to head url: %v", err)
+	}
+	remoteSize := resp.ContentLength
+
+	// Check if local file exists and has the same size
+	if fi, err := os.Stat(dstPath); err == nil {
+		localSize := fi.Size()
+		if localSize == remoteSize {
+			logrus.Debugf("skip downloading %s: local file exists with same size", dstPath)
+			return nil
+		}
+	}
+
+	// Download the file
+	resp, err = http.Get(srcURL)
+	if err != nil {
+		return fmt.Errorf("download failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad http status code: %d", resp.StatusCode)
+	}
+
+	// Create the file with a temporary name first
+	tmpPath := dstPath + ".tmp"
+	out, err := os.Create(tmpPath)
+	if err != nil {
+		return fmt.Errorf("failed to create tmp file: %v", err)
+	}
+
+	// Copy the content
+	written, err := io.Copy(out, resp.Body)
+	out.Close() // Close before rename
+	if err != nil {
+		os.Remove(tmpPath) // Clean up on error
+		return fmt.Errorf("failed to save file: %v", err)
+	}
+
+	// Verify downloaded size
+	if written != remoteSize {
+		os.Remove(tmpPath)
+		return fmt.Errorf("size mismatch after download: got %d, expected %d", written, remoteSize)
+	}
+
+	// Rename temporary file to final destination
+	if err := os.Rename(tmpPath, dstPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temporary file: %v", err)
+	}
+
+	logrus.Debugf("download %s to %s, (%d bytes)", srcURL, dstPath, written)
 	return nil
 }
