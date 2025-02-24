@@ -19,9 +19,9 @@ func UpdatePig(pigVer, region string) error {
 		logrus.Debugf("region is set to: %s", Region)
 		region = Region
 	}
-	baseURL := PigstyIO
+	baseURL := config.RepoPigstyIO
 	if region == "china" {
-		baseURL = PigstyCC
+		baseURL = config.RepoPigstyCC
 	}
 
 	// Fetch the latest version if not specified
@@ -99,9 +99,9 @@ func UpdatePig(pigVer, region string) error {
 }
 
 func getLatestPigVersion(region string) (string, error) {
-	latestURL := PigstyIO + "/pkg/pig/latest"
+	latestURL := config.RepoPigstyIO + "/pkg/pig/latest"
 	if region == "china" {
-		latestURL = PigstyCC + "/pkg/pig/latest"
+		latestURL = config.RepoPigstyCC + "/pkg/pig/latest"
 	}
 	resp, err := http.Get(latestURL)
 	if err != nil {
@@ -122,8 +122,8 @@ func ValidVersion(version string) bool {
 
 func PrintInstallMethod() {
 	if Region == "china" {
-		fmt.Printf("\nInstall the latest pig (china mirror)\nncurl -fsSL https://repo.pigsty.cc/get | bash\n\n")
+		fmt.Printf("\nInstall the latest pig (china mirror)\nncurl -fsSL %s/get | bash\n\n", config.RepoPigstyCC)
 	} else {
-		fmt.Printf("\nInstall the latest pig\ncurl -fsSL https://repo.pigsty.io/get | bash\n\n")
+		fmt.Printf("\nInstall the latest pig\ncurl -fsSL %s/get | bash\n\n", config.RepoPigstyIO)
 	}
 }

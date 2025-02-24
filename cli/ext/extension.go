@@ -49,7 +49,7 @@ type Extension struct {
 
 // SummaryURL returns the URL to the pigsty.io catalog summary page
 func (e *Extension) SummaryURL() string {
-	return fmt.Sprintf("https://pigsty.io/%s/%s", strings.ToLower(e.Category), e.Name)
+	return fmt.Sprintf("%s/%s/%s", config.PigstyIO, strings.ToLower(e.Category), e.Name)
 }
 
 // CompactVersion returns the compact version string like 17-13

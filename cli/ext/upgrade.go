@@ -16,8 +16,8 @@ import (
 // UpgradeCatalog downloads the latest extension catalog from the fastest available source
 func UpgradeCatalog() error {
 	urls := []string{
-		"https://repo.pigsty.io/etc/pigsty.csv",
-		"https://repo.pigsty.cc/etc/pigsty.csv",
+		config.RepoPigstyIO + "/etc/pigsty.csv",
+		config.RepoPigstyCC + "/etc/pigsty.csv",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

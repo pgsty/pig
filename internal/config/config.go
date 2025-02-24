@@ -39,6 +39,10 @@ var (
 const (
 	PigVersion     = "0.3.0"
 	PigstyVersion  = "3.2.2"
+	PigstyIO       = "https://pigsty.io"
+	PigstyCC       = "https://pigsty.cc"
+	RepoPigstyIO   = "https://repo.pigsty.io"
+	RepoPigstyCC   = "https://repo.pigsty.cc"
 	PigstyGPGCheck = false
 	DistroEL       = "rpm"
 	DistroDEB      = "deb"

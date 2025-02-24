@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"pig/cli/get"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"strings"
@@ -126,11 +125,11 @@ func InstallProxy() error {
 		logrus.Debugf("osarch=%s, proxyVer=%s", osarch, proxyVer)
 		filename = fmt.Sprintf("vray-%s-1.%s.rpm", proxyVer, osarch)
 
-		packageURL = fmt.Sprintf("%s/pkg/ray/%s", get.PigstyCC, filename)
+		packageURL = fmt.Sprintf("%s/pkg/ray/%s", config.RepoPigstyCC, filename)
 	case config.DistroDEB:
 		logrus.Debugf("osarch=%s, pigVer=%s", config.OSArch, proxyVer)
 		filename = fmt.Sprintf("pig_%s_%s.deb", proxyVer, config.OSArch)
-		packageURL = fmt.Sprintf("%s/pkg/ray/%s", get.PigstyCC, filename)
+		packageURL = fmt.Sprintf("%s/pkg/ray/%s", config.RepoPigstyCC, filename)
 	case config.DistroMAC:
 		return fmt.Errorf("macos is not supported yet")
 	}

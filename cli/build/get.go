@@ -50,9 +50,9 @@ func downloadWithPrefixes(prefixes []string, downloadAll bool) error {
 	var baseURL string
 	switch source {
 	case get.ViaIO:
-		baseURL = "https://repo.pigsty.io/pkg/ext"
+		baseURL = config.RepoPigstyIO + "/pkg/ext"
 	case get.ViaCC:
-		baseURL = "https://repo.pigsty.cc/pkg/ext"
+		baseURL = config.RepoPigstyCC + "/pkg/ext"
 	default:
 		return fmt.Errorf("no network access, please check your network settings")
 	}
