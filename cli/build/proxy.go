@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"pig/cli/get"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"strings"
@@ -15,7 +16,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const proxyConfigTemplate = `{
+const (
+	proxyVer            = "5.23.0"
+	proxyConfigTemplate = `{
   "log": {"loglevel": "info"},
   "inbounds": [{"port": %s,"listen": "%s","protocol": "http","tag": "http-in","settings": {}}],
   "outbounds": [{
@@ -25,13 +28,12 @@ const proxyConfigTemplate = `{
       "streamSettings": {"network": "tcp","security": "none","tcpSettings": {"header": {"type": "none"}}}
     }]
 }`
-
-// proxy environment template
-const proxyEnvTemplate = `
+	proxyEnvTemplate = `
 alias po="export HTTP_PROXY=%s && export HTTPS_PROXY=%s && export ALL_PROXY=%s"
 alias px="unset HTTP_PROXY && unset HTTPS_PROXY && unset ALL_PROXY && unset NO_PROXY"
 alias pck="curl -I --connect-timeout 10 www.google.com"
 `
+)
 
 // SetupProxy sets up proxy with the given remote and local configurations
 func SetupProxy(remote string, local string) error {
@@ -57,7 +59,7 @@ func SetupProxy(remote string, local string) error {
 	localPort := strings.Split(local, ":")[1]
 
 	// 2. Install or make sure proxy packages are installed
-	if err := installProxy(); err != nil {
+	if err := InstallProxy(); err != nil {
 		return fmt.Errorf("failed to install proxy: %v", err)
 	}
 
@@ -67,8 +69,8 @@ func SetupProxy(remote string, local string) error {
 		logrus.Debugf("fail to write /etc/v2ray.json content: %s", proxyConfig)
 		return fmt.Errorf("failed to write /etc/v2ray.json: %v", err)
 	} else {
-		logrus.Info("write /etc/v2ray.json config")
-		logrus.Debugf("write /etc/v2ray.json content: %s", proxyConfig)
+		logrus.Info("write proxy config to /etc")
+		logrus.Debugf("/etc/v2ray.json content: %s", proxyConfig)
 	}
 
 	// 4. Write proxy environment
@@ -80,9 +82,9 @@ func SetupProxy(remote string, local string) error {
 
 	// 5. Restart proxy service
 	if err := utils.SudoCommand([]string{"systemctl", "restart", "v2ray"}); err != nil {
-		return fmt.Errorf("failed to restart v2ray service: %v", err)
+		return fmt.Errorf("failed to restart proxy service: %v", err)
 	} else {
-		logrus.Info("start v2ray service")
+		logrus.Info("proxy service started")
 	}
 
 	// 6. Test proxy connectivity
@@ -93,7 +95,7 @@ func SetupProxy(remote string, local string) error {
 		logrus.Warn("$ cat /etc/v2ray.json")
 		return nil
 	} else {
-		logrus.Info("proxy is working")
+		logrus.Info("proxy is working, turn on/off proxy with:")
 		logrus.Infof("Proxy On    : \t$ po")
 		logrus.Infof("Proxy Off   : \t$ px")
 		logrus.Infof("Proxy Check : \t$ pck")
@@ -102,29 +104,60 @@ func SetupProxy(remote string, local string) error {
 	return nil
 }
 
-// installProxy installs the proxy if not already installed
-func installProxy() error {
-	// Check if proxy is already installed
+// InstallProxy will install build proxy via http
+func InstallProxy() error {
 	if _, err := os.Stat("/usr/local/bin/v2ray"); err == nil {
 		logrus.Info("proxy binary is already installed")
 		return nil
 	}
 
+	var filename, packageURL, downloadTo string
 	switch config.OSType {
 	case config.DistroEL:
-		logrus.Info("proxy package not found, try install via yum")
-		if err := utils.SudoCommand([]string{"sudo", "yum", "install", "-y", "vray"}); err != nil {
-			return fmt.Errorf("failed to install proxy via yum: %v", err)
+		osarch := config.OSArch
+		switch osarch {
+		case "amd64", "x86_64":
+			osarch = "x86_64"
+		case "arm64", "aarch64":
+			osarch = "aarch64"
+		default:
+			return fmt.Errorf("unsupported arch: %s on %s %s", config.OSArch, config.OSType, config.OSCode)
 		}
-	case config.DistroDEB:
-		logrus.Info("proxy package not found, try install via apt")
-		if err := utils.SudoCommand([]string{"sudo", "apt", "install", "-y", "vray"}); err != nil {
-			return fmt.Errorf("failed to install proxy via apt: %v", err)
-		}
+		logrus.Debugf("osarch=%s, proxyVer=%s", osarch, proxyVer)
+		filename = fmt.Sprintf("vray-%s-1.%s.rpm", proxyVer, osarch)
 
+		packageURL = fmt.Sprintf("%s/pkg/ray/%s", get.PigstyCC, filename)
+	case config.DistroDEB:
+		logrus.Debugf("osarch=%s, pigVer=%s", config.OSArch, proxyVer)
+		filename = fmt.Sprintf("pig_%s_%s.deb", proxyVer, config.OSArch)
+		packageURL = fmt.Sprintf("%s/pkg/ray/%s", get.PigstyCC, filename)
 	case config.DistroMAC:
-		logrus.Warn("proxy package not found, MacOs is not supported yet")
-		return fmt.Errorf("MacOs is not supported yet")
+		return fmt.Errorf("macos is not supported yet")
+	}
+	downloadTo = fmt.Sprintf("/tmp/%s", filename)
+
+	logrus.Debugf("wipe destination file %s", downloadTo)
+	if err := utils.DelFile(downloadTo); err != nil {
+		return fmt.Errorf("failed to wipe destination file: %v", err)
+	}
+	logrus.Debugf("downloading proxy %s package from %s to %s", config.OSType, packageURL, downloadTo)
+	if err := utils.DownloadFile(packageURL, downloadTo); err != nil {
+		return fmt.Errorf("failed to download package: %v", err)
+	}
+
+	// run sudo shell command to remove current package and install the new one
+	logrus.Debugf("reinstall proxy via package manager")
+	switch config.OSType {
+	case config.DistroEL:
+		if err := utils.SudoCommand([]string{"yum", "remove", "-q", "-y", "vray"}); err != nil {
+			logrus.Warnf("failed to remove current package: %v", err)
+		}
+		return utils.SudoCommand([]string{"rpm", "-i", downloadTo})
+	case config.DistroDEB:
+		if err := utils.SudoCommand([]string{"apt", "remove", "-qq", "-y", "vray"}); err != nil {
+			logrus.Warnf("failed to remove current package: %v", err)
+		}
+		return utils.SudoCommand([]string{"dpkg", "-i", downloadTo})
 	}
 	return nil
 }

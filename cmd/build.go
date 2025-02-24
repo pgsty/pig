@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"pig/cli/build"
 
 	"github.com/sirupsen/logrus"
@@ -22,7 +21,7 @@ var buildCmd = &cobra.Command{
 
   pig build repo                   # init build repo (=repo set -ru)
   pig build tool  [mini|full|...]  # init build toolset
-  pig build proxy [user@host:port] # init build proxy (optional)
+  pig build proxy [id@host:port ]  # init build proxy (optional)
   pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.12.9)
   pig build spec                   # init build spec repo
   pig build get   [all|std|..]     # get ext code tarball with prefixes
@@ -66,7 +65,7 @@ var buildProxyCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var remote, local string
 		if len(args) == 0 {
-			return fmt.Errorf("proxy cred 'id@host:port' is required as the first argument")
+			return build.InstallProxy()
 		} else {
 			if len(args) == 2 {
 				remote, local = args[0], args[1]
