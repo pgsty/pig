@@ -15,7 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-//go:embed assets/pigsty-v3.2.2.tgz
+//go:embed assets/pigsty-v3.3.0.tgz
 var embeddedTarball []byte
 
 //go:embed assets/EULA.md

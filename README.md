@@ -1,8 +1,8 @@
 # PIG - Postgres Install Genius
 
 [![Catalog: pigsty.io](https://img.shields.io/badge/catalog-pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/ext/list)
-[![Version: v0.2.2](https://img.shields.io/badge/version-v0.2.2-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.2.2)
-[![Pigsty: v3.2.2](https://img.shields.io/badge/Pigsty-v3.2.2-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io)
+[![Version: v0.3.0](https://img.shields.io/badge/version-v0.3.0-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.3.0)
+[![Pigsty: v3.3.0](https://img.shields.io/badge/Pigsty-v3.3.0-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 404](https://img.shields.io/badge/extensions-404-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
 
