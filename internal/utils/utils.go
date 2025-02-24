@@ -77,6 +77,21 @@ func SudoCommand(args []string) error {
 	return cmd.Run()
 }
 
+// QuietSudoCommand runs a command with sudo if the current user is not root
+func QuietSudoCommand(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no command to run")
+	}
+	if config.CurrentUser != "root" {
+		// insert sudo as first cmd arg
+		args = append([]string{"sudo"}, args...)
+	}
+
+	// now split command and args again
+	cmd := exec.Command(args[0], args[1:]...)
+	return cmd.Run()
+}
+
 // PutFile writes content to a file at the specified path with proper permissions.
 // It performs the following steps:
 // 1. Checks if file exists and has identical content (to avoid unnecessary writes)

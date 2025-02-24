@@ -120,15 +120,14 @@ func InstallProxy() error {
 		case "arm64", "aarch64":
 			osarch = "aarch64"
 		default:
-			return fmt.Errorf("unsupported arch: %s on %s %s", config.OSArch, config.OSType, config.OSCode)
+			return fmt.Errorf("unsupported arch: %s on %s %s", osarch, config.OSType, config.OSCode)
 		}
 		logrus.Debugf("osarch=%s, proxyVer=%s", osarch, proxyVer)
 		filename = fmt.Sprintf("vray-%s-1.%s.rpm", proxyVer, osarch)
-
 		packageURL = fmt.Sprintf("%s/pkg/ray/%s", config.RepoPigstyCC, filename)
 	case config.DistroDEB:
 		logrus.Debugf("osarch=%s, proxy=%s", config.OSArch, proxyVer)
-		filename = fmt.Sprintf("vray_%s_%s.deb", proxyVer, config.OSArch)
+		filename = fmt.Sprintf("vray_%s-1_%s.deb", proxyVer, config.OSArch)
 		packageURL = fmt.Sprintf("%s/pkg/ray/%s", config.RepoPigstyCC, filename)
 	case config.DistroMAC:
 		return fmt.Errorf("macos is not supported yet")
@@ -148,14 +147,10 @@ func InstallProxy() error {
 	logrus.Debugf("reinstall proxy via package manager")
 	switch config.OSType {
 	case config.DistroEL:
-		if err := utils.SudoCommand([]string{"yum", "remove", "-q", "-y", "vray"}); err != nil {
-			logrus.Warnf("failed to remove current package: %v", err)
-		}
+		_ = utils.QuietSudoCommand([]string{"yum", "remove", "-q", "-y", "vray"})
 		return utils.SudoCommand([]string{"rpm", "-i", downloadTo})
 	case config.DistroDEB:
-		if err := utils.SudoCommand([]string{"apt", "remove", "-qq", "-y", "vray"}); err != nil {
-			logrus.Warnf("failed to remove current package: %v", err)
-		}
+		_ = utils.QuietSudoCommand([]string{"apt", "remove", "-qq", "-y", "vray"})
 		return utils.SudoCommand([]string{"dpkg", "-i", downloadTo})
 	}
 	return nil

@@ -57,12 +57,12 @@ func UpdatePig(pigVer, region string) error {
 		default:
 			return fmt.Errorf("unsupported arch: %s on %s %s", config.OSArch, config.OSType, config.OSCode)
 		}
-		logrus.Debugf("osarch=%s, pigVer=%s", osarch, pigVer)
+		logrus.Debugf("osarch=%s, pig=%s", osarch, pigVer)
 		filename = fmt.Sprintf("pig-%s-1.%s.rpm", pigVer, osarch)
 		packageURL = fmt.Sprintf("%s/pkg/pig/v%s/%s", baseURL, pigVer, filename)
 	case config.DistroDEB:
-		logrus.Debugf("osarch=%s, pigVer=%s", config.OSArch, pigVer)
-		filename = fmt.Sprintf("pig_%s_%s.deb", pigVer, config.OSArch)
+		logrus.Debugf("osarch=%s, pig=%s", config.OSArch, pigVer)
+		filename = fmt.Sprintf("pig_%s-1_%s.deb", pigVer, config.OSArch)
 		packageURL = fmt.Sprintf("%s/pkg/pig/v%s/%s", baseURL, pigVer, filename)
 	case config.DistroMAC:
 		PrintInstallMethod()
