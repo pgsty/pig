@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"regexp"
@@ -12,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// UpdatePig will self-upgrade pig itself
 func UpdatePig(pigVer, region string) error {
 	var err error
 	if region == "" {
@@ -19,9 +19,9 @@ func UpdatePig(pigVer, region string) error {
 		logrus.Debugf("region is set to: %s", Region)
 		region = Region
 	}
-	baseURL := "https://repo.pigsty.io"
+	baseURL := PigstyIO
 	if region == "china" {
-		baseURL = "https://repo.pigsty.cc"
+		baseURL = PigstyCC
 	}
 
 	// Fetch the latest version if not specified
@@ -76,10 +76,9 @@ func UpdatePig(pigVer, region string) error {
 	}
 
 	logrus.Infof("downloading pig %s package from %s to %s", config.OSType, packageURL, downloadTo)
-	if err := downloadFile(packageURL, downloadTo); err != nil {
+	if err := utils.DownloadFile(packageURL, downloadTo); err != nil {
 		return fmt.Errorf("failed to download package: %v", err)
 	}
-
 	logrus.Infof("pig %s package downloaded to %s", config.OSType, downloadTo)
 
 	// run sudo shell command to remove current package and install the new one
@@ -100,9 +99,9 @@ func UpdatePig(pigVer, region string) error {
 }
 
 func getLatestPigVersion(region string) (string, error) {
-	latestURL := "https://repo.pigsty.io/pkg/pig/latest"
+	latestURL := PigstyIO + "/pkg/pig/latest"
 	if region == "china" {
-		latestURL = "https://repo.pigsty.cc/pkg/pig/latest"
+		latestURL = PigstyCC + "/pkg/pig/latest"
 	}
 	resp, err := http.Get(latestURL)
 	if err != nil {
@@ -114,34 +113,6 @@ func getLatestPigVersion(region string) (string, error) {
 		return "", fmt.Errorf("failed to fetch latest version: %v", err)
 	}
 	return string(body), nil
-}
-
-func downloadFile(srcURL, destPath string) error {
-	// Start download
-	resp, err := http.Get(srcURL)
-	if err != nil {
-		return fmt.Errorf("failed to download file: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status: %s", resp.Status)
-	}
-
-	// Create output file
-	out, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("failed to create output file: %v", err)
-	}
-	defer out.Close()
-
-	// write to output file
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to write to output file: %v", err)
-	}
-
-	return nil
 }
 
 func ValidVersion(version string) bool {
