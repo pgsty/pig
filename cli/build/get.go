@@ -3,12 +3,12 @@ package build
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"pig/cli/get"
 	"pig/internal/config"
+	"pig/internal/utils"
 	"strings"
 	"sync"
 
@@ -22,7 +22,7 @@ type downloadTask struct {
 
 const parallelWorkers = 8
 
-// DownloadExtensions downloads extension source tarballs from repository
+// DownloadCodeTarball downloads extension source tarballs from repository
 func DownloadCodeTarball(args []string) error {
 	if len(args) == 0 {
 		// Default to 'std' behavior when no arguments provided
@@ -154,23 +154,18 @@ func parallelDownload(tasks []downloadTask, workers int) {
 	if len(tasks) == 0 {
 		return
 	}
-
 	var wg sync.WaitGroup
 	taskCh := make(chan downloadTask, len(tasks))
-
-	// Start workers
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go downloadWorker(&wg, taskCh)
 	}
 
-	// Send tasks to workers
+	// Send tasks to workers and wait for completion
 	for _, task := range tasks {
 		taskCh <- task
 	}
 	close(taskCh)
-
-	// Wait for all downloads to complete
 	wg.Wait()
 	logrus.Infof("All %d downloads completed", len(tasks))
 }
@@ -178,68 +173,16 @@ func parallelDownload(tasks []downloadTask, workers int) {
 func downloadWorker(wg *sync.WaitGroup, taskCh <-chan downloadTask) {
 	defer wg.Done()
 	for task := range taskCh {
-		if err := downloadFile(task); err != nil {
-			logrus.Errorf("Failed to process %s: %v", task.SrcURL, err)
-		}
+		_ = downloadFile(task)
 	}
 }
 
 func downloadFile(task downloadTask) error {
-	// Check remote file size first
-	resp, err := http.Head(task.SrcURL)
+	err := utils.DownloadFile(task.SrcURL, task.DstPath)
 	if err != nil {
-		return fmt.Errorf("failed to check remote file: %v", err)
+		logrus.Errorf("fail to download %s: %v", task.SrcURL, err)
+	} else {
+		logrus.Infof("fetch %s", task.DstPath)
 	}
-	remoteSize := resp.ContentLength
-
-	// Check if local file exists and has the same size
-	if fi, err := os.Stat(task.DstPath); err == nil {
-		localSize := fi.Size()
-		if localSize == remoteSize {
-			logrus.Infof("Downloaded %s: local file exists with same size", task.DstPath)
-			return nil
-		}
-		logrus.Debugf("Size mismatch for %s: local=%d, remote=%d", task.DstPath, localSize, remoteSize)
-	}
-
-	// Download the file
-	resp, err = http.Get(task.SrcURL)
-	if err != nil {
-		return fmt.Errorf("download failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	// Create the file with a temporary name first
-	tmpPath := task.DstPath + ".tmp"
-	out, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %v", err)
-	}
-
-	// Copy the content
-	written, err := io.Copy(out, resp.Body)
-	out.Close() // Close before rename
-	if err != nil {
-		os.Remove(tmpPath) // Clean up on error
-		return fmt.Errorf("failed to save file: %v", err)
-	}
-
-	// Verify downloaded size
-	if written != remoteSize {
-		os.Remove(tmpPath)
-		return fmt.Errorf("size mismatch after download: got %d, expected %d", written, remoteSize)
-	}
-
-	// Rename temporary file to final destination
-	if err := os.Rename(tmpPath, task.DstPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename temporary file: %v", err)
-	}
-
-	logrus.Infof("Downloaded %s (%d bytes)", task.DstPath, written)
-	return nil
+	return err
 }
