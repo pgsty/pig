@@ -29,8 +29,8 @@ const (
 )
 
 var (
-	ioURL          = "https://repo.pigsty.io"
-	ccURL          = "https://repo.pigsty.cc"
+	PigstyIO       = "https://repo.pigsty.io"
+	PigstyCC       = "https://repo.pigsty.cc"
 	Source         = ViaNA
 	Region         = "default"
 	InternetAccess = false
@@ -134,8 +134,8 @@ func NetworkCondition() string {
 	}
 
 	go probeGoogle(ctx)
-	go probeEndpoint(ctx, ioURL, ViaIO)
-	go probeEndpoint(ctx, ccURL, ViaCC)
+	go probeEndpoint(ctx, PigstyIO, ViaIO)
+	go probeEndpoint(ctx, PigstyCC, ViaCC)
 
 	var ioData, ccData []VersionInfo
 	ioSuccess := false
@@ -205,8 +205,8 @@ DONE:
 // GetAllVersions fetches and displays all available versions from the active repository
 func GetAllVersions(print bool) error {
 	baseURL := map[string]string{
-		ViaIO: ioURL,
-		ViaCC: ccURL,
+		ViaIO: PigstyIO,
+		ViaCC: PigstyCC,
 	}[Source]
 
 	if baseURL == "" {
@@ -425,9 +425,9 @@ func ParseChecksums(r io.Reader, source string) ([]VersionInfo, error) {
 
 		var downloadURL string
 		if source == ViaIO {
-			downloadURL = fmt.Sprintf("%s/src/%s", ioURL, filename)
+			downloadURL = fmt.Sprintf("%s/src/%s", PigstyIO, filename)
 		} else {
-			downloadURL = fmt.Sprintf("%s/src/%s", ccURL, filename)
+			downloadURL = fmt.Sprintf("%s/src/%s", PigstyCC, filename)
 		}
 		versions = append(versions, VersionInfo{
 			Version:     version,
