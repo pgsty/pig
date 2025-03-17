@@ -56,6 +56,10 @@ func SetupProxy(remote string, local string) error {
 
 	localHost := strings.Split(local, ":")[0]
 	localPort := strings.Split(local, ":")[1]
+	if localHost == "" {
+		localHost = "127.0.0.1"
+		local = "127.0.0.1:" + localPort
+	}
 
 	// 2. Install or make sure proxy packages are installed
 	if err := InstallProxy(); err != nil {
