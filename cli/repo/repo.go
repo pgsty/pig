@@ -184,7 +184,7 @@ func (r *Repository) Info() string {
 			metaInfo += fmt.Sprintf("%s=%s ", key, value)
 		}
 	}
-	availInfo := fmt.Sprintf("No (%s %d %s)", config.OSVendor, config.OSCode, config.OSArch)
+	availInfo := fmt.Sprintf("No (%s %s %s)", config.OSVendor, config.OSCode, config.OSArch)
 	if r.AvailableInCurrentOS() {
 		availInfo = fmt.Sprintf("Yes (%s %s %s)", config.OSVendor, config.OSCode, config.OSArch)
 	}
