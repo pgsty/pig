@@ -79,12 +79,13 @@ pig sty init
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if pigstyVersion == "" {
-			logrus.Debugf("install embedded pigsty %s to %s with force=%v", config.PigstyVersion, pigstyInitPath, pigstyInitForce)
-			err := sty.InstallPigsty(nil, pigstyInitPath, pigstyInitForce)
-			if err != nil {
-				logrus.Errorf("failed to install pigsty: %v", err)
-			}
-			return nil
+			pigstyVersion = "latest"
+			// logrus.Debugf("install embedded pigsty %s to %s with force=%v", config.PigstyVersion, pigstyInitPath, pigstyInitForce)
+			// err := sty.InstallPigsty(nil, pigstyInitPath, pigstyInitForce)
+			// if err != nil {
+			// 	logrus.Errorf("failed to install pigsty: %v", err)
+			// }
+			// return nil
 		}
 
 		// if version is explicit given, always download & install from remote

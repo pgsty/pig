@@ -2,8 +2,10 @@
 .vscode/
 .code/
 .idea/
+cli/sty/assets/*.tgz
 
 bin/dist
+bin/dist2
 tmp/
 dist/
 pig

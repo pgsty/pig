@@ -54,6 +54,8 @@ clean:
 	rm -rf pig
 d:
 	bin/dist
+dd:
+	bin/dist2
 t: tb tt
 tb:
 	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -a -ldflags '-extldflags "-static"' -o pig

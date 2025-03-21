@@ -15,9 +15,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-//go:embed assets/pigsty-v3.3.0.tgz
-var embeddedTarball []byte
-
 //go:embed assets/EULA.md
 var embeddedEULA []byte
 
@@ -29,7 +26,8 @@ const DefaultDir = "~/pigsty"
 // Returns error if installation fails.
 func InstallPigsty(srcTarball []byte, targetDir string, overwrite bool) error {
 	if srcTarball == nil {
-		srcTarball = embeddedTarball
+		return fmt.Errorf("embedded tarball not found")
+		// srcTarball = embeddedTarball
 	}
 	if targetDir == "" {
 		targetDir = DefaultDir
