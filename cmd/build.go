@@ -4,12 +4,12 @@ import (
 	"pig/cli/build"
 
 	"github.com/sirupsen/logrus"
-
 	"github.com/spf13/cobra"
 )
 
 var (
 	buildPgrxVer string
+	buildRustYes bool
 )
 
 // buildCmd represents the top-level `build` command
@@ -22,7 +22,7 @@ var buildCmd = &cobra.Command{
   pig build repo                   # init build repo (=repo set -ru)
   pig build tool  [mini|full|...]  # init build toolset
   pig build proxy [id@host:port ]  # init build proxy (optional)
-  pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.12.9)
+  pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.13.1)
   pig build spec                   # init build spec repo
   pig build get   [all|std|..]     # get ext code tarball with prefixes
   pig build ext   [extname...]     # build extension
@@ -83,7 +83,7 @@ var buildRustCmd = &cobra.Command{
 	Short:   "Initialize rust and pgrx environment",
 	Aliases: []string{"rs"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.SetupRust(buildPgrxVer)
+		return build.SetupRust(buildPgrxVer, buildRustYes)
 	},
 }
 
@@ -119,6 +119,11 @@ var buildExtCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(buildCmd)
+
+	// Parse build flags
+	buildCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", "0.13.1", "pgrx version to install")
+	buildCmd.PersistentFlags().BoolVarP(&buildRustYes, "yes", "y", false, "enforce rust re-installation")
+
 	// Add subcommands
 	buildCmd.AddCommand(buildRepoCmd)
 	buildCmd.AddCommand(buildToolCmd)

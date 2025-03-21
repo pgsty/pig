@@ -11,16 +11,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func SetupRust(pgrxVersion string) error {
+func SetupRust(pgrxVersion string, force bool) error {
 	if pgrxVersion == "" {
-		pgrxVersion = "0.12.9" // 默认 pgrx 版本
+		pgrxVersion = "0.13.1"
 	}
-
 	cargoBin := config.HomeDir + "/.cargo/bin/cargo"
 
+	// install rustc if not installed
 	logrus.Infof("Setting up rust and pgrx %s", pgrxVersion)
-	// 1. 检查 Rust 是否已安装
-	if _, err := os.Stat(cargoBin); err == nil {
+	if _, err := os.Stat(cargoBin); err == nil && !force {
 		logrus.Info("Rust already installed, skip")
 	} else {
 		logrus.Info("Rust not found, installing Rust...")
@@ -53,6 +52,7 @@ func SetupRust(pgrxVersion string) error {
 		}
 	}
 
+	// install cargo-pgrx
 	if err := utils.Command([]string{cargoBin, "install", "--locked", fmt.Sprintf("cargo-pgrx@%s", pgrxVersion)}); err != nil {
 		return fmt.Errorf("failed to install cargo-pgrx %s: %v", pgrxVersion, err)
 	} else {
