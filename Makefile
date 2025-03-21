@@ -3,7 +3,7 @@
 # Mtime     :   2025-02-14
 # Copyright (C) 2018-2025 Ruohang Feng
 #==============================================================#
-VERSION=v0.3.1
+VERSION=v0.3.2
 
 ###############################################################
 #                     Build & Release                         #
@@ -17,8 +17,10 @@ DARWIN_ARM_DIR:=dist/$(VERSION)/pig-$(VERSION).darwin-arm64
 
 build-linux-amd64:
 	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -a -ldflags '-extldflags "-static"' -o pig
+	upx pig
 build-linux-arm64:
 	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -a -ldflags '-extldflags "-static"' -o pig
+	upx pig
 
 r: release
 release: release-linux
