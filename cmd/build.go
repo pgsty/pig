@@ -25,6 +25,7 @@ var buildCmd = &cobra.Command{
   pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.13.1)
   pig build spec                   # init build spec repo
   pig build get   [all|std|..]     # get ext code tarball with prefixes
+  pig build dep   [extname...]     # install extension build deps
   pig build ext   [extname...]     # build extension
 `,
 }
@@ -107,6 +108,16 @@ var buildGetCmd = &cobra.Command{
 	},
 }
 
+// buildDepCmd represents the `build dep` command
+var buildDepCmd = &cobra.Command{
+	Use:     "dep",
+	Short:   "Install extension build dependencies",
+	Aliases: []string{"d"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return build.InstallExtensionDeps(args)
+	},
+}
+
 // buildExtCmd represents the `build ext` command
 var buildExtCmd = &cobra.Command{
 	Use:     "ext",
@@ -131,5 +142,6 @@ func init() {
 	buildCmd.AddCommand(buildRustCmd)
 	buildCmd.AddCommand(buildSpecCmd)
 	buildCmd.AddCommand(buildGetCmd)
+	buildCmd.AddCommand(buildDepCmd)
 	buildCmd.AddCommand(buildExtCmd)
 }

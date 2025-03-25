@@ -13,15 +13,15 @@ import (
 func BuildExtension(args []string) error {
 	switch config.OSType {
 	case config.DistroEL:
-		return buildELExtension(args)
+		return buildRpmExtension(args)
 	case config.DistroDEB:
-		return BuildDEBExtension(args)
+		return buildDebExtension(args)
 	default:
 		return fmt.Errorf("unsupported operating system")
 	}
 }
 
-func buildELExtension(extlist []string) error {
+func buildRpmExtension(extlist []string) error {
 	workDir := config.HomeDir + "/rpmbuild/"
 	if _, err := os.Stat(workDir); os.IsNotExist(err) {
 		return fmt.Errorf("rpmbuild directory not found, please run `pig build spec` first")
@@ -43,7 +43,7 @@ func buildELExtension(extlist []string) error {
 	return nil
 }
 
-func BuildDEBExtension(extlist []string) error {
+func buildDebExtension(extlist []string) error {
 	workDir := config.HomeDir + "/deb/"
 	if _, err := os.Stat(workDir); os.IsNotExist(err) {
 		return fmt.Errorf("deb directory not found, please run `pig build spec` first")

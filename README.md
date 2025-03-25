@@ -142,12 +142,13 @@ pig repo cache                   # cache repo as offline package
 **Build Management**
 
 ```bash
-pig build repo                   # init build repo (=repo set)
+pig build repo                   # init build repo (=repo set -ru)
 pig build tool  [mini|full|...]  # init build toolset
-pig build proxy [user@host:port] # init build proxy (optional)
+pig build proxy [id@host:port ]  # init build proxy (optional)
 pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.13.1)
 pig build spec                   # init build spec repo
 pig build get   [all|std|..]     # get ext code tarball with prefixes
+pig build dep   [extname...]     # install extension build deps
 pig build ext   [extname...]     # build extension
 ```
 
@@ -280,20 +281,19 @@ You can perform fuzzy search on extension name, description, and category.
 ```bash
 $ pig ext ls olap
 
-INFO[14:48:13] found 13 extensions matching 'olap':
 Name            State  Version  Cate  Flags   License       Repo     PGVer  Package               Description
 ----            -----  -------  ----  ------  -------       ------   -----  ------------          ---------------------
-citus           avail  13.0.1   OLAP  -dsl--  AGPL-3.0      PIGSTY   14-17  citus_17*             Distributed PostgreSQL as an extension
-citus_columnar  avail  11.3-1   OLAP  -ds---  AGPL-3.0      PIGSTY   14-17  citus_17*             Citus columnar storage engine
-columnar        n/a    11.1-11  OLAP  -ds---  AGPL-3.0      PIGSTY   13-16  hydra_17*             Hydra Columnar extension
-pg_analytics    avail  0.3.4    OLAP  -ds-t-  PostgreSQL    PIGSTY   14-17  pg_analytics_17       Postgres for analytics, powered by DuckDB
-pg_duckdb       avail  0.2.0    OLAP  -dsl--  MIT           PIGSTY   14-17  pg_duckdb_17*         DuckDB Embedded in Postgres
-pg_mooncake     avail  0.1.2    OLAP  ------  MIT           PIGSTY   14-17  pg_mooncake_17*       Columnstore Table in Postgres
-duckdb_fdw      avail  1.0.0    OLAP  -ds--r  MIT           PIGSTY   13-17  duckdb_fdw_17*        DuckDB Foreign Data Wrapper
-pg_parquet      avail  0.2.0    OLAP  -dslt-  PostgreSQL    PIGSTY   14-17  pg_parquet_17         copy data between Postgres and Parquet
-pg_fkpart       avail  1.7      OLAP  -d----  GPL-2.0       PIGSTY   13-17  pg_fkpart_17          Table partitioning by foreign key utility
-pg_partman      avail  5.2.4    OLAP  -ds---  PostgreSQL    PGDG     13-17  pg_partman_17*        Extension to manage partitioned tables by time or ID
-plproxy         avail  2.11.0   OLAP  -ds---  BSD 0-Clause  PIGSTY   13-17  plproxy_17*           Database partitioning implemented as procedural language
+citus           added  13.0.2   OLAP  -dsl--  AGPL-3.0      PIGSTY   14-17  citus_17*             Distributed PostgreSQL as an extension
+citus_columnar  added  13.0.2   OLAP  -ds---  AGPL-3.0      PIGSTY   14-17  citus_17*             Citus columnar storage engine
+columnar        n/a    1.1.2    OLAP  -ds---  AGPL-3.0      PIGSTY   13-16  hydra_17*             Hydra Columnar extension
+pg_analytics    added  0.3.7    OLAP  -ds-t-  PostgreSQL    PIGSTY   14-17  pg_analytics_17       Postgres for analytics, powered by DuckDB
+pg_duckdb       added  0.3.1    OLAP  -dsl--  MIT           PIGSTY   14-17  pg_duckdb_17*         DuckDB Embedded in Postgres
+pg_mooncake     added  0.1.2    OLAP  -d----  MIT           PIGSTY   14-17  pg_mooncake_17*       Columnstore Table in Postgres
+duckdb_fdw      added  1.1.2    OLAP  -ds--r  MIT           PIGSTY   13-17  duckdb_fdw_17*        DuckDB Foreign Data Wrapper
+pg_parquet      added  0.3.1    OLAP  -dslt-  PostgreSQL    PIGSTY   14-17  pg_parquet_17         copy data between Postgres and Parquet
+pg_fkpart       added  1.7.0    OLAP  -d----  GPL-2.0       PIGSTY   13-17  pg_fkpart_17          Table partitioning by foreign key utility
+pg_partman      added  5.2.4    OLAP  -ds---  PostgreSQL    PGDG     13-17  pg_partman_17*        Extension to manage partitioned tables by time or ID
+plproxy         added  2.11.0   OLAP  -ds---  BSD 0-Clause  PIGSTY   13-17  plproxy_17*           Database partitioning implemented as procedural language
 pg_strom        avail  5.2.2    OLAP  -ds--x  PostgreSQL    PGDG     13-17  pg_strom_17*          PG-Strom - big-data processing acceleration using GPU and NVME
 tablefunc       added  1.0      OLAP  -ds-tx  PostgreSQL    CONTRIB  13-17  postgresql17-contrib  functions that manipulate whole tables, including crosstab
 
@@ -362,51 +362,50 @@ You can list all available repo / module (repo collection) with `pig repo list`:
 ```bash
 $ pig repo list
 
-os_environment: {code: el8, arch: amd64, type: rpm, major: 8}
+os_environment: {code: el9, arch: amd64, type: rpm, major: 9}
 repo_upstream:  # Available Repo: 32
-  - { name: pigsty-local   ,description: 'Pigsty Local'       ,module: local    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'file:///www/pigsty' }
-  - { name: pigsty-infra   ,description: 'Pigsty INFRA'       ,module: infra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.pigsty.io/yum/infra/$basearch' }
-  - { name: pigsty-pgsql   ,description: 'Pigsty PGSQL'       ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.pigsty.io/yum/pgsql/el$releasever.$basearch' }
-  - { name: nginx          ,description: 'Nginx Repo'         ,module: infra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://nginx.org/packages/rhel/$releasever/$basearch/' }
-  - { name: baseos         ,description: 'EL 8+ BaseOS'       ,module: node     ,releases: [8,9]            ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/' }
-  - { name: appstream      ,description: 'EL 8+ AppStream'    ,module: node     ,releases: [8,9]            ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/AppStream/$basearch/os/' }
-  - { name: extras         ,description: 'EL 8+ Extras'       ,module: node     ,releases: [8,9]            ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/extras/$basearch/os/' }
-  - { name: powertools     ,description: 'EL 8 PowerTools'    ,module: node     ,releases: [8]              ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/PowerTools/$basearch/os/' }
-  - { name: epel           ,description: 'EL 8+ EPEL'         ,module: node     ,releases: [8,9]            ,arch: [x86_64, aarch64]  ,baseurl: 'http://download.fedoraproject.org/pub/epel/$releasever/Everything/$basearch/' }
-  - { name: pgdg-common    ,description: 'PostgreSQL Common'  ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/common/redhat/rhel-$releasever-$basearch' }
-  - { name: pgdg-el8fix    ,description: 'PostgreSQL EL8FIX'  ,module: pgsql    ,releases: [8]              ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/common/pgdg-centos8-sysupdates/redhat/rhel-8-x86_64/' }
-  - { name: pgdg13         ,description: 'PostgreSQL 13'      ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/13/redhat/rhel-$releasever-$basearch' }
-  - { name: pgdg14         ,description: 'PostgreSQL 14'      ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/14/redhat/rhel-$releasever-$basearch' }
-  - { name: pgdg15         ,description: 'PostgreSQL 15'      ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/15/redhat/rhel-$releasever-$basearch' }
-  - { name: pgdg16         ,description: 'PostgreSQL 16'      ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/16/redhat/rhel-$releasever-$basearch' }
-  - { name: pgdg17         ,description: 'PostgreSQL 17'      ,module: pgsql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/17/redhat/rhel-$releasever-$basearch' }
-  - { name: pgdg-extras    ,description: 'PostgreSQL Extra'   ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/common/pgdg-rhel$releasever-extras/redhat/rhel-$releasever-$basearch' }
-  - { name: pgdg13-nonfree ,description: 'PostgreSQL 13+'     ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64]           ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/13/redhat/rhel-$releasever-$basearch' }
-  - { name: pgdg14-nonfree ,description: 'PostgreSQL 14+'     ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64]           ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/14/redhat/rhel-$releasever-$basearch' }
-  - { name: pgdg15-nonfree ,description: 'PostgreSQL 15+'     ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64]           ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/15/redhat/rhel-$releasever-$basearch' }
-  - { name: pgdg16-nonfree ,description: 'PostgreSQL 16+'     ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64]           ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/16/redhat/rhel-$releasever-$basearch' }
-  - { name: pgdg17-nonfree ,description: 'PostgreSQL 17+'     ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64]           ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/17/redhat/rhel-$releasever-$basearch' }
-  - { name: timescaledb    ,description: 'TimescaleDB'        ,module: extra    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://packagecloud.io/timescale/timescaledb/el/$releasever/$basearch' }
-  - { name: wiltondb       ,description: 'WiltonDB'           ,module: mssql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.copr.fedorainfracloud.org/results/wiltondb/wiltondb/epel-$releasever-$basearch/' }
-  - { name: ivorysql       ,description: 'IvorySQL'           ,module: ivory    ,releases: [7,8,9]          ,arch: [x86_64]           ,baseurl: 'https://repo.pigsty.io/yum/ivory/el$releasever.$basearch' }
-  - { name: groonga        ,description: 'Groonga'            ,module: groonga  ,releases: [8,9]            ,arch: [x86_64, aarch64]  ,baseurl: 'https://packages.groonga.org/almalinux/$releasever/$basearch/' }
-  - { name: mysql          ,description: 'MySQL'              ,module: mysql    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.mysql.com/yum/mysql-8.0-community/el/$releasever/$basearch/' }
-  - { name: mongo          ,description: 'MongoDB'            ,module: mongo    ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.mongodb.org/yum/redhat/$releasever/mongodb-org/8.0/$basearch/' }
-  - { name: redis          ,description: 'Redis'              ,module: redis    ,releases: [8,9]            ,arch: [x86_64, aarch64]  ,baseurl: 'https://rpmfind.net/linux/remi/enterprise/$releasever/redis72/$basearch/' }
-  - { name: grafana        ,description: 'Grafana'            ,module: grafana  ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://rpm.grafana.com' }
-  - { name: docker-ce      ,description: 'Docker CE'          ,module: docker   ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.docker.com/linux/centos/$releasever/$basearch/stable' }
-  - { name: kubernetes     ,description: 'Kubernetes'         ,module: kube     ,releases: [7,8,9]          ,arch: [x86_64, aarch64]  ,baseurl: 'https://pkgs.k8s.io/core:/stable:/v1.31/rpm/' }
-repo_modules:   # Available Modules: 19
+  - { name: pigsty-local   ,description: 'Pigsty Local'       ,module: local    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'file:///www/pigsty' }
+  - { name: pigsty-infra   ,description: 'Pigsty INFRA'       ,module: infra    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.pigsty.io/yum/infra/$basearch' }
+  - { name: pigsty-pgsql   ,description: 'Pigsty PGSQL'       ,module: pgsql    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.pigsty.io/yum/pgsql/el$releasever.$basearch' }
+  - { name: nginx          ,description: 'Nginx Repo'         ,module: infra    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://nginx.org/packages/rhel/$releasever/$basearch/' }
+  - { name: docker-ce      ,description: 'Docker CE'          ,module: infra    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.docker.com/linux/centos/$releasever/$basearch/stable' }
+  - { name: baseos         ,description: 'EL 8+ BaseOS'       ,module: node     ,releases: [8,9]    ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/' }
+  - { name: appstream      ,description: 'EL 8+ AppStream'    ,module: node     ,releases: [8,9]    ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/AppStream/$basearch/os/' }
+  - { name: extras         ,description: 'EL 8+ Extras'       ,module: node     ,releases: [8,9]    ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/extras/$basearch/os/' }
+  - { name: crb            ,description: 'EL 9 CRB'           ,module: node     ,releases: [9]      ,arch: [x86_64, aarch64]  ,baseurl: 'https://dl.rockylinux.org/pub/rocky/$releasever/CRB/$basearch/os/' }
+  - { name: epel           ,description: 'EL 8+ EPEL'         ,module: node     ,releases: [8,9]    ,arch: [x86_64, aarch64]  ,baseurl: 'http://download.fedoraproject.org/pub/epel/$releasever/Everything/$basearch/' }
+  - { name: pgdg-common    ,description: 'PostgreSQL Common'  ,module: pgsql    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/common/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg-el9fix    ,description: 'PostgreSQL EL9FIX'  ,module: pgsql    ,releases: [9]      ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/common/pgdg-rocky9-sysupdates/redhat/rhel-9-x86_64/' }
+  - { name: pgdg13         ,description: 'PostgreSQL 13'      ,module: pgsql    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/13/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg14         ,description: 'PostgreSQL 14'      ,module: pgsql    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/14/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg15         ,description: 'PostgreSQL 15'      ,module: pgsql    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/15/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg16         ,description: 'PostgreSQL 16'      ,module: pgsql    ,releases: [8,9]    ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/16/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg17         ,description: 'PostgreSQL 17'      ,module: pgsql    ,releases: [8,9]    ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/17/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg-extras    ,description: 'PostgreSQL Extra'   ,module: extra    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.postgresql.org/pub/repos/yum/common/pgdg-rhel$releasever-extras/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg13-nonfree ,description: 'PostgreSQL 13+'     ,module: extra    ,releases: [7,8,9]  ,arch: [x86_64]           ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/13/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg14-nonfree ,description: 'PostgreSQL 14+'     ,module: extra    ,releases: [7,8,9]  ,arch: [x86_64]           ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/14/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg15-nonfree ,description: 'PostgreSQL 15+'     ,module: extra    ,releases: [7,8,9]  ,arch: [x86_64]           ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/15/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg16-nonfree ,description: 'PostgreSQL 16+'     ,module: extra    ,releases: [8,9]    ,arch: [x86_64]           ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/16/redhat/rhel-$releasever-$basearch' }
+  - { name: pgdg17-nonfree ,description: 'PostgreSQL 17+'     ,module: extra    ,releases: [8,9]    ,arch: [x86_64]           ,baseurl: 'https://download.postgresql.org/pub/repos/yum/non-free/17/redhat/rhel-$releasever-$basearch' }
+  - { name: timescaledb    ,description: 'TimescaleDB'        ,module: extra    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://packagecloud.io/timescale/timescaledb/el/$releasever/$basearch' }
+  - { name: wiltondb       ,description: 'WiltonDB'           ,module: mssql    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.copr.fedorainfracloud.org/results/wiltondb/wiltondb/epel-$releasever-$basearch/' }
+  - { name: ivorysql       ,description: 'IvorySQL'           ,module: ivory    ,releases: [7,8,9]  ,arch: [x86_64]           ,baseurl: 'https://repo.pigsty.io/yum/ivory/el$releasever.$basearch' }
+  - { name: groonga        ,description: 'Groonga'            ,module: groonga  ,releases: [8,9]    ,arch: [x86_64, aarch64]  ,baseurl: 'https://packages.groonga.org/almalinux/$releasever/$basearch/' }
+  - { name: mysql          ,description: 'MySQL'              ,module: mysql    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.mysql.com/yum/mysql-8.0-community/el/$releasever/$basearch/' }
+  - { name: mongo          ,description: 'MongoDB'            ,module: mongo    ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.mongodb.org/yum/redhat/$releasever/mongodb-org/8.0/$basearch/' }
+  - { name: redis          ,description: 'Redis'              ,module: redis    ,releases: [8,9]    ,arch: [x86_64, aarch64]  ,baseurl: 'https://rpmfind.net/linux/remi/enterprise/$releasever/redis72/$basearch/' }
+  - { name: grafana        ,description: 'Grafana'            ,module: grafana  ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://rpm.grafana.com' }
+  - { name: kubernetes     ,description: 'Kubernetes'         ,module: kube     ,releases: [7,8,9]  ,arch: [x86_64, aarch64]  ,baseurl: 'https://pkgs.k8s.io/core:/stable:/v1.31/rpm/' }
+repo_modules:   # Available Modules: 18
   - all       : pigsty-infra, pigsty-pgsql, pgdg-common, pgdg-el8fix, pgdg-el9fix, pgdg17, pgdg16, pgdg15, pgdg14, pgdg13, baseos, appstream, extras, powertools, crb, epel, base, updates, security, backports
   - pigsty    : pigsty-infra, pigsty-pgsql
   - pgdg      : pgdg-common, pgdg-el8fix, pgdg-el9fix, pgdg17, pgdg16, pgdg15, pgdg14, pgdg13
   - node      : baseos, appstream, extras, powertools, crb, epel, base, updates, security, backports
-  - infra     : pigsty-infra, nginx
+  - infra     : pigsty-infra, nginx, docker-ce
   - pgsql     : pigsty-pgsql, pgdg-common, pgdg-el8fix, pgdg-el9fix, pgdg13, pgdg14, pgdg15, pgdg16, pgdg17, pgdg
   - extra     : pgdg-extras, pgdg13-nonfree, pgdg14-nonfree, pgdg15-nonfree, pgdg16-nonfree, pgdg17-nonfree, timescaledb, citus
   - mssql     : wiltondb
   - mysql     : mysql
-  - docker    : docker-ce
   - kube      : kubernetes
   - grafana   : grafana
   - pgml      : pgml
