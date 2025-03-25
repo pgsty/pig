@@ -8,7 +8,7 @@
 
 [**pig**](https://pigsty.io/ext/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13-17 along with [404 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13-17 along with [405 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
@@ -144,7 +144,7 @@ pig repo cache                   # cache repo as offline package
 pig build repo                   # init build repo (=repo set -ru)
 pig build tool  [mini|full|...]  # init build toolset
 pig build proxy [user@host:port] # init build proxy (optional)
-pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.12.9)
+pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.13.1)
 pig build spec                   # init build spec repo
 pig build get   [all|std|..]     # get ext code tarball with prefixes
 pig build ext   [extname...]     # build extension
@@ -169,8 +169,8 @@ And you can recover you old repos at `/etc/apt/backup` or `/etc/yum.repos.d/back
 You can also install PostgreSQL kernel packages with
 
 ```bash
-pig ext install pg17          # install PostgreSQL 17 kernels (all but devel)
-pig ext install pg16-simple   # install PostgreSQL 16 kernels with minimal packages
+pig ext install pg17          # install PostgreSQL 17 kernels (all except test/devel)
+pig ext install pg16-mini     # install PostgreSQL 16 kernels with minimal packages
 pig ext install pg15 -y       # install PostgreSQL 15 kernels with auto-confirm
 pig ext install pg14=14.3     # install PostgreSQL 14 kernels with an specific minor version
 pig ext install pg13=13.10    # install PostgreSQL 13 kernels
@@ -188,44 +188,60 @@ You can also use other package alias, it will translate to corresponding package
 and the `$v` will be replaced with the active or given pg version number, such as `17`, `16`, etc...
 
 ```yaml
-pg17:        "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit",
-pg16-core:   "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-test postgresql$v-devel postgresql$v-llvmjit",
-pg15-simple: "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl",
-pg14-client: "postgresql$v",
-pg13-server: "postgresql$v-server postgresql$v-libs postgresql$v-contrib",
-pg17-devel:  "postgresql$v-devel",
+pg17:         "postgresql17 postgresql17-server postgresql17-libs postgresql17-contrib postgresql17-plperl postgresql17-plpython3 postgresql17-pltcl postgresql17-llvmjit"
+pg17-client:  "postgresql17"
+pg17-server:  "postgresql17-server postgresql17-libs postgresql17-contrib"
+pg17-devel:   "postgresql17-devel"
+pg17-basic:   "pg_repack_17* wal2json_17* pgvector_17*"
+pg16-mini:    "postgresql16 postgresql16-server postgresql16-libs postgresql16-contrib"
+pg15-full:    "postgresql15 postgresql15-server postgresql15-libs postgresql15-contrib postgresql15-plperl postgresql15-plpython3 postgresql15-pltcl postgresql15-llvmjit postgresql15-test postgresql15-devel"
+pg14-main:    "postgresql14 postgresql14-server postgresql14-libs postgresql14-contrib postgresql14-plperl postgresql14-plpython3 postgresql14-pltcl postgresql14-llvmjit pg_repack_14* wal2json_14* pgvector_14*"
+pg13-core:    "postgresql13 postgresql13-server postgresql13-libs postgresql13-contrib postgresql13-plperl postgresql13-plpython3 postgresql13-pltcl postgresql13-llvmjit"
 ```
 
 <details><summary>More Alias</summary>
 
+Take el for examples:
 
 ```yaml
-pgsql:        "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit",
-pgsql-core:   "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-test postgresql$v-devel postgresql$v-llvmjit",
-pgsql-simple: "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl",
-pgsql-client: "postgresql$v",
-pgsql-server: "postgresql$v-server postgresql$v-libs postgresql$v-contrib",
-pgsql-devel:  "postgresql$v-devel",
-pgsql-basic:  "pg_repack_$v* wal2json_$v* pgvector_$v*",
-postgresql:   "postgresql$v*",
-pgsql-common: "patroni patroni-etcd pgbouncer pgbackrest pg_exporter pgbadger vip-manager",
-patroni:      "patroni patroni-etcd",
-pgbouncer:    "pgbouncer",
-pgbackrest:   "pgbackrest",
-pg_exporter:  "pg_exporter",
-vip-manager:  "vip-manager",
-pgbadger:     "pgbadger",
-pg_activity:  "pg_activity",
-pg_filedump:  "pg_filedump",
-pgxnclient:   "pgxnclient",
-pgformatter:  "pgformatter",
-pgcopydb:     "pgcopydb",
-pgloader:     "pgloader",
-pg_timetable: "pg_timetable",
-wiltondb:     "wiltondb",
-polardb:      "PolarDB",
-ivorysql:     "ivorysql3 ivorysql3-server ivorysql3-contrib ivorysql3-libs ivorysql3-plperl ivorysql3-plpython3 ivorysql3-pltcl ivorysql3-test",
-ivorysql-all: "ivorysql3 ivorysql3-server ivorysql3-contrib ivorysql3-libs ivorysql3-plperl ivorysql3-plpython3 ivorysql3-pltcl ivorysql3-test ivorysql3-docs ivorysql3-devel ivorysql3-llvmjit",
+pgsql-common:        "patroni patroni-etcd pgbouncer pgbackrest pg_exporter pgbadger vip-manager",
+pgsql:               "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit"
+pgsql-mini:          "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib"
+pgsql-core:          "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit"
+pgsql-full:          "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit postgresql$v-test postgresql$v-devel"
+pgsql-main:          "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit pg_repack_$v* wal2json_$v* pgvector_$v*"
+pgsql-client:        "postgresql$v"
+pgsql-server:        "postgresql$v-server postgresql$v-libs postgresql$v-contrib"
+pgsql-devel:         "postgresql$v-devel"
+pgsql-basic:         "pg_repack_$v* wal2json_$v* pgvector_$v*"
+postgresql:          "postgresql$v*"
+patroni:             "patroni patroni-etcd",
+pgbouncer:           "pgbouncer",
+pgbackrest:          "pgbackrest",
+pgbackrest_exporter: "pgbackrest_exporter",
+pg_exporter:         "pg_exporter",
+vip-manager:         "vip-manager",
+pgbadger:            "pgbadger",
+pg_activity:         "pg_activity",
+pg_filedump:         "pg_filedump",
+pgxnclient:          "pgxnclient",
+pgformatter:         "pgformatter",
+pgcopydb:            "pgcopydb",
+pgloader:            "pgloader",
+pg_timetable:        "pg_timetable",
+timescaledb-utils:   "timescaledb-tools timescaledb-event-streamer",
+ivorysql:            "ivorysql4",
+wiltondb:            "wiltondb",
+polardb:             "PolarDB",
+ferretdb:            "ferretdb2",
+duckdb:              "duckdb",
+etcd:                "etcd",
+haproxy:             "haproxy",
+pig:                 "pig",
+vray:                "vray",
+juicefs:             "juicefs",
+restic:              "restic",
+rclone:              "rclone",
 ```
 
 </details>
