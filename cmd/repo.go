@@ -161,19 +161,20 @@ var repoAddCmd = &cobra.Command{
 
 var repoSetCmd = &cobra.Command{
 	Use:     "set",
-	Short:   "wipe and overwrite repository",
+	Short:   "wipe, overwrite, and update repository",
 	Aliases: []string{"overwrite"},
 	Example: `
-  pig repo set all                  # set repo to node,pgsql,infra  (recommended)
-  pig repo set all -u               # set repo to above repo and update repo cache (or --update)
-  pig repo set pigsty --update      # set repo to pigsty extension repo and update repo cache
-  pig repo set pgdg   --update      # set repo to pgdg official repo and update repo cache
-  pig repo set infra                # set repo to observability, grafana & prometheus stack, pg bin utils
+  pig repo set                      # set repo to node,pgsql,infra (= pig repo add all -ru)
+  pig repo set node,pgsql           # use pgdg + pigsty repo
+  pig repo set node,pgdg            # use pgdg and node repo only
+  pig repo set node,pigsty          # use pgdg and node repo only
+  pig repo set node,infra,mssql     # use wiltondb/babelfish repo
 
   (Beware that system repo management require sudo/root privilege)
 	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repoRemove = true
+		repoUpdate = true
 		return repoAddCmd.RunE(cmd, args)
 	},
 }
@@ -317,10 +318,7 @@ func init() {
 	repoAddCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoAddCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 	repoAddCmd.Flags().BoolVarP(&repoRemove, "remove", "r", false, "remove existing repo")
-
 	repoSetCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
-	repoSetCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
-
 	repoRmCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 
 	// boot command flags
