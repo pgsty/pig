@@ -1,7 +1,7 @@
 # PIG - Postgres Install Genius
 
 [![Catalog: pigsty.io](https://img.shields.io/badge/catalog-pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/ext/list)
-[![Version: v0.3.2](https://img.shields.io/badge/version-v0.3.2-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.3.2)
+[![Version: v0.3.3](https://img.shields.io/badge/version-v0.3.3-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.3.3)
 [![Pigsty: v3.3.0](https://img.shields.io/badge/Pigsty-v3.3.0-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 405](https://img.shields.io/badge/extensions-405-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
@@ -131,6 +131,7 @@ pig repo list                    # available repo list
 pig repo info   [repo|module...] # show repo info
 pig repo status                  # show current repo status
 pig repo add    [repo|module...] # add repo and modules
+pig repo set    [repo|module...] # overwrite & update after add
 pig repo rm     [repo|module...] # remove repo & modules
 pig repo update                  # update repo pkg cache
 pig repo create                  # create repo on current system
@@ -141,7 +142,7 @@ pig repo cache                   # cache repo as offline package
 **Build Management**
 
 ```bash
-pig build repo                   # init build repo (=repo set -ru)
+pig build repo                   # init build repo (=repo set)
 pig build tool  [mini|full|...]  # init build toolset
 pig build proxy [user@host:port] # init build proxy (optional)
 pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.13.1)
@@ -157,9 +158,10 @@ While the following command will backup & wipe your existing repo and add all re
 
 ```bash
 pig repo add all --ru        # This will OVERWRITE all existing repo with node,pgdg,pigsty repo
+pig repo set                 # = pig repo add all --update --remove
 ```
 
-There's a brutal version of repo add: `repo set`, which will overwrite you existing repo (`-r`) by default.
+There's a brutal version of repo add: `repo set`, which will overwrite you existing repo (`-ru`) by default.
 
 And you can recover you old repos at `/etc/apt/backup` or `/etc/yum.repos.d/backup`.
 

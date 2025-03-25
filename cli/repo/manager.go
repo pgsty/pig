@@ -223,7 +223,7 @@ func (m *Manager) adjustPigstyRepoMeta() {
 // ModuleOrder returns the order of modules in given precedence
 func (m *Manager) ModuleOrder() []string {
 	// Define the desired order of specific modules
-	desiredOrder := []string{"all", "pigsty", "pgdg", "node", "infra", "pgsql", "extra", "mssql", "mysql", "docker", "kube", "grafana", "pgml"}
+	desiredOrder := []string{"all", "pigsty", "pgdg", "node", "infra", "pgsql", "extra", "mssql", "mysql", "kube", "grafana", "pgml"}
 
 	// Create a map to store the index of each module in the desired order
 	orderMap := make(map[string]int)
