@@ -48,7 +48,6 @@ var statusCmd = &cobra.Command{
 		fmt.Println("\n" + utils.PadHeader("Pigsty Environment", padding))
 		utils.PadKV("Inventory Path", config.PigstyConfig)
 		utils.PadKV("Pigsty Home", config.PigstyHome)
-		utils.PadKV("Embedded Version", config.PigstyVersion)
 		if license.Manager.Active != nil && license.Manager.Active.Claims != nil {
 			fmt.Printf("Active License:\n")
 			license.Manager.Hide = true

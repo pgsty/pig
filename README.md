@@ -4,7 +4,7 @@
 [![Version: v0.3.2](https://img.shields.io/badge/version-v0.3.2-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.3.2)
 [![Pigsty: v3.3.0](https://img.shields.io/badge/Pigsty-v3.3.0-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 404](https://img.shields.io/badge/extensions-404-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
+[![Extensions: 405](https://img.shields.io/badge/extensions-405-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
 
 [**pig**](https://pigsty.io/ext/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
@@ -406,7 +406,7 @@ The **pig** can also be used as a [cli](https://pigsty.io/ext/pig/sty) tool for 
 Which brings HA, PITR, Monitoring, IaC, and all the extensions to your PostgreSQL cluster.
 
 ```bash
-pig sty init     # install embed pigsty to ~/pigsty 
+pig sty init     # install pigsty to ~/pigsty 
 pig sty boot     # install ansible and other pre-deps 
 pig sty conf     # auto-generate pigsty.yml config file
 pig sty install  # run the install.yml playbook

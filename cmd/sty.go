@@ -66,12 +66,12 @@ var pigstyInitCmd = &cobra.Command{
 pig sty init
   -p | --path    : where to install, ~/pigsty by default
   -f | --force   : force overwrite existing pigsty dir
-  -v | --version : pigsty version, embedded by default
+  -v | --version : pigsty version, latest by default
   -d | --dir     : download directory, /tmp by default
 
 `,
 	Example: `
-  pig sty init                   # install to ~/pigsty with embedded version
+  pig sty init                   # install to ~/pigsty with the latest version
   pig sty init -f                # install and OVERWRITE existing pigsty dir
   pig sty init -p /tmp/pigsty    # install to another location /tmp/pigsty
   pig sty init -v 3.3            # get & install specific version v3.3.0
