@@ -12,29 +12,25 @@ import (
 // essential build tools for different linux distros
 var buildTools = map[string][]string{
 	"el8": {
-		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray",
-		"rpmdevtools", "dnf-utils", "pgdg-srpm-macros", "postgresql1*-devel", "postgresql1*-server", "jq",
-		"readline-devel", "zlib-devel", "libxml2-devel", "lz4-devel", "libzstd-devel", "krb5-devel",
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "rpmdevtools", "dnf-utils", "pgdg-srpm-macros",
+		"readline-devel", "zlib-devel", "libxml2-devel", "lz4-devel", "libzstd-devel", "krb5-devel", "postgresql1*-devel", "postgresql1*-server",
 	},
 	"el9": {
-		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray",
-		"rpmdevtools", "dnf-utils", "pgdg-srpm-macros", "postgresql1*-devel", "postgresql1*-server", "jq",
-		"readline-devel", "zlib-devel", "libxml2-devel", "lz4-devel", "libzstd-devel", "krb5-devel",
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "rpmdevtools", "dnf-utils", "pgdg-srpm-macros",
+		"readline-devel", "zlib-devel", "libxml2-devel", "lz4-devel", "libzstd-devel", "krb5-devel", "postgresql1*-devel", "postgresql1*-server",
 	},
 	"d12": {
-		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray",
-		"debhelper", "devscripts", "fakeroot", "postgresql-all", "postgresql-server-dev-all", "jq",
-		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev",
+		"make", "cmake", "ninja-build", "pkg-config" +
+			"", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
+		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
 	},
 	"u22": {
-		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray",
-		"debhelper", "devscripts", "fakeroot", "postgresql-all", "postgresql-server-dev-all", "jq",
-		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev",
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
+		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
 	},
 	"u24": {
-		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray",
-		"debhelper", "devscripts", "fakeroot", "postgresql-all", "postgresql-server-dev-all", "jq",
-		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev",
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
+		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
 	},
 }
 
@@ -59,7 +55,20 @@ func InstallBuildTools(mode string) error {
 	default:
 		return fmt.Errorf("unsupported distribution: %s", config.OSType)
 	}
-	installCmds = append(installCmds, buildTools[distro]...)
+
+	tools := buildTools[distro]
+	if mode == "mini" {
+		// Filter out PostgreSQL related packages in mini mode
+		filteredTools := make([]string, 0, len(tools))
+		for _, tool := range tools {
+			if !strings.Contains(strings.ToLower(tool), "postgresql") && !strings.Contains(strings.ToLower(tool), "pgdg") {
+				filteredTools = append(filteredTools, tool)
+			}
+		}
+		tools = filteredTools
+	}
+
+	installCmds = append(installCmds, tools...)
 	logrus.Infof("install build utils: %s", strings.Join(installCmds, " "))
 	return utils.SudoCommand(installCmds)
 }

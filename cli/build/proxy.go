@@ -60,6 +60,10 @@ func SetupProxy(remote string, local string) error {
 		localHost = "127.0.0.1"
 		local = "127.0.0.1:" + localPort
 	}
+	if localHost == "*" {
+		localHost = "0.0.0.0"
+		local = "0.0.0.0:" + localPort
+	}
 
 	// 2. Install or make sure proxy packages are installed
 	if err := InstallProxy(); err != nil {
