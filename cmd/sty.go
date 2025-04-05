@@ -74,7 +74,7 @@ pig sty init
   pig sty init                   # install to ~/pigsty with the latest version
   pig sty init -f                # install and OVERWRITE existing pigsty dir
   pig sty init -p /tmp/pigsty    # install to another location /tmp/pigsty
-  pig sty init -v 3.4            # get & install specific version v3.4.0
+  pig sty init -v 3.4            # get & install specific version v3.4.1
   pig sty init 3                 # get & install specific version v3 latest
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
