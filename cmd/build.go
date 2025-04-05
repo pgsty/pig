@@ -48,7 +48,7 @@ var buildToolCmd = &cobra.Command{
 	Short:   "Initialize build tools",
 	Aliases: []string{"t"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mode := "mini"
+		var mode string
 		if len(args) > 0 {
 			mode = args[0]
 		}
