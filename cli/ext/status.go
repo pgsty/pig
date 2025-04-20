@@ -12,6 +12,16 @@ import (
 
 // ExtensionStatus prints the status of installed extensions
 func ExtensionStatus(contrib bool) {
+	if Catalog == nil {
+		logrus.Debugf("catalog is not initialized, initializing from embedded data")
+		var err error
+		Catalog, err = NewExtensionCatalog()
+		if err != nil {
+			logrus.Errorf("failed to initialize catalog: %v", err)
+			return
+		}
+	}
+
 	PostgresInstallSummary()
 	if Postgres == nil {
 		logrus.Errorf("no PostgreSQL specified and not active PostgreSQL found")
@@ -23,8 +33,13 @@ func ExtensionStatus(contrib bool) {
 	var exts []*Extension
 	var notFound []string
 	repocount := map[string]int{"CONTRIB": 0, "PGDG": 0, "PIGSTY": 0}
+	extMap := Catalog.ExtNameMap
 	for _, ext := range Postgres.Extensions {
-		extInfo := Catalog.ExtNameMap[ext.Name]
+		if ext.Extension == nil {
+			logrus.Debugf("un-cataloged extension found: %v", ext)
+			continue
+		}
+		extInfo := extMap[ext.Name]
 		if extInfo == nil {
 			logrus.Infof("Extension: %s (not found in catalog)", ext.Name)
 			notFound = append(notFound, ext.Name)

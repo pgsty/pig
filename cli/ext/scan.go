@@ -25,6 +25,51 @@ var badCaseExtensions = map[string]bool{
 	"pg_proctab--0.0.10-compat":      true,
 }
 
+// lib name to ext name mapping, special case
+var matchSpecialCase = map[string]string{
+	"pgxml":                         "xml2",
+	"_int":                          "intarray",
+	"hstore_plpython3":              "hstore_plpython3u",
+	"jsonb_plpython3":               "jsonb_plpython3u",
+	"libduckdb":                     "pg_duckdb",
+	"libhive":                       "hdfs_fdw",
+	"llvmjit":                       "llvmjit",
+	"pg_partman_bgw":                "pg_partman",
+	"pgcryptokey_acpass":            "pgcryptokey",
+	"pglogical_output":              "pglogical",
+	"pgq_lowlevel":                  "pgq",
+	"pgq_triggers":                  "pgq",
+	"pgroonga_check":                "pgroonga",
+	"pgroonga_crash_safer":          "pgroonga",
+	"pgroonga_standby_maintainer":   "pgroonga",
+	"pgroonga_wal_applier":          "pgroonga",
+	"pgroonga_wal_resource_manager": "pgroonga",
+	"plugin_debugger":               "pldbgapi",
+	"ddl_deparse":                   "pgl_ddl_deploy",
+	"pg_timestamp":                  "pg_bulkload",
+	"pg_documentdb":                 "documentdb",
+	"pg_documentdb_core":            "documentdb",
+	"pg_documentdb_distributed":     "documentdb",
+	"pg_mooncake_duckdb":            "pg_mooncake",
+}
+
+var matchGlobCase = map[string]string{
+	"libMobilityDB-*":   "mobilitydb",
+	"libpgrouting-*":    "pgrouting",
+	"libpljava-so-*":    "pljava",
+	"timescaledb-tsl-*": "timescaledb",
+}
+
+var matchBuiltInLib = map[string]bool{
+	"libpqwalreceiver": true,
+	"dict_snowball":    true,
+	"llvmjit":          true,
+	"libecpg":          true,
+	"libecpg_compat":   true,
+	"libpgtypes":       true,
+	"libpq":            true,
+}
+
 // ExtensionInstall stores information about an Installed extension
 type ExtensionInstall struct {
 	*Extension
@@ -170,13 +215,17 @@ func (p *PostgresInstall) ScanExtensions() error {
 			extInstall := &ExtensionInstall{Postgres: p, ControlName: extName}
 			extMap[extName] = extInstall
 			extensions = append(extensions, extInstall)
-
 			extInstall.Libraries = make(map[string]bool, 0)
 			_ = extInstall.ParseControlFile()
 			// DEPENDENCY: find the extension object in the global Extensions list
-			ext := Catalog.ExtNameMap[extName]
+
+			normExtName := extName
+			if strings.HasPrefix(extName, "omni") {
+				normExtName = strings.SplitN(extName, "--", 2)[0]
+			}
+			ext := Catalog.ExtNameMap[normExtName]
 			if ext == nil {
-				logrus.Debugf("failed to find extension %s in catalog", extName)
+				logrus.Debugf("failed to find extension %s in catalog", normExtName)
 				continue
 			} else {
 				extInstall.Extension = ext
@@ -316,45 +365,6 @@ func PrintInstalledPostgres() string {
 	return strings.Join(pgVerStrList, ", ")
 }
 
-// lib name to ext name mapping, special case
-var matchSpecialCase = map[string]string{
-	"pgxml":                         "xml2",
-	"_int":                          "intarray",
-	"hstore_plpython3":              "hstore_plpython3u",
-	"jsonb_plpython3":               "jsonb_plpython3u",
-	"libMobilityDB-1.2":             "mobilitydb",
-	"libduckdb":                     "pg_duckdb",
-	"libpgrouting-3.7":              "pgrouting",
-	"libpljava-so-1.6.8":            "pljava",
-	"libhive":                       "hdfs_fdw",
-	"llvmjit":                       "llvmjit",
-	"pg_partman_bgw":                "pg_partman",
-	"pgcryptokey_acpass":            "pgcryptokey",
-	"pglogical_output":              "pglogical",
-	"pgq_lowlevel":                  "pgq",
-	"pgq_triggers":                  "pgq",
-	"pgroonga_check":                "pgroonga",
-	"pgroonga_crash_safer":          "pgroonga",
-	"pgroonga_standby_maintainer":   "pgroonga",
-	"pgroonga_wal_applier":          "pgroonga",
-	"pgroonga_wal_resource_manager": "pgroonga",
-	"plugin_debugger":               "pldbgapi",
-	"timescaledb-tsl-2.17.0":        "timescaledb",
-	"timescaledb-tsl-2.17.1":        "timescaledb",
-	"timescaledb-tsl-2.17.2":        "timescaledb",
-	"ddl_deparse":                   "pgl_ddl_deploy",
-}
-
-var matchBuiltInLib = map[string]bool{
-	"libpqwalreceiver": true,
-	"dict_snowball":    true,
-	"llvmjit":          true,
-	"libecpg":          true,
-	"libecpg_compat":   true,
-	"libpgtypes":       true,
-	"libpq":            true,
-}
-
 func isEncodingLib(libname string) bool {
 	if strings.HasPrefix(libname, "euc") || strings.HasPrefix(libname, "utf8") || strings.HasPrefix(libname, "latin") || libname == "cyrillic_and_mic" {
 		return true
@@ -370,12 +380,23 @@ func isBuiltInLib(libname string) bool {
 }
 
 func MatchExtensionWithLibs(extname, libname string) bool {
-	if extname == libname {
+	// Normalize names for comparison
+	normExtname := strings.ToLower(strings.TrimSpace(extname))
+	normLibname := strings.ToLower(strings.TrimSpace(libname))
+
+	if normExtname == normLibname {
 		return true
 	}
 	if ename, exists := matchSpecialCase[libname]; exists {
 		if extname == ename {
 			return true
+		}
+	}
+	for pattern, ename := range matchGlobCase {
+		if match, _ := filepath.Match(pattern, libname); match {
+			if extname == ename {
+				return true
+			}
 		}
 	}
 	if libname+"u" == extname || extname+"u" == libname {
@@ -391,5 +412,4 @@ func MatchExtensionWithLibs(extname, libname string) bool {
 	}
 
 	return false
-
 }
