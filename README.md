@@ -4,11 +4,11 @@
 [![Version: v0.3.4](https://img.shields.io/badge/version-v0.3.4-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.3.4)
 [![Pigsty: v3.4.1](https://img.shields.io/badge/Pigsty-v3.4.1-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 405](https://img.shields.io/badge/extensions-405-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
+[![Extensions: 407](https://img.shields.io/badge/extensions-407-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
 
 [**pig**](https://pigsty.io/ext/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13-17 along with [405 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13-17 along with [407 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
@@ -472,6 +472,4 @@ Here are some [bad cases](https://pigsty.io/ext/roadmap/badcase/) and limitation
 [![Copyright: 2018-2025 rh@Vonng.com](https://img.shields.io/badge/Copyright-2025_(rh%40vonng.com)-red?logo=c&color=steelblue)](https://github.com/Vonng)
 [![License: Apache](https://img.shields.io/badge/License-Apache--2.0-steelblue?style=flat&logo=opensourceinitiative&logoColor=green)](https://github.com/pgsty/pig/blob/main/LICENSE)
 
-![pig](https://github.com/user-attachments/assets/17333d0d-a77a-4f6a-8fae-9e3f57fa798e)
-
-[![pig-meme](https://github.com/user-attachments/assets/6d6e8740-0474-4f9e-8960-a141f90986b9)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
+[![pig-meme](https://github.com/user-attachments/assets/4c2310a0-7551-4233-875f-18d0bd87a03e)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
