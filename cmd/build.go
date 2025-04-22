@@ -17,6 +17,7 @@ var buildCmd = &cobra.Command{
 	Use:     "build",
 	Short:   "Build Postgres Extension",
 	Aliases: []string{"b"},
+	GroupID: "pgext",
 	Example: `pig build - Build Postgres Extension
 
   pig build repo                   # init build repo (=repo set -ru)
