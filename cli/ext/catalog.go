@@ -174,6 +174,8 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"ivorysql":            "ivorysql4",
 			"wiltondb":            "wiltondb",
 			"polardb":             "PolarDB",
+			"orioledb":            "orioledb_17 oriolepg_17",
+			"openhalodb":          "openhalodb",
 			"ferretdb":            "ferretdb2",
 			"duckdb":              "duckdb",
 			"etcd":                "etcd",
@@ -228,6 +230,8 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"ivorysql":            "ivorysql-4",
 			"wiltondb":            "wiltondb",
 			"polardb":             "polardb-for-postgresql",
+			"orioledb":            "oriolepg-17-orioledb oriolepg-17", // TBD
+			"openhalodb":          "openhalodb",                       // TBD
 			"ferretdb":            "ferretdb2",
 			"duckdb":              "duckdb",
 			"etcd":                "etcd",

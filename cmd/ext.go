@@ -149,8 +149,8 @@ var extAddCmd = &cobra.Command{
 	Aliases: []string{"a", "install", "ins"},
 	Example: `
 Description:
-  pig ext install pg_duckdb                  # install one extension
-  pig ext install postgis timescaledb        # install multiple extensions
+  pig ext add     pg_duckdb                  # install one extension
+  pig ext add     postgis timescaledb        # install multiple extensions
   pig ext add     pgvector pgvectorscale     # other alias: add, ins, i, a
   pig ext ins     pg_search -y               # auto confirm installation
   pig ext install pgsql                      # install the latest version of postgresql kernel
@@ -159,6 +159,7 @@ Description:
   pig ext install pg15-core                  # install postgresql 15 core packages
   pig ext install pg14-main -y               # install pg 14 + essential extensions (vector, repack, wal2json)
   pig ext install pg13-devel --yes           # install pg 13 devel packages (auto-confirm)
+  pig ext install pg12-mini                  # install postgresql 12 minimal packages
   pig ext install pgsql-common               # install common utils such as patroni pgbouncer pgbackrest,...
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
