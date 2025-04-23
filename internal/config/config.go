@@ -144,9 +144,17 @@ func findPigstyHome(pigstyHome string) string {
 	// if pigstyHomePath is not set or not valid, use home from config
 	pigstyHomePath = viper.GetString("home")
 	if validatePigstyHome(pigstyHomePath) {
-		logrus.Debugf("get pigsty home %s via config/env/default", pigstyHomePath)
+		logrus.Debugf("get pigsty home %s via config/env", pigstyHomePath)
 		return pigstyHomePath
 	}
+
+	pigstyHomePath = filepath.Join(HomeDir, "pigsty")
+	if validatePigstyHome(pigstyHomePath) {
+		logrus.Debugf("get pigsty home %s via default home", pigstyHomePath)
+		return pigstyHomePath
+	}
+
+	logrus.Debugf("pigsty home not found, is pigsty installed?")
 	return ""
 }
 
