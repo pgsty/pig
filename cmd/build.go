@@ -130,8 +130,6 @@ var buildExtCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(buildCmd)
-
 	// Parse build flags
 	buildCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", "0.13.1", "pgrx version to install")
 	buildCmd.PersistentFlags().BoolVarP(&buildRustYes, "yes", "y", false, "enforce rust re-installation")

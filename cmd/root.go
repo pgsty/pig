@@ -15,10 +15,11 @@ import (
 
 // log level parameters
 var (
-	logLevel  string
-	logPath   string
-	inventory string
-	debug     bool
+	logLevel   string
+	logPath    string
+	inventory  string
+	pigstyHome string
+	debug      bool
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -49,7 +50,7 @@ func initAll() error {
 	if err := initLogger(logLevel, logPath); err != nil {
 		return err
 	}
-	config.InitConfig(inventory)
+	config.InitConfig(inventory, pigstyHome)
 	return nil
 }
 
@@ -103,19 +104,23 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "log level: debug, info, warn, error, fatal, panic")
 	rootCmd.PersistentFlags().StringVar(&logPath, "log-path", "", "log file path, terminal by default")
 	rootCmd.PersistentFlags().StringVarP(&inventory, "inventory", "i", "", "config inventory path")
+	rootCmd.PersistentFlags().StringVarP(&pigstyHome, "home", "H", "", "pigsty home path")
 
 	rootCmd.AddGroup(
 		&cobra.Group{ID: "pgext", Title: "PostgreSQL Extension Manager"},
 		&cobra.Group{ID: "pigsty", Title: "Pigsty Management Commands"},
 	)
 	rootCmd.AddCommand(
-		repoCmd,
 		extCmd,
+		repoCmd,
+		buildCmd,
+
 		styCmd,
+		patroniCmd,
+
 		statusCmd,
 		licenseCmd,
 		versionCmd,
 		updateCmd,
-		patroniCmd,
 	)
 }
