@@ -46,8 +46,16 @@ var statusCmd = &cobra.Command{
 		ext.PostgresInstallSummary()
 
 		fmt.Println("\n" + utils.PadHeader("Pigsty Environment", padding))
-		utils.PadKV("Inventory Path", config.PigstyConfig)
-		utils.PadKV("Pigsty Home", config.PigstyHome)
+		if config.PigstyConfig != "" {
+			utils.PadKV("Inventory Path", config.PigstyConfig)
+		} else {
+			utils.PadKV("Inventory Path", "Not Found")
+		}
+		if config.PigstyHome != "" {
+			utils.PadKV("Pigsty Home", config.PigstyHome)
+		} else {
+			utils.PadKV("Pigsty Home", "Not Found")
+		}
 		if license.Manager.Active != nil && license.Manager.Active.Claims != nil {
 			fmt.Printf("Active License:\n")
 			license.Manager.Hide = true

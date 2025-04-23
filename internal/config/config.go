@@ -49,7 +49,9 @@ const (
 	DistroMAC      = "brew"
 )
 
-func InitConfig(inventory string) {
+// InitConfig initializes the configuration, if inventory and pigstyHome is given as cli args,
+// if not, it will use the environment variables / config file / default values
+func InitConfig(inventory, pigstyHome string) {
 	DetectEnvironment()
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -94,26 +96,23 @@ func InitConfig(inventory string) {
 		logrus.Debugf("Load config from %s", ConfigFile)
 	}
 
-	// load config file
+	// load specified config file if provided
 	cfgPath := viper.GetString("config")
 	if cfgPath != "" {
 		InitConfigFile(cfgPath)
 	}
 
-	// setup inventory & pigsty home
-	if inventory != "" {
-		PigstyConfig = inventory
-		PigstyHome = filepath.Dir(inventory)
-		logrus.Debugf("inventory = %s, home = %s, from cli arg", PigstyConfig, PigstyHome)
-	} else {
-		if inventory = viper.GetString("inventory"); inventory != "" {
-			PigstyConfig = inventory
-			PigstyHome = filepath.Dir(inventory)
-			logrus.Debugf("inventory = %s, home = %s, from config/env", PigstyConfig, PigstyHome)
-		} else {
-			PigstyConfig = filepath.Join(HomeDir, "pigsty", "pigsty.yml")
-			PigstyHome = filepath.Join(HomeDir, "pigsty")
-			logrus.Debugf("inventory = %s, home = %s, from default", PigstyConfig, PigstyHome)
+	// setup pigsty home
+	PigstyHome = findPigstyHome(pigstyHome)
+
+	// setup inventory
+	PigstyConfig = findInventoryPath(inventory)
+
+	// fill missing pigsty.yml if pigsty home is set
+	if PigstyHome != "" && PigstyConfig == "" {
+		candidatePath := filepath.Join(PigstyHome, "pigsty.yml")
+		if _, err := os.Stat(candidatePath); err == nil {
+			PigstyConfig = candidatePath
 		}
 	}
 
@@ -124,12 +123,86 @@ func InitConfig(inventory string) {
 	}
 }
 
+func findPigstyHome(pigstyHome string) string {
+	var pigstyHomePath string
+	if pigstyHome != "" {
+		if !filepath.IsAbs(pigstyHome) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				logrus.Warnf("Failed to get current working directory: %v", err)
+				cwd = "."
+			}
+			pigstyHome = filepath.Join(cwd, pigstyHome)
+		}
+		pigstyHomePath = pigstyHome
+		if validatePigstyHome(pigstyHomePath) {
+			logrus.Debugf("get pigsty home %s via cil arg", pigstyHomePath)
+			return pigstyHomePath
+		}
+	}
+
+	// if pigstyHomePath is not set or not valid, use home from config
+	pigstyHomePath = viper.GetString("home")
+	if validatePigstyHome(pigstyHomePath) {
+		logrus.Debugf("get pigsty home %s via config/env/default", pigstyHomePath)
+		return pigstyHomePath
+	}
+	return ""
+}
+
+func validatePigstyHome(pigstyHomePath string) bool {
+	if pigstyHomePath == "" {
+		return false
+	}
+
+	f, err := os.Open(filepath.Join(pigstyHomePath, "ansible.cfg"))
+	if err == nil {
+		defer f.Close()
+		return true
+	}
+	return false
+}
+
+func findInventoryPath(inventory string) string {
+	var inventoryPaths, inventorySources []string
+
+	if inventory != "" {
+		// if relative path, convert to absolute path with current working directory
+		if !filepath.IsAbs(inventory) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				cwd = "."
+			}
+			inventory = filepath.Join(cwd, inventory)
+		}
+		inventoryPaths = append(inventoryPaths, inventory)
+		inventorySources = append(inventorySources, "cli arg")
+	}
+
+	if configInventory := viper.GetString("inventory"); configInventory != "" {
+		inventoryPaths = append(inventoryPaths, configInventory)
+		inventorySources = append(inventorySources, "config/env")
+	}
+
+	defaultPath := filepath.Join(HomeDir, "pigsty", "pigsty.yml")
+	inventoryPaths = append(inventoryPaths, defaultPath)
+	inventorySources = append(inventorySources, "default")
+
+	for i, path := range inventoryPaths {
+		if _, err := os.Stat(path); err == nil {
+			logrus.Debugf("find inventory %s from %s", path, inventorySources[i])
+			return path
+		}
+	}
+	return ""
+}
+
 // InitConfigFile will init the config file with provided path
 func InitConfigFile(cfgPath string) {
 	viper.SetConfigType("yml")
 	viper.SetDefault("license", "")
 	viper.SetDefault("region", "default")
-	viper.SetDefault("home", "~/pigsty")
+	viper.SetDefault("home", filepath.Join(HomeDir, "pigsty"))
 
 	var cfgSource string
 	if cfgPath != "" {
@@ -147,26 +220,8 @@ func InitConfigFile(cfgPath string) {
 		cfgPath = ""
 	}
 
-	if cfgPath == "" {
-		pigstyHome := os.Getenv("PIGSTY_HOME")
-		if pigstyHome == "" {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				logrus.Debug("Failed to get user home directory")
-				pigstyHome = "${HOME}/pigsty"
-			} else {
-				pigstyHome = filepath.Join(homeDir, "pigsty")
-				logrus.Debugf("config file is infer from ENV: PIGSTY_HOME=%s", pigstyHome)
-			}
-		}
-		cfgPath = filepath.Join(pigstyHome, "pigsty.yml")
-		cfgSource = "HOME"
-	}
-
 	PigstyConfig = cfgPath
-	PigstyHome = filepath.Base(cfgPath)
 	viper.SetConfigFile(cfgPath)
-
 	viper.SetEnvPrefix("PIGSTY")
 	viper.AutomaticEnv()
 	if err := viper.ReadInConfig(); err != nil {
