@@ -9,19 +9,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	doRemoveWithUninstall bool
+)
+
 // doCmd represents the pig do management command
 var doCmd = &cobra.Command{
 	Use:     "do",
-	Short:   "Run Pigsty Playbook Tasks",
-	Aliases: []string{"ru"},
+	Short:   "run admin tasks",
+	Aliases: []string{"d"},
 	GroupID: "pigsty",
-	Long:    `pig do - ansible playbook to perform admin tasks`,
+	Long:    `pig do - perform admin tasks with ansible playbook`,
 	Example: `
   pig do pgsql-add  <sel> [ins...]      # add instances to cluster
   pig do pgsql-rm   <sel> [ins...]      # remove instances from cluster
   pig do pgsql-db   <cls> <dbname>      # create/update pgsql database
   pig do pgsql-user <cls> <username>    # create/udpate pgsql user
-  pig do pgsql-ext  <sel> [ext...]      # install pgsql extensions
+  pig do pgsql-ext  <cls> [ext...]      # install pgsql extensions
   pig do pgsql-svc  <sel>               # reload pgsql service
   pig do pgsql-hba  <sel>               # refresh pgsql hba
   pig do pgmon-add  <cls>               # add remote monitor target
@@ -31,10 +35,9 @@ var doCmd = &cobra.Command{
   pig do node-rm    <sel>               # remove node from pigsty
   pig do node-repo  <sel>               # refresh node repo
   pig do node-pkg   <sel> [pkg...]      # install node package
- 
-  pig do redis-add  <sel> [port...]     # TBD
-  pig do redis-rm   <sel> [port...]     # TBD
-  pig do redis-svc  <sel> [port...]     # TBD
+
+  pig do redis-add  <sel> [port...]     # add redis cluster/node/instance
+  pig do redis-rm   <sel> [port...]     # remove redis cluster/node/instance
   `,
 }
 
@@ -52,8 +55,8 @@ var doPgsqlAddCmd = &cobra.Command{
   `,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cls := args[0]
-		command := []string{"pgsql.yml", "-l", cls}
+		selector := args[0]
+		command := []string{"pgsql.yml", "-l", selector}
 		command = append(command, args[1:]...)
 		return do.RunPlaybook(inventory, command)
 	},
@@ -73,10 +76,9 @@ var doPgsqlRmCmd = &cobra.Command{
 
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cls := args[0]
-		command := []string{"pgsql-rm.yml", "-l", cls}
-		if len(args) > 1 && args[1] == "full" {
-			//
+		selector := args[0]
+		command := []string{"pgsql-rm.yml", "-l", selector}
+		if doRemoveWithUninstall {
 			command = append(command, "-e", "pg_uninstall=true")
 		}
 		return do.RunPlaybook(inventory, command)
@@ -178,8 +180,8 @@ var doPgsqlSvcCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cls := args[0]
-		command := []string{"pgsql.yml", "-l", cls, "-t", "pg_service"}
+		selector := args[0]
+		command := []string{"pgsql.yml", "-l", selector, "-t", "pg_service"}
 		return do.RunPlaybook(inventory, command)
 	},
 }
@@ -255,8 +257,8 @@ var doNodeRmCmd = &cobra.Command{
   `,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cls := args[0]
-		command := []string{"node-rm.yml", "-l", cls}
+		selector := args[0]
+		command := []string{"node-rm.yml", "-l", selector}
 		return do.RunPlaybook(inventory, command)
 	},
 }
@@ -397,6 +399,10 @@ var doRedisRmCmd = &cobra.Command{
 }
 
 func init() {
+
+	doPgsqlRmCmd.Flags().BoolVarP(&doRemoveWithUninstall, "uninstall", "u", false, "uninstall packages during removal")
+	doRedisRmCmd.Flags().BoolVarP(&doRemoveWithUninstall, "uninstall", "u", false, "uninstall packages during removal")
+
 	doCmd.AddCommand(doPgsqlAddCmd)
 	doCmd.AddCommand(doPgsqlRmCmd)
 	doCmd.AddCommand(doPgsqlUserCmd)
