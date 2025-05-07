@@ -39,7 +39,7 @@ var (
 )
 
 var (
-	PostgresActiveMajorVersions = []int{17, 16, 15, 14, 13}
+	PostgresActiveMajorVersions = []int{18, 17, 16, 15, 14, 13}
 	PostgresLatestMajorVersion  = 17
 	PostgresElSearchPath        = []string{"/usr/pgsql-%s/bin/pg_config"}
 	PostgresDEBSearchPath       = []string{"/usr/lib/postgresql/%s/bin/pg_config"}
