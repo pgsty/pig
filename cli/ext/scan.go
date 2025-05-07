@@ -39,6 +39,8 @@ var matchSpecialCase = map[string]string{
 	"pglogical_output":              "pglogical",
 	"pgq_lowlevel":                  "pgq",
 	"pgq_triggers":                  "pgq",
+	"citus_pgoutput":                "citus",
+	"citus_wal2json":                "citus",
 	"pgroonga_check":                "pgroonga",
 	"pgroonga_crash_safer":          "pgroonga",
 	"pgroonga_standby_maintainer":   "pgroonga",
