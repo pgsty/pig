@@ -37,7 +37,7 @@ var (
 )
 
 const (
-	PigVersion     = "0.4.0"
+	PigVersion     = "0.4.1"
 	PigstyVersion  = "3.4.0"
 	PigstyIO       = "https://pigsty.io"
 	PigstyCC       = "https://pigsty.cc"
