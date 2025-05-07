@@ -1,14 +1,15 @@
 # PIG - Postgres Install Genius
 
+[![Document: pigsty.io/ext/pig](https://img.shields.io/badge/docs-pigsty.io/ext/pig-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/ext/pig)
 [![Catalog: pigsty.io](https://img.shields.io/badge/catalog-pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/ext/list)
 [![Version: v0.4.1](https://img.shields.io/badge/version-v0.4.1-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.4.1)
 [![Pigsty: v3.4.1](https://img.shields.io/badge/Pigsty-v3.4.1-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 412](https://img.shields.io/badge/extensions-412-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
+[![Extensions: 414](https://img.shields.io/badge/extensions-414-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
 
 [**pig**](https://pigsty.io/ext/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13-17 along with [412 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13-17 along with [414 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 

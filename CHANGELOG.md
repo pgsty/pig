@@ -25,7 +25,7 @@
 
 ## v0.4.1
 
-- Update extension list to 412
+- Update extension list to 414
 - add `citus_wal2json` and `citus_pgoutput` to `pig ext scan` mapping
 - Add PG 18 beta repo
 - Add PG 18 package alias
