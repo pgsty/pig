@@ -258,6 +258,9 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 		}
 		for _, ver := range PostgresActiveMajorVersions {
 			for k, v := range pkgMapTmpl {
+				if ver == 18 {
+					v = strings.Replace(v, "postgresql-client-$v", "postgresql-client-$v libpq5=18*", -1)
+				}
 				key := strings.Replace(k, "pgsql", fmt.Sprintf("pg%d", ver), 1)
 				value := strings.Replace(v, "$v", fmt.Sprintf("%d", ver), -1)
 				pkgMap[key] = value
