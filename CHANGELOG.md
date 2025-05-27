@@ -4,7 +4,8 @@
 
 | Version |    Date    | Summary                              | Release                                                    |
 |:--------|:----------:|--------------------------------------|------------------------------------------------------------|
-| v0.4.1  | 2025-05-07 | 412 extension, pg18 alias            | [v0.4.1](https://github.com/pgsty/pig/releases/tag/v0.4.1) |
+| v0.4.2  | 2025-05-27 | 421 extension                        | [v0.4.2](https://github.com/pgsty/pig/releases/tag/v0.4.2) |
+| v0.4.1  | 2025-05-07 | 414 extension, pg18 alias support    | [v0.4.1](https://github.com/pgsty/pig/releases/tag/v0.4.1) |
 | v0.4.0  | 2025-05-01 | do & pt sub-cmd, halo & orioledb     | [v0.4.0](https://github.com/pgsty/pig/releases/tag/v0.4.0) |
 | v0.3.4  | 2025-04-05 | routine update                       | [v0.3.4](https://github.com/pgsty/pig/releases/tag/v0.3.4) |
 | v0.3.3  | 2025-03-25 | alias, repo, deps                    | [v0.3.3](https://github.com/pgsty/pig/releases/tag/v0.3.3) |
@@ -22,6 +23,13 @@
 
 
 --------
+
+## v0.4.2 (WIP)
+
+- Update extension list to 421
+- Add openhalo/orioledb support for Debian / Ubuntu
+- Add el7 repo back
+
 
 ## v0.4.1
 
