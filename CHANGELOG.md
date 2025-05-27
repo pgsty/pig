@@ -4,7 +4,8 @@
 
 | Version |    Date    | Summary                              | Release                                                    |
 |:--------|:----------:|--------------------------------------|------------------------------------------------------------|
-| v0.4.1  | 2025-05-07 | 412 extension, pg18 alias            | [v0.4.1](https://github.com/pgsty/pig/releases/tag/v0.4.1) |
+| v0.4.2  | 2025-05-27 | 421 extension, halo & oriole deb     | [v0.4.2](https://github.com/pgsty/pig/releases/tag/v0.4.2) |
+| v0.4.1  | 2025-05-07 | 414 extension, pg18 alias support    | [v0.4.1](https://github.com/pgsty/pig/releases/tag/v0.4.1) |
 | v0.4.0  | 2025-05-01 | do & pt sub-cmd, halo & orioledb     | [v0.4.0](https://github.com/pgsty/pig/releases/tag/v0.4.0) |
 | v0.3.4  | 2025-04-05 | routine update                       | [v0.3.4](https://github.com/pgsty/pig/releases/tag/v0.3.4) |
 | v0.3.3  | 2025-03-25 | alias, repo, deps                    | [v0.3.3](https://github.com/pgsty/pig/releases/tag/v0.3.3) |
@@ -20,6 +21,35 @@
 | v0.1.0  | 2024-12-29 | repo, ext, sty, and self-update      | [v0.1.0](https://github.com/pgsty/pig/releases/tag/v0.1.0) |
 | v0.0.1  | 2024-12-23 | Genesis Release                      | [v0.0.1](https://github.com/pgsty/pig/releases/tag/v0.0.1) |
 
+
+--------
+
+## v0.4.2
+
+- Update extension list to 421
+- Add openhalo/orioledb support for Debian / Ubuntu
+- pgdd [0.6.0](https://github.com/rustprooflabs/pgdd) (pgrx 0.14.1)
+- convert [0.0.4](https://github.com/rustprooflabs/convert) (pgrx 0.14.1)
+- pg_idkit [0.3.0](https://github.com/VADOSWARE/pg_idkit) (pgrx 0.14.1)
+- pg_tokenizer.rs [0.1.0](https://github.com/tensorchord/pg_tokenizer.rs) (pgrx 0.13.1)
+- pg_render [0.1.2](https://github.com/mkaski/pg_render) (pgrx 0.12.8)
+- pgx_ulid [0.2.0](https://github.com/pksunkara/pgx_ulid) (pgrx 0.12.7)
+- pg_ivm [1.11.0](https://github.com/sraoss/pg_ivm) for debian/ubuntu
+- orioledb [1.4.0 beta11](https://github.com/orioledb/orioledb)
+- Add el7 repo back
+
+**Checksums**
+
+```bash
+bbf83fa3e3ec9a4dca82eeed921ae90a  pig_0.4.2-1_amd64.deb
+e45753335faf80a70d4f2ef1d3100d72  pig_0.4.2-1_arm64.deb
+966d60bbc2025ba9cc53393011605f9f  pig-0.4.2-1.aarch64.rpm
+1f31f54da144f10039fa026b7b6e75ad  pig-0.4.2-1.x86_64.rpm
+1eec26c4e69b40921e209bcaa4fe257a  pig-v0.4.2.linux-amd64.tar.gz
+768d43441917a3625c462ce9f2b9d4ef  pig-v0.4.2.linux-arm64.tar.gz
+```
+
+Release: https://github.com/pgsty/pig/releases/tag/v0.4.2
 
 --------
 
@@ -55,6 +85,19 @@
 - pgvectorscale [0.7.1](https://github.com/timescale/pgvectorscale/releases/tag/0.7.1) (pgrx 0.12.9)
 - pg_session_jwt [0.3.1](https://github.com/neondatabase/pg_session_jwt/releases/tag/v0.3.1) (pgrx 0.12.6) -> 0.12.9
 
+**Checksums**
+
+```
+e2c1037c20f97c6f5930876ee82b6392  pig_0.4.1-1_amd64.deb
+8197b6b5b95d1d1ae95e0a0e50355ecb  pig_0.4.1-1_arm64.deb
+9d3a261d31c92fc73fe5bbfcd5b8e8ba  pig-0.4.1-1.aarch64.rpm
+ffcec2a2ae965d14b9d3d80278fd340c  pig-0.4.1-1.x86_64.rpm
+01d3128e782f35a20f0c81480cbe9025  pig-v0.4.1.linux-amd64.tar.gz
+b2655628df326a1d0ed13f3dd8762c65  pig-v0.4.1.linux-arm64.tar.gz
+```
+
+Release: https://github.com/pgsty/pig/releases/tag/v0.4.1
+
 
 --------
 
@@ -81,7 +124,19 @@
 - Updated pg_tracing RPM to 0.1.3
 - Updated pgmq RPM to 1.5.1
 
+**Checksums**
+
+```
+bbc0adf94b342ac450c7999ea1c5ab76  pig_0.4.0-1_amd64.deb
+7445b819624e7498b496edb12a36f426  pig_0.4.0-1_arm64.deb
+835ce929afac0fb1f249f55571fbed97  pig-0.4.0-1.aarch64.rpm
+25ba5a846095e17d2bfa2f15fe4e4b44  pig-0.4.0-1.x86_64.rpm
+1568b163ffa23cb921ee439452ca4de9  pig-v0.4.0.linux-amd64.tar.gz
+9f2ab3f5d1e29807a9642dfbe1dc9b0e  pig-v0.4.0.linux-arm64.tar.gz
+```
+
 Release: https://github.com/pgsty/pig/releases/tag/v0.4.0
+
 
 --------
 
@@ -95,6 +150,8 @@ curl https://repo.pigsty.io/pig | bash -s 0.3.4
 - use aliyun epel mirror instead of broken tsinghua tuna mirror
 - bump pigsty version string
 - add `gitlab` repo to repo list
+
+**Checksums**
 
 ```
 5c0bba04d955bbe6a29d24d31aa17c6b  pig-0.3.4-1.aarch64.rpm
@@ -152,6 +209,7 @@ c43e082c661e75d91f1c726e60911ea3  pig-v0.3.3.linux-arm64.tar.gz
 75af6731adc4d31aa3458d70fc7f4e42  pig_0.3.3-1_arm64.deb
 ```
 
+Release: https://github.com/pgsty/pig/releases/tag/v0.3.3
 
 
 --------
