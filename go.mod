@@ -3,7 +3,6 @@ module pig
 go 1.24.2
 
 require (
-	github.com/dustin/go-humanize v1.0.1
 	github.com/gofrs/uuid/v5 v5.3.2
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/sirupsen/logrus v1.9.3
