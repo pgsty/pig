@@ -1,15 +1,15 @@
 # PIG - Postgres Install Genius
 
-[![Document: pigsty.io/ext/pig](https://img.shields.io/badge/docs-pigsty.io/ext/pig-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/ext/pig)
-[![Catalog: pigsty.io](https://img.shields.io/badge/catalog-pigsty.io-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/ext/list)
-[![Version: v0.4.2](https://img.shields.io/badge/version-v0.4.2-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.4.2)
-[![Pigsty: v3.4.1](https://img.shields.io/badge/Pigsty-v3.4.1-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io)
+[![Document: pgsty.com/ext/pig](https://img.shields.io/badge/docs-pgsty.com/ext/pig-slategray?style=flat&logo=cilium&logoColor=white)](https://pgsty.com/ext/pig)
+[![Catalog: pgsty.com](https://img.shields.io/badge/catalog-pgsty.com-slategray?style=flat&logo=cilium&logoColor=white)](https://pgsty.com/ext/list)
+[![Version: v0.5.0](https://img.shields.io/badge/version-v0.5.0-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.5.0)
+[![Pigsty: v3.5.0](https://img.shields.io/badge/Pigsty-v3.5.0-slategray?style=flat&logo=cilium&logoColor=white)](https://pgsty.com/docs)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 421](https://img.shields.io/badge/extensions-421-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
+[![Extensions: 422](https://img.shields.io/badge/extensions-422-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgsty.com/ext/list)
 
-[**pig**](https://pigsty.io/ext/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
+[**pig**](https://pgsty.com/ext/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13-17 along with [421 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13~17 along with [422 extensions](https://pgsty.com/ext/list) on (`amd64` / `arm64`) with native OS package manager
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
@@ -21,10 +21,10 @@ Install PostgreSQL 13-17 along with [421 extensions](https://pigsty.io/ext/list)
 ## Get Started
 
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18,17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://pigsty.io/docs/pgsql)
-[![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://pigsty.io/docs/node)
-[![EL Support: 8/9](https://img.shields.io/badge/EL-8/9-red?style=flat&logo=redhat&logoColor=red)](https://pigsty.io/ext/feat/rpm)
-[![Debian Support: 12](https://img.shields.io/badge/Debian-12-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pigsty.io/docs/reference/compatibility/)
-[![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://pigsty.io/ext/feat/deb)
+[![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://pgsty.com/docs/node)
+[![EL Support: 8/9](https://img.shields.io/badge/EL-8/9-red?style=flat&logo=redhat&logoColor=red)](https://pgsty.com/docs/prepare/linux)
+[![Debian Support: 12](https://img.shields.io/badge/Debian-12-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pgsty.com/docs/prepare/linux)
+[![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://pgsty.com/docs/prepare/linux)
 
 [Install](#installation) the `pig` package first, (you can also use the `apt` / `yum` or just copy the binary)
 
@@ -32,7 +32,7 @@ Install PostgreSQL 13-17 along with [421 extensions](https://pigsty.io/ext/list)
 curl -fsSL https://repo.pigsty.io/pig | bash
 ```
 
-Then it's ready to use, assume you want to install the [`pg_duckdb`](https://pigsty.io/ext/feat/pg_duckdb) extension:
+Then it's ready to use, assume you want to install the [`pg_duckdb`](https://pgsty.com/ext/pg_duckdb) extension:
 
 ```bash
 $ pig repo add pigsty pgdg -u  # add pgdg & pigsty repo, then update repo cache
@@ -40,7 +40,7 @@ $ pig ext install pg17         # install PostgreSQL 17 kernels with native PGDG 
 $ pig ext install pg_duckdb    # install the pg_duckdb extension (for current pg17)
 ```
 
-That's it, All set! Check the [advanced usage](#advanced-usage) for details and [the full list 400+ available extensions](https://pigsty.io/ext/feat/list).
+That's it, All set! Check the [advanced usage](#advanced-usage) for details and [the full list 400+ available extensions](https://pgsty.com/ext/list).
 
 [![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
 
@@ -155,7 +155,7 @@ pig build ext   [extname...]     # build extension
 
 **Radical Repo Admin**
 
-The default `pig repo add pigsty pgdg` will add the `PGDG` repo and [`PIGSTY`](https://pigsty.io/ext/usage/repo) repo to your system.
+The default `pig repo add pigsty pgdg` will add the `PGDG` repo and [`PIGSTY`](https://pgsty.com/ext/repo) repo to your system.
 While the following command will backup & wipe your existing repo and add all require repo to your system.
 
 ```bash
@@ -321,7 +321,7 @@ $ pig ext info pg_duckdb
 │ Version   : 0.3.1                                                          │
 │ License   : MIT                                                            │
 │ Website   : https://github.com/duckdb/pg_duckdb                            │
-│ Details   : https://pigsty.io/ext/olap/pg_duckdb                           │
+│ Details   : https://pgsty.com/ext/olap/pg_duckdb                           │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Extension Properties                                                       │
 ├────────────────────────────────────────────────────────────────────────────┤
@@ -420,7 +420,7 @@ repo_modules:   # Available Modules: 18
 
 **Pigsty Management**
 
-The **pig** can also be used as a [cli](https://pigsty.io/ext/pig/sty) tool for [Pigsty](https://pigsty.io) - the battery-include free PostgreSQL RDS.
+The **pig** can also be used as a [cli](https://pgsty.com/ext/pig/sty) tool for [Pigsty](https://pigsty.io) — the battery-include free PostgreSQL RDS.
 Which brings HA, PITR, Monitoring, IaC, and all the extensions to your PostgreSQL cluster.
 
 ```bash
@@ -449,19 +449,18 @@ You can use the `pig sty` subcommand to bootstrap pigsty on current node.
 | **u22** | Ubuntu 22.04 (`jammy`)         | PG 17 - 13 | PG 17 - 13 |
 | **d12** | Debian 12 (`bookworm`)         | PG 17 - 13 | PG 17 - 13 |
 
-Here are some [bad cases](https://pigsty.io/ext/roadmap/badcase/) and limitation for above Linux distros:
+Here are some bad cases and limitations for above Linux distros:
 
-- [`pg_duckdb`](https://pigsty.io/ext/olap/pg_duckdb) `el8:*:*`
-- [`pg_mooncake`](https://pigsty.io/ext/olap/pg_mooncake) `el8:*:*`
-- [`pljava`](https://pigsty.io/ext/lang/pljava): `el8:*:*`
-- [`pllua`](https://pigsty.io/ext/lang/pllua): `el8:arm:13,14,15`
-- [`h3`](https://pigsty.io/ext/gis/h3): `el8.amd.pg17`
-- [`jdbc_fdw`](https://pigsty.io/ext/fdw/jdbc_fdw): `el:arm:*`
-- [`pg_partman`](https://pigsty.io/ext/olap/pg_partman): `u24:*:13`
-- [`wiltondb`](https://pigsty.io/ext/sim/babelfishpg_common): `d12:*:*`
-- [`citus`](https://pigsty.io/ext/olap/citus) and [`hydra`](https://pigsty.io/ext/olap/hydra) are mutually exclusive
-- [`pg_duckdb`](https://pigsty.io/ext/olap/pg_duckdb) will invalidate [`duckdb_fdw`](https://pigsty.io/ext/olap/duckdb_fdw)
-- [`documentdb`](https://pigsty.io/ext/sim/documentdb) is not available on `arm` arch
+- [`pg_duckdb`](https://pgsty.com/ext/pg_duckdb) `el8:*:*`
+- [`pg_mooncake`](https://pgsty.com/ext/pg_mooncake) `el8:*:*`
+- [`pljava`](https://pgsty.com/ext/pljava): `el8:*:*`
+- [`pllua`](https://pgsty.com/ext/pllua): `el8:arm:13,14,15`
+- [`h3`](https://pgsty.com/ext/h3): `el8.amd.pg17`
+- [`jdbc_fdw`](https://pgsty.com/ext/jdbc_fdw): `el:arm:*`
+- [`pg_partman`](https://pgsty.com/ext/pg_partman): `u24:*:13`
+- [`wiltondb`](https://pgsty.com/ext/babelfishpg_common): `d12:*:*`
+- [`citus`](https://pgsty.com/ext/citus) and [`hydra`](https://pgsty.com/ext/hydra) are mutually exclusive
+- [`pg_duckdb`](https://pgsty.com/ext/pg_duckdb) will invalidate [`duckdb_fdw`](https://pgsty.com/ext/duckdb_fdw)
 
 
 --------
@@ -471,7 +470,7 @@ Here are some [bad cases](https://pigsty.io/ext/roadmap/badcase/) and limitation
 [![Author: RuohangFeng](https://img.shields.io/badge/Author-Ruohang_Feng-steelblue?style=flat)](https://vonng.com/)
 [![About: @Vonng](https://img.shields.io/badge/%40Vonng-steelblue?style=flat)](https://vonng.com/en/)
 [![Mail: rh@vonng.com](https://img.shields.io/badge/rh%40vonng.com-steelblue?style=flat)](mailto:rh@vonng.com)
-[![Copyright: 2018-2025 rh@Vonng.com](https://img.shields.io/badge/Copyright-2025_(rh%40vonng.com)-red?logo=c&color=steelblue)](https://github.com/Vonng)
+[![Copyright: 2018-2025 rh@vonng.com](https://img.shields.io/badge/Copyright-2025_(rh%40vonng.com)-red?logo=c&color=steelblue)](https://github.com/Vonng)
 [![License: Apache](https://img.shields.io/badge/License-Apache--2.0-steelblue?style=flat&logo=opensourceinitiative&logoColor=green)](https://github.com/pgsty/pig/blob/main/LICENSE)
 
 [![pig-meme](https://github.com/user-attachments/assets/4c2310a0-7551-4233-875f-18d0bd87a03e)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
