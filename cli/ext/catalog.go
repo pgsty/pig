@@ -176,6 +176,8 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"polardb":             "PolarDB",
 			"orioledb":            "orioledb_17 oriolepg_17",
 			"openhalodb":          "openhalodb",
+			"percona-core":        "percona-postgresql17,percona-postgresql17-server,percona-postgresql17-contrib,percona-postgresql17-plperl,percona-postgresql17-plpython3,percona-postgresql17-pltcl",
+			"percona-main":        "percona-postgresql17,percona-postgresql17-server,percona-postgresql17-contrib,percona-postgresql17-plperl,percona-postgresql17-plpython3,percona-postgresql17-pltcl,percona-postgis33_17,percona-postgis33_17-client,percona-postgis33_17-utils,percona-pgvector_17,percona-wal2json17,percona-pg_repack17,percona-pgaudit17,percona-pgaudit17_set_user,percona-pg_stat_monitor17,percona-pg_gather",
 			"ferretdb":            "ferretdb2",
 			"duckdb":              "duckdb",
 			"etcd":                "etcd",
@@ -185,6 +187,7 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"juicefs":             "juicefs",
 			"restic":              "restic",
 			"rclone":              "rclone",
+			"genai-toolbox":       "genai-toolbox",
 		}
 		pkgMapTmpl := map[string]string{
 			"pgsql":        "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit",
@@ -230,8 +233,10 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"ivorysql":            "ivorysql-4",
 			"wiltondb":            "wiltondb",
 			"polardb":             "polardb-for-postgresql",
-			"orioledb":            "oriolepg-17-orioledb oriolepg-17", // TBD
-			"openhalodb":          "openhalodb",                       // TBD
+			"orioledb":            "oriolepg-17-orioledb oriolepg-17",
+			"openhalodb":          "openhalodb",
+			"percona-core":        "percona-postgresql-17 percona-postgresql-client-17 percona-postgresql-plperl-17 percona-postgresql-plpython3-17 percona-postgresql-pltcl-17",
+			"percona-main":        "percona-postgresql-17 percona-postgresql-client-17 percona-postgresql-plperl-17 percona-postgresql-plpython3-17 percona-postgresql-pltcl-17 percona-postgresql-17-postgis-3 percona-postgresql-17-pgvector percona-postgresql-17-wal2json percona-postgresql-17-repack percona-postgresql-17-pgaudit percona-pgaudit17-set-user percona-pg-stat-monitor17 percona-pg-gather",
 			"ferretdb":            "ferretdb2",
 			"duckdb":              "duckdb",
 			"etcd":                "etcd",
@@ -241,6 +246,7 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"juicefs":             "juicefs",
 			"restic":              "restic",
 			"rclone":              "rclone",
+			"genai-toolbox":       "genai-toolbox",
 		}
 		pkgMapTmpl := map[string]string{
 			"pgsql":        "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v",
