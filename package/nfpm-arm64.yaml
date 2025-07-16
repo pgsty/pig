@@ -1,12 +1,12 @@
 name: "pig"
 arch: "arm64"
 platform: "linux"
-version: "v0.5.0"
+version: "v0.6.0"
 release: "1"
 version_schema: semver
 maintainer: Ruohang Feng <rh@vonng.com>
 description: |
-  CLI Tools for Pigsty and PostgreSQL
+  CLI Tools for Pigsty and PostgreSQL, https://ext.pgsty.com/pig
 
 vendor: "Vonng"
 homepage: "https://github.com/pgsty/pig"
@@ -17,3 +17,8 @@ contents:
     dst: /usr/bin/pig
     file_info:
       mode: 0755
+
+  - src: LICENSE
+    dst: /usr/share/doc/pig/LICENSE
+    file_info:
+      mode: 0644
