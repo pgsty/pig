@@ -1,15 +1,15 @@
 # PIG - Postgres Install Genius
 
-[![Document: pgsty.com/ext/pig](https://img.shields.io/badge/docs-pgsty.com/ext/pig-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pgsty.com/pig)
-[![Catalog: pgsty.com](https://img.shields.io/badge/catalog-pgsty.com-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pgsty.com/list)
-[![Version: v0.5.1](https://img.shields.io/badge/version-v0.5.1-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.5.1)
+[![Document: pgsty.com/pig](https://img.shields.io/badge/docs-pig/ext/pig-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pgsty.com/pig)
+[![Catalog: ext.pgsty.com](https://img.shields.io/badge/catalog-ext.pgsty.com-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pgsty.com/list)
+[![Version: v0.6.0](https://img.shields.io/badge/version-v0.6.0-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.6.0)
 [![Pigsty: v3.6.0](https://img.shields.io/badge/Pigsty-v3.6.0-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 422](https://img.shields.io/badge/extensions-422-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pgsty.com/list)
+[![Extensions: 423](https://img.shields.io/badge/extensions-423-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pgsty.com/list)
 
-[**pig**](https://pgsty.com/ext/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
+[**pig**](https://pgsty.com/ext/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](compatibility) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13~17 along with [423 extensions](https://pgsty.com/ext/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13~17 along with [423 extensions](https://ext.pgsty.com/list) on (`amd64` / `arm64`) with native OS package manager
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
@@ -20,11 +20,11 @@ Install PostgreSQL 13~17 along with [423 extensions](https://pgsty.com/ext/list)
 
 ## Get Started
 
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18,17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://pigsty.io/docs/pgsql)
-[![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://pgsty.com/docs/node)
-[![EL Support: 8/9](https://img.shields.io/badge/EL-8/9-red?style=flat&logo=redhat&logoColor=red)](https://pgsty.com/docs/prepare/linux)
-[![Debian Support: 12](https://img.shields.io/badge/Debian-12-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pgsty.com/docs/prepare/linux)
-[![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://pgsty.com/docs/prepare/linux)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18,17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://doc.pgsty.com/pgsql)
+[![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://doc.pgsty.com/node)
+[![EL Support: 8/9](https://img.shields.io/badge/EL-8/9-red?style=flat&logo=redhat&logoColor=red)](https://doc.pgsty.com/prepare/linux)
+[![Debian Support: 12](https://img.shields.io/badge/Debian-12-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://doc.pgsty.com/prepare/linux)
+[![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://doc.pgsty.com/prepare/linux)
 
 [Install](#installation) the `pig` package first, (you can also use the `apt` / `yum` or just copy the binary)
 
@@ -32,7 +32,7 @@ Install PostgreSQL 13~17 along with [423 extensions](https://pgsty.com/ext/list)
 curl -fsSL https://repo.pigsty.io/pig | bash
 ```
 
-Then it's ready to use, assume you want to install the [`pg_duckdb`](https://pgsty.com/ext/pg_duckdb) extension:
+Then it's ready to use, assume you want to install the [`pg_duckdb`](https://ext.pgsty.com/e/pg_duckdb) extension:
 
 ```bash
 $ pig repo add pigsty pgdg -u  # add pgdg & pigsty repo, then update repo cache
@@ -40,7 +40,7 @@ $ pig ext install pg17         # install PostgreSQL 17 kernels with native PGDG 
 $ pig ext install pg_duckdb    # install the pg_duckdb extension (for current pg17)
 ```
 
-That's it, All set! Check the [advanced usage](#advanced-usage) for details and [the full list 400+ available extensions](https://pgsty.com/ext/list).
+That's it, All set! Check the [advanced usage](#advanced-usage) for details and [the full list 420+ available extensions](https://ext.pgsty.com/list).
 
 [![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
 
@@ -84,7 +84,7 @@ sudo yum makecache; sudo yum install -y pig
 
 > For mainland china user: consider replace the `repo.pigsty.io` with `repo.pigsty.cc`
 
-`pig` has self update feature, you can update pig itself to the latest version with:
+`pig` has self-update feature, you can update pig itself to the latest version with:
 
 ```bash
 pig update
@@ -188,7 +188,7 @@ pig ext link pg17             # create /usr/pgsql soft links, and write it to /e
 ```
 
 
-You can also use other package alias, it will translate to corresponding package on your OS distro
+You can also use other package aliases, it will translate to corresponding package on your OS distro
 and the `$v` will be replaced with the active or given pg version number, such as `17`, `16`, etc...
 
 ```yaml
@@ -208,44 +208,40 @@ pg13-core:    "postgresql13 postgresql13-server postgresql13-libs postgresql13-c
 Take el for examples:
 
 ```yaml
-pgsql-common:        "patroni patroni-etcd pgbouncer pgbackrest pg_exporter pgbadger vip-manager",
-pgsql:               "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit"
-pgsql-mini:          "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib"
-pgsql-core:          "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit"
-pgsql-full:          "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit postgresql$v-test postgresql$v-devel"
-pgsql-main:          "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit pg_repack_$v* wal2json_$v* pgvector_$v*"
-pgsql-client:        "postgresql$v"
-pgsql-server:        "postgresql$v-server postgresql$v-libs postgresql$v-contrib"
-pgsql-devel:         "postgresql$v-devel"
-pgsql-basic:         "pg_repack_$v* wal2json_$v* pgvector_$v*"
-postgresql:          "postgresql$v*"
-patroni:             "patroni patroni-etcd",
-pgbouncer:           "pgbouncer",
-pgbackrest:          "pgbackrest",
-pgbackrest_exporter: "pgbackrest_exporter",
-pg_exporter:         "pg_exporter",
-vip-manager:         "vip-manager",
-pgbadger:            "pgbadger",
-pg_activity:         "pg_activity",
-pg_filedump:         "pg_filedump",
-pgxnclient:          "pgxnclient",
-pgformatter:         "pgformatter",
-pgcopydb:            "pgcopydb",
-pgloader:            "pgloader",
-pg_timetable:        "pg_timetable",
-timescaledb-utils:   "timescaledb-tools timescaledb-event-streamer",
-ivorysql:            "ivorysql4",
-wiltondb:            "wiltondb",
-polardb:             "PolarDB",
-ferretdb:            "ferretdb2",
-duckdb:              "duckdb",
-etcd:                "etcd",
-haproxy:             "haproxy",
-pig:                 "pig",
-vray:                "vray",
-juicefs:             "juicefs",
-restic:              "restic",
-rclone:              "rclone",
+"postgresql":          "postgresql$v*",
+"pgsql-common":        "patroni patroni-etcd pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager",
+"patroni":             "patroni patroni-etcd",
+"pgbouncer":           "pgbouncer",
+"pgbackrest":          "pgbackrest",
+"pg_exporter":         "pg_exporter",
+"pgbackrest_exporter": "pgbackrest_exporter",
+"vip-manager":         "vip-manager",
+"pgbadger":            "pgbadger",
+"pg_activity":         "pg_activity",
+"pg_filedump":         "pg_filedump",
+"pgxnclient":          "pgxnclient",
+"pgformatter":         "pgformatter",
+"pgcopydb":            "pgcopydb",
+"pgloader":            "pgloader",
+"pg_timetable":        "pg_timetable",
+"timescaledb-utils":   "timescaledb-tools timescaledb-event-streamer",
+"ivorysql":            "ivorysql4",
+"wiltondb":            "wiltondb",
+"polardb":             "PolarDB",
+"orioledb":            "orioledb_17 oriolepg_17",
+"openhalodb":          "openhalodb",
+"percona-core":        "percona-postgresql17,percona-postgresql17-server,percona-postgresql17-contrib,percona-postgresql17-plperl,percona-postgresql17-plpython3,percona-postgresql17-pltcl",
+"percona-main":        "percona-postgresql17,percona-postgresql17-server,percona-postgresql17-contrib,percona-postgresql17-plperl,percona-postgresql17-plpython3,percona-postgresql17-pltcl,percona-postgis33_17,percona-postgis33_17-client,percona-postgis33_17-utils,percona-pgvector_17,percona-wal2json17,percona-pg_repack17,percona-pgaudit17,percona-pgaudit17_set_user,percona-pg_stat_monitor17,percona-pg_gather",
+"ferretdb":            "ferretdb2",
+"duckdb":              "duckdb",
+"etcd":                "etcd",
+"haproxy":             "haproxy",
+"pig":                 "pig",
+"vray":                "vray",
+"juicefs":             "juicefs",
+"restic":              "restic",
+"rclone":              "rclone",
+"genai-toolbox":       "genai-toolbox",
 ```
 
 </details>
@@ -321,7 +317,7 @@ $ pig ext info pg_duckdb
 │ Version   : 0.3.1                                                          │
 │ License   : MIT                                                            │
 │ Website   : https://github.com/duckdb/pg_duckdb                            │
-│ Details   : https://pgsty.com/ext/olap/pg_duckdb                           │
+│ Details   : https://ext.pgsty.com/e/pg_duckdb                              │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Extension Properties                                                       │
 ├────────────────────────────────────────────────────────────────────────────┤

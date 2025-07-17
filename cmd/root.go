@@ -114,6 +114,7 @@ func init() {
 		extCmd,
 		repoCmd,
 		buildCmd,
+		installCmd,
 
 		doCmd,
 		styCmd,

@@ -60,8 +60,8 @@ dd:
 	bin/dist2
 t: tb tt
 tb:
-	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -a -ldflags '-extldflags "-static"' -o pig
-	scp pig sv:/tmp/pig
+	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -a -ldflags '-extldflags "-static"' -o pig
+	scp pig meta:/tmp/pig
 tt:
 	ssh sv "/tmp/pig status"
 

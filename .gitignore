@@ -2,6 +2,7 @@
 .vscode/
 .code/
 .idea/
+.claude/
 cli/sty/assets/*.tgz
 
 bin/dist
@@ -10,3 +11,4 @@ tmp/
 dist/
 pig
 .DS_Store
+CLAUDE.md

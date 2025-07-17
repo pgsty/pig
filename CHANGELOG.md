@@ -4,7 +4,7 @@
 
 | Version |    Date    | Summary                                    | Release                                                    |
 |:--------|:----------:|--------------------------------------------|------------------------------------------------------------|
-| v0.6.0  | 2025-07-16 | 423 extension, percona pg_tde, mcp toolbox | [v0.6.0](https://github.com/pgsty/pig/releases/tag/v0.6.0) |
+| v0.6.0  | 2025-07-17 | 423 extension, percona pg_tde, mcp toolbox | [v0.6.0](https://github.com/pgsty/pig/releases/tag/v0.6.0) |
 | v0.5.0  | 2025-06-30 | 422 extension, new extension catalog       | [v0.5.0](https://github.com/pgsty/pig/releases/tag/v0.5.0) |
 | v0.4.2  | 2025-05-27 | 421 extension, halo & oriole deb           | [v0.4.2](https://github.com/pgsty/pig/releases/tag/v0.4.2) |
 | v0.4.1  | 2025-05-07 | 414 extension, pg18 alias support          | [v0.4.1](https://github.com/pgsty/pig/releases/tag/v0.4.1) |
@@ -28,6 +28,7 @@
 ## v0.6.0
 
 - New extension catalog: [https://ext.pigsty.io](https://ext.pigsty.io)
+- New subcommand: `pig install` to simplify `pig ext install`
 - Add new kernel support: percona with pg_tde
 - Add new package: Google MCP toolbox for databases
 - Add new repo: percona repo and clickhouse repo
@@ -35,6 +36,7 @@
 - fix orioledb broken on debian/ubuntu system
 - Bump golang to 1.24.5
 - Bump pigsty to v3.6.0
+
 
 --------
 
