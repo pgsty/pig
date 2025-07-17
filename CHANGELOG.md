@@ -34,6 +34,7 @@
 - Add new repo: percona repo and clickhouse repo
 - Change extension summary info links to https://ext.pgsty.com
 - fix orioledb broken on debian/ubuntu system
+- fix epel repo on EL distributions
 - Bump golang to 1.24.5
 - Bump pigsty to v3.6.0
 
