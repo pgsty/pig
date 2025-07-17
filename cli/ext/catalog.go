@@ -188,6 +188,11 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"restic":              "restic",
 			"rclone":              "rclone",
 			"genai-toolbox":       "genai-toolbox",
+			"tigerbeetle":         "tigerbeetle",
+			"clickhouse":          "clickhouse-server clickhouse-client clickhouse-common-static",
+			"victoria":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscil vlagent grafana-victorialogs-ds",
+			"vmetrics":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds",
+			"vlogs":               "victoria-logs vlogscil vlagent grafana-victorialogs-ds",
 		}
 		pkgMapTmpl := map[string]string{
 			"pgsql":        "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit",
@@ -247,6 +252,11 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"restic":              "restic",
 			"rclone":              "rclone",
 			"genai-toolbox":       "genai-toolbox",
+			"tigerbeetle":         "tigerbeetle",
+			"clickhouse":          "clickhouse-server clickhouse-client clickhouse-common-static",
+			"victoria":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscil vlagent grafana-victorialogs-ds",
+			"vmetrics":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds",
+			"vlogs":               "victoria-logs vlogscil vlagent grafana-victorialogs-ds",
 		}
 		pkgMapTmpl := map[string]string{
 			"pgsql":        "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v",
