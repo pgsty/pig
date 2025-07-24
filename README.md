@@ -7,7 +7,7 @@
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 423](https://img.shields.io/badge/extensions-423-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pgsty.com/list)
 
-[**pig**](https://pgsty.com/ext/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](compatibility) (EL/Debian/Ubuntu) Linux.
+[**pig**](https://ext.pgsty.com/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](compatibility) (EL/Debian/Ubuntu) Linux.
 
 Install PostgreSQL 13~17 along with [423 extensions](https://ext.pgsty.com/list) on (`amd64` / `arm64`) with native OS package manager
 
@@ -155,7 +155,7 @@ pig build ext   [extname...]     # build extension
 
 **Radical Repo Admin**
 
-The default `pig repo add pigsty pgdg` will add the `PGDG` repo and [`PIGSTY`](https://pgsty.com/ext/repo) repo to your system.
+The default `pig repo add pigsty pgdg` will add the `PGDG` repo and [`PIGSTY`](https://ext.pgsty.com/repo) repo to your system.
 While the following command will backup & wipe your existing repo and add all require repo to your system.
 
 ```bash
@@ -416,7 +416,7 @@ repo_modules:   # Available Modules: 18
 
 **Pigsty Management**
 
-The **pig** can also be used as a [cli](https://pgsty.com/ext/pig/sty) tool for [Pigsty](https://pigsty.io) — the battery-include free PostgreSQL RDS.
+The **pig** can also be used as a [cli](https://ext.pgsty.com/pig/sty) tool for [Pigsty](https://doc.pgsty.com) — the battery-include free PostgreSQL RDS.
 Which brings HA, PITR, Monitoring, IaC, and all the extensions to your PostgreSQL cluster.
 
 ```bash
@@ -447,16 +447,16 @@ You can use the `pig sty` subcommand to bootstrap pigsty on current node.
 
 Here are some bad cases and limitations for above Linux distros:
 
-- [`pg_duckdb`](https://pgsty.com/ext/pg_duckdb) `el8:*:*`
-- [`pg_mooncake`](https://pgsty.com/ext/pg_mooncake) `el8:*:*`
-- [`pljava`](https://pgsty.com/ext/pljava): `el8:*:*`
-- [`pllua`](https://pgsty.com/ext/pllua): `el8:arm:13,14,15`
-- [`h3`](https://pgsty.com/ext/h3): `el8.amd.pg17`
-- [`jdbc_fdw`](https://pgsty.com/ext/jdbc_fdw): `el:arm:*`
-- [`pg_partman`](https://pgsty.com/ext/pg_partman): `u24:*:13`
-- [`wiltondb`](https://pgsty.com/ext/babelfishpg_common): `d12:*:*`
-- [`citus`](https://pgsty.com/ext/citus) and [`hydra`](https://pgsty.com/ext/hydra) are mutually exclusive
-- [`pg_duckdb`](https://pgsty.com/ext/pg_duckdb) will invalidate [`duckdb_fdw`](https://pgsty.com/ext/duckdb_fdw)
+- [`pg_duckdb`](https://ext.pgsty.com/e/pg_duckdb) `el8:*:*`
+- [`pg_mooncake`](https://ext.pgsty.com/e/pg_mooncake) `el8:*:*`
+- [`pljava`](https://ext.pgsty.com/e/pljava): `el8:*:*`
+- [`pllua`](https://ext.pgsty.com/e/pllua): `el8:arm:13,14,15`
+- [`h3`](https://ext.pgsty.com/e/h3): `el8.amd.pg17`
+- [`jdbc_fdw`](https://ext.pgsty.com/e/jdbc_fdw): `el:arm:*`
+- [`pg_partman`](https://ext.pgsty.com/e/pg_partman): `u24:*:13`
+- [`wiltondb`](https://ext.pgsty.com/e/babelfishpg_common): `d12:*:*`
+- [`citus`](https://ext.pgsty.com/e/citus) and [`hydra`](https://ext.pgsty.com/e/hydra) are mutually exclusive
+- [`pg_duckdb`](https://ext.pgsty.com/e/pg_duckdb) will invalidate [`duckdb_fdw`](https://ext.pgsty.com/e/duckdb_fdw)
 
 
 --------
