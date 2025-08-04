@@ -57,13 +57,18 @@ sudo yum makecache;
 
 ## 兼容性
 
-|   OS/Arch    | OS/Arch |                                                                                                  x86_64                                                                                                  |                                                                                                 aarch64                                                                                                  |
-|:------------:|:-------:|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------:|
-|     EL8      |   el8   |   <Badge variant="blue-subtle">17</Badge><Badge variant="blue-subtle">16</Badge><Badge variant="blue-subtle">15</Badge><Badge variant="blue-subtle">14</Badge><Badge variant="blue-subtle">13</Badge>    |   <Badge variant="blue-subtle">17</Badge><Badge variant="blue-subtle">16</Badge><Badge variant="blue-subtle">15</Badge><Badge variant="blue-subtle">14</Badge><Badge variant="blue-subtle">13</Badge>    |
-|     EL9      |   el9   |   <Badge variant="blue-subtle">17</Badge><Badge variant="blue-subtle">16</Badge><Badge variant="blue-subtle">15</Badge><Badge variant="blue-subtle">14</Badge><Badge variant="blue-subtle">13</Badge>    |   <Badge variant="blue-subtle">17</Badge><Badge variant="blue-subtle">16</Badge><Badge variant="blue-subtle">15</Badge><Badge variant="blue-subtle">14</Badge><Badge variant="blue-subtle">13</Badge>    |
-|  Debian 12   |   d12   |   <Badge variant="blue-subtle">17</Badge><Badge variant="blue-subtle">16</Badge><Badge variant="blue-subtle">15</Badge><Badge variant="blue-subtle">14</Badge><Badge variant="blue-subtle">13</Badge>    |   <Badge variant="blue-subtle">17</Badge><Badge variant="blue-subtle">16</Badge><Badge variant="blue-subtle">15</Badge><Badge variant="blue-subtle">14</Badge><Badge variant="blue-subtle">13</Badge>    |
-| Ubuntu 22.04 |   u22   |   <Badge variant="blue-subtle">17</Badge><Badge variant="blue-subtle">16</Badge><Badge variant="blue-subtle">15</Badge><Badge variant="blue-subtle">14</Badge><Badge variant="blue-subtle">13</Badge>    |   <Badge variant="blue-subtle">17</Badge><Badge variant="blue-subtle">16</Badge><Badge variant="blue-subtle">15</Badge><Badge variant="blue-subtle">14</Badge><Badge variant="blue-subtle">13</Badge>    |
-| Ubuntu 24.04 |   u24   |   <Badge variant="blue-subtle">17</Badge><Badge variant="blue-subtle">16</Badge><Badge variant="blue-subtle">15</Badge><Badge variant="blue-subtle">14</Badge><Badge variant="blue-subtle">13</Badge>    |   <Badge variant="blue-subtle">17</Badge><Badge variant="blue-subtle">16</Badge><Badge variant="blue-subtle">15</Badge><Badge variant="blue-subtle">14</Badge><Badge variant="blue-subtle">13</Badge>    |
+| Linux 发行版              | 版本  |   架构    |                                             系统代码                                              |   PostgreSQL 版本    |
+|:-----------------------|:---:|:-------:|:---------------------------------------------------------------------------------------------:|:------------------:|
+| RHEL9 / Rocky9 / Alma9 | EL9 | x86_64  |  [`el9.x86_64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/el9.x86_64.yml)  | 17, 16, 15, 14, 13 |
+| RHEL9 / Rocky9 / Alma9 | EL9 | aarch64 | [`el9.aarch64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/el9.aarch64.yml) | 17, 16, 15, 14, 13 |
+| RHEL8 / Rocky8 / Alma8 | EL8 | x86_64  |  [`el8.x86_64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/el8.x86_64.yml)  | 17, 16, 15, 14, 13 |
+| RHEL8 / Rocky8 / Alma8 | EL8 | aarch64 | [`el8.aarch64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/el8.aarch64.yml) | 17, 16, 15, 14, 13 |
+| Ubuntu 24.04 (`noble`) | U24 | x86_64  |  [`u24.x86_64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/u24.x86_64.yml)  | 17, 16, 15, 14, 13 |
+| Ubuntu 24.04 (`noble`) | U24 | aarch64 | [`u24.aarch64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/u24.aarch64.yml) | 17, 16, 15, 14, 13 |
+| Ubuntu 22.04 (`jammy`) | U22 | x86_64  |  [`u22.x86_64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/u22.x86_64.yml)  | 17, 16, 15, 14, 13 |
+| Ubuntu 22.04 (`jammy`) | U22 | aarch64 | [`u22.aarch64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/u22.aarch64.yml) | 17, 16, 15, 14, 13 |
+| Debian 12 (`bookworm`) | D12 | x86_64  |  [`d12.x86_64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/d12.x86_64.yml)  | 17, 16, 15, 14, 13 |
+| Debian 12 (`bookworm`) | D12 | aarch64 | [`d12.aarch64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/d12.aarch64.yml) | 17, 16, 15, 14, 13 |
 
 
 
