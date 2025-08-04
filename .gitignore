@@ -12,3 +12,5 @@ dist/
 pig
 .DS_Store
 CLAUDE.md
+.hugo_build.lock
+public/
