@@ -38,20 +38,12 @@ $ pig ext install pg_duckdb    # 安装 pg_duckdb 扩展（针对当前 pg17）
 
 --------
 
-<Cards>
-    <Card icon={<Zap className="text-green-500"/>} title='快速上手' href={"/zh/pig/start"}>
-        PIG CLI 快速上手
-    </Card>
-    <Card icon={<Download className="text-blue-600"/>} title='安装' href={"/zh/pig/install"}>
-        安装 PostgreSQL 扩展
-    </Card>
-    <Card icon={<HelpCircle className="text-purple-600"/>} title='特性' href={"/zh/pig/why"}>
-        为什么需要 PostgreSQL 包管理器？
-    </Card>
-    <Card icon={<Rocket className="text-orange-500"/>} title='发布说明' href={"/zh/pig/release"}>
-        PIG 命令行工具发布说明
-    </Card>
-</Cards>
+{{< cards cols="4"  >}}
+{{< card link="/cmd/repo"  title="pig repo"  subtitle="管理软件仓库"  icon="library" >}}
+{{< card link="/cmd/ext"   title="pig ext"   subtitle="管理PG扩展"   icon="cube" >}}
+{{< card link="/cmd/build" title="pig build" subtitle="设置构建环境"  icon="view-grid" >}}
+{{< card link="/cmd/sty"   title="pig sty"   subtitle="管理 Pigsty"  icon="cloud-download" >}}
+{{< /cards >}}
 
 --------
 

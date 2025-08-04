@@ -6,7 +6,7 @@ release: "1"
 version_schema: semver
 maintainer: Ruohang Feng <rh@vonng.com>
 description: |
-  CLI Tools for Pigsty and PostgreSQL, https://ext.pgsty.com/pig
+  CLI Tools for Pigsty and PostgreSQL, https://pig.pgsty.com
 
 vendor: "Vonng"
 homepage: "https://github.com/pgsty/pig"

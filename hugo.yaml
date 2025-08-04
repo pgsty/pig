@@ -10,7 +10,7 @@ hasCJKLanguage: true
 
 services:
   googleAnalytics:
-    ID: G-SGY2FPH1EG
+    ID: G-5HDLR6CMB4
 
 contentDir: docs
 
@@ -70,8 +70,8 @@ menu:
         type: separator
       weight: 6
     - identifier: pgext
-      name: "PGEXT Catalog ↗"
-      url: "https://ext.pgsty.com/zh"
+      name: "PG Extensions ↗"
+      url: "https://ext.pgsty.com"
       weight: 10
     - identifier: pigsty
       name: "Pigsty Docs ↗"

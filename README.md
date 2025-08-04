@@ -1,13 +1,13 @@
 # PIG - Postgres Install Genius
 
-[![Document: pgsty.com/pig](https://img.shields.io/badge/docs-pig/ext/pig-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pgsty.com/pig)
-[![Catalog: ext.pgsty.com](https://img.shields.io/badge/catalog-ext.pgsty.com-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pgsty.com/list)
+[![Website: pig.pgsty.com](https://img.shields.io/badge/Website-pig.pgsty.com-slategray?style=flat&logo=cilium&logoColor=white)](https://pig.pgsty.com)
+[![Catalog: ext.pgsty.com](https://img.shields.io/badge/Catalog-ext.pgsty.com-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pgsty.com/list)
 [![Version: v0.6.0](https://img.shields.io/badge/version-v0.6.0-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.6.0)
-[![Pigsty: v3.6.0](https://img.shields.io/badge/Pigsty-v3.6.0-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com)
+[![Pigsty: v3.6.0](https://img.shields.io/badge/Pigsty-v3.6.0-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com/release/latest)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 423](https://img.shields.io/badge/extensions-423-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pgsty.com/list)
 
-[**pig**](https://ext.pgsty.com/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](compatibility) (EL/Debian/Ubuntu) Linux.
+[**pig**](https://pig.pgsty.com) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
 Install PostgreSQL 13~17 along with [423 extensions](https://ext.pgsty.com/list) on (`amd64` / `arm64`) with native OS package manager
 
@@ -20,7 +20,7 @@ Install PostgreSQL 13~17 along with [423 extensions](https://ext.pgsty.com/list)
 
 ## Get Started
 
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18,17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://doc.pgsty.com/pgsql)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18b2,17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://doc.pgsty.com/pgsql)
 [![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://doc.pgsty.com/node)
 [![EL Support: 8/9](https://img.shields.io/badge/EL-8/9-red?style=flat&logo=redhat&logoColor=red)](https://doc.pgsty.com/prepare/linux)
 [![Debian Support: 12](https://img.shields.io/badge/Debian-12-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://doc.pgsty.com/prepare/linux)
@@ -416,7 +416,7 @@ repo_modules:   # Available Modules: 18
 
 **Pigsty Management**
 
-The **pig** can also be used as a [cli](https://ext.pgsty.com/pig/sty) tool for [Pigsty](https://doc.pgsty.com) — the battery-include free PostgreSQL RDS.
+The **pig** can also be used as a [cli](https://pig.pgsty.com/cmd/sty) tool for [Pigsty](https://doc.pgsty.com) — the battery-include free PostgreSQL RDS.
 Which brings HA, PITR, Monitoring, IaC, and all the extensions to your PostgreSQL cluster.
 
 ```bash
@@ -463,7 +463,7 @@ Here are some bad cases and limitations for above Linux distros:
 
 ## About
 
-[![Author: RuohangFeng](https://img.shields.io/badge/Author-Ruohang_Feng-steelblue?style=flat)](https://vonng.com/)
+[![Author: RuohangFeng](https://img.shields.io/badge/Author-Ruohang_Feng-steelblue?style=flat)](https://blog.vonng.com/en/about)
 [![About: @Vonng](https://img.shields.io/badge/%40Vonng-steelblue?style=flat)](https://vonng.com/en/)
 [![Mail: rh@vonng.com](https://img.shields.io/badge/rh%40vonng.com-steelblue?style=flat)](mailto:rh@vonng.com)
 [![Copyright: 2018-2025 rh@vonng.com](https://img.shields.io/badge/Copyright-2025_(rh%40vonng.com)-red?logo=c&color=steelblue)](https://github.com/Vonng)

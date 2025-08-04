@@ -353,7 +353,7 @@ e38e8a21ed73a37d4588053f8c900f7c  pig_0.3.1-1_arm64.deb
 
 ## v0.3.0
 
-[`pig`](/zh/pig/) 项目现在有了新的 [主页](https://ext.pgsty.com/pig)，以及 PostgreSQL 扩展 [目录](https://ext.pgsty.com/list)。
+[`pig`](/zh/pig/) 项目现在有了新的 [主页](https://pig.pgsty.com)，以及 PostgreSQL 扩展 [目录](https://ext.pgsty.com/list)。
 
 ```bash
 curl https://repo.pigsty.io/pig | bash    # cloudflare
@@ -365,7 +365,7 @@ pig v0.3 也嵌入并随最新的 Pigsty [v3.3.0](https://doc.pgsty.com/release)
 
 **新功能**
 
-`pig build` 子命令具有设置扩展构建环境的 [能力](https://ext.pgsty.com/pig/build/)
+`pig build` 子命令具有设置扩展构建环境的 [能力](https://pig.pgsty.com/cmd/build/)
 
 ```bash
 pig build repo     # 初始化构建仓库 (=repo set -ru)

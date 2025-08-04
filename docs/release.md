@@ -341,7 +341,7 @@ Release: https://github.com/pgsty/pig/releases/tag/v0.3.1
 
 ## v0.3.0
 
-The [`pig`](/pig/) project now has a new [homepage](https://ext.pgsty.com/pig), alone with the PostgreSQL Extension [Catalog](https://ext.pgsty.com/list).
+The [`pig`](/pig/) project now has a new [homepage](https://pig.pgsty.com), alone with the PostgreSQL Extension [Catalog](https://ext.pgsty.com/list).
 
 ```bash
 curl https://repo.pigsty.io/pig | bash    # cloudflare
@@ -353,7 +353,7 @@ pig v0.3 is also embedded & shipped with the latest Pigsty [v3.3.0](https://doc.
 
 **New Features**
 
-`pig build` subcommand with the [ability](https://ext.pgsty.com/pig/build/) to set up extension building environment
+`pig build` subcommand with the [ability](https://pig.pgsty.com/cmd/build/) to set up extension building environment
 
 ```bash
 pig build repo     # init build repo (=repo set -ru)

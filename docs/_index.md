@@ -42,7 +42,7 @@ $ pig ext install pg_duckdb    # install the pg_duckdb extension (for current pg
 
 Check sub-commands [documentation](/cmd) with `pig help <command>`
 
-{{< cards cols="5"  >}}
+{{< cards cols="4"  >}}
 {{< card link="/cmd/repo"  title="pig repo"  subtitle="Manage software repositories" icon="library" >}}
 {{< card link="/cmd/ext"   title="pig ext"   subtitle="Manage postgres extensions"   icon="cube" >}}
 {{< card link="/cmd/build" title="pig build" subtitle="Build extension from source"  icon="view-grid" >}}
