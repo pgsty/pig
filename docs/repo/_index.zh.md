@@ -1,5 +1,5 @@
 ---
-title: 扩展仓库
+title: 仓库
 description: 用于交付 PostgreSQL 扩展的基础设施和软件包仓库
 icon: Warehouse
 weight: 700

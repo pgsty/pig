@@ -31,11 +31,79 @@ languages:
     contentDir: content/en
     weight: 1
     title: PIG, PG Package Manager
+    menu:
+      main:
+        - name: Search
+          weight: 1
+          params:
+            type: search
+        - name: GitHub
+          weight: 2
+          url: "https://github.com/pgsty/pig"
+          params:
+            icon: github
+      sidebar:
+        - identifier: more
+          name: Links
+          params:
+            type: separator
+          weight: 6
+        - identifier: chinese
+          name: "PIG 中文文档 ↗"
+          url: "/zh"
+          weight: 7
+        - identifier: pgext
+          name: "PG Extensions ↗"
+          url: "https://ext.pgsty.com/"
+          weight: 8
+        - identifier: pigsty
+          name: "Pigsty Docs ↗"
+          url: "https://doc.pgsty.com"
+          weight: 9
+        - identifier: vonng
+          name: "Vonng's Blog ↗"
+          url: "https://blog.vonng.com/en/"
+          weight: 10
+
   zh:
     languageName: 简体中文
     languageCode: zh
     weight: 2
     title: PIG, PG包管理器
+    menu:
+      main:
+        - name: Search
+          weight: 1
+          params:
+            type: search
+        - name: GitHub
+          weight: 2
+          url: "https://github.com/pgsty/pig"
+          params:
+            icon: github
+      sidebar:
+        - identifier: more
+          name: Links
+          params:
+            type: separator
+          weight: 6
+        - identifier: english
+          name: "PIG EN Docs ↗"
+          url: "/"
+          weight: 7
+        - identifier: pgext
+          name: "PG Extensions ↗"
+          url: "https://ext.pgsty.com/zh/"
+          weight: 8
+        - identifier: pigsty
+          name: "Pigsty Docs ↗"
+          url: "https://doc.pgsty.com/zh/"
+          weight: 9
+        - identifier: vonng
+          name: "Vonng's Blog ↗"
+          url: "https://blog.vonng.com/"
+          weight: 10
+
 
 markup:
   highlight:
@@ -50,47 +118,6 @@ markup:
           inline: [['\(', '\)']]
         enable: true
 
-menu:
-  main:
-    - name: Search
-      weight: 1
-      params:
-        type: search
-    - name: GitHub
-      weight: 2
-      url: "https://github.com/pgsty/pig"
-      params:
-        icon: github
-
-  sidebar:
-
-    - identifier: more
-      name: Links
-      params:
-        type: separator
-      weight: 6
-    - identifier: pgext
-      name: "PG Extensions ↗"
-      url: "https://ext.pgsty.com"
-      weight: 10
-    - identifier: pigsty
-      name: "Pigsty Docs ↗"
-      url: "https://doc.pgsty.com"
-      weight: 9
-    - identifier: vonng
-      name: "Vonng's Blog ↗"
-      url: "https://blog.vonng.com/en/"
-      weight: 10
-    - identifier: chinese
-      name: "PIG 中文文档 ↗"
-      url: "/zh"
-      weight: 20
-    - identifier: english
-      name: "PIG EN Docs ↗"
-      url: "/"
-      weight: 19
-
-
 params:
   description: Pig is a package manager for PostgreSQL and its extension ecosystem.
 
@@ -100,9 +127,6 @@ params:
   navbar:
     displayTitle: true
     displayLogo: true
-#    logo:
-#      path: /logo.png
-#      dark: /logo.png
     width: wide
 
   page:
@@ -115,7 +139,7 @@ params:
     displayToggle: true
 
   footer:
-    enable: true
+    enable: false
     displayCopyright: true
     displayPoweredBy: true
     width: normal
