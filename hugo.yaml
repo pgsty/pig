@@ -1,6 +1,6 @@
 baseURL: 'https://pig.pgsty.com/'
 languageCode: 'en'
-title: 'PIG Package Manager'
+title: 'PIG'
 
 enableRobotsTXT: true
 # Parse Git commit
@@ -30,18 +30,25 @@ languages:
     languageCode: en
     contentDir: content/en
     weight: 1
-    title: PIG, PG Package Manager
+    title: PIG
     menu:
       main:
-        - name: Search
-          weight: 1
-          params:
-            type: search
-        - name: GitHub
+
+        - name: Pigsty
           weight: 2
+          url: "https://pgsty.com"
+
+        - name: GitHub
+          weight: 3
           url: "https://github.com/pgsty/pig"
           params:
             icon: github
+
+        - name: Search
+          weight: 4
+          params:
+            type: search
+
       sidebar:
         - identifier: more
           name: Links
@@ -52,57 +59,85 @@ languages:
           name: "PIG 中文文档 ↗"
           url: "/zh"
           weight: 7
-        - identifier: pgext
-          name: "PG Extensions ↗"
-          url: "https://ext.pgsty.com/"
-          weight: 8
+
+        - identifier: chinese
+          name: "PIG 中文文档"
+          url: "/zh"
+          weight: 7
         - identifier: pigsty
-          name: "Pigsty Docs ↗"
+          name: "Pigsty, PG RDS ↗"
+          url: "https://pgsty.com"
+          weight: 8
+        - identifier: pigsty-doc
+          name: "Pigsty v3.6 Doc ↗"
           url: "https://doc.pgsty.com"
           weight: 9
-        - identifier: vonng
-          name: "Vonng's Blog ↗"
-          url: "https://blog.vonng.com/en/"
+        - identifier: pgext
+          name: "PG Extension ↗"
+          url: "https://ext.pgsty.com"
           weight: 10
+        - identifier: pgexp
+          name: "PG Exporter ↗"
+          url: "https://exp.pgsty.com"
+          weight: 11
+        - identifier: vonng
+          name: "Author: Vonng ↗"
+          url: "https://vonng.com"
+          weight: 12
+
+
+
 
   zh:
     languageName: 简体中文
     languageCode: zh
     weight: 2
-    title: PIG, PG包管理器
+    title: PIG
     menu:
       main:
-        - name: Search
-          weight: 1
-          params:
-            type: search
-        - name: GitHub
+        - name: Pigsty
           weight: 2
+          url: "https://pgsty.com"
+        - name: GitHub
+          weight: 3
           url: "https://github.com/pgsty/pig"
           params:
             icon: github
+        - name: Search
+          weight: 4
+          params:
+            type: search
       sidebar:
         - identifier: more
           name: Links
           params:
             type: separator
           weight: 6
+
         - identifier: english
-          name: "PIG EN Docs ↗"
+          name: "PIG English Doc"
           url: "/"
           weight: 7
-        - identifier: pgext
-          name: "PG Extensions ↗"
-          url: "https://ext.pgsty.com/zh/"
-          weight: 8
         - identifier: pigsty
-          name: "Pigsty Docs ↗"
+          name: "Pigsty, PG RDS ↗"
+          url: "https://pgsty.com"
+          weight: 8
+        - identifier: pigsty-doc
+          name: "Pigsty v3.6文档 ↗"
           url: "https://doc.pgsty.com/zh/"
           weight: 9
-        - identifier: vonng
-          name: "Vonng's Blog ↗"
-          url: "https://blog.vonng.com/"
+        - identifier: pgext
+          name: "PG 扩展目录 ↗"
+          url: "https://ext.pgsty.com/zh/"
           weight: 10
+        - identifier: pgexp
+          name: "PG Exporter ↗"
+          url: "https://exp.pgsty.com"
+          weight: 11
+        - identifier: vonng
+          name: "作者：Vonng ↗"
+          url: "https://vonng.com"
+          weight: 12
 
 
 markup:
@@ -127,6 +162,9 @@ params:
   navbar:
     displayTitle: true
     displayLogo: true
+    logo:
+      path: logo.png
+      dark: logo.png
     width: wide
 
   page:

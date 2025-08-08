@@ -9,6 +9,13 @@ breadcrumbs: false
 comments: false
 ---
 
+<div class="hx-mt-6 hx-mb-6">
+{{< hextra/hero-headline >}}
+  PostgreSQL & 扩展包管理器 &nbsp;<br class="sm:hx-block hx-hidden" />
+{{< /hextra/hero-headline >}}
+</div>
+
+
 —— **Postgres Install Genius，PostgreSQL 生态中缺失的扩展包管理器**
 
 {{< cards >}}
@@ -58,3 +65,5 @@ $ pig ext install pg_duckdb    # 安装 pg_duckdb 扩展（针对当前 pg17）
 
 - https://github.com/pgsty/pig
 - https://github.com/pgsty/pigsty
+
+![](/logo.png)

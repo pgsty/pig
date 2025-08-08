@@ -26,8 +26,6 @@ Pig is the genie that helps you unlock it. Honestly, nobody ever complained that
 ![](/img/pigsty/ecosystem.gif)
 
 
-
-
 ## Linux Compatibility
 
 | Linux Distro           | Ver |  Arch   |                                            OS Code                                            |  PostgreSQL Major  |
@@ -42,3 +40,8 @@ Pig is the genie that helps you unlock it. Honestly, nobody ever complained that
 | Ubuntu 22.04 (`jammy`) | U22 | aarch64 | [`u22.aarch64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/u22.aarch64.yml) | 17, 16, 15, 14, 13 |
 | Debian 12 (`bookworm`) | D12 | x86_64  |  [`d12.x86_64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/d12.x86_64.yml)  | 17, 16, 15, 14, 13 |
 | Debian 12 (`bookworm`) | D12 | aarch64 | [`d12.aarch64`](https://github.com/pgsty/pigsty/blob/main/roles/node_id/vars/d12.aarch64.yml) | 17, 16, 15, 14, 13 |
+
+
+## Featured
+
+![](/featured.jpg)

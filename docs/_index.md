@@ -9,6 +9,11 @@ breadcrumbs: false
 comments: false
 ---
 
+<div class="hx-mt-6 hx-mb-6">
+{{< hextra/hero-headline >}}
+  The Missing Package Manager &nbsp;<br class="sm:hx-block hx-hidden" />For PostgreSQL & Extensions
+{{< /hextra/hero-headline >}}
+</div>
 
 —— ***Postgres Install Genius, the missing extension package manager for PostgreSQL ecosystem***
 
@@ -59,3 +64,5 @@ You can also check the [pigsty](https://pgsty.com) project, which makes it even 
 
 - https://github.com/pgsty/pigsty
 - https://github.com/pgsty/pig
+
+![](/logo.png)
