@@ -32,7 +32,7 @@ builds:
 archives:
   - id: pig
     name_template: >-
-      {{ .ProjectName }}-{{ .Version }}.
+      {{ .ProjectName }}-v{{ .Version }}.
       {{- if eq .Os "darwin" }}darwin{{- else }}{{ .Os }}{{- end }}-
       {{- if eq .Arch "amd64" }}amd64
       {{- else if eq .Arch "arm64" }}arm64
@@ -42,11 +42,16 @@ nfpms:
   - id: pig-packages
     package_name: pig
     file_name_template: >-
-      {{ .PackageName }}-{{ .Version }}.
-      {{- if eq .Os "linux" }}{{ .Os }}{{- end }}-
-      {{- if eq .Arch "amd64" }}amd64
-      {{- else if eq .Arch "arm64" }}arm64
-      {{- else }}{{ .Arch }}{{ end }}
+      {{ .PackageName }}
+      {{- if eq .Format "deb" }}_{{ .Version }}_
+        {{- if eq .Arch "amd64" }}amd64
+        {{- else if eq .Arch "arm64" }}arm64
+        {{- else }}{{ .Arch }}{{ end }}
+      {{- else if eq .Format "rpm" }}-{{ .Version }}.
+        {{- if eq .Arch "amd64" }}x86_64
+        {{- else if eq .Arch "arm64" }}aarch64
+        {{- else }}{{ .Arch }}{{ end }}
+      {{- end }}
     vendor: "PGSTY"
     homepage: "https://pig.pgsty.com"
     maintainer: "Ruohang Feng <rh@vonng.com>"
@@ -74,11 +79,7 @@ dockers:
       - "pgsty/pig:latest-amd64"
       - "pgsty/pig:{{ .Version }}-amd64"
       - "pgsty/pig:{{ .Major }}.{{ .Minor }}-amd64"
-    dockerfile: |
-      FROM alpine:3.20
-      RUN apk add --no-cache ca-certificates
-      COPY pig /usr/bin/pig
-      ENTRYPOINT ["/usr/bin/pig"]
+    dockerfile: Dockerfile
     use: buildx
     build_flag_templates:
       - "--platform=linux/amd64"
@@ -97,11 +98,7 @@ dockers:
       - "pgsty/pig:latest-arm64"
       - "pgsty/pig:{{ .Version }}-arm64"
       - "pgsty/pig:{{ .Major }}.{{ .Minor }}-arm64"
-    dockerfile: |
-      FROM alpine:3.20
-      RUN apk add --no-cache ca-certificates
-      COPY pig /usr/bin/pig
-      ENTRYPOINT ["/usr/bin/pig"]
+    dockerfile: Dockerfile
     use: buildx
     build_flag_templates:
       - "--platform=linux/arm64"

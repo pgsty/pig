@@ -3,7 +3,7 @@
 # Mtime     :   2025-02-14
 # Copyright (C) 2018-2025 Ruohang Feng
 #==============================================================#
-VERSION=v0.6.0
+VERSION=v0.6.1
 
 ###############################################################
 #                     Build & Release                         #
@@ -43,6 +43,42 @@ linux-arm64: clean build-linux-arm64
 
 
 ###############################################################
+#                      GoReleaser                            #
+###############################################################
+# Install goreleaser if not present
+gr-install:
+	@which goreleaser > /dev/null || (echo "Installing goreleaser..." && go install github.com/goreleaser/goreleaser/v2@latest)
+
+# Build snapshot release (without publishing)
+gr-snapshot:
+	goreleaser release --snapshot --clean --skip=publish
+
+# Build release locally (without git tag)
+gr-build:
+	goreleaser build --snapshot --clean
+
+# Build release locally without snapshot suffix (requires clean git)
+gr-local:
+	goreleaser release --clean --skip=publish
+
+# Release with goreleaser (requires git tag)
+gr-release:
+	goreleaser release --clean
+
+# Production release (set prerelease to false in config first)
+gr-prod-release:
+	@echo "Creating production release (will notify subscribers if announce.skip is false)..."
+	goreleaser release --clean
+
+# Check goreleaser configuration
+gr-check: goreleaser-install
+	goreleaser check
+
+# New main release task using goreleaser
+release-new: goreleaser-release
+
+
+###############################################################
 #                       Development                           #
 ###############################################################
 r: run
@@ -60,4 +96,6 @@ b:
 	hugo --minify
 
 
-.PHONY: run build clean build-linux-amd64 build-linux-arm64 release release-linux linux-amd64 linux-arm64
+.PHONY: run build clean build-linux-amd64 build-linux-arm64 release release-linux linux-amd64 linux-arm64 \
+ goreleaser-install goreleaser-snapshot goreleaser-build goreleaser-release goreleaser-test-release \
+ goreleaser-check release-new goreleaser-local

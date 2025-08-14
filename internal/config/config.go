@@ -50,7 +50,7 @@ const (
 
 // Build information. Populated at build-time.
 var (
-	PigVersion    = "0.6.0"
+	PigVersion    = "0.6.1"
 	PigstyVersion = "3.6.0"
 	Branch        = "main"
 	Revision      = "HEAD"
@@ -129,7 +129,7 @@ func InitConfig(inventory, pigstyHome string) {
 
 	// setup license with HomeDir
 	license.HomeDir = HomeDir
-	
+
 	// setup license if provided
 	lic := viper.GetString("license")
 	if lic != "" {
