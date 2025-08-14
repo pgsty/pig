@@ -396,16 +396,22 @@ func splitAndTrim(s string) []string {
 
 // DistroBadCase is a map of bad cases for extensions
 var DistroBadCase = map[string]map[string][]int{
-	"el8.amd64": {"pljava": {}, "timescaledb_toolkit": {}},
+	"el8.amd64": {"pg_duckdb": {}, "pg_mooncake": {}},
+	"el8.arm64": {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}, "pg_duckdb": {}, "pg_mooncake": {}, "pg_dbms_metadata": {15}},
 	"el9.amd64": {},
-	"u24.amd64": {"pgml": {}, "citus": {}, "topn": {}, "timescaledb_toolkit": {}, "pg_partman": {13}, "timeseries": {13}},
+	"el9.arm64": {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}},
+
 	"u22.amd64": {},
+	"u22.arm64": {},
+	"u24.amd64": {"pg_partman": {13}},
+	"u24.arm64": {"pg_partman": {13}, "timeseries": {13}},
+
+	"d11.amd64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}},
+	"d11.arm64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}},
 	"d12.amd64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}},
-	"el8.arm64": {"pg_dbms_job": {}, "pljava": {}, "timescaledb_toolkit": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}, "topn": {13}},
-	"el9.arm64": {"pg_dbms_job": {}, "timescaledb_toolkit": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}, "topn": {13}},
-	"u24.arm64": {"pgml": {}, "citus": {}, "topn": {}, "timescaledb_toolkit": {}, "pg_partman": {13}, "timeseries": {13}},
-	"u22.arm64": {"topn": {}},
-	"d12.arm64": {"topn": {}, "babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}},
+	"d12.arm64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}},
+	"d13.amd64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}}, // TBD
+	"d13.arm64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}}, // TBD
 }
 
 // RpmRenameMap is a map of RPM package rename rules

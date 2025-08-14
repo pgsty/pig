@@ -152,7 +152,7 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 	}
 	ec.AliasMap = map[string]string{}
 	switch distroCode {
-	case "el", "rpm", "el7", "el8", "el9":
+	case "el", "rpm", "el7", "el8", "el9", "el10":
 		pkgMap := map[string]string{
 			"postgresql":          "postgresql$v*",
 			"pgsql-common":        "patroni patroni-etcd pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager",
@@ -216,7 +216,7 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			}
 		}
 		ec.AliasMap = pkgMap
-	case "deb", "d10", "d11", "d12", "u20", "u22", "u24":
+	case "deb", "d10", "d11", "d12", "d13", "u20", "u22", "u24":
 		pkgMap := map[string]string{
 			"postgresql":          "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v postgresql-server-dev-$v",
 			"pgsql-common":        "patroni pgbouncer pgbackrest pg-exporter pgbackrest-exporter vip-manager",
