@@ -1,0 +1,159 @@
+version: 2
+
+env:
+  - CGO_ENABLED=0
+
+before:
+  hooks:
+    - go mod download
+    - go mod tidy
+
+builds:
+  - id: pig
+    main: ./main.go
+    binary: pig
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -extldflags "-static"
+      - -X 'pig/internal/config.PigVersion={{.Version}}'
+      - -X 'pig/internal/config.PigstyVersion=3.6.0'
+      - -X 'pig/internal/config.Branch={{.Branch}}'
+      - -X 'pig/internal/config.Revision={{.ShortCommit}}'
+      - -X 'pig/internal/config.BuildDate={{.Date}}'
+    flags:
+      - -a
+
+archives:
+  - id: pig
+    name_template: >-
+      {{ .ProjectName }}-{{ .Version }}.
+      {{- if eq .Os "darwin" }}darwin{{- else }}{{ .Os }}{{- end }}-
+      {{- if eq .Arch "amd64" }}amd64
+      {{- else if eq .Arch "arm64" }}arm64
+      {{- else }}{{ .Arch }}{{ end }}
+
+nfpms:
+  - id: pig-packages
+    package_name: pig
+    file_name_template: >-
+      {{ .PackageName }}-{{ .Version }}.
+      {{- if eq .Os "linux" }}{{ .Os }}{{- end }}-
+      {{- if eq .Arch "amd64" }}amd64
+      {{- else if eq .Arch "arm64" }}arm64
+      {{- else }}{{ .Arch }}{{ end }}
+    vendor: "PGSTY"
+    homepage: "https://pig.pgsty.com"
+    maintainer: "Ruohang Feng <rh@vonng.com>"
+    description: |
+      PostgreSQL Extension Package Manager and CLI Tool
+    license: "Apache-2.0"
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/pig/LICENSE
+        file_info:
+          mode: 0644
+    rpm:
+      summary: "PostgreSQL Package Manger CLI"
+      group: "Applications/Databases"
+
+dockers:
+  - id: pig-docker
+    goos: linux
+    goarch: amd64
+    image_templates:
+      - "pgsty/pig:latest-amd64"
+      - "pgsty/pig:{{ .Version }}-amd64"
+      - "pgsty/pig:{{ .Major }}.{{ .Minor }}-amd64"
+    dockerfile: |
+      FROM alpine:3.20
+      RUN apk add --no-cache ca-certificates
+      COPY pig /usr/bin/pig
+      ENTRYPOINT ["/usr/bin/pig"]
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title=pig"
+      - "--label=org.opencontainers.image.description=CLI Tools for Pigsty and PostgreSQL"
+      - "--label=org.opencontainers.image.vendor=Vonng"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.source=https://github.com/pgsty/pig"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+
+  - id: pig-docker-arm64
+    goos: linux
+    goarch: arm64
+    image_templates:
+      - "pgsty/pig:latest-arm64"
+      - "pgsty/pig:{{ .Version }}-arm64"
+      - "pgsty/pig:{{ .Major }}.{{ .Minor }}-arm64"
+    dockerfile: |
+      FROM alpine:3.20
+      RUN apk add --no-cache ca-certificates
+      COPY pig /usr/bin/pig
+      ENTRYPOINT ["/usr/bin/pig"]
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title=pig"
+      - "--label=org.opencontainers.image.description=CLI Tools for Pigsty and PostgreSQL"
+      - "--label=org.opencontainers.image.vendor=Vonng"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.source=https://github.com/pgsty/pig"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+
+docker_manifests:
+  - name_template: "pgsty/pig:latest"
+    image_templates:
+      - "pgsty/pig:latest-amd64"
+      - "pgsty/pig:latest-arm64"
+  - name_template: "pgsty/pig:{{ .Version }}"
+    image_templates:
+      - "pgsty/pig:{{ .Version }}-amd64"
+      - "pgsty/pig:{{ .Version }}-arm64"
+  - name_template: "pgsty/pig:{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "pgsty/pig:{{ .Major }}.{{ .Minor }}-amd64"
+      - "pgsty/pig:{{ .Major }}.{{ .Minor }}-arm64"
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - 'Merge pull request'
+      - 'Merge branch'
+
+release:
+  github:
+    owner: pgsty
+    name: pig
+  draft: false
+  prerelease: false
+  mode: replace
+  replace_existing_artifacts: true
+  name_template: "{{.ProjectName}}-v{{.Version}}"
+  disable: false
+
+announce:
+  skip: true

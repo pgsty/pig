@@ -37,8 +37,6 @@ var (
 )
 
 const (
-	PigVersion     = "0.6.0"
-	PigstyVersion  = "3.6.0"
 	PigstyIO       = "https://pigsty.io"
 	PigstyCC       = "https://pigsty.cc"
 	PgstyCom       = "https://pgsty.com"
@@ -48,6 +46,18 @@ const (
 	DistroEL       = "rpm"
 	DistroDEB      = "deb"
 	DistroMAC      = "brew"
+)
+
+// Build information. Populated at build-time.
+var (
+	PigVersion    = "0.6.0"
+	PigstyVersion = "3.6.0"
+	Branch        = "main"
+	Revision      = "HEAD"
+	BuildDate     = "2025081010200"
+	GoVersion     = runtime.Version()
+	GOOS          = runtime.GOOS
+	GOARCH        = runtime.GOARCH
 )
 
 // InitConfig initializes the configuration, if inventory and pigstyHome is given as cli args,
