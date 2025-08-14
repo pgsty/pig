@@ -43,11 +43,11 @@ nfpms:
     package_name: pig
     file_name_template: >-
       {{ .PackageName }}
-      {{- if eq .Format "deb" }}_{{ .Version }}_
+      {{- if eq .Format "deb" }}_{{ .Version }}-1_
         {{- if eq .Arch "amd64" }}amd64
         {{- else if eq .Arch "arm64" }}arm64
         {{- else }}{{ .Arch }}{{ end }}
-      {{- else if eq .Format "rpm" }}-{{ .Version }}.
+      {{- else if eq .Format "rpm" }}-{{ .Version }}-1.
         {{- if eq .Arch "amd64" }}x86_64
         {{- else if eq .Arch "arm64" }}aarch64
         {{- else }}{{ .Arch }}{{ end }}
@@ -67,62 +67,11 @@ nfpms:
         dst: /usr/share/doc/pig/LICENSE
         file_info:
           mode: 0644
+    release: "1"
     rpm:
       summary: "PostgreSQL Package Manger CLI"
       group: "Applications/Databases"
 
-dockers:
-  - id: pig-docker
-    goos: linux
-    goarch: amd64
-    image_templates:
-      - "pgsty/pig:latest-amd64"
-      - "pgsty/pig:{{ .Version }}-amd64"
-      - "pgsty/pig:{{ .Major }}.{{ .Minor }}-amd64"
-    dockerfile: Dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.title=pig"
-      - "--label=org.opencontainers.image.description=CLI Tools for Pigsty and PostgreSQL"
-      - "--label=org.opencontainers.image.vendor=Vonng"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.created={{ .Date }}"
-      - "--label=org.opencontainers.image.source=https://github.com/pgsty/pig"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-
-  - id: pig-docker-arm64
-    goos: linux
-    goarch: arm64
-    image_templates:
-      - "pgsty/pig:latest-arm64"
-      - "pgsty/pig:{{ .Version }}-arm64"
-      - "pgsty/pig:{{ .Major }}.{{ .Minor }}-arm64"
-    dockerfile: Dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.title=pig"
-      - "--label=org.opencontainers.image.description=CLI Tools for Pigsty and PostgreSQL"
-      - "--label=org.opencontainers.image.vendor=Vonng"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.created={{ .Date }}"
-      - "--label=org.opencontainers.image.source=https://github.com/pgsty/pig"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-
-docker_manifests:
-  - name_template: "pgsty/pig:latest"
-    image_templates:
-      - "pgsty/pig:latest-amd64"
-      - "pgsty/pig:latest-arm64"
-  - name_template: "pgsty/pig:{{ .Version }}"
-    image_templates:
-      - "pgsty/pig:{{ .Version }}-amd64"
-      - "pgsty/pig:{{ .Version }}-arm64"
-  - name_template: "pgsty/pig:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "pgsty/pig:{{ .Major }}.{{ .Minor }}-amd64"
-      - "pgsty/pig:{{ .Major }}.{{ .Minor }}-arm64"
 
 checksum:
   name_template: 'checksums.txt'

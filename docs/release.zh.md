@@ -8,6 +8,7 @@ breadcrumbs: false
 
 |       版本        |     日期     | 摘要                             |                           GitHub                           |
 |:---------------:|:----------:|--------------------------------|:----------------------------------------------------------:|
+| [v0.6.1](#v061) | 2025-08-13 | 添加 CI/CD 管道，使用 PIGSTY PGDG 仓库  | [v0.6.1](https://github.com/pgsty/pig/releases/tag/v0.6.1) |
 | [v0.6.0](#v060) | 2025-07-17 | 423 个扩展，percona pg_tde，mcp 工具箱 | [v0.6.0](https://github.com/pgsty/pig/releases/tag/v0.6.0) |
 | [v0.5.0](#v050) | 2025-06-30 | 422 个扩展，新的扩展目录                 | [v0.6.0](https://github.com/pgsty/pig/releases/tag/v0.5.0) |
 | [v0.4.2](#v042) | 2025-05-27 | 421 个扩展，halo 和 oriole deb      | [v0.4.2](https://github.com/pgsty/pig/releases/tag/v0.4.2) |
@@ -26,6 +27,19 @@ breadcrumbs: false
 | [v0.1.1](#v011) | 2025-01-09 | 更新扩展列表                         | [v0.1.1](https://github.com/pgsty/pig/releases/tag/v0.1.1) |
 | [v0.1.0](#v010) | 2024-12-29 | repo、ext、sty 和自更新              | [v0.1.0](https://github.com/pgsty/pig/releases/tag/v0.1.0) |
 | [v0.0.1](#v001) | 2024-12-23 | 创世发布                           | [v0.0.1](https://github.com/pgsty/pig/releases/tag/v0.0.1) |
+
+## v0.6.1
+
+- 新增 el10 与 debian 13 trixie 的支持存根
+- 专门的新文档网站： https://pig.pgsty.com
+- 使用 go 1.25 重新构建，新增 CI/CD 管道
+- 在中国大陆使用 PIGSTY PGDG 镜像
+- 移除空的 `pgdg-el10fix` 仓库
+- 使用 Pigsty WiltonDB 镜像
+- 修复 EL 10 专用的 EPEL 仓库
+- pig version 输出构建环境信息
+
+
 
 
 ## v0.6.0

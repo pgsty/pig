@@ -8,7 +8,7 @@ breadcrumbs: false
 
 |     Version     |    Date    | Summary                              |                           GitHub                           |
 |:---------------:|:----------:|--------------------------------------|:----------------------------------------------------------:|
-| [v0.6.1](#v061) | 2025-08-13 | Use PGDG mirror in china             | [v0.6.1](https://github.com/pgsty/pig/releases/tag/v0.6.1) |
+| [v0.6.1](#v061) | 2025-08-13 | CI/CD pipeline, PGDG mirror in china | [v0.6.1](https://github.com/pgsty/pig/releases/tag/v0.6.1) |
 | [v0.5.0](#v050) | 2025-06-30 | 422 extension, new extension catalog | [v0.6.0](https://github.com/pgsty/pig/releases/tag/v0.5.0) |
 | [v0.4.2](#v042) | 2025-05-27 | 421 extension, halo & oriole deb     | [v0.4.2](https://github.com/pgsty/pig/releases/tag/v0.4.2) |
 | [v0.4.1](#v041) | 2025-05-07 | 414 extension, pg18 alias support    | [v0.4.1](https://github.com/pgsty/pig/releases/tag/v0.4.1) |
@@ -28,7 +28,6 @@ breadcrumbs: false
 | [v0.0.1](#v001) | 2024-12-23 | Genesis Release                      | [v0.0.1](https://github.com/pgsty/pig/releases/tag/v0.0.1) |
 
 
-
 ## v0.6.1
 
 - Add el10 and debian 13 trixie support stub
@@ -38,7 +37,7 @@ breadcrumbs: false
 - Remove unused `pgdg-el10fix` repo
 - Use pigsty mirror for WiltonDB
 - Add EL 10 dedicate epel repo (with minor suffix)
-
+- pig version output with go build environment
 
 
 ## v0.6.0
