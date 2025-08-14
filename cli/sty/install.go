@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"pig/cli/license"
+	"pig/internal/config"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -35,11 +36,15 @@ func InstallPigsty(srcTarball []byte, targetDir string, overwrite bool) error {
 
 	// Expand ~ to home directory
 	if strings.HasPrefix(targetDir, "~/") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get user home directory: %v", err)
+		if config.HomeDir != "" {
+			targetDir = filepath.Join(config.HomeDir, targetDir[2:])
+		} else {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("failed to get user home directory: %v", err)
+			}
+			targetDir = filepath.Join(homeDir, targetDir[2:])
 		}
-		targetDir = filepath.Join(homeDir, targetDir[2:])
 	}
 
 	// Check if target directory exists

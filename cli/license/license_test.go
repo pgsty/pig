@@ -2,6 +2,8 @@ package license
 
 import (
 	"fmt"
+	"path/filepath"
+	"pig/internal/config"
 	"testing"
 	"time"
 
@@ -123,8 +125,9 @@ func TestSetPrivateKey(t *testing.T) {
 		t.Fatal("should fail to issue license without private key")
 	}
 
-	// Set private key
-	err = lm.SetPrivateKey("/Users/vonng/.ssh/private.pem")
+	// Set private key using home directory path
+	privateKeyPath := filepath.Join(config.HomeDir, ".ssh", "private.pem")
+	err = lm.SetPrivateKey(privateKeyPath)
 	if err != nil {
 		t.Fatalf("failed to set private key: %v", err)
 	}

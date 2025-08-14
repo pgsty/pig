@@ -22,6 +22,7 @@ import (
 
 var (
 	Manager *LicenseManager = DefaultLicenseManager()
+	HomeDir string          // Set by config package during initialization
 )
 
 const (
@@ -324,7 +325,10 @@ func (lm *LicenseManager) LicenseType() string {
 
 // WriteHistory writes a license history record to a CSV file, it's ok to skip error
 func WriteHistory(record ...string) {
-	home, _ := os.UserHomeDir()
+	home := HomeDir
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
 	historyFile := filepath.Join(home, issueHistory)
 	f, err := os.OpenFile(historyFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -345,7 +349,10 @@ func WriteHistory(record ...string) {
 
 // ReadHistory will tabulate the license issue history
 func ReadHistory() {
-	home, _ := os.UserHomeDir()
+	home := HomeDir
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
 	historyFile := filepath.Join(home, issueHistory)
 
 	f, err := os.Open(historyFile)

@@ -7,6 +7,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"pig/cli/license"
 	"pig/internal/config"
 	"time"
@@ -17,8 +18,7 @@ import (
 )
 
 const (
-	defaultPrivateKeyPath = "/Users/vonng/.ssh/private.pem"
-	dateFormat            = "2006-01-02"
+	dateFormat = "2006-01-02"
 )
 
 var (
@@ -84,9 +84,10 @@ var licenseIssueCmd = &cobra.Command{
 
 		// Ensure private key is provided or fallback to default
 		if issueKey == "" {
-			logrus.Debugf("No private key path specified, checking default path: %s", defaultPrivateKeyPath)
-			if _, err := os.Stat(defaultPrivateKeyPath); err == nil {
-				issueKey = defaultPrivateKeyPath
+			defaultPath := filepath.Join(config.HomeDir, ".ssh", "private.pem")
+			logrus.Debugf("No private key path specified, checking default path: %s", defaultPath)
+			if _, err := os.Stat(defaultPath); err == nil {
+				issueKey = defaultPath
 				logrus.Infof("Using default private key: %s", issueKey)
 			} else {
 				logrus.Error("No private key found for issuing license")

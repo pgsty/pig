@@ -6,10 +6,10 @@ release: "1"
 version_schema: semver
 maintainer: Ruohang Feng <rh@vonng.com>
 description: |
-  CLI Tools for Pigsty and PostgreSQL, https://pig.pgsty.com
+  PostgreSQL Package Manger CLI
 
 vendor: "Vonng"
-homepage: "https://github.com/pgsty/pig"
+homepage: "https://pig.pgsty.com"
 license: "Apache-2.0 License"
 
 contents:

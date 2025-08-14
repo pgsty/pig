@@ -127,6 +127,9 @@ func InitConfig(inventory, pigstyHome string) {
 		}
 	}
 
+	// setup license with HomeDir
+	license.HomeDir = HomeDir
+	
 	// setup license if provided
 	lic := viper.GetString("license")
 	if lic != "" {
