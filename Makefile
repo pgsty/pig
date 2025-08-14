@@ -5,6 +5,19 @@
 #==============================================================#
 VERSION=v0.6.1
 
+# Build Variables
+BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+REVISION=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
+GO_VERSION=$(shell go version | awk '{print $$3}')
+
+# LD Flags for injecting build-time variables
+LD_FLAGS=-X 'pig/internal/config.PigVersion=$(VERSION)' \
+        -X 'pig/internal/config.Branch=$(BRANCH)' \
+        -X 'pig/internal/config.Revision=$(REVISION)' \
+        -X 'pig/internal/config.BuildDate=$(BUILD_DATE)' \
+        -X 'pig/internal/config.GoVersion=$(GO_VERSION)'
+
 ###############################################################
 #                     Build & Release                         #
 ###############################################################
@@ -16,10 +29,10 @@ DARWIN_AMD_DIR:=dist/$(VERSION)/pig-$(VERSION).darwin-amd64
 DARWIN_ARM_DIR:=dist/$(VERSION)/pig-$(VERSION).darwin-arm64
 
 build-linux-amd64:
-	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -a -ldflags '-extldflags "-static"' -o pig
+	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -a -ldflags "$(LD_FLAGS) -extldflags '-static'" -o pig
 	upx pig
 build-linux-arm64:
-	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -a -ldflags '-extldflags "-static"' -o pig
+	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -a -ldflags "$(LD_FLAGS) -extldflags '-static'" -o pig
 	upx pig
 
 r: release
@@ -86,7 +99,7 @@ run:
 	go run main.go
 b: build
 build:
-	go build -o pig
+	go build -ldflags "$(LD_FLAGS)" -o pig
 c: clean
 clean:
 	rm -rf pig
