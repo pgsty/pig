@@ -37,7 +37,7 @@ func (r *Repository) SupportArm64() bool {
 // ToInlineYAML Will output a single line yaml string
 func (r *Repository) ToInlineYAML() string {
 	name := r.Name
-	desc := fmt.Sprintf("'%s'", r.Description) // description 里加上单引号
+	desc := fmt.Sprintf("'%s'", r.Description) // add single quotes to description
 	module := r.Module
 	releases := compactIntArray(r.Releases)
 	arch := compactStrArray(r.Arch)

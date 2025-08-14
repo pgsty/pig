@@ -24,7 +24,7 @@ AwEHoUQDQgAEAJoxqViuKuTNF4e+Swn+XS+Jsgu9pWHGOGnkpl4F8gnze+r3Z2o7
 -----END EC PRIVATE KEY-----`
 )
 
-// 测试默认公钥加载
+// Test loading default public key
 func TestGetDefaultPublicKey(t *testing.T) {
 	pub := GetDefaultPublicKey()
 	if pub == nil {
@@ -32,7 +32,7 @@ func TestGetDefaultPublicKey(t *testing.T) {
 	}
 }
 
-// 测试加载公钥和私钥
+// Test loading public and private keys
 func TestLoadKeys(t *testing.T) {
 	// Test loading public key from string
 	pubKey, err := LoadECDSAPublicKey(testPublicKey)
@@ -75,7 +75,7 @@ func TestLoadKeys(t *testing.T) {
 	}
 }
 
-// 测试创建 LicenseManager
+// Test creating LicenseManager
 func TestNewLicenseManager(t *testing.T) {
 	lm, err := NewLicenseManager()
 	if err != nil {
@@ -86,7 +86,7 @@ func TestNewLicenseManager(t *testing.T) {
 	}
 }
 
-// 测试添加额外公钥（这里使用默认公钥自身作为测试）
+// Test adding additional public key (using default public key itself for testing)
 func TestAddPublicKey(t *testing.T) {
 	lm, err := NewLicenseManager()
 	if err != nil {
@@ -110,26 +110,26 @@ func TestAddPublicKey(t *testing.T) {
 
 }
 
-// 测试加载私钥（需自行提供一对匹配的公私钥用于测试）
+// Test loading private key (need to provide matching public-private key pair for testing)
 func TestSetPrivateKey(t *testing.T) {
 	lm, err := NewLicenseManager()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// 未设置私钥时尝试签发应失败
+	// Should fail when trying to issue without setting private key
 	_, err = lm.IssueLicenseFast("test")
 	if err == nil {
 		t.Fatal("should fail to issue license without private key")
 	}
 
-	// 设置私钥
+	// Set private key
 	err = lm.SetPrivateKey("/Users/vonng/.ssh/private.pem")
 	if err != nil {
 		t.Fatalf("failed to set private key: %v", err)
 	}
 
-	// 再次签发则应该成功
+	// Should succeed when issuing again
 	token, err := lm.IssueLicenseFast("test-user")
 	fmt.Println(token)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestSetPrivateKey(t *testing.T) {
 	}
 }
 
-// 测试 IssueLicense（带过期时间）
+// Test IssueLicense (with expiration time)
 func TestIssueLicense(t *testing.T) {
 	lm, _ := NewLicenseManager()
 	lm.AddPublicKey(testPublicKey)
@@ -158,7 +158,7 @@ func TestIssueLicense(t *testing.T) {
 		t.Fatalf("issued token is not valid JWT: %s", tokenStr)
 	}
 
-	// 验证签发的 JWT
+	// Verify issued JWT
 	tok, err := lm.Validate(tokenStr)
 	if err != nil {
 		t.Fatalf("failed to validate issued token: %v", err)
@@ -174,7 +174,7 @@ func TestIssueLicense(t *testing.T) {
 	}
 }
 
-// 测试 Validate
+// Test Validate
 func TestValidate(t *testing.T) {
 	lm, _ := NewLicenseManager()
 	lm.AddPublicKey(testPublicKey)
@@ -192,7 +192,7 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-// 测试 IsValidJWT
+// Test IsValidJWT
 func TestIsValidJWT(t *testing.T) {
 	valid := "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJ0ZXN0In0.ZTJtOTQ5M3Nz"
 	if !IsValidJWT(valid) {
@@ -205,9 +205,9 @@ func TestIsValidJWT(t *testing.T) {
 	}
 }
 
-// 测试 IssueJWT 与 ValidateJWT
+// Test IssueJWT and ValidateJWT
 func TestIssueAndValidateJWT(t *testing.T) {
-	// 准备公私钥(需匹配)
+	// Prepare public-private keys (must match)
 	privateKeyPem := testPrivateKey
 	publicKeyPem := testPublicKey
 
@@ -240,7 +240,7 @@ func TestIssueAndValidateJWT(t *testing.T) {
 	}
 }
 
-// 测试 PublicKeysEqual
+// Test PublicKeysEqual
 func TestPublicKeysEqual(t *testing.T) {
 	pub1 := GetDefaultPublicKey()
 	pub2 := GetDefaultPublicKey()
