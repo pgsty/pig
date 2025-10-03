@@ -50,8 +50,8 @@ const (
 
 // Build information. Populated at build-time.
 var (
-	PigVersion    = "0.6.1"
-	PigstyVersion = "3.6.0"
+	PigVersion    = "0.6.2"
+	PigstyVersion = "3.6.1"
 	Branch        = "main"
 	Revision      = "HEAD"
 	BuildDate     = "2025081010200"

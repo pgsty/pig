@@ -1,9 +1,9 @@
 #==============================================================#
 # File      :   Makefile
-# Mtime     :   2025-02-14
+# Mtime     :   2025-10-02
 # Copyright (C) 2018-2025 Ruohang Feng
 #==============================================================#
-VERSION=v0.6.1
+VERSION=v0.6.2
 
 # Build Variables
 BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")

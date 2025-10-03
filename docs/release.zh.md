@@ -8,6 +8,7 @@ breadcrumbs: false
 
 |       版本        |     日期     | 摘要                             |                           GitHub                           |
 |:---------------:|:----------:|--------------------------------|:----------------------------------------------------------:|
+| [v0.6.2](#v062) | 2025-10-03 | 正式提供 PG 18 支持                  | [v0.6.2](https://github.com/pgsty/pig/releases/tag/v0.6.2) |
 | [v0.6.1](#v061) | 2025-08-13 | 添加 CI/CD 管道，使用 PIGSTY PGDG 仓库  | [v0.6.1](https://github.com/pgsty/pig/releases/tag/v0.6.1) |
 | [v0.6.0](#v060) | 2025-07-17 | 423 个扩展，percona pg_tde，mcp 工具箱 | [v0.6.0](https://github.com/pgsty/pig/releases/tag/v0.6.0) |
 | [v0.5.0](#v050) | 2025-06-30 | 422 个扩展，新的扩展目录                 | [v0.6.0](https://github.com/pgsty/pig/releases/tag/v0.5.0) |
@@ -28,6 +29,12 @@ breadcrumbs: false
 | [v0.1.0](#v010) | 2024-12-29 | repo、ext、sty 和自更新              | [v0.1.0](https://github.com/pgsty/pig/releases/tag/v0.1.0) |
 | [v0.0.1](#v001) | 2024-12-23 | 创世发布                           | [v0.0.1](https://github.com/pgsty/pig/releases/tag/v0.0.1) |
 
+
+## v0.6.2
+
+- 使用 PG 18 官方正式仓库取代原本的 Testing Beta 仓库 instead of testing repo
+- 在接收 Pigsty 版本字符串的时候，自动添加 `v` 前缀
+- 改进了网络检查与下载的逻辑
 
 ## v0.6.1
 
