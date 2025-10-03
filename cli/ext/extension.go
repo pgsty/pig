@@ -396,10 +396,12 @@ func splitAndTrim(s string) []string {
 
 // DistroBadCase is a map of bad cases for extensions
 var DistroBadCase = map[string]map[string][]int{
-	"el8.amd64": {"pg_duckdb": {}, "pg_mooncake": {}},
-	"el8.arm64": {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}, "pg_duckdb": {}, "pg_mooncake": {}, "pg_dbms_metadata": {15}},
-	"el9.amd64": {},
-	"el9.arm64": {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}},
+	"el8.amd64":  {"pg_duckdb": {}, "pg_mooncake": {}},
+	"el8.arm64":  {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}, "pg_duckdb": {}, "pg_mooncake": {}, "pg_dbms_metadata": {15}},
+	"el9.amd64":  {},
+	"el9.arm64":  {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}},
+	"el10.amd64": {},
+	"el10.arm64": {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}},
 
 	"u22.amd64": {},
 	"u22.arm64": {},
