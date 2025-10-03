@@ -20,7 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var Timeout = 1500 * time.Millisecond
+var DefaultTimeout = 1500 * time.Millisecond
 
 const (
 	ViaIO = "pigsty.io"
@@ -46,7 +46,12 @@ type VersionInfo struct {
 
 // NetworkCondition probes repository endpoints and returns the fastest responding one
 func NetworkCondition() string {
-	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
+	return NetworkConditionWithTimeout(DefaultTimeout)
+}
+
+// NetworkConditionWithTimeout probes repository endpoints with a specified timeout
+func NetworkConditionWithTimeout(timeout time.Duration) string {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	type result struct {
@@ -66,7 +71,7 @@ func NetworkCondition() string {
 			return
 		}
 
-		client := &http.Client{Timeout: Timeout}
+		client := &http.Client{Timeout: timeout}
 		start := time.Now()
 		resp, err := client.Do(req)
 		if err != nil {
@@ -107,7 +112,7 @@ func NetworkCondition() string {
 			resultChan <- result{"google", nil}
 			return
 		}
-		client := &http.Client{Timeout: Timeout}
+		client := &http.Client{Timeout: timeout}
 		start := time.Now()
 		resp, err := client.Do(req)
 		if err != nil {
@@ -282,28 +287,34 @@ func DownloadSrc(version string, targetDir string) error {
 
 	// Check if file already exists
 	if _, err := os.Stat(targetPath); err == nil {
-		// Calculate MD5 checksum of existing file
-		f, err := os.Open(targetPath)
-		if err != nil {
-			return fmt.Errorf("failed to open existing file: %v", err)
-		}
-		defer f.Close()
+		// If we have checksum info, verify existing file
+		if verInfo.Checksum != "" {
+			f, err := os.Open(targetPath)
+			if err != nil {
+				return fmt.Errorf("failed to open existing file: %v", err)
+			}
+			defer f.Close()
 
-		h := md5.New()
-		if _, err := io.Copy(h, f); err != nil {
-			return fmt.Errorf("failed to calculate md5 checksum: %v", err)
-		}
-		existingChecksum := hex.EncodeToString(h.Sum(nil))
+			h := md5.New()
+			if _, err := io.Copy(h, f); err != nil {
+				return fmt.Errorf("failed to calculate md5 checksum: %v", err)
+			}
+			existingChecksum := hex.EncodeToString(h.Sum(nil))
 
-		if existingChecksum == verInfo.Checksum {
-			logrus.Infof("File %s exists with same md5 %s, skip...", targetPath, existingChecksum)
+			if existingChecksum == verInfo.Checksum {
+				logrus.Infof("File %s exists with same md5 %s, skip...", targetPath, existingChecksum)
+				return nil
+			}
+
+			// Remove existing file with mismatched checksum
+			logrus.Warnf("Removing existing file %s with mismatched checksum", targetPath)
+			if err := os.Remove(targetPath); err != nil {
+				return fmt.Errorf("failed to remove existing file: %v", err)
+			}
+		} else {
+			// No checksum available, skip if file exists
+			logrus.Infof("File %s exists, skip download...", targetPath)
 			return nil
-		}
-
-		// Remove existing file with mismatched checksum
-		logrus.Warnf("Removing existing file %s with mismatched checksum", targetPath)
-		if err := os.Remove(targetPath); err != nil {
-			return fmt.Errorf("failed to remove existing file: %v", err)
 		}
 	}
 
@@ -364,12 +375,14 @@ func DownloadSrc(version string, targetDir string) error {
 	}
 	fmt.Println() // New line after progress bar
 
-	// Verify checksum
+	// Verify checksum if available
 	downloadedChecksum := hex.EncodeToString(h.Sum(nil))
-	if downloadedChecksum != verInfo.Checksum {
-		logrus.Warnf("Removing downloaded file due to md5 checksum mismatch")
-		os.Remove(targetPath)
-		return fmt.Errorf("md5 checksum mismatch: expected %s, got %s", verInfo.Checksum, downloadedChecksum)
+	if verInfo.Checksum != "" {
+		if downloadedChecksum != verInfo.Checksum {
+			logrus.Warnf("Removing downloaded file due to md5 checksum mismatch")
+			os.Remove(targetPath)
+			return fmt.Errorf("md5 checksum mismatch: expected %s, got %s", verInfo.Checksum, downloadedChecksum)
+		}
 	}
 
 	logrus.Infof("Downloaded: %s %.1f MiB %s", targetPath, sizeInMiB, downloadedChecksum)
@@ -378,19 +391,44 @@ func DownloadSrc(version string, targetDir string) error {
 
 // IsValidVersion checks if a version string matches the expected format
 // Format: vX.Y.Z[-{a|b|c|alpha|beta|rc}N]
+// Returns a VersionInfo with download URL based on region
 func IsValidVersion(version string) *VersionInfo {
-	// First check if version exists in AllVersions
+	// Ensure version has 'v' prefix if it starts with a number
+	if len(version) > 0 && version[0] >= '0' && version[0] <= '9' {
+		version = "v" + version
+	}
+	
+	// Check if version matches expected format
 	re := regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-(?:a|b|c|alpha|beta|rc)\d+)?$`)
 	if !re.MatchString(version) {
 		return nil
 	}
 
-	for _, v := range AllVersions {
-		if v.Version == version {
-			return &v
+	// First check if version exists in AllVersions cache
+	if AllVersions != nil {
+		for _, v := range AllVersions {
+			if v.Version == version {
+				return &v
+			}
 		}
 	}
-	return nil
+	
+	// If not in cache, create VersionInfo based on region
+	// Choose repository based on Source/Region (default to io)
+	var baseURL string
+	if Source == ViaCC || Region == "china" {
+		baseURL = config.RepoPigstyCC
+	} else {
+		baseURL = config.RepoPigstyIO
+	}
+	
+	filename := fmt.Sprintf("pigsty-%s.tgz", version)
+	return &VersionInfo{
+		Version:     version,
+		DownloadURL: fmt.Sprintf("%s/src/%s", baseURL, filename),
+		// Checksum will be empty for versions not in cache
+		Checksum: "",
+	}
 }
 
 // FetchChecksums retrieves and parses the checksums file from the specified URL

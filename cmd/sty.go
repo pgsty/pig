@@ -78,37 +78,59 @@ pig sty init
   pig sty init 3                 # get & install specific version v3 latest
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Handle version from args if provided
+		if len(args) > 0 && pigstyVersion == "" {
+			pigstyVersion = args[0]
+		}
+
+		// Default to latest if no version specified
 		if pigstyVersion == "" {
 			pigstyVersion = "latest"
-			// logrus.Debugf("install embedded pigsty %s to %s with force=%v", config.PigstyVersion, pigstyInitPath, pigstyInitForce)
-			// err := sty.InstallPigsty(nil, pigstyInitPath, pigstyInitForce)
-			// if err != nil {
-			// 	logrus.Errorf("failed to install pigsty: %v", err)
-			// }
-			// return nil
+		}
+
+		// Ensure version has 'v' prefix if it starts with a number
+		if pigstyVersion != "latest" && len(pigstyVersion) > 0 {
+			if pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
+				pigstyVersion = "v" + pigstyVersion
+			}
 		}
 
 		// if version is explicit given, always download & install from remote
 		get.NetworkCondition()
+		var ver *get.VersionInfo
 		if get.AllVersions == nil {
-			logrus.Errorf("Fail to get pigsty version list")
-			os.Exit(1)
-		}
-
-		pigstyVersion = get.CompleteVersion(pigstyVersion)
-		if ver := get.IsValidVersion(pigstyVersion); ver == nil {
-			logrus.Errorf("invalid pigsty version: %v", pigstyVersion)
-			return nil
+			logrus.Warnf("Fail to get pigsty version list, use the built-in version %s", config.PigstyVersion)
+			// Use built-in version as fallback
+			if pigstyVersion == "latest" {
+				pigstyVersion = config.PigstyVersion
+			}
+			// Ensure fallback version has v prefix if it starts with a number
+			if len(pigstyVersion) > 0 && pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
+				pigstyVersion = "v" + pigstyVersion
+			}
+			// Create a fallback VersionInfo for built-in version
+			ver = &get.VersionInfo{
+				Version:     pigstyVersion,
+				DownloadURL: fmt.Sprintf("%s/src/pigsty-%s.tgz", config.RepoPigstyIO, pigstyVersion),
+			}
 		} else {
-			logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, pigstyDownloadDir)
-			err := get.DownloadSrc(pigstyVersion, pigstyDownloadDir)
-			if err != nil {
-				logrus.Errorf("failed to download pigsty src %s: %v", pigstyVersion, err)
-				os.Exit(2)
+			pigstyVersion = get.CompleteVersion(pigstyVersion)
+			ver = get.IsValidVersion(pigstyVersion)
+			if ver == nil {
+				logrus.Errorf("invalid pigsty version: %v", pigstyVersion)
+				return nil
 			}
 		}
 
-		// downloaded, then extract & install it
+		// download according to the version
+		logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, pigstyDownloadDir)
+		err := get.DownloadSrc(pigstyVersion, pigstyDownloadDir)
+		if err != nil {
+			logrus.Errorf("failed to download pigsty src %s: %v", pigstyVersion, err)
+			os.Exit(2)
+		}
+
+		// read, then extract & install it
 		srcTarball, err := sty.LoadPigstySrc(filepath.Join(pigstyDownloadDir, fmt.Sprintf("pigsty-%s.tgz", pigstyVersion)))
 		if err != nil {
 			logrus.Errorf("failed to load pigsty src %s: %v", pigstyVersion, err)
@@ -302,6 +324,13 @@ var pigstyGetcmd = &cobra.Command{
 		}
 		if pigstyVersion == "" && len(args) > 0 {
 			pigstyVersion = args[0]
+		}
+
+		// Ensure version has 'v' prefix if it starts with a number
+		if pigstyVersion != "" && pigstyVersion != "latest" && len(pigstyVersion) > 0 {
+			if pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
+				pigstyVersion = "v" + pigstyVersion
+			}
 		}
 
 		if completeVer := get.CompleteVersion(pigstyVersion); completeVer != pigstyVersion {
