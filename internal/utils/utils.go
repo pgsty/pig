@@ -60,6 +60,7 @@ func ShellOutput(name string, args ...string) (string, error) {
 }
 
 // SudoCommand runs a command with sudo if the current user is not root
+// TODO: FineGrained control of which commands can be run with sudo
 func SudoCommand(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no command to run")
