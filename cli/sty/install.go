@@ -27,8 +27,7 @@ const DefaultDir = "~/pigsty"
 // Returns error if installation fails.
 func InstallPigsty(srcTarball []byte, targetDir string, overwrite bool) error {
 	if srcTarball == nil {
-		return fmt.Errorf("embedded tarball not found")
-		// srcTarball = embeddedTarball
+		return fmt.Errorf("source tarball not provided")
 	}
 	if targetDir == "" {
 		targetDir = DefaultDir
@@ -41,7 +40,7 @@ func InstallPigsty(srcTarball []byte, targetDir string, overwrite bool) error {
 		} else {
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
-				return fmt.Errorf("failed to get user home directory: %v", err)
+				return fmt.Errorf("failed to get user home directory: %w", err)
 			}
 			targetDir = filepath.Join(homeDir, targetDir[2:])
 		}
@@ -50,11 +49,11 @@ func InstallPigsty(srcTarball []byte, targetDir string, overwrite bool) error {
 	// Check if target directory exists
 	if exists := pathExists(targetDir); exists {
 		if !overwrite {
-			return fmt.Errorf("target directory %s already exists, use -f|--force flag to overwrite", targetDir)
+			return fmt.Errorf("directory already exists: %s (use -f to overwrite)", targetDir)
 		}
-		logrus.Warnf("target directory %s already exists, overwriting", targetDir)
+		logrus.Warnf("overwriting existing directory: %s", targetDir)
 	} else if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("failed to create target directory %s: %v", targetDir, err)
+		return fmt.Errorf("failed to create directory %s: %w", targetDir, err)
 	}
 
 	// if a valid license is found, goes to pro mode, ask user to agree the EULA
@@ -63,42 +62,42 @@ func InstallPigsty(srcTarball []byte, targetDir string, overwrite bool) error {
 		fmt.Println("##############################################################################")
 		fmt.Println(string(embeddedEULA))
 		fmt.Println("##############################################################################\n\n")
-		logrus.Warnf("To proceed with the installation of Pigsty Pro Edition, you must agree to the End User License Agreement (EULA).")
-		logrus.Infof("Do you accept the terms of the EULA? Please type 'yes' to accept or 'no' to decline:")
+		logrus.Warnf("to proceed with Pigsty Pro installation, you must accept the EULA")
+		logrus.Infof("do you accept the terms of the EULA? (yes/no)")
 		fmt.Printf("> ")
 		var response string
 		fmt.Scanln(&response)
 		response = strings.ToLower(strings.TrimSpace(response))
 		switch strings.ToLower(response) {
 		case "no", "n", "nay", "off", "false":
-			logrus.Errorf("Installation aborted due to EULA rejection.")
-			logrus.Warnf("Consider using the AGPLv3 OSS version instead (remove the license file)")
-			return fmt.Errorf("installation aborted due to EULA rejection")
+			logrus.Errorf("installation aborted: EULA not accepted")
+			logrus.Warnf("consider using AGPLv3 OSS version (remove license file)")
+			return fmt.Errorf("EULA not accepted")
 		case "yes", "y", "ok", "true":
-			logrus.Infof("EULA accepted, continue pigsty pro installation")
+			logrus.Infof("EULA accepted, proceeding with installation")
 		default:
-			logrus.Errorf("Invalid response: %s", response)
-			return fmt.Errorf("invalid response to EULA inquiry")
+			return fmt.Errorf("invalid response: %s", response)
 		}
 	}
 
 	// Extract content to target directory
 	if err := extractPigsty(srcTarball, targetDir); err != nil {
-		return fmt.Errorf("failed to extract pigsty: %v", err)
+		return fmt.Errorf("failed to extract pigsty: %w", err)
 	}
 
 	if license.Manager.Valid {
 		licensePath := filepath.Join(targetDir, "EULA.md")
 		if err := os.WriteFile(licensePath, embeddedEULA, 0644); err != nil {
-			return fmt.Errorf("failed to write EULA file: %v", err)
+			return fmt.Errorf("failed to write EULA: %w", err)
 		}
-		logrus.Infof("the EULA is generated at %s", licensePath)
+		logrus.Debugf("EULA written: %s", licensePath)
 	}
 
-	logrus.Infof("pigsty installed @ %s", targetDir)
-	logrus.Infof("pig sty boot    # install ansible and prepare offline pkg")
-	logrus.Infof("pig sty conf    # configure pigsty and generate config")
-	logrus.Infof("pig sty install # install & provisioning env (DANGEROUS!)")
+	logrus.Infof("pigsty installed: %s", targetDir)
+	logrus.Infof("next steps:")
+	logrus.Infof("  pig sty boot    # install ansible and prepare offline pkg")
+	logrus.Infof("  pig sty conf    # configure pigsty and generate config")
+	logrus.Infof("  pig sty install # install & provision env (DANGEROUS!)")
 
 	return nil
 }
@@ -110,7 +109,7 @@ func extractPigsty(data []byte, dst string) error {
 	buf := bytes.NewReader(data)
 	gzr, err := gzip.NewReader(buf)
 	if err != nil {
-		return fmt.Errorf("failed to create gzip reader: %v", err)
+		return fmt.Errorf("failed to create gzip reader: %w", err)
 	}
 	defer gzr.Close()
 
@@ -121,7 +120,7 @@ func extractPigsty(data []byte, dst string) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("failed to read tar header: %v", err)
+			return fmt.Errorf("failed to read tar entry: %w", err)
 		}
 		if header == nil {
 			continue
@@ -138,12 +137,12 @@ func extractPigsty(data []byte, dst string) error {
 
 		// Skip protected files and directories
 		if isProtectedFile(relPath, dst) {
-			logrus.Warnf("Skipping overwriting existing file: %s", relPath)
+			logrus.Debugf("skipping protected file: %s", relPath)
 			continue
 		}
 
 		if err := extractTarEntry(header, target, tarReader); err != nil {
-			return fmt.Errorf("failed to extract %s: %v", target, err)
+			return fmt.Errorf("failed to extract %s: %w", target, err)
 		}
 	}
 
@@ -155,14 +154,14 @@ func LoadPigstySrc(path string) ([]byte, error) {
 	// Open and read the file
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file %s: %v", path, err)
+		return nil, fmt.Errorf("failed to open file %s: %w", path, err)
 	}
 	defer f.Close()
 
 	// Read file contents into byte slice
 	data, err := io.ReadAll(f)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file %s: %v", path, err)
+		return nil, fmt.Errorf("failed to read file %s: %w", path, err)
 	}
 
 	return data, nil
@@ -189,26 +188,26 @@ func extractTarEntry(header *tar.Header, target string, reader *tar.Reader) erro
 
 	case tar.TypeReg:
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-			return fmt.Errorf("failed to create parent directory: %v", err)
+			return fmt.Errorf("failed to create parent directory: %w", err)
 		}
 
 		f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
 		if err != nil {
-			return fmt.Errorf("failed to create file: %v", err)
+			return fmt.Errorf("failed to create file: %w", err)
 		}
 		defer f.Close()
 
 		if _, err := io.Copy(f, reader); err != nil {
-			return fmt.Errorf("failed to write file contents: %v", err)
+			return fmt.Errorf("failed to write file: %w", err)
 		}
 	case tar.TypeSymlink:
 		os.Remove(target) // Remove existing symlink if any
 		if err := os.Symlink(header.Linkname, target); err != nil {
-			return fmt.Errorf("failed to create symlink: %v", err)
+			return fmt.Errorf("failed to create symlink: %w", err)
 		}
 
 	default:
-		logrus.Warnf("Skipping unsupported file type %v: %s", header.Typeflag, target)
+		logrus.Debugf("skipping unsupported file type %d: %s", header.Typeflag, target)
 	}
 
 	return nil

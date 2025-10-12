@@ -68,11 +68,11 @@ func InitConfig(inventory, pigstyHome string) {
 	DetectEnvironment()
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		logrus.Debug("Failed to get user home directory, trying user.Current()")
+		logrus.Debugf("failed to get user home directory, trying user.Current()")
 		if usr, err := user.Current(); err == nil {
 			homeDir = "/home/" + usr.Username
 		} else {
-			logrus.Fatalf("Failed to get user home directory via username, abort: %v", err)
+			logrus.Fatalf("failed to determine user home directory: %v", err)
 		}
 	}
 
@@ -101,12 +101,12 @@ func InitConfig(inventory, pigstyHome string) {
 	if err := viper.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
 		if errors.As(err, &configFileNotFoundError) {
-			logrus.WithError(err).Debugf("Config file not found, will rely on environment variables and defaults")
+			logrus.Debugf("config file not found, using environment variables and defaults")
 		} else {
-			logrus.WithError(err).Debugf("Error reading config file from %s", ConfigFile)
+			logrus.Debugf("failed to read config file %s: %v", ConfigFile, err)
 		}
 	} else {
-		logrus.Debugf("Load config from %s", ConfigFile)
+		logrus.Debugf("config loaded: %s", ConfigFile)
 	}
 
 	// load specified config file if provided
@@ -145,14 +145,14 @@ func findPigstyHome(pigstyHome string) string {
 		if !filepath.IsAbs(pigstyHome) {
 			cwd, err := os.Getwd()
 			if err != nil {
-				logrus.Warnf("Failed to get current working directory: %v", err)
+				logrus.Warnf("failed to get current working directory: %v", err)
 				cwd = "."
 			}
 			pigstyHome = filepath.Join(cwd, pigstyHome)
 		}
 		pigstyHomePath = pigstyHome
 		if validatePigstyHome(pigstyHomePath) {
-			logrus.Debugf("get pigsty home %s via cil arg", pigstyHomePath)
+			logrus.Debugf("pigsty home from cli arg: %s", pigstyHomePath)
 			return pigstyHomePath
 		}
 	}
@@ -160,17 +160,17 @@ func findPigstyHome(pigstyHome string) string {
 	// if pigstyHomePath is not set or not valid, use home from config
 	pigstyHomePath = viper.GetString("home")
 	if validatePigstyHome(pigstyHomePath) {
-		logrus.Debugf("get pigsty home %s via config/env", pigstyHomePath)
+		logrus.Debugf("pigsty home from config: %s", pigstyHomePath)
 		return pigstyHomePath
 	}
 
 	pigstyHomePath = filepath.Join(HomeDir, "pigsty")
 	if validatePigstyHome(pigstyHomePath) {
-		logrus.Debugf("get pigsty home %s via default home", pigstyHomePath)
+		logrus.Debugf("pigsty home from default: %s", pigstyHomePath)
 		return pigstyHomePath
 	}
 
-	logrus.Debugf("pigsty home not found, is pigsty installed?")
+	logrus.Debugf("pigsty home not found")
 	return ""
 }
 
@@ -214,10 +214,11 @@ func findInventoryPath(inventory string) string {
 
 	for i, path := range inventoryPaths {
 		if _, err := os.Stat(path); err == nil {
-			logrus.Debugf("find inventory %s from %s", path, inventorySources[i])
+			logrus.Debugf("inventory found (%s): %s", inventorySources[i], path)
 			return path
 		}
 	}
+	logrus.Debugf("inventory not found")
 	return ""
 }
 
@@ -251,12 +252,12 @@ func InitConfigFile(cfgPath string) {
 	if err := viper.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
 		if errors.As(err, &configFileNotFoundError) {
-			logrus.WithError(err).Debugf("Config file not found, will rely on environment variables and defaults")
+			logrus.Debugf("config file not found, using environment variables and defaults")
 		} else {
-			logrus.WithError(err).Debugf("Error reading config file from %s", cfgSource)
+			logrus.Debugf("failed to read config file from %s: %v", cfgSource, err)
 		}
 	} else {
-		logrus.Debugf("Load config from %s: %s", cfgSource, cfgPath)
+		logrus.Debugf("config loaded from %s: %s", cfgSource, cfgPath)
 	}
 }
 

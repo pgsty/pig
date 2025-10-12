@@ -213,14 +213,14 @@ func GetAllVersions(print bool) error {
 	}[Source]
 
 	if baseURL == "" {
-		return fmt.Errorf("bad network condition")
+		return fmt.Errorf("network unavailable")
 	}
 
 	if AllVersions == nil {
 		// If not populated yet, fetch now
 		versions, err := FetchChecksums(baseURL + "/src/checksums")
 		if err != nil {
-			return fmt.Errorf("failed to fetch versions: %v", err)
+			return fmt.Errorf("failed to fetch versions: %w", err)
 		}
 		AllVersions = versions
 	}
@@ -273,13 +273,13 @@ func DownloadSrc(version string, targetDir string) error {
 		var err error
 		targetDir, err = os.Getwd()
 		if err != nil {
-			return fmt.Errorf("failed to get current directory: %v", err)
+			return fmt.Errorf("failed to get current directory: %w", err)
 		}
 	}
 
 	// Create target directory if not exists
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("failed to create target directory: %v", err)
+		return fmt.Errorf("failed to create target directory: %w", err)
 	}
 
 	filename := fmt.Sprintf("pigsty-%s.tgz", version)
@@ -291,48 +291,49 @@ func DownloadSrc(version string, targetDir string) error {
 		if verInfo.Checksum != "" {
 			f, err := os.Open(targetPath)
 			if err != nil {
-				return fmt.Errorf("failed to open existing file: %v", err)
+				return fmt.Errorf("failed to open existing file: %w", err)
 			}
 			defer f.Close()
 
 			h := md5.New()
 			if _, err := io.Copy(h, f); err != nil {
-				return fmt.Errorf("failed to calculate md5 checksum: %v", err)
+				return fmt.Errorf("failed to calculate checksum: %w", err)
 			}
 			existingChecksum := hex.EncodeToString(h.Sum(nil))
 
 			if existingChecksum == verInfo.Checksum {
-				logrus.Infof("File %s exists with same md5 %s, skip...", targetPath, existingChecksum)
+				logrus.Infof("file exists with matching checksum, skipping: %s", targetPath)
 				return nil
 			}
 
 			// Remove existing file with mismatched checksum
-			logrus.Warnf("Removing existing file %s with mismatched checksum", targetPath)
+			logrus.Warnf("removing existing file with mismatched checksum: %s", targetPath)
 			if err := os.Remove(targetPath); err != nil {
-				return fmt.Errorf("failed to remove existing file: %v", err)
+				return fmt.Errorf("failed to remove existing file: %w", err)
 			}
 		} else {
 			// No checksum available, skip if file exists
-			logrus.Infof("File %s exists, skip download...", targetPath)
+			logrus.Infof("file exists, skipping download: %s", targetPath)
 			return nil
 		}
 	}
 
 	// Start download
+	logrus.Infof("downloading: %s", verInfo.DownloadURL)
 	resp, err := http.Get(verInfo.DownloadURL)
 	if err != nil {
-		return fmt.Errorf("failed to download file: %v", err)
+		return fmt.Errorf("failed to download file: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status: %s", resp.Status)
+		return fmt.Errorf("download failed: %s", resp.Status)
 	}
 
 	// Create output file
 	out, err := os.Create(targetPath)
 	if err != nil {
-		return fmt.Errorf("failed to create output file: %v", err)
+		return fmt.Errorf("failed to create output file: %w", err)
 	}
 	defer out.Close()
 
@@ -352,10 +353,10 @@ func DownloadSrc(version string, targetDir string) error {
 		if n > 0 {
 			// Write to file and hash
 			if _, err := out.Write(buf[:n]); err != nil {
-				return fmt.Errorf("failed to write to file: %v", err)
+				return fmt.Errorf("failed to write file: %w", err)
 			}
 			if _, err := h.Write(buf[:n]); err != nil {
-				return fmt.Errorf("failed to update hash: %v", err)
+				return fmt.Errorf("failed to calculate checksum: %w", err)
 			}
 
 			// Update progress
@@ -370,7 +371,7 @@ func DownloadSrc(version string, targetDir string) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("error during download: %v", err)
+			return fmt.Errorf("download error: %w", err)
 		}
 	}
 	fmt.Println() // New line after progress bar
@@ -379,13 +380,13 @@ func DownloadSrc(version string, targetDir string) error {
 	downloadedChecksum := hex.EncodeToString(h.Sum(nil))
 	if verInfo.Checksum != "" {
 		if downloadedChecksum != verInfo.Checksum {
-			logrus.Warnf("Removing downloaded file due to md5 checksum mismatch")
+			logrus.Warnf("removing file due to checksum mismatch")
 			os.Remove(targetPath)
-			return fmt.Errorf("md5 checksum mismatch: expected %s, got %s", verInfo.Checksum, downloadedChecksum)
+			return fmt.Errorf("checksum mismatch: expected %s, got %s", verInfo.Checksum, downloadedChecksum)
 		}
 	}
 
-	logrus.Infof("Downloaded: %s %.1f MiB %s", targetPath, sizeInMiB, downloadedChecksum)
+	logrus.Infof("downloaded: %s (%.1f MiB, %s)", targetPath, sizeInMiB, downloadedChecksum)
 	return nil
 }
 
@@ -435,7 +436,7 @@ func IsValidVersion(version string) *VersionInfo {
 func FetchChecksums(url string) ([]VersionInfo, error) {
 	resp, err := http.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch checksums: %v", err)
+		return nil, fmt.Errorf("failed to fetch checksums: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -473,7 +474,7 @@ func ParseChecksums(r io.Reader, source string) ([]VersionInfo, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read checksums: %v", err)
+		return nil, fmt.Errorf("failed to parse checksums: %w", err)
 	}
 
 	// Sort versions in descending order

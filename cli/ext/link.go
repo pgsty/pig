@@ -28,17 +28,17 @@ var (
 // 1. Removes the /usr/pgsql symbolic link
 // 2. Removes the /etc/profile.d/pgsql.sh file
 func UnlinkPostgres() error {
-	logrus.Info("unlinking postgres from environment")
+	logrus.Debugf("unlinking postgres from environment")
 
 	if err := RemoveSymlink(pgLinkPath); err != nil {
 		return fmt.Errorf("failed to remove symlink %s: %w", pgLinkPath, err)
 	}
 
 	if err := utils.DelFile(pgProfilePath); err != nil {
-		return fmt.Errorf("failed to remove profile file %s: %w", pgProfilePath, err)
+		return fmt.Errorf("failed to remove profile %s: %w", pgProfilePath, err)
 	}
 
-	logrus.Info("successfully unlinked postgres")
+	logrus.Infof("postgres unlinked")
 	return nil
 }
 
@@ -131,8 +131,7 @@ func LinkPostgres(args ...string) error {
 	}
 
 	if err := validatePGHome(pgHome); err != nil {
-		logrus.Warnf("PGHOME directory %s is not valid: %s", pgHome, err)
-		// TODO: can we check if the path is valid?
+		logrus.Warnf("postgres home validation failed: %s", err)
 	}
 
 	// Create symlink
@@ -142,15 +141,15 @@ func LinkPostgres(args ...string) error {
 	if err := utils.SudoCommand([]string{"ln", "-s", pgHome, pgLinkPath}); err != nil {
 		return fmt.Errorf("failed to create symlink %s -> %s: %w", pgLinkPath, pgHome, err)
 	}
-	logrus.Infof("create symbolic link %s -> %s", pgLinkPath, pgHome)
+	logrus.Infof("symlink created: %s -> %s", pgLinkPath, pgHome)
 
 	// Write profile
 	binDir := filepath.Join(pgHome, "bin")
 	if err := utils.PutFile(pgProfilePath, generateProfile(pgHome, binDir)); err != nil {
-		return fmt.Errorf("failed to write profile file %s: %w", pgProfilePath, err)
+		return fmt.Errorf("failed to write profile %s: %w", pgProfilePath, err)
 	}
 
-	logrus.Infof("write %s with PGHOME=%s and PATH+=%s", pgProfilePath, pgHome, binDir)
-	logrus.Infof("run . %s to load the new env, run pig st to check active postgres", pgProfilePath)
+	logrus.Infof("profile updated: %s (PGHOME=%s)", pgProfilePath, pgHome)
+	logrus.Infof("run: . %s", pgProfilePath)
 	return nil
 }

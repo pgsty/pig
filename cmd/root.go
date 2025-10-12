@@ -59,7 +59,7 @@ func initLogger(level string, path string) error {
 	lvl, err := logrus.ParseLevel(level)
 	if err != nil {
 		lvl = logrus.InfoLevel
-		logrus.Warnf("invalid log level: %q, fall back to default 'INFO': %v", level, err)
+		logrus.Warnf("invalid log level %q, using INFO", level)
 	}
 	logrus.SetLevel(lvl)
 
@@ -72,15 +72,15 @@ func initLogger(level string, path string) error {
 
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
-			return fmt.Errorf("fail to open log file %s: %v", path, err)
+			return fmt.Errorf("failed to open log file %s: %w", path, err)
 		}
 		logFile = f // Save file handle for later cleanup
 		logrus.SetOutput(f)
-		logrus.Infof("log redirect to: %s", path)
+		logrus.Infof("log output: %s", path)
 		logrus.SetFormatter(&logrus.TextFormatter{
 			FullTimestamp: true,
 		})
-		logrus.Debugf("File logger init at level %s", lvl.String())
+		logrus.Debugf("file logger initialized at level %s", lvl.String())
 	} else {
 		logrus.SetOutput(os.Stderr)
 		logrus.SetFormatter(&logrus.TextFormatter{
@@ -88,7 +88,7 @@ func initLogger(level string, path string) error {
 			FullTimestamp:   true,
 		})
 
-		logrus.Debugf("Stderr logger init at level %s", lvl.String())
+		logrus.Debugf("stderr logger initialized at level %s", lvl.String())
 	}
 	return nil
 }
@@ -96,8 +96,8 @@ func initLogger(level string, path string) error {
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := rootCmd.Execute(); err != nil {
+		logrus.WithError(err).Error("command execution failed")
 		os.Exit(1)
 	}
 }

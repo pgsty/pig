@@ -2,7 +2,6 @@ package ext
 
 import (
 	"fmt"
-	"os"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"strconv"
@@ -13,12 +12,12 @@ import (
 
 // InstallExtensions installs extensions based on provided names, aliases, or categories
 func InstallExtensions(pgVer int, names []string, yes bool) error {
-	logrus.Debugf("installing extensions: pgVer=%d, names=%s, yes=%v", pgVer, strings.Join(names, ", "), yes)
+	logrus.Debugf("installing extensions: version=%d names=%v yes=%v", pgVer, names, yes)
 	if len(names) == 0 {
-		return fmt.Errorf("no extension names provided")
+		return fmt.Errorf("no extensions specified")
 	}
 	if pgVer == 0 {
-		logrus.Debugf("no PostgreSQL version specified, set target version to the latest major version: %d", PostgresLatestMajorVersion)
+		logrus.Debugf("using latest postgres version: %d by default", PostgresLatestMajorVersion)
 		pgVer = PostgresLatestMajorVersion
 	}
 
@@ -39,10 +38,9 @@ func InstallExtensions(pgVer int, names []string, yes bool) error {
 			installCmds = append(installCmds, "-y")
 		}
 	case config.DistroMAC:
-		logrus.Warnf("macOS brew installation is not supported yet")
-		os.Exit(1)
+		return fmt.Errorf("macOS brew installation not supported")
 	default:
-		return fmt.Errorf("unsupported OS type: %s", config.OSType)
+		return fmt.Errorf("unsupported OS: %s", config.OSType)
 	}
 
 	var pkgNames []string
@@ -73,16 +71,16 @@ func InstallExtensions(pgVer int, names []string, yes bool) error {
 				pkgNames = append(pkgNames, pkgNamesProcessed...)
 				continue
 			} else {
-				logrus.Debugf("can not found '%s' in extension name or alias", name)
+				logrus.Debugf("extension not found in catalog: %s", name)
 				continue
 			}
 		}
 		pkgName := ext.PackageName(pgVer)
 		if pkgName == "" {
-			logrus.Warnf("no package found for extension %s", ext.Name)
+			logrus.Warnf("no package available for extension: %s", ext.Name)
 			continue
 		}
-		logrus.Debugf("translate extension %s to package name: %s", ext.Name, pkgName)
+		logrus.Debugf("resolved package: %s -> %s", ext.Name, pkgName)
 
 		pkgNamesProcessed := processPkgName(pkgName, pgVer)
 		if version != "" {
@@ -98,10 +96,10 @@ func InstallExtensions(pgVer int, names []string, yes bool) error {
 	}
 
 	if len(pkgNames) == 0 {
-		return fmt.Errorf("no packages to be installed")
+		return fmt.Errorf("no packages to install")
 	}
 	installCmds = append(installCmds, pkgNames...)
-	logrus.Infof("installing extensions: %s", strings.Join(installCmds, " "))
+	logrus.Infof("installing: %s", strings.Join(pkgNames, " "))
 
 	return utils.SudoCommand(installCmds)
 }

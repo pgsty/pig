@@ -92,19 +92,17 @@ func NewManager(paths ...string) (m *Manager, err error) {
 	}
 	if err := m.LoadData(data); err != nil {
 		if m.DataSource != defaultCsvPath {
-			logrus.Debugf("failed to load extension data from %s: %v, fallback to embedded data", m.DataSource, err)
+			logrus.Debugf("failed to load repo data from %s, using embedded", m.DataSource)
 		} else {
-			logrus.Debugf("failed to load extension data from default path: %s, fallback to embedded data", defaultCsvPath)
+			logrus.Debugf("repo data not found at default path, using embedded")
 		}
-		err = m.LoadData(nil)
+		if err = m.LoadData(nil); err != nil {
+			logrus.Errorf("failed to parse embedded repo data: %v", err)
+			return nil, fmt.Errorf("failed to load repo configuration: %w", err)
+		}
 		m.DataSource = "embedded"
-		if err != nil {
-			logrus.Debugf("not likely to happen: failed on parsing embedded data: %v", err)
-		}
-		return nil, err
-
 	}
-	logrus.Debugf("load repo data from %s", m.DataSource)
+	logrus.Debugf("repo data loaded: %s", m.DataSource)
 	return m, nil
 }
 
@@ -260,14 +258,16 @@ func (m *Manager) ModuleOrder() []string {
 func (m *Manager) DetectRegion(region string) {
 	if region != "" {
 		m.Region = region
+		logrus.Debugf("using specified region: %s", region)
 		return
 	}
 	get.NetworkCondition()
 	if !get.InternetAccess {
-		logrus.Warn("no internet access, assume region = default")
+		logrus.Warnf("no internet access, using default region")
 		m.Region = "default"
 	} else {
 		m.Region = get.Region
+		logrus.Debugf("detected region: %s", m.Region)
 	}
 }
 
@@ -275,14 +275,22 @@ func (m *Manager) DetectRegion(region string) {
 func (m *Manager) AddPigstyGPG() error {
 	switch m.OsType {
 	case config.DistroEL:
-		return utils.PutFile("/etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty", embedGPGKey)
+		if err := utils.PutFile("/etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty", embedGPGKey); err != nil {
+			return fmt.Errorf("failed to install dnf GPG key: %w", err)
+		}
+		logrus.Debugf("GPG key installed: /etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty")
+		return nil
 	case config.DistroDEB:
 		block, _ := armor.Decode(bytes.NewReader(embedGPGKey))
 		keyBytes, err := io.ReadAll(block.Body)
 		if err != nil {
-			return fmt.Errorf("failed to read GPG key: %v", err)
+			return fmt.Errorf("failed to decode GPG key: %w", err)
 		}
-		return utils.PutFile("/etc/apt/keyrings/pigsty.gpg", keyBytes)
+		if err := utils.PutFile("/etc/apt/keyrings/pigsty.gpg", keyBytes); err != nil {
+			return fmt.Errorf("failed to install apt GPG key: %w", err)
+		}
+		logrus.Debugf("GPG key installed: /etc/apt/keyrings/pigsty.gpg")
+		return nil
 	default:
 		return fmt.Errorf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull)
 	}

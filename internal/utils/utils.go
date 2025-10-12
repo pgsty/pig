@@ -25,28 +25,36 @@ var (
 // Command runs a command with current user
 func Command(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("no command to run")
+		return fmt.Errorf("no command specified")
 	}
+	logrus.Debugf("executing command: %v", args)
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("command failed: %w", err)
+	}
+	return nil
 }
 
 // ShellCommand runs a command without sudo
 func ShellCommand(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("no command to run")
+		return fmt.Errorf("no command specified")
 	}
 	if TrySudo {
 		return SudoCommand(args)
 	}
+	logrus.Debugf("executing shell command: %v", args)
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("shell command failed: %w", err)
+	}
+	return nil
 }
 
 // ShellOutput runs a command and returns the output
@@ -63,34 +71,42 @@ func ShellOutput(name string, args ...string) (string, error) {
 // TODO: FineGrained control of which commands can be run with sudo
 func SudoCommand(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("no command to run")
+		return fmt.Errorf("no command specified")
 	}
 	if config.CurrentUser != "root" {
 		// insert sudo as first cmd arg
 		args = append([]string{"sudo"}, args...)
 	}
 
+	logrus.Debugf("executing sudo command: %v", args)
 	// now split command and args again
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("sudo command failed: %w", err)
+	}
+	return nil
 }
 
 // QuietSudoCommand runs a command with sudo if the current user is not root
 func QuietSudoCommand(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("no command to run")
+		return fmt.Errorf("no command specified")
 	}
 	if config.CurrentUser != "root" {
 		// insert sudo as first cmd arg
 		args = append([]string{"sudo"}, args...)
 	}
 
+	logrus.Debugf("executing quiet sudo command: %v", args)
 	// now split command and args again
 	cmd := exec.Command(args[0], args[1:]...)
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("quiet sudo command failed: %w", err)
+	}
+	return nil
 }
 
 // PutFile writes content to a file at the specified path with proper permissions.
@@ -213,15 +229,14 @@ func SudoRunShellScript(script string) error {
 	// generate tmp file name with timestamp
 	tmpFile := fmt.Sprintf("script-%s.sh", time.Now().Format("20240101120000"))
 	scriptPath := filepath.Join(os.TempDir(), tmpFile)
-	logrus.Debugf("create tmp script: %s", scriptPath)
+	logrus.Debugf("creating temporary script: %s", scriptPath)
 
 	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
-		return fmt.Errorf("failed to create tmp script %s: %s", scriptPath, err)
+		return fmt.Errorf("failed to create temporary script %s: %w", scriptPath, err)
 	}
 
-	err := SudoCommand([]string{"bash", scriptPath})
-	if err != nil {
-		return fmt.Errorf("failed to run script: %v", err)
+	if err := SudoCommand([]string{"bash", scriptPath}); err != nil {
+		return fmt.Errorf("failed to execute script: %w", err)
 	}
 	return nil
 }
@@ -230,7 +245,7 @@ func DownloadFile(srcURL, dstPath string) error {
 	// Check remote file size first
 	resp, err := http.Head(srcURL)
 	if err != nil {
-		return fmt.Errorf("failed to head url: %v", err)
+		return fmt.Errorf("failed to check remote file: %w", err)
 	}
 	remoteSize := resp.ContentLength
 
@@ -238,27 +253,28 @@ func DownloadFile(srcURL, dstPath string) error {
 	if fi, err := os.Stat(dstPath); err == nil {
 		localSize := fi.Size()
 		if localSize == remoteSize {
-			logrus.Debugf("skip downloading %s: local file exists with same size", dstPath)
+			logrus.Debugf("file already exists with same size: %s", dstPath)
 			return nil
 		}
 	}
 
 	// Download the file
+	logrus.Debugf("downloading: %s -> %s", srcURL, dstPath)
 	resp, err = http.Get(srcURL)
 	if err != nil {
-		return fmt.Errorf("download failed: %v", err)
+		return fmt.Errorf("failed to download file: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad http status code: %d", resp.StatusCode)
+		return fmt.Errorf("bad http status: %d", resp.StatusCode)
 	}
 
 	// Create the file with a temporary name first
 	tmpPath := dstPath + ".tmp"
 	out, err := os.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("failed to create tmp file: %v", err)
+		return fmt.Errorf("failed to create temporary file: %w", err)
 	}
 
 	// Copy the content
@@ -266,21 +282,21 @@ func DownloadFile(srcURL, dstPath string) error {
 	out.Close() // Close before rename
 	if err != nil {
 		os.Remove(tmpPath) // Clean up on error
-		return fmt.Errorf("failed to save file: %v", err)
+		return fmt.Errorf("failed to write file: %w", err)
 	}
 
 	// Verify downloaded size
 	if written != remoteSize {
 		os.Remove(tmpPath)
-		return fmt.Errorf("size mismatch after download: got %d, expected %d", written, remoteSize)
+		return fmt.Errorf("size mismatch: got %d bytes, expected %d bytes", written, remoteSize)
 	}
 
 	// Rename temporary file to final destination
 	if err := os.Rename(tmpPath, dstPath); err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename temporary file: %v", err)
+		return fmt.Errorf("failed to rename temporary file: %w", err)
 	}
 
-	logrus.Debugf("download %s to %s, (%d bytes)", srcURL, dstPath, written)
+	logrus.Debugf("downloaded: %s (%d bytes)", dstPath, written)
 	return nil
 }

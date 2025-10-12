@@ -20,17 +20,16 @@ func (m *Manager) AddModules(modules ...string) error {
 	for _, module := range modules {
 		if _, ok := m.Module[module]; !ok {
 			logrus.Warnf("available modules: %v", strings.Join(m.GetModuleList(), ", "))
-			return fmt.Errorf("module %s not found", module)
+			return fmt.Errorf("module not found: %s", module)
 		}
 	}
 
-	logrus.Infof("add repo for %s.%s , region = %s", config.OSCode, config.OSArch, m.Region)
+	logrus.Infof("adding repo modules for %s.%s (region=%s)", config.OSCode, config.OSArch, m.Region)
 	for _, module := range modules {
 		if err := m.AddModule(module); err != nil {
-			logrus.Errorf("failed to add repo module: %s", module)
-			return err
+			return fmt.Errorf("failed to add module %s: %w", module, err)
 		}
-		logrus.Infof("add repo module: %s", module)
+		logrus.Infof("repo module added: %s", module)
 	}
 	return nil
 }
@@ -39,10 +38,13 @@ func (m *Manager) AddModules(modules ...string) error {
 func (m *Manager) AddModule(module string) error {
 	modulePath := m.getModulePath(module)
 	if modulePath == "" {
-		return fmt.Errorf("fail to get module path for %s", module)
+		return fmt.Errorf("failed to determine module path: %s", module)
 	}
 	moduleContent := m.getModuleContent(module)
-	return utils.PutFile(modulePath, []byte(moduleContent))
+	if err := utils.PutFile(modulePath, []byte(moduleContent)); err != nil {
+		return fmt.Errorf("failed to write module file: %w", err)
+	}
+	return nil
 }
 
 // getModulePath returns the path to the repository configuration file for a given module

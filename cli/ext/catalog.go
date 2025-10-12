@@ -60,21 +60,19 @@ func NewExtensionCatalog(paths ...string) (*ExtensionCatalog, error) {
 	}
 	if err := ec.Load(data); err != nil {
 		if ec.DataPath != defaultCsvPath {
-			logrus.Debugf("failed to load extension data from %s: %v, fallback to embedded data", ec.DataPath, err)
+			logrus.Debugf("failed to load extension data from %s, using embedded", ec.DataPath)
 		} else {
-			logrus.Debugf("failed to load extension data from default path: %s, fallback to embedded data", defaultCsvPath)
+			logrus.Debugf("extension data not found at default path, using embedded")
 		}
 		ec.DataPath = "embedded"
-		err = ec.Load(embedExtensionData)
-		if err != nil {
-			logrus.Debugf("not likely to happen: failed on parsing embedded data: %v", err)
+		if err = ec.Load(embedExtensionData); err != nil {
+			logrus.Errorf("failed to parse embedded extension data: %v", err)
+			return nil, fmt.Errorf("failed to load extension catalog: %w", err)
 		}
 		return ec, nil
-
-	} else {
-		logrus.Debugf("load extension data from %s", ec.DataPath)
-		return ec, nil
 	}
+	logrus.Debugf("extension catalog loaded: %s", ec.DataPath)
+	return ec, nil
 }
 
 // Load loads extension data from the provided data or embedded data
