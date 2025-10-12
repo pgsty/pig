@@ -72,7 +72,7 @@ func NewManager(paths ...string) (m *Manager, err error) {
 		m.UpdateCmd = []string{"apt-get", "update"}
 	default:
 		m.RepoDir = "/tmp/"
-		m.RepoDir = "/tmp/repo-backup"
+		m.BackupDir = "/tmp/repo-backup"
 	}
 
 	var data []byte
