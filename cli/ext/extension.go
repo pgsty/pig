@@ -433,7 +433,7 @@ func (e *Extension) Available(pgVer int) bool {
 			for _, ver := range e.RpmPg {
 				if ver == verStr {
 					found = true
-					continue
+					break
 				}
 			}
 			if !found {
@@ -446,7 +446,7 @@ func (e *Extension) Available(pgVer int) bool {
 			for _, ver := range e.DebPg {
 				if ver == verStr {
 					found = true
-					continue
+					break
 				}
 			}
 			if !found {
