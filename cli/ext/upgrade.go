@@ -16,8 +16,8 @@ import (
 // UpgradeCatalog downloads the latest extension catalog from the fastest available source
 func UpgradeCatalog() error {
 	urls := []string{
-		config.RepoPigstyIO + "/etc/pigsty.csv",
-		config.RepoPigstyCC + "/etc/pigsty.csv",
+		config.RepoPigstyIO + "/etc/extension.csv",
+		config.RepoPigstyCC + "/etc/extension.csv",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -84,7 +84,7 @@ func UpgradeCatalog() error {
 		}
 		extNum := len(ec.Extensions)
 		logrus.Infof("validate extension catalog, got %d extensions", extNum)
-		catalogPath := filepath.Join(config.ConfigDir, "pigsty.csv")
+		catalogPath := filepath.Join(config.ConfigDir, "extension.csv")
 		if err := os.WriteFile(catalogPath, res.content, 0644); err != nil {
 			logrus.Errorf("Failed to write extension catalog file: %v", err)
 			return err

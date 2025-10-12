@@ -56,7 +56,7 @@ func TabulteVersion(pgVer int, data []*Extension) {
 			ext.Name, ext.GetStatus(pgVer), ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.Availability(config.OSCode), pkgStr, desc)
 	}
 	w.Flush()
-	fmt.Printf("\n(%d Rows) (State: added|avail|n/a,Flags: b = HasBin, d = HasDDL, s = HasSolib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(data))
+	fmt.Printf("\n(%d Rows) (State: added|avail|n/a, Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(data))
 }
 
 func TabulteCommon(data []*Extension) {
@@ -72,7 +72,7 @@ func TabulteCommon(data []*Extension) {
 			ext.Name, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RpmRepo, ext.DebRepo, CompactVersion(ext.PgVer), desc)
 	}
 	w.Flush()
-	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasSolib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(data))
+	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(data))
 }
 
 // SearchExtensions performs fuzzy search on extensions
@@ -97,14 +97,14 @@ func SearchExtensions(query string, exts []*Extension) []*Extension {
 		}
 	}
 
-	// Second check: exact name or alias match
+	// Second check: exact name or pkg match
 	for _, ext := range exts {
 		// Check exact match in name
 		if strings.ToLower(ext.Name) == query {
 			return []*Extension{ext}
 		}
-		// Check exact match in alias
-		if strings.ToLower(ext.Alias) == query {
+		// Check exact match in pkg
+		if strings.ToLower(ext.Pkg) == query {
 			return []*Extension{ext}
 		}
 	}
@@ -114,16 +114,16 @@ func SearchExtensions(query string, exts []*Extension) []*Extension {
 
 	// Fuzzy search pass
 	for _, ext := range exts {
-		// Calculate best score from name, alias and descriptions
+		// Calculate best score from name, pkg and descriptions
 		var bestScore float64
 
 		// Check name similarity
 		nameScore := similarity(query, strings.ToLower(ext.Name))
 		bestScore = nameScore
 
-		// Check alias similarity
-		if aliasScore := similarity(query, strings.ToLower(ext.Alias)); aliasScore > bestScore {
-			bestScore = aliasScore
+		// Check pkg similarity
+		if pkgScore := similarity(query, strings.ToLower(ext.Pkg)); pkgScore > bestScore {
+			bestScore = pkgScore
 		}
 
 		// Check English description (with lower weight)

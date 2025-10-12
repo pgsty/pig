@@ -95,5 +95,5 @@ func tabulateExtensions(exts []*Extension) {
 	}
 	w.Flush()
 
-	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasSolib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(exts))
+	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(exts))
 }

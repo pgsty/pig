@@ -127,9 +127,9 @@ Examples:
   pig ext ls gis -v 16        # list gis category for pg 16
 ```
 
-The default extension catalog is defined in [**`cli/ext/assets/pigsty.csv`**](https://github.com/pgsty/pig/blob/main/cli/ext/assets/pigsty.csv)
+The default extension catalog is defined in [**`cli/ext/assets/extension.csv`**](https://github.com/pgsty/pig/blob/main/cli/ext/assets/extension.csv)
 
-You can update to the latest extension catalog with: `pig ext upgrade` it will download the latest extension catalog data to `~/.pig/pigsty.csv`.
+You can update to the latest extension catalog with: `pig ext upgrade` it will download the latest extension catalog data to `~/.pig/extension.csv`.
 
 ------
 

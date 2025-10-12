@@ -32,8 +32,10 @@ const extensionInfoTmpl = `
 │ {{ printf "%-74s" .EnDesc }} │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Extension : {{ printf "%-62s" .Name        }} │
-│ Alias     : {{ printf "%-62s" .Alias       }} │
+│ Package   : {{ printf "%-62s" .Pkg         }} │
+│ Lead Ext  : {{ printf "%-62s" .LeadExt     }} │
 │ Category  : {{ printf "%-62s" .Category    }} │
+│ State     : {{ printf "%-62s" .State       }} │
 │ Version   : {{ printf "%-62s" .Version     }} │
 │ License   : {{ printf "%-62s" .License     }} │
 │ Website   : {{ printf "%-62s" .URL         }} │
@@ -42,6 +44,7 @@ const extensionInfoTmpl = `
 │ Extension Properties                                                       │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ PostgreSQL Ver │  Available on: {{ printf "%-42s" (join .PgVer ", ") }} │
+│ Contrib :  {{ if .Contrib }}Yes{{ else }}No {{ end }} │  Lead Ext :  {{ if .Lead }}Yes{{ else }}No {{ end }} │  Has Binary :  {{ if .HasBin }}Yes{{ else }}No {{ end }} │
 │ CREATE  :  {{ if .NeedDDL  }}Yes{{ else }}No {{ end }} │  {{ printf "%-56s" .CreateSQL }} │
 │ DYLOAD  :  {{ if .NeedLoad }}Yes{{ else }}No {{ end }} │  {{ printf "%-56s" .SharedLib }} │
 │ {{ printf "%-74s" .SuperUser }} │
@@ -58,6 +61,12 @@ const extensionInfoTmpl = `
 {{- range .DependsOn }}
 │ - {{ printf "%-72s" . }} │
 {{- end }}
+{{- end }}
+{{- if .SeeAlso }}
+├────────────────────────────────────────────────────────────────────────────┤
+│ See Also                                                                   │
+├────────────────────────────────────────────────────────────────────────────┤
+│ {{ printf "%-74s" (join .SeeAlso ", ") }} │
 {{- end }}
 
 {{- if .RpmRepo }}
@@ -86,13 +95,9 @@ const extensionInfoTmpl = `
 {{- end }}
 {{- end }}
 
-{{- if .BadCase }}
+{{- if .Source }}
 ├────────────────────────────────────────────────────────────────────────────┤
-│ Known Issues                                                               │
-├────────────────────────────────────────────────────────────────────────────┤
-{{- range .BadCase }}
-│ {{ printf "%-74s" . }} │
-{{- end }}
+│ Source: {{ printf "%-67s" .Source }} │
 {{- end }}
 
 {{- if .Comment }}

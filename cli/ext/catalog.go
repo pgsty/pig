@@ -16,7 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-//go:embed assets/pigsty.csv
+//go:embed assets/extension.csv
 var embedExtensionData []byte
 
 // The global default extension catalog (use config file if applicable, fallback to embedded data)
@@ -44,7 +44,7 @@ func NewExtensionCatalog(paths ...string) (*ExtensionCatalog, error) {
 	var data []byte
 	var defaultCsvPath string
 	if config.ConfigDir != "" {
-		defaultCsvPath = filepath.Join(config.ConfigDir, "pigsty.csv")
+		defaultCsvPath = filepath.Join(config.ConfigDir, "extension.csv")
 		if !slices.Contains(paths, defaultCsvPath) {
 			paths = append(paths, defaultCsvPath)
 		}
@@ -114,8 +114,9 @@ func (ec *ExtensionCatalog) Load(data []byte) error {
 		ext := &extensions[i]
 		ec.Extensions[i] = ext
 		ec.ExtNameMap[ext.Name] = ext
-		if ext.Alias != "" && ext.Lead {
-			ec.ExtAliasMap[ext.Alias] = ext
+		// Use Pkg field as alias for lead extensions
+		if ext.Pkg != "" && ext.Lead {
+			ec.ExtAliasMap[ext.Pkg] = ext
 		}
 		if len(ext.Requires) > 0 {
 			for _, req := range ext.Requires {
@@ -130,7 +131,7 @@ func (ec *ExtensionCatalog) Load(data []byte) error {
 
 	var ctrlLess = make(map[string]bool)
 	for _, ext := range ec.Extensions {
-		if ext.HasSolib && !ext.NeedDDL {
+		if ext.HasLib && !ext.NeedDDL {
 			ctrlLess[ext.Name] = true
 		}
 	}

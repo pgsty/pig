@@ -2,6 +2,7 @@ package ext
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"pig/internal/config"
 	"sort"
@@ -11,40 +12,47 @@ import (
 
 // Extension represents a PostgreSQL extension record
 type Extension struct {
-	ID          int      `csv:"id"`          // Primary key
-	Name        string   `csv:"name"`        // Extension name
-	Alias       string   `csv:"alias"`       // Alternative name
-	Category    string   `csv:"category"`    // Extension category
-	URL         string   `csv:"url"`         // Project URL
-	License     string   `csv:"license"`     // License type
-	Tags        []string `csv:"tags"`        // Extension tags
-	Version     string   `csv:"version"`     // Extension version
-	Repo        string   `csv:"repo"`        // Repository name
-	Lang        string   `csv:"lang"`        // Programming language
-	Utility     bool     `csv:"utility"`     // Is utility extension
-	Lead        bool     `csv:"lead"`        // Is lead extension
-	HasSolib    bool     `csv:"has_solib"`   // Has shared library
-	NeedDDL     bool     `csv:"need_ddl"`    // Needs DDL changes
-	NeedLoad    bool     `csv:"need_load"`   // Needs loading
-	Trusted     string   `csv:"trusted"`     // Is trusted extension
-	Relocatable string   `csv:"relocatable"` // Is relocatable
-	Schemas     []string `csv:"schemas"`     // Target schemas
-	PgVer       []string `csv:"pg_ver"`      // Supported PG versions
-	Requires    []string `csv:"requires"`    // Required extensions
-	RpmVer      string   `csv:"rpm_ver"`     // RPM version
-	RpmRepo     string   `csv:"rpm_repo"`    // RPM repository
-	RpmPkg      string   `csv:"rpm_pkg"`     // RPM package name
-	RpmPg       []string `csv:"rpm_pg"`      // RPM PG versions
-	RpmDeps     []string `csv:"rpm_deps"`    // RPM dependencies
-	DebVer      string   `csv:"deb_ver"`     // DEB version
-	DebRepo     string   `csv:"deb_repo"`    // DEB repository
-	DebPkg      string   `csv:"deb_pkg"`     // DEB package name
-	DebDeps     []string `csv:"deb_deps"`    // DEB dependencies
-	DebPg       []string `csv:"deb_pg"`      // DEB PG versions
-	BadCase     []string `csv:"bad_case"`    // Distro BadCase
-	EnDesc      string   `csv:"en_desc"`     // English description
-	ZhDesc      string   `csv:"zh_desc"`     // Chinese description
-	Comment     string   `csv:"comment"`     // Additional comments
+	ID          int                    `csv:"id"`          // Primary key
+	Name        string                 `csv:"name"`        // Extension name
+	Pkg         string                 `csv:"pkg"`         // Normalized extension package name
+	LeadExt     string                 `csv:"lead_ext"`    // The leading extension in this package
+	Category    string                 `csv:"category"`    // Extension category
+	State       string                 `csv:"state"`       // Extension State (available, deprecated, removed, not-ready)
+	URL         string                 `csv:"url"`         // Project URL
+	License     string                 `csv:"license"`     // License type
+	Tags        []string               `csv:"tags"`        // Extension tags
+	Version     string                 `csv:"version"`     // Extension version
+	Repo        string                 `csv:"repo"`        // Repository name
+	Lang        string                 `csv:"lang"`        // Programming language
+	Contrib     bool                   `csv:"contrib"`     // Is contrib extension
+	Lead        bool                   `csv:"lead"`        // Is lead extension
+	HasBin      bool                   `csv:"has_bin"`     // Has binary utilities
+	HasLib      bool                   `csv:"has_lib"`     // Has shared library
+	NeedDDL     bool                   `csv:"need_ddl"`    // Needs DDL changes
+	NeedLoad    bool                   `csv:"need_load"`   // Needs loading
+	Trusted     string                 `csv:"trusted"`     // Is trusted extension
+	Relocatable string                 `csv:"relocatable"` // Is relocatable
+	Schemas     []string               `csv:"schemas"`     // Target schemas
+	PgVer       []string               `csv:"pg_ver"`      // Supported PG versions
+	Requires    []string               `csv:"requires"`    // Required extensions
+	RequireBy   []string               `csv:"require_by"`  // Extensions that depend on this
+	SeeAlso     []string               `csv:"see_also"`    // Related extensions
+	RpmVer      string                 `csv:"rpm_ver"`     // RPM version
+	RpmRepo     string                 `csv:"rpm_repo"`    // RPM repository
+	RpmPkg      string                 `csv:"rpm_pkg"`     // RPM package name
+	RpmPg       []string               `csv:"rpm_pg"`      // RPM PG versions
+	RpmDeps     []string               `csv:"rpm_deps"`    // RPM dependencies
+	DebVer      string                 `csv:"deb_ver"`     // DEB version
+	DebRepo     string                 `csv:"deb_repo"`    // DEB repository
+	DebPkg      string                 `csv:"deb_pkg"`     // DEB package name
+	DebDeps     []string               `csv:"deb_deps"`    // DEB dependencies
+	DebPg       []string               `csv:"deb_pg"`      // DEB PG versions
+	Source      string                 `csv:"source"`      // Source code tarball name
+	Extra       map[string]interface{} `csv:"extra"`       // Extra information (JSONB)
+	EnDesc      string                 `csv:"en_desc"`     // English description
+	ZhDesc      string                 `csv:"zh_desc"`     // Chinese description
+	Comment     string                 `csv:"comment"`     // Additional comments
+	Mtime       string                 `csv:"mtime"`       // Last modify time
 }
 
 // SummaryURL returns the URL to the pigsty.io catalog summary page
@@ -168,12 +176,12 @@ func (e *Extension) CreateSQL() string {
 	}
 }
 
-// Availability returns the shared library hint string according to the extension availability
+// SharedLib returns the shared library hint string according to the extension availability
 func (e *Extension) SharedLib() string {
 	if e.NeedLoad {
 		return fmt.Sprintf("SET shared_preload_libraries = '%s'", e.Name)
 	}
-	if e.HasSolib {
+	if e.HasLib {
 		return "no need to load shared libraries"
 	}
 	return "no shared library"
@@ -212,8 +220,18 @@ func (e *Extension) GetBool(name string) string {
 			return "Yes"
 		}
 		return "No"
-	case "utility":
-		if e.Utility {
+	case "has_bin":
+		if e.HasBin {
+			return "Yes"
+		}
+		return "No"
+	case "has_lib":
+		if e.HasLib {
+			return "Yes"
+		}
+		return "No"
+	case "contrib":
+		if e.Contrib {
 			return "Yes"
 		}
 		return "No"
@@ -243,7 +261,7 @@ func (e *Extension) GetBool(name string) string {
 // GetFlag returns a string of flags for the extension
 func (e *Extension) GetFlag() string {
 	b, d, s, l, t, r := "-", "-", "-", "-", "-", "-"
-	if e.Utility {
+	if e.HasBin {
 		b = "b"
 	}
 	if e.NeedDDL {
@@ -252,7 +270,7 @@ func (e *Extension) GetFlag() string {
 	if e.NeedLoad {
 		l = "l"
 	}
-	if e.HasSolib {
+	if e.HasLib {
 		s = "s"
 	}
 	if e.Trusted == "t" {
@@ -317,8 +335,8 @@ func (e *Extension) DependsOn() []string {
 
 // ParseExtension parses a CSV record into an Extension struct
 func ParseExtension(record []string) (*Extension, error) {
-	if len(record) != 34 {
-		return nil, fmt.Errorf("invalid record length: got %d, want 34", len(record))
+	if len(record) != 41 {
+		return nil, fmt.Errorf("invalid record length: got %d, want 41", len(record))
 	}
 
 	id, err := strconv.Atoi(record[0])
@@ -331,41 +349,59 @@ func ParseExtension(record []string) (*Extension, error) {
 		return strings.ToLower(strings.TrimSpace(s)) == "t"
 	}
 
+	// Parse Extra JSON field
+	var extra map[string]interface{}
+	extraStr := strings.TrimSpace(record[36])
+	if extraStr != "" && extraStr != "{}" {
+		if err := json.Unmarshal([]byte(extraStr), &extra); err != nil {
+			extra = make(map[string]interface{})
+		}
+	} else {
+		extra = make(map[string]interface{})
+	}
+
 	ext := &Extension{
 		ID:          id,
 		Name:        strings.TrimSpace(record[1]),
-		Alias:       strings.TrimSpace(record[2]),
-		Category:    strings.TrimSpace(record[3]),
-		URL:         strings.TrimSpace(record[4]),
-		License:     strings.TrimSpace(record[5]),
-		Tags:        splitAndTrim(record[6]),
-		Version:     strings.TrimSpace(record[7]),
-		Repo:        strings.TrimSpace(record[8]),
-		Lang:        strings.TrimSpace(record[9]),
-		Utility:     parseBool(record[10]),
-		Lead:        parseBool(record[11]),
-		HasSolib:    parseBool(record[12]),
-		NeedDDL:     parseBool(record[13]),
-		NeedLoad:    parseBool(record[14]),
-		Trusted:     record[15],
-		Relocatable: record[16],
-		Schemas:     splitAndTrim(record[17]),
-		PgVer:       splitAndTrim(record[18]),
-		Requires:    splitAndTrim(record[19]),
-		RpmVer:      strings.TrimSpace(record[20]),
-		RpmRepo:     strings.TrimSpace(record[21]),
-		RpmPkg:      strings.TrimSpace(record[22]),
-		RpmPg:       splitAndTrim(record[23]),
-		RpmDeps:     splitAndTrim(record[24]),
-		DebVer:      strings.TrimSpace(record[25]),
-		DebRepo:     strings.TrimSpace(record[26]),
-		DebPkg:      strings.TrimSpace(record[27]),
-		DebDeps:     splitAndTrim(record[28]),
-		DebPg:       splitAndTrim(record[29]),
-		BadCase:     splitAndTrim(record[30]),
-		EnDesc:      strings.TrimSpace(record[31]),
-		ZhDesc:      strings.TrimSpace(record[32]),
-		Comment:     strings.TrimSpace(record[33]),
+		Pkg:         strings.TrimSpace(record[2]),
+		LeadExt:     strings.TrimSpace(record[3]),
+		Category:    strings.TrimSpace(record[4]),
+		State:       strings.TrimSpace(record[5]),
+		URL:         strings.TrimSpace(record[6]),
+		License:     strings.TrimSpace(record[7]),
+		Tags:        splitAndTrim(record[8]),
+		Version:     strings.TrimSpace(record[9]),
+		Repo:        strings.TrimSpace(record[10]),
+		Lang:        strings.TrimSpace(record[11]),
+		Contrib:     parseBool(record[12]),
+		Lead:        parseBool(record[13]),
+		HasBin:      parseBool(record[14]),
+		HasLib:      parseBool(record[15]),
+		NeedDDL:     parseBool(record[16]),
+		NeedLoad:    parseBool(record[17]),
+		Trusted:     record[18],
+		Relocatable: record[19],
+		Schemas:     splitAndTrim(record[20]),
+		PgVer:       splitAndTrim(record[21]),
+		Requires:    splitAndTrim(record[22]),
+		RequireBy:   splitAndTrim(record[23]),
+		SeeAlso:     splitAndTrim(record[24]),
+		RpmVer:      strings.TrimSpace(record[25]),
+		RpmRepo:     strings.TrimSpace(record[26]),
+		RpmPkg:      strings.TrimSpace(record[27]),
+		RpmPg:       splitAndTrim(record[28]),
+		RpmDeps:     splitAndTrim(record[29]),
+		DebVer:      strings.TrimSpace(record[30]),
+		DebRepo:     strings.TrimSpace(record[31]),
+		DebPkg:      strings.TrimSpace(record[32]),
+		DebDeps:     splitAndTrim(record[33]),
+		DebPg:       splitAndTrim(record[34]),
+		Source:      strings.TrimSpace(record[35]),
+		Extra:       extra,
+		EnDesc:      strings.TrimSpace(record[37]),
+		ZhDesc:      strings.TrimSpace(record[38]),
+		Comment:     strings.TrimSpace(record[39]),
+		Mtime:       strings.TrimSpace(record[40]),
 	}
 
 	return ext, nil

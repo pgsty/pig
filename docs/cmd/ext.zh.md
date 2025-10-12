@@ -126,9 +126,9 @@ list & search available extensions
   pig ext ls gis -v 16        # 列出 PG 16 的 GIS 类扩展
 ```
 
-默认扩展目录定义在 [**`cli/ext/assets/pigsty.csv`**](https://github.com/pgsty/pig/blob/main/cli/ext/assets/pigsty.csv)
+默认扩展目录定义在 [**`cli/ext/assets/extension.csv`**](https://github.com/pgsty/pig/blob/main/cli/ext/assets/extension.csv)
 
-可用 `pig ext upgrade` 命令更新到最新扩展目录，数据将下载到 `~/.pig/pigsty.csv`。
+可用 `pig ext upgrade` 命令更新到最新扩展目录，数据将下载到 `~/.pig/extension.csv`。
 
 ------
 
