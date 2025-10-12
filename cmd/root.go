@@ -20,6 +20,7 @@ var (
 	inventory  string
 	pigstyHome string
 	debug      bool
+	logFile    *os.File // log file handle, kept open during program lifetime
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -65,10 +66,16 @@ func initLogger(level string, path string) error {
 
 	// write to file if path is not empty
 	if path != "" {
+		// Close previous log file if exists (prevent leak on re-initialization)
+		if logFile != nil {
+			logFile.Close()
+		}
+
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			return fmt.Errorf("fail to open log file %s: %v", path, err)
 		}
+		logFile = f // Save file handle for later cleanup
 		logrus.SetOutput(f)
 		logrus.Infof("log redirect to: %s", path)
 		logrus.SetFormatter(&logrus.TextFormatter{
