@@ -110,6 +110,7 @@ b:
 bt:
 	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -a -ldflags "$(LD_FLAGS) -extldflags '-static'" -o pig
 	scp pig meta:/tmp/pig
+	ssh meta sudo mv /tmp/pig /usr/bin/pig
 
 .PHONY: run build clean build-linux-amd64 build-linux-arm64 release release-linux linux-amd64 linux-arm64 \
  goreleaser-install goreleaser-snapshot goreleaser-build goreleaser-release goreleaser-test-release \

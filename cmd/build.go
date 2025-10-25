@@ -9,6 +9,7 @@ import (
 
 var (
 	buildPgrxVer string
+	buildPgrxPg  string
 	buildRustYes bool
 )
 
@@ -23,7 +24,8 @@ var buildCmd = &cobra.Command{
   pig build repo                   # init build repo (=repo set -ru)
   pig build tool  [mini|full|...]  # init build toolset
   pig build proxy [id@host:port ]  # init build proxy (optional)
-  pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.16.1)
+  pig build rust  [-y]             # install Rust toolchain
+  pig build pgrx  [-v <ver>]       # install & init pgrx (0.16.1)
   pig build spec                   # init build spec repo
   pig build get   [all|std|..]     # get ext code tarball with prefixes
   pig build dep   [extname...]     # install extension build deps
@@ -82,10 +84,20 @@ var buildProxyCmd = &cobra.Command{
 // buildRustCmd represents the `build rust` command
 var buildRustCmd = &cobra.Command{
 	Use:     "rust",
-	Short:   "Initialize rust and pgrx environment",
+	Short:   "Install Rust toolchain",
 	Aliases: []string{"rs"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.SetupRust(buildPgrxVer, buildRustYes)
+		return build.SetupRust(buildRustYes)
+	},
+}
+
+// buildPgrxCmd represents the `build pgrx` command
+var buildPgrxCmd = &cobra.Command{
+	Use:     "pgrx",
+	Short:   "Install and initialize pgrx (requires Rust)",
+	Aliases: []string{"px"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return build.SetupPgrx(buildPgrxVer, buildPgrxPg)
 	},
 }
 
@@ -134,11 +146,15 @@ func init() {
 	buildCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", "0.16.1", "pgrx version to install")
 	buildCmd.PersistentFlags().BoolVarP(&buildRustYes, "yes", "y", false, "enforce rust re-installation")
 
+	// Add pgrx specific flags
+	buildPgrxCmd.Flags().StringVar(&buildPgrxPg, "pg", "", "comma-separated PG versions to init (e.g. '18,17,16'), 'init' for no args, or auto-detect if empty")
+
 	// Add subcommands
 	buildCmd.AddCommand(buildRepoCmd)
 	buildCmd.AddCommand(buildToolCmd)
 	buildCmd.AddCommand(buildProxyCmd)
 	buildCmd.AddCommand(buildRustCmd)
+	buildCmd.AddCommand(buildPgrxCmd)
 	buildCmd.AddCommand(buildSpecCmd)
 	buildCmd.AddCommand(buildGetCmd)
 	buildCmd.AddCommand(buildDepCmd)
