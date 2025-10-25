@@ -13,7 +13,7 @@ import (
 
 func SetupRust(pgrxVersion string, force bool) error {
 	if pgrxVersion == "" {
-		pgrxVersion = "0.13.1"
+		pgrxVersion = "0.16.1"
 	}
 	cargoBin := config.HomeDir + "/.cargo/bin/cargo"
 
@@ -62,12 +62,12 @@ func SetupRust(pgrxVersion string, force bool) error {
 	switch config.OSType {
 	case config.DistroEL:
 		logrus.Infof("init pgrx %s for EL-based system", pgrxVersion)
-		if err := utils.Command([]string{cargoBin, "pgrx", "init", "--pg13=/usr/pgsql-13/bin/pg_config", "--pg14=/usr/pgsql-14/bin/pg_config", "--pg15=/usr/pgsql-15/bin/pg_config", "--pg16=/usr/pgsql-16/bin/pg_config", "--pg17=/usr/pgsql-17/bin/pg_config"}); err != nil {
+		if err := utils.Command([]string{cargoBin, "pgrx", "init", "--pg13=/usr/pgsql-13/bin/pg_config", "--pg14=/usr/pgsql-14/bin/pg_config", "--pg15=/usr/pgsql-15/bin/pg_config", "--pg16=/usr/pgsql-16/bin/pg_config", "--pg17=/usr/pgsql-17/bin/pg_config", "--pg18=/usr/pgsql-18/bin/pg_config"}); err != nil {
 			return fmt.Errorf("failed to initialize pgrx for EL distro: %v", err)
 		}
 	case config.DistroDEB:
 		logrus.Infof("init pgrx %s for DEB-based system", pgrxVersion)
-		if err := utils.Command([]string{cargoBin, "pgrx", "init", "--pg13=/usr/lib/postgresql/13/bin/pg_config", "--pg14=/usr/lib/postgresql/14/bin/pg_config", "--pg15=/usr/lib/postgresql/15/bin/pg_config", "--pg16=/usr/lib/postgresql/16/bin/pg_config", "--pg17=/usr/lib/postgresql/17/bin/pg_config"}); err != nil {
+		if err := utils.Command([]string{cargoBin, "pgrx", "init", "--pg13=/usr/lib/postgresql/13/bin/pg_config", "--pg14=/usr/lib/postgresql/14/bin/pg_config", "--pg15=/usr/lib/postgresql/15/bin/pg_config", "--pg16=/usr/lib/postgresql/16/bin/pg_config", "--pg17=/usr/lib/postgresql/17/bin/pg_config", "--pg18=/usr/lib/postgresql/18/bin/pg_config"}); err != nil {
 			return fmt.Errorf("failed to initialize pgrx for DEB distro: %v", err)
 		}
 	case config.DistroMAC:

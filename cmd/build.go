@@ -23,7 +23,7 @@ var buildCmd = &cobra.Command{
   pig build repo                   # init build repo (=repo set -ru)
   pig build tool  [mini|full|...]  # init build toolset
   pig build proxy [id@host:port ]  # init build proxy (optional)
-  pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.13.1)
+  pig build rust  [-v <pgrx_ver>]  # init rustc & pgrx (0.16.1)
   pig build spec                   # init build spec repo
   pig build get   [all|std|..]     # get ext code tarball with prefixes
   pig build dep   [extname...]     # install extension build deps
@@ -131,7 +131,7 @@ var buildExtCmd = &cobra.Command{
 
 func init() {
 	// Parse build flags
-	buildCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", "0.13.1", "pgrx version to install")
+	buildCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", "0.16.1", "pgrx version to install")
 	buildCmd.PersistentFlags().BoolVarP(&buildRustYes, "yes", "y", false, "enforce rust re-installation")
 
 	// Add subcommands
