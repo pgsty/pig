@@ -8,7 +8,6 @@ import (
 	"pig/internal/config"
 	"pig/internal/utils"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -16,12 +15,35 @@ import (
 
 // BuildPackage builds packages for specified extension
 func BuildPackage(pkgName string, pgVersions string, withSymbol bool) error {
-	// Route to appropriate build system based on OS type
+	// Resolve package to extension
+	extension, err := ResolvePackage(pkgName)
+	if err != nil {
+		return err
+	}
+
+	// Validate build support
+	if err := ValidateBuildExtension(extension); err != nil {
+		return err
+	}
+
+	// Parse PG versions
+	pgVers, err := ParsePGVersions(pgVersions)
+	if err != nil {
+		return err
+	}
+
+	// Get versions for this extension
+	versions := GetPGVersionsForExtension(extension, pgVers)
+	if len(versions) == 0 {
+		return fmt.Errorf("no valid PG versions for %s", extension.Name)
+	}
+
+	// Route to appropriate build system
 	switch config.OSType {
 	case config.DistroEL:
-		return buildRpmPackage(pkgName, pgVersions, withSymbol)
+		return buildRpmPackage(extension, versions, withSymbol)
 	case config.DistroDEB:
-		return buildDebPackage(pkgName, pgVersions)
+		return buildDebPackage(extension, versions)
 	case config.DistroMAC:
 		return fmt.Errorf("macOS package building not supported")
 	default:
@@ -30,61 +52,7 @@ func BuildPackage(pkgName string, pgVersions string, withSymbol bool) error {
 }
 
 // buildRpmPackage builds RPM packages for EL systems
-func buildRpmPackage(pkgName string, pgVersions string, withSymbol bool) error {
-	// Extension catalog should already be loaded (global singleton)
-	// Just ensure it's loaded for safety
-	ext.Catalog.LoadAliasMap(config.OSType)
-
-	// Translate package name (similar to ext add logic)
-	extName := translatePkgName(pkgName)
-
-	// Find extension in catalog
-	extension, exists := ext.Catalog.ExtNameMap[extName]
-	if !exists {
-		// Try alias map
-		if aliasExt, ok := ext.Catalog.ExtPkgMap[extName]; ok {
-			extension = aliasExt
-		} else {
-			return fmt.Errorf("extension %s not found in catalog", extName)
-		}
-	}
-
-	// Check if extension supports RPM build
-	if extension.RpmRepo == "" || extension.Source == "" {
-		logrus.Warnf("extension %s does not support RPM build", extension.Name)
-		return fmt.Errorf("extension %s does not support RPM build", extension.Name)
-	}
-
-	// Determine PG versions to build
-	var pgVers []int
-	if pgVersions != "" {
-		// Use provided versions
-		for _, v := range strings.Split(pgVersions, ",") {
-			ver, err := strconv.Atoi(strings.TrimSpace(v))
-			if err != nil {
-				return fmt.Errorf("invalid PG version: %s", v)
-			}
-			pgVers = append(pgVers, ver)
-		}
-	} else {
-		// Use extension's default PgVer versions
-		if len(extension.PgVer) == 0 {
-			return fmt.Errorf("no PG versions specified and extension has no RPM_PG field")
-		}
-		for _, v := range extension.PgVer {
-			ver, err := strconv.Atoi(v)
-			if err != nil {
-				logrus.Warnf("invalid PG version in RPM_PG: %s", v)
-				continue
-			}
-			pgVers = append(pgVers, ver)
-		}
-	}
-
-	if len(pgVers) == 0 {
-		return fmt.Errorf("no valid PG versions to build")
-	}
-
+func buildRpmPackage(extension *ext.Extension, pgVers []int, withSymbol bool) error {
 	// Sort versions from low to high
 	sort.Ints(pgVers)
 
@@ -115,28 +83,6 @@ func buildRpmPackage(pkgName string, pgVersions string, withSymbol bool) error {
 	return nil
 }
 
-// translatePkgName translates user input to standard package name
-func translatePkgName(input string) string {
-	// Remove common prefixes
-	input = strings.TrimPrefix(input, "pg_")
-	input = strings.TrimPrefix(input, "pg-")
-	input = strings.TrimPrefix(input, "postgresql-")
-
-	// Handle version suffixes (e.g., pg_stat_kcache_17)
-	parts := strings.Split(input, "_")
-	if len(parts) > 1 {
-		lastPart := parts[len(parts)-1]
-		if _, err := strconv.Atoi(lastPart); err == nil {
-			// Last part is a number, remove it
-			input = strings.Join(parts[:len(parts)-1], "_")
-		}
-	}
-
-	// Convert hyphens to underscores for consistency
-	input = strings.ReplaceAll(input, "-", "_")
-
-	return input
-}
 
 // printSpecInfo prints basic info from spec file
 func printSpecInfo(specFile string) {
@@ -224,33 +170,11 @@ func listBuildArtifacts(pkgName string, homeDir string) {
 }
 
 // buildDebPackage builds DEB packages for Debian/Ubuntu systems (stub)
-func buildDebPackage(pkgName string, pgVersions string) error {
+func buildDebPackage(extension *ext.Extension, pgVers []int) error {
 	// Work directory for Debian builds
-	workDir := config.HomeDir + "/deb/"
+	workDir := filepath.Join(config.HomeDir, "deb")
 	if _, err := os.Stat(workDir); os.IsNotExist(err) {
 		return fmt.Errorf("deb directory not found at %s, please run `pig build spec` first", workDir)
-	}
-
-	// Extension catalog should already be loaded
-	ext.Catalog.LoadAliasMap(config.OSType)
-
-	// Translate package name
-	extName := translatePkgName(pkgName)
-
-	// Find extension in catalog
-	extension, exists := ext.Catalog.ExtNameMap[extName]
-	if !exists {
-		if aliasExt, ok := ext.Catalog.ExtPkgMap[extName]; ok {
-			extension = aliasExt
-		} else {
-			return fmt.Errorf("extension %s not found in catalog", extName)
-		}
-	}
-
-	// Check if extension supports DEB build
-	if extension.DebRepo == "" || extension.Source == "" {
-		logrus.Warnf("extension %s does not support DEB build", extension.Name)
-		return fmt.Errorf("extension %s does not support DEB build", extension.Name)
 	}
 
 	// Change to work directory

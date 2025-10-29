@@ -2,6 +2,7 @@ package build
 
 import (
 	"fmt"
+	"pig/cli/ext"
 	"pig/internal/utils"
 	"strings"
 
@@ -10,48 +11,95 @@ import (
 
 // BuildAll performs complete build pipeline: get source, install deps, build package
 func BuildAll(pkgs []string, pgVersions string, withSymbol bool) error {
-	if len(pkgs) == 0 {
-		return fmt.Errorf("no packages specified")
+	// Validate and resolve all packages upfront
+	extensions, err := ResolvePackages(pkgs)
+	if err != nil {
+		return err
 	}
 
-	// Log the complete pipeline
-	logrus.Infof("Starting complete build pipeline for: %s", strings.Join(pkgs, ", "))
+	// Parse PG versions once
+	pgVers, err := ParsePGVersions(pgVersions)
+	if err != nil {
+		return err
+	}
+
+	// Validate all extensions can be built
+	var validExts []*ext.Extension
+	for _, ext := range extensions {
+		if err := ValidateBuildExtension(ext); err != nil {
+			logrus.Warnf("Skipping %s: %v", ext.Name, err)
+			continue
+		}
+		validExts = append(validExts, ext)
+	}
+
+	if len(validExts) == 0 {
+		return fmt.Errorf("no valid extensions to build")
+	}
+
+	// Log build plan
+	names := make([]string, len(validExts))
+	for i, e := range validExts {
+		names[i] = e.Name
+	}
+	logrus.Infof("Building extensions: %s", strings.Join(names, ", "))
 	if pgVersions != "" {
 		logrus.Infof("Using PG versions: %s", pgVersions)
 	}
 
-	// Process each package
-	for _, pkg := range pkgs {
-		logrus.Info(utils.PadHeader(fmt.Sprintf("Building %s", pkg), 80))
-
-		// Step 1: Download source code (don't force download in build all)
-		logrus.Infof("[1/3] Downloading source code for %s", pkg)
-		if err := DownloadCodeTarball([]string{pkg}, false); err != nil {
-			logrus.Errorf("Failed to download source for %s: %v", pkg, err)
-			// Continue with next package on download failure
+	// Execute pipeline for each extension
+	successCount := 0
+	for _, ext := range validExts {
+		if err := buildExtensionPipeline(ext, pgVers, withSymbol); err != nil {
+			logrus.Errorf("Failed to build %s: %v", ext.Name, err)
 			continue
 		}
-
-		// Step 2: Install build dependencies
-		logrus.Infof("[2/3] Installing build dependencies for %s", pkg)
-		if err := InstallExtensionDeps([]string{pkg}, pgVersions); err != nil {
-			logrus.Errorf("Failed to install dependencies for %s: %v", pkg, err)
-			// Continue with next package on dep install failure
-			continue
-		}
-
-		// Step 3: Build package
-		logrus.Infof("[3/3] Building package for %s", pkg)
-		if err := BuildPackage(pkg, pgVersions, withSymbol); err != nil {
-			logrus.Errorf("Failed to build package %s: %v", pkg, err)
-			// Log error but continue with next package
-			continue
-		}
-
-		logrus.Infof("Successfully completed build pipeline for %s", pkg)
-		logrus.Info(utils.PadHeader(fmt.Sprintf("%s complete", pkg), 80))
+		successCount++
 	}
 
-	logrus.Info(utils.PadHeader("All builds complete", 80))
+	// Summary
+	logrus.Info(utils.PadHeader("Build Complete", 80))
+	logrus.Infof("Successfully built %d/%d extensions", successCount, len(validExts))
+
+	if successCount == 0 {
+		return fmt.Errorf("all builds failed")
+	}
+	return nil
+}
+
+// buildExtensionPipeline executes the complete build pipeline for a single extension
+func buildExtensionPipeline(ext *ext.Extension, pgVersions []int, withSymbol bool) error {
+	logrus.Info(utils.PadHeader(fmt.Sprintf("Building %s", ext.Name), 80))
+
+	// Get PG versions for this extension
+	versions := GetPGVersionsForExtension(ext, pgVersions)
+	versionStr := ""
+	if len(versions) > 0 {
+		strs := make([]string, len(versions))
+		for i, v := range versions {
+			strs[i] = fmt.Sprintf("%d", v)
+		}
+		versionStr = strings.Join(strs, ",")
+	}
+
+	// Step 1: Download source
+	logrus.Infof("[1/3] Downloading source for %s", ext.Name)
+	if err := DownloadCodeTarball([]string{ext.Name}, false); err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+
+	// Step 2: Install dependencies
+	logrus.Infof("[2/3] Installing dependencies for %s", ext.Name)
+	if err := InstallExtensionDeps([]string{ext.Name}, versionStr); err != nil {
+		return fmt.Errorf("dependency installation failed: %w", err)
+	}
+
+	// Step 3: Build package
+	logrus.Infof("[3/3] Building package for %s", ext.Name)
+	if err := BuildPackage(ext.Name, versionStr, withSymbol); err != nil {
+		return fmt.Errorf("package build failed: %w", err)
+	}
+
+	logrus.Infof("Successfully built %s", ext.Name)
 	return nil
 }
