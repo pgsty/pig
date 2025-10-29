@@ -1,12 +1,10 @@
 package build
 
 import (
-	"bufio"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
-	"pig/cli/get"
+	"pig/cli/ext"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"strings"
@@ -25,75 +23,89 @@ const parallelWorkers = 8
 // DownloadCodeTarball downloads extension source tarballs from repository
 func DownloadCodeTarball(args []string) error {
 	if len(args) == 0 {
-		// Default to 'std' behavior when no arguments provided
-		args = []string{"std"}
+		return fmt.Errorf("no arguments provided")
 	}
 
-	// Handle special cases
-	if len(args) == 1 {
-		switch args[0] {
-		case "all":
-			// Download all packages
-			return downloadWithPrefixes([]string{}, true)
-		case "std":
-			// Download standard packages (excluding large ones)
-			return downloadWithPrefixes([]string{}, false)
-		}
-	}
+	baseURL := config.RepoPigstyCC + "/ext/src"
 
-	// Handle multiple prefixes
-	return downloadWithPrefixes(args, false)
-}
-
-func downloadWithPrefixes(prefixes []string, downloadAll bool) error {
-	source := get.NetworkCondition()
-	var baseURL string
-	switch source {
-	case get.ViaIO:
-		baseURL = config.RepoPigstyIO + "/pkg/ext"
-	case get.ViaCC:
-		baseURL = config.RepoPigstyCC + "/pkg/ext"
-	default:
-		return fmt.Errorf("no network access, please check your network settings")
-	}
-
-	// Get package list
-	packages, err := getPackageList(baseURL)
-	if err != nil {
-		return err
-	}
-
-	// Determine tarball directory based on OS
+	// Prepare tarball directory
 	tarballDir := getTarballDir()
 	if err := os.MkdirAll(tarballDir, 0755); err != nil {
 		return fmt.Errorf("failed to create tarball directory: %v", err)
 	}
 
-	// Create download tasks
-	tasks := createDownloadTasks(baseURL, tarballDir, packages, downloadAll, prefixes)
+	// Resolve arguments to download tasks
+	tasks := resolveTasks(args, baseURL, tarballDir)
 	if len(tasks) == 0 {
-		logrus.Info("No packages to download")
+		logrus.Warn("nothing to download")
 		return nil
 	}
 
+	// Download all tasks in parallel
 	parallelDownload(tasks, parallelWorkers)
 	return nil
 }
 
-func getPackageList(baseURL string) ([]string, error) {
-	metaURL := fmt.Sprintf("%s/README.md", baseURL)
-	resp, err := http.Get(metaURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get packages list: %v", err)
-	}
-	defer resp.Body.Close()
+// resolveTasks converts arguments to download tasks
+func resolveTasks(args []string, baseURL, tarballDir string) []downloadTask {
+	var tasks []downloadTask
+	seen := make(map[string]bool) // Prevent duplicate downloads
 
-	var packages []string
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		packages = append(packages, scanner.Text())
+	for _, arg := range args {
+		arg = strings.TrimSpace(arg)
+		if arg == "" {
+			continue
+		}
+
+		// Try to resolve as extension name/pkg
+		lowerArg := strings.ToLower(arg)
+		var extension *ext.Extension
+
+		// Check extension catalogs
+		if e, ok := ext.Catalog.ExtNameMap[lowerArg]; ok {
+			extension = e
+		} else if e, ok := ext.Catalog.ExtAliasMap[lowerArg]; ok {
+			extension = e
+		}
+
+		// Handle extension case
+		if extension != nil {
+			if extension.Source == "" {
+				logrus.Warnf("extension '%s' has no source file", extension.Name)
+				continue
+			}
+			if seen[extension.Source] {
+				logrus.Debugf("skip duplicate: %s", extension.Source)
+				continue
+			}
+			seen[extension.Source] = true
+
+			srcURL := fmt.Sprintf("%s/%s", baseURL, extension.Source)
+			dstPath := filepath.Join(tarballDir, extension.Source)
+			tasks = append(tasks, downloadTask{
+				SrcURL:  srcURL,
+				DstPath: dstPath,
+			})
+			logrus.Debugf("resolved extension %s -> %s", arg, extension.Source)
+		} else {
+			// Treat as plain filename
+			if seen[arg] {
+				logrus.Debugf("skip duplicate: %s", arg)
+				continue
+			}
+			seen[arg] = true
+
+			srcURL := fmt.Sprintf("%s/%s", baseURL, arg)
+			dstPath := filepath.Join(tarballDir, arg)
+			tasks = append(tasks, downloadTask{
+				SrcURL:  srcURL,
+				DstPath: dstPath,
+			})
+			logrus.Debugf("resolved filename: %s", arg)
+		}
 	}
-	return packages, scanner.Err()
+
+	return tasks
 }
 
 func getTarballDir() string {
@@ -107,82 +119,52 @@ func getTarballDir() string {
 	}
 }
 
-func createDownloadTasks(baseURL, tarballDir string, packages []string, downloadAll bool, prefixes []string) []downloadTask {
-	var tasks []downloadTask
-	skipPrefixes := []string{"pg_duckdb", "pg_mooncake", "omnigres", "plv8"}
-
-	for _, pkg := range packages {
-		if !downloadAll {
-			if len(prefixes) > 0 {
-				// Check if package matches any of the provided prefixes
-				matched := false
-				for _, prefix := range prefixes {
-					if strings.HasPrefix(pkg, prefix) {
-						matched = true
-						break
-					}
-				}
-				if !matched {
-					continue
-				}
-			} else {
-				// Use the default skip logic when no prefixes specified (std mode)
-				skip := false
-				for _, skipPrefix := range skipPrefixes {
-					if strings.HasPrefix(pkg, skipPrefix) {
-						logrus.Debugf("skipping %s due to size limit", pkg)
-						skip = true
-						break
-					}
-				}
-				if skip {
-					continue
-				}
-			}
-		}
-
-		srcURL := fmt.Sprintf("%s/%s", baseURL, pkg)
-		dstPath := filepath.Join(tarballDir, pkg)
-		logrus.Debugf("scheduling download task %s -> %s", srcURL, dstPath)
-		tasks = append(tasks, downloadTask{SrcURL: srcURL, DstPath: dstPath})
-	}
-	return tasks
-}
-
-// parallelDownload launches workers to download tarballs concurrently
+// parallelDownload downloads files concurrently with worker pool
 func parallelDownload(tasks []downloadTask, workers int) {
 	if len(tasks) == 0 {
 		return
 	}
+
+	// Adjust worker count based on task count
+	if workers > len(tasks) {
+		workers = len(tasks)
+	}
+
 	var wg sync.WaitGroup
 	taskCh := make(chan downloadTask, len(tasks))
+
+	// Start workers
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go downloadWorker(&wg, taskCh)
 	}
 
-	// Send tasks to workers and wait for completion
+	// Send tasks to workers
 	for _, task := range tasks {
 		taskCh <- task
 	}
 	close(taskCh)
+
+	// Wait for completion
 	wg.Wait()
-	logrus.Infof("All %d downloads completed", len(tasks))
 }
 
 func downloadWorker(wg *sync.WaitGroup, taskCh <-chan downloadTask) {
 	defer wg.Done()
 	for task := range taskCh {
-		_ = downloadFile(task)
+		downloadFile(task)
 	}
 }
 
-func downloadFile(task downloadTask) error {
+func downloadFile(task downloadTask) {
+	// Extract filename from path for logging
+	filename := filepath.Base(task.DstPath)
+	logrus.Infof("downloading %s from %s", filename, task.SrcURL)
+
 	err := utils.DownloadFile(task.SrcURL, task.DstPath)
 	if err != nil {
-		logrus.Errorf("fail to download %s: %v", task.SrcURL, err)
+		logrus.Errorf("failed to download %s: %v", filename, err)
 	} else {
-		logrus.Infof("fetch %s", task.DstPath)
+		logrus.Infof("downloaded %s to %s", filename, task.DstPath)
 	}
-	return err
 }
