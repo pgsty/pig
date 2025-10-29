@@ -32,7 +32,7 @@ func BuildPackage(pkgName string, pgVersions string, withSymbol bool) error {
 	extension, exists := ext.Catalog.ExtNameMap[extName]
 	if !exists {
 		// Try alias map
-		if aliasExt, ok := ext.Catalog.ExtAliasMap[extName]; ok {
+		if aliasExt, ok := ext.Catalog.ExtPkgMap[extName]; ok {
 			extension = aliasExt
 		} else {
 			return fmt.Errorf("extension %s not found in catalog", extName)

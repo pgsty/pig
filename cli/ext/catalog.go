@@ -26,7 +26,7 @@ var Catalog, _ = NewExtensionCatalog()
 type ExtensionCatalog struct {
 	Extensions  []*Extension
 	ExtNameMap  map[string]*Extension
-	ExtAliasMap map[string]*Extension
+	ExtPkgMap   map[string]*Extension
 	Dependency  map[string][]string
 	ControlLess map[string]bool
 	DataPath    string
@@ -108,7 +108,7 @@ func (ec *ExtensionCatalog) Load(data []byte) error {
 	// update peripheral data
 	ec.Extensions = make([]*Extension, len(extensions))
 	ec.ExtNameMap = make(map[string]*Extension)
-	ec.ExtAliasMap = make(map[string]*Extension)
+	ec.ExtPkgMap = make(map[string]*Extension)
 	ec.Dependency = make(map[string][]string)
 	for i := range extensions {
 		ext := &extensions[i]
@@ -116,7 +116,7 @@ func (ec *ExtensionCatalog) Load(data []byte) error {
 		ec.ExtNameMap[ext.Name] = ext
 		// Use Pkg field as alias for lead extensions
 		if ext.Pkg != "" && ext.Lead {
-			ec.ExtAliasMap[ext.Pkg] = ext
+			ec.ExtPkgMap[ext.Pkg] = ext
 		}
 		if len(ext.Requires) > 0 {
 			for _, req := range ext.Requires {

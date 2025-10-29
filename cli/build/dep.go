@@ -98,7 +98,7 @@ func resolveExtensionPackages(args []string) []string {
 		// Check extension catalogs
 		if e, ok := ext.Catalog.ExtNameMap[lowerArg]; ok && e.Lead {
 			pkg = e.Pkg
-		} else if e, ok := ext.Catalog.ExtAliasMap[lowerArg]; ok && e.Lead {
+		} else if e, ok := ext.Catalog.ExtPkgMap[lowerArg]; ok && e.Lead {
 			pkg = e.Pkg
 		} else {
 			// Treat as package name directly

@@ -53,7 +53,7 @@ func InstallExtensions(pgVer int, names []string, yes bool) error {
 		}
 		ext, ok := Catalog.ExtNameMap[name]
 		if !ok {
-			ext, ok = Catalog.ExtAliasMap[name]
+			ext, ok = Catalog.ExtPkgMap[name]
 		}
 		if !ok {
 			// try to find in AliasMap (if it is not a postgres extension)

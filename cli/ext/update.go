@@ -44,7 +44,7 @@ func UpdateExtensions(pgVer int, names []string, yes bool) error {
 	for _, name := range names {
 		ext, ok := Catalog.ExtNameMap[name]
 		if !ok {
-			ext, ok = Catalog.ExtAliasMap[name]
+			ext, ok = Catalog.ExtPkgMap[name]
 		}
 
 		if !ok {

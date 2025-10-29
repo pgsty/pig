@@ -64,7 +64,7 @@ func resolveTasks(args []string, baseURL, tarballDir string) []downloadTask {
 		// Check extension catalogs
 		if e, ok := ext.Catalog.ExtNameMap[lowerArg]; ok {
 			extension = e
-		} else if e, ok := ext.Catalog.ExtAliasMap[lowerArg]; ok {
+		} else if e, ok := ext.Catalog.ExtPkgMap[lowerArg]; ok {
 			extension = e
 		}
 

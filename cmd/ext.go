@@ -104,7 +104,7 @@ var extInfoCmd = &cobra.Command{
 		for _, name := range args {
 			e, ok := ext.Catalog.ExtNameMap[name]
 			if !ok {
-				e, ok = ext.Catalog.ExtAliasMap[name]
+				e, ok = ext.Catalog.ExtPkgMap[name]
 				if !ok {
 					logrus.Errorf("extension '%s' not found", name)
 					continue

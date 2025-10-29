@@ -46,7 +46,7 @@ func InstallPackages(pgVer int, names []string, yes bool, noTranslation bool) er
 	}
 
 	var pkgNames []string
-	
+
 	// Load alias map for translation if not disabled
 	if !noTranslation {
 		ext.Catalog.LoadAliasMap(config.OSType)
@@ -73,7 +73,7 @@ func InstallPackages(pgVer int, names []string, yes bool, noTranslation bool) er
 					pkgNamesProcessed = processPkgName(pkgName, pgVer)
 					translated = true
 				}
-			} else if extension, ok := ext.Catalog.ExtAliasMap[name]; ok {
+			} else if extension, ok := ext.Catalog.ExtPkgMap[name]; ok {
 				pkgName := extension.PackageName(pgVer)
 				if pkgName != "" {
 					logrus.Infof("translate extension '%s' to package: %s", name, pkgName)
