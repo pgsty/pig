@@ -14,13 +14,23 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// BuildPackage builds RPM packages for specified extension
+// BuildPackage builds packages for specified extension
 func BuildPackage(pkgName string, pgVersions string, withSymbol bool) error {
-	// Only support EL systems for now
-	if config.OSType != config.DistroEL {
-		return fmt.Errorf("build pkg only supports EL systems currently")
+	// Route to appropriate build system based on OS type
+	switch config.OSType {
+	case config.DistroEL:
+		return buildRpmPackage(pkgName, pgVersions, withSymbol)
+	case config.DistroDEB:
+		return buildDebPackage(pkgName, pgVersions)
+	case config.DistroMAC:
+		return fmt.Errorf("macOS package building not supported")
+	default:
+		return fmt.Errorf("unsupported operating system: %s", config.OSType)
 	}
+}
 
+// buildRpmPackage builds RPM packages for EL systems
+func buildRpmPackage(pkgName string, pgVersions string, withSymbol bool) error {
 	// Extension catalog should already be loaded (global singleton)
 	// Just ensure it's loaded for safety
 	ext.Catalog.LoadAliasMap(config.OSType)
@@ -153,7 +163,7 @@ func printSpecInfo(specFile string) {
 	}
 }
 
-// buildForPgVersion builds the package for a specific PG version
+// buildForPgVersion builds the RPM package for a specific PG version
 func buildForPgVersion(extension *ext.Extension, pgVer int, specFile string, withSymbol bool) error {
 	logrus.Info(utils.PadHeader(fmt.Sprintf("%s for PG%d", extension.Name, pgVer), 80))
 
@@ -163,15 +173,14 @@ func buildForPgVersion(extension *ext.Extension, pgVer int, specFile string, wit
 	// Build rpmbuild command
 	args := []string{"rpmbuild"}
 
-	// Add debug option
-	if withSymbol {
-		args = append(args, "--with", "debuginfo")
-	} else {
-		args = append(args, "--without", "debuginfo")
-	}
-
-	// Add macro definition
+	// Add PG version macro
 	args = append(args, "--define", fmt.Sprintf("pgmajorversion %d", pgVer))
+
+	// Control debug package generation
+	if !withSymbol {
+		// Disable debug package generation
+		args = append(args, "--define", "debug_package %{nil}")
+	}
 
 	// Add spec file
 	args = append(args, "-ba", specFile)
@@ -212,6 +221,52 @@ func listBuildArtifacts(pkgName string, homeDir string) {
 	}
 
 	logrus.Info(utils.PadHeader(fmt.Sprintf("%s done", pkgName), 80))
+}
+
+// buildDebPackage builds DEB packages for Debian/Ubuntu systems (stub)
+func buildDebPackage(pkgName string, pgVersions string) error {
+	// Work directory for Debian builds
+	workDir := config.HomeDir + "/deb/"
+	if _, err := os.Stat(workDir); os.IsNotExist(err) {
+		return fmt.Errorf("deb directory not found at %s, please run `pig build spec` first", workDir)
+	}
+
+	// Extension catalog should already be loaded
+	ext.Catalog.LoadAliasMap(config.OSType)
+
+	// Translate package name
+	extName := translatePkgName(pkgName)
+
+	// Find extension in catalog
+	extension, exists := ext.Catalog.ExtNameMap[extName]
+	if !exists {
+		if aliasExt, ok := ext.Catalog.ExtPkgMap[extName]; ok {
+			extension = aliasExt
+		} else {
+			return fmt.Errorf("extension %s not found in catalog", extName)
+		}
+	}
+
+	// Check if extension supports DEB build
+	if extension.DebRepo == "" || extension.Source == "" {
+		logrus.Warnf("extension %s does not support DEB build", extension.Name)
+		return fmt.Errorf("extension %s does not support DEB build", extension.Name)
+	}
+
+	// Change to work directory
+	os.Chdir(workDir)
+
+	logrus.Infof("Building DEB package for %s in %s", extension.Name, workDir)
+	logrus.Infof("################ %s build begin in %s", extension.Pkg, workDir)
+
+	// Execute make command for the package
+	if err := utils.Command([]string{"make", extension.Pkg}); err != nil {
+		logrus.Errorf("################ %s build failed: %v", extension.Pkg, err)
+		return fmt.Errorf("failed to build DEB package for %s: %w", extension.Name, err)
+	}
+
+	logrus.Infof("################ %s build success", extension.Pkg)
+	return nil
 }
 
 // getArch returns the current system architecture

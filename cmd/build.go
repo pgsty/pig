@@ -30,10 +30,10 @@ var buildCmd = &cobra.Command{
   pig build rust  [-y]             # install Rust toolchain
   pig build pgrx  [-v <ver>]       # install & init pgrx (0.16.1)
   pig build spec                   # init build spec repo
-  pig build get   [all|std|..]     # get ext code tarball with prefixes
-  pig build dep   [extname...]     # install extension build deps
-  pig build ext   [extname...]     # build extension
-  pig build pkg   <extname>        # build RPM package for extension
+  pig build get   [ext|pkg|..]     # get extension source code tarball
+  pig build dep   [ext|pkg...]     # install extension build deps
+  pig build pkg   [ext|pkg]        # build extension package
+  pig build all   [ext|pkg...]     # all = get + dep + pkg
 `,
 }
 
@@ -148,7 +148,7 @@ var buildExtCmd = &cobra.Command{
 // buildPkgCmd represents the `build pkg` command
 var buildPkgCmd = &cobra.Command{
 	Use:     "pkg <extname>",
-	Short:   "Build RPM package for extension",
+	Short:   "Build package for extension",
 	Aliases: []string{"p"},
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -168,8 +168,8 @@ func init() {
 	buildDepCmd.Flags().StringVar(&buildDepPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
 
 	// Add pkg specific flags
-	buildPkgCmd.Flags().StringVar(&buildPkgPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), use extension's RPM_PG if empty")
-	buildPkgCmd.Flags().BoolVarP(&buildPkgSymbol, "symbol", "s", false, "include debug symbols in the package")
+	buildPkgCmd.Flags().StringVar(&buildPkgPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
+	buildPkgCmd.Flags().BoolVarP(&buildPkgSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
 
 	// Add subcommands
 	buildCmd.AddCommand(buildRepoCmd)
