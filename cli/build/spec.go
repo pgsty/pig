@@ -29,10 +29,16 @@ func GetSpecRepo() error {
 
 func SetupELBuildEnv() error {
 	targetDir := path.Join("/tmp", "rpm")
+
+	// Check if directory exists and clean it up
 	if _, err := os.Stat(targetDir); err == nil {
-		logrus.Infof("rpm repo already exists in %s, skip", targetDir)
-		return nil
+		logrus.Warnf("rpm repo already exists in %s, removing...", targetDir)
+		if err := os.RemoveAll(targetDir); err != nil {
+			return fmt.Errorf("failed to remove existing rpm repo: %v", err)
+		}
+		logrus.Infof("removed existing rpm repo at %s", targetDir)
 	}
+
 	cloneCmd := []string{"git", "clone", RPM_REPO, targetDir}
 	if err := utils.Command(cloneCmd); err != nil {
 		return fmt.Errorf("failed to clone rpm repo: %v", err)
@@ -56,11 +62,16 @@ func SetupELBuildEnv() error {
 
 func SetupDEBBuildEnv() error {
 	targetDir := config.HomeDir + "/deb"
-	// check if targetDir exists, skip if exists
+
+	// Check if directory exists and clean it up
 	if _, err := os.Stat(targetDir); err == nil {
-		logrus.Infof("deb repo already exists in %s, skip", targetDir)
-		return nil
+		logrus.Warnf("deb repo already exists in %s, removing...", targetDir)
+		if err := os.RemoveAll(targetDir); err != nil {
+			return fmt.Errorf("failed to remove existing deb repo: %v", err)
+		}
+		logrus.Infof("removed existing deb repo at %s", targetDir)
 	}
+
 	cloneCmd := []string{"git", "clone", DEB_REPO, targetDir}
 	if err := utils.Command(cloneCmd); err != nil {
 		return fmt.Errorf("failed to clone deb repo: %v", err)
