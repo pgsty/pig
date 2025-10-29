@@ -13,6 +13,9 @@ var (
 	buildDepPg     string
 	buildPkgPg     string
 	buildPkgSymbol bool
+	buildAllPg     string
+	buildAllSymbol bool
+	buildGetForce  bool
 	buildRustYes   bool
 )
 
@@ -117,11 +120,11 @@ var buildSpecCmd = &cobra.Command{
 
 // buildGetCmd represents the `build get` command
 var buildGetCmd = &cobra.Command{
-	Use:     "get",
+	Use:     "get <pkg...>",
 	Short:   "Download source code tarball",
-	Aliases: []string{"get"},
+	Aliases: []string{"g"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.DownloadCodeTarball(args)
+		return build.DownloadCodeTarball(args, buildGetForce)
 	},
 }
 
@@ -156,6 +159,18 @@ var buildPkgCmd = &cobra.Command{
 	},
 }
 
+// buildAllCmd represents the `build all` command
+var buildAllCmd = &cobra.Command{
+	Use:     "all <pkg...>",
+	Short:   "Complete build pipeline: get, dep, pkg",
+	Long:    "Execute complete build pipeline for extensions: download source, install dependencies, and build package",
+	Aliases: []string{"a"},
+	Args:    cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return build.BuildAll(args, buildAllPg, buildAllSymbol)
+	},
+}
+
 func init() {
 	// Parse build flags
 	buildPgrxCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", "0.16.1", "pgrx version to install")
@@ -164,12 +179,19 @@ func init() {
 	// Add pgrx specific flags
 	buildPgrxCmd.Flags().StringVar(&buildPgrxPg, "pg", "", "comma-separated PG versions to init (e.g. '18,17,16'), 'init' for no args, or auto-detect if empty")
 
+	// Add get specific flags
+	buildGetCmd.Flags().BoolVarP(&buildGetForce, "force", "f", false, "force download even if file exists")
+
 	// Add dep specific flags
 	buildDepCmd.Flags().StringVar(&buildDepPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
 
 	// Add pkg specific flags
 	buildPkgCmd.Flags().StringVar(&buildPkgPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
 	buildPkgCmd.Flags().BoolVarP(&buildPkgSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
+
+	// Add all specific flags
+	buildAllCmd.Flags().StringVar(&buildAllPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
+	buildAllCmd.Flags().BoolVarP(&buildAllSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
 
 	// Add subcommands
 	buildCmd.AddCommand(buildRepoCmd)
@@ -182,4 +204,5 @@ func init() {
 	buildCmd.AddCommand(buildDepCmd)
 	buildCmd.AddCommand(buildExtCmd)
 	buildCmd.AddCommand(buildPkgCmd)
+	buildCmd.AddCommand(buildAllCmd)
 }

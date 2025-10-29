@@ -21,7 +21,7 @@ type downloadTask struct {
 const parallelWorkers = 8
 
 // DownloadCodeTarball downloads extension source tarballs from repository
-func DownloadCodeTarball(args []string) error {
+func DownloadCodeTarball(args []string, forceDownload bool) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no arguments provided")
 	}
@@ -35,19 +35,19 @@ func DownloadCodeTarball(args []string) error {
 	}
 
 	// Resolve arguments to download tasks
-	tasks := resolveTasks(args, baseURL, tarballDir)
+	tasks := resolveTasks(args, baseURL, tarballDir, forceDownload)
 	if len(tasks) == 0 {
 		logrus.Warn("nothing to download")
 		return nil
 	}
 
 	// Download all tasks in parallel
-	parallelDownload(tasks, parallelWorkers)
+	parallelDownload(tasks, parallelWorkers, forceDownload)
 	return nil
 }
 
 // resolveTasks converts arguments to download tasks
-func resolveTasks(args []string, baseURL, tarballDir string) []downloadTask {
+func resolveTasks(args []string, baseURL, tarballDir string, forceDownload bool) []downloadTask {
 	var tasks []downloadTask
 	seen := make(map[string]bool) // Prevent duplicate downloads
 
@@ -82,6 +82,15 @@ func resolveTasks(args []string, baseURL, tarballDir string) []downloadTask {
 
 			srcURL := fmt.Sprintf("%s/%s", baseURL, extension.Source)
 			dstPath := filepath.Join(tarballDir, extension.Source)
+
+			// Check if file exists and skip if not forcing
+			if !forceDownload {
+				if _, err := os.Stat(dstPath); err == nil {
+					logrus.Infof("file already exists, skipping: %s", extension.Source)
+					continue
+				}
+			}
+
 			tasks = append(tasks, downloadTask{
 				SrcURL:  srcURL,
 				DstPath: dstPath,
@@ -97,6 +106,15 @@ func resolveTasks(args []string, baseURL, tarballDir string) []downloadTask {
 
 			srcURL := fmt.Sprintf("%s/%s", baseURL, arg)
 			dstPath := filepath.Join(tarballDir, arg)
+
+			// Check if file exists and skip if not forcing
+			if !forceDownload {
+				if _, err := os.Stat(dstPath); err == nil {
+					logrus.Infof("file already exists, skipping: %s", arg)
+					continue
+				}
+			}
+
 			tasks = append(tasks, downloadTask{
 				SrcURL:  srcURL,
 				DstPath: dstPath,
@@ -120,7 +138,7 @@ func getTarballDir() string {
 }
 
 // parallelDownload downloads files concurrently with worker pool
-func parallelDownload(tasks []downloadTask, workers int) {
+func parallelDownload(tasks []downloadTask, workers int, forceDownload bool) {
 	if len(tasks) == 0 {
 		return
 	}
@@ -136,7 +154,7 @@ func parallelDownload(tasks []downloadTask, workers int) {
 	// Start workers
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
-		go downloadWorker(&wg, taskCh)
+		go downloadWorker(&wg, taskCh, forceDownload)
 	}
 
 	// Send tasks to workers
@@ -149,16 +167,25 @@ func parallelDownload(tasks []downloadTask, workers int) {
 	wg.Wait()
 }
 
-func downloadWorker(wg *sync.WaitGroup, taskCh <-chan downloadTask) {
+func downloadWorker(wg *sync.WaitGroup, taskCh <-chan downloadTask, forceDownload bool) {
 	defer wg.Done()
 	for task := range taskCh {
-		downloadFile(task)
+		downloadFile(task, forceDownload)
 	}
 }
 
-func downloadFile(task downloadTask) {
+func downloadFile(task downloadTask, forceDownload bool) {
 	// Extract filename from path for logging
 	filename := filepath.Base(task.DstPath)
+
+	// If force download, remove existing file first
+	if forceDownload {
+		if _, err := os.Stat(task.DstPath); err == nil {
+			logrus.Debugf("force download enabled, removing existing file: %s", filename)
+			os.Remove(task.DstPath)
+		}
+	}
+
 	logrus.Infof("downloading %s from %s", filename, task.SrcURL)
 
 	err := utils.DownloadFile(task.SrcURL, task.DstPath)
