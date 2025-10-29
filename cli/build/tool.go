@@ -19,9 +19,16 @@ var buildTools = map[string][]string{
 		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "rpmdevtools", "dnf-utils", "pgdg-srpm-macros",
 		"readline-devel", "zlib-devel", "libxml2-devel", "lz4-devel", "libzstd-devel", "krb5-devel", "postgresql1*-devel", "postgresql1*-server",
 	},
+	"el10": {
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "rpmdevtools", "dnf-utils", "pgdg-srpm-macros",
+		"readline-devel", "zlib-devel", "libxml2-devel", "lz4-devel", "libzstd-devel", "krb5-devel", "postgresql1*-devel", "postgresql1*-server",
+	},
 	"d12": {
-		"make", "cmake", "ninja-build", "pkg-config" +
-			"", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
+		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
+	},
+	"d13": {
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
 		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
 	},
 	"u22": {
