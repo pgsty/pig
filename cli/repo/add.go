@@ -81,7 +81,7 @@ func (m *Manager) getModuleContent(module string) string {
 func (m *Manager) normalizeModules(modules ...string) []string {
 	// if "all" in modules, replace it with node, pgsql
 	if slices.Contains(modules, "all") {
-		modules = append(modules, "node", "pigsty", "pgdg")
+		modules = append(modules, "node", "pgsql", "infra")
 		modules = slices.DeleteFunc(modules, func(module string) bool {
 			return module == "all"
 		})

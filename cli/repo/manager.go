@@ -180,7 +180,7 @@ func (m *Manager) addDefaultModules() {
 	switch m.OsType {
 	case config.DistroEL:
 		m.Module["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
-		m.Module["pgdg"] = []string{"pgdg-common", "pgdg-el8fix", "pgdg-el9fix", "pgdg17", "pgdg16", "pgdg15", "pgdg14", "pgdg13"}
+		m.Module["pgdg"] = []string{"pgdg-common", "pgdg-el8fix", "pgdg-el9fix", "pgdg18", "pgdg17", "pgdg16", "pgdg15", "pgdg14", "pgdg13"}
 		m.Module["all"] = append(m.Module["pigsty"], append(m.Module["pgdg"], m.Module["node"]...)...)
 	case config.DistroDEB:
 		m.Module["pigsty"] = []string{"pigsty-infra", "pigsty-pgsql"}
