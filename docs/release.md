@@ -30,6 +30,20 @@ breadcrumbs: false
 | [v0.0.1](#v001) | 2024-12-23 | Genesis Release                          | [v0.0.1](https://github.com/pgsty/pig/releases/tag/v0.0.1) |
 
 
+## v0.7.0
+
+- `pig build` overhaul
+  - `pig build all <pkg>` will download source, prepare deps, and build rpm/deb
+  - `pig build pgrx` is separated from `pig build rust` with its own subcommand
+  - `pig build pgrx [-v pgrx_version]` now can scan existing pg and init with them 
+  - `pig build dep` will now process EL rpm spec dependencies directly
+  - `pig build pkg` will now build EL rpm spec directly without the `build` script
+  - `pig build spec` now support download rpm.tgz / deb.tgz spec files directly from pigsty repo
+  - `pig build env` will setup environment in one pass (= `build repo+tool+spec`)
+  - `pig build repo` / `pig repo add` / `pig repo set` will now using `node,pgsql,infra` as default repo modules instead of previous `node,pgdg,pigsty`
+- Optimized error logging
+
+
 ## v0.6.2
 
 - Use official PG 18 repo instead of testing repo

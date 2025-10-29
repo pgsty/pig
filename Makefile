@@ -3,7 +3,7 @@
 # Mtime     :   2025-10-02
 # Copyright (C) 2018-2025 Ruohang Feng
 #==============================================================#
-VERSION=v0.6.2
+VERSION=v0.7.0
 
 # Build Variables
 BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -107,8 +107,12 @@ d:
 	hugo serve
 b:
 	hugo --minify
-bt:
+t:
 	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -a -ldflags "$(LD_FLAGS) -extldflags '-static'" -o pig
+	scp pig meta:/tmp/pig
+	ssh meta sudo mv /tmp/pig /usr/bin/pig
+tt:
+	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -a -ldflags "$(LD_FLAGS) -extldflags '-static'" -o pig
 	scp pig meta:/tmp/pig
 	ssh meta sudo mv /tmp/pig /usr/bin/pig
 
