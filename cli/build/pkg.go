@@ -83,7 +83,6 @@ func buildRpmPackage(extension *ext.Extension, pgVers []int, withSymbol bool) er
 	return nil
 }
 
-
 // printSpecInfo prints basic info from spec file
 func printSpecInfo(specFile string) {
 	logrus.Info(utils.PadHeader(fmt.Sprintf("%s spec file", filepath.Base(specFile[:len(specFile)-5])), 80))
@@ -114,7 +113,16 @@ func buildForPgVersion(extension *ext.Extension, pgVer int, specFile string, wit
 	logrus.Info(utils.PadHeader(fmt.Sprintf("%s for PG%d", extension.Name, pgVer), 80))
 
 	// Set PATH environment variable
-	os.Setenv("PATH", fmt.Sprintf("/usr/bin:/usr/pgsql-%d/bin:/root/.cargo/bin:/pg/bin:/usr/share/Modules/bin:/usr/lib64/ccache:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin:/home/vagrant/.cargo/bin", pgVer))
+	envPATH := fmt.Sprintf("/usr/bin:/usr/pgsql-%d/bin:/root/.cargo/bin:/pg/bin:/usr/share/Modules/bin:/usr/lib64/ccache:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin:/home/vagrant/.cargo/bin", pgVer)
+	logrus.Infof("Building Env: PATH=%s", envPATH)
+	os.Setenv("PATH", envPATH)
+
+	// Set QA_RPATHS for EL10+ or specific extensions with RPATH issues
+	if config.OSVersionCode == "el10" {
+		logrus.Debugf("add QA_RPATHS bypass for el10+")
+		os.Setenv("QA_RPATHS", "3") // 0x0001 | 0x0002 = bypass standard and invalid RPATHs
+
+	}
 
 	// Build rpmbuild command
 	args := []string{"rpmbuild"}

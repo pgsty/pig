@@ -177,9 +177,9 @@ func GetPGVersionsForExtension(extension *ext.Extension, userVersions []int) []i
 
 	switch config.OSType {
 	case config.DistroEL:
-		versionStrs = extension.RpmPg
+		versionStrs = extension.PgVer
 	case config.DistroDEB:
-		versionStrs = extension.DebPg
+		versionStrs = extension.PgVer
 	default:
 		versionStrs = extension.PgVer
 	}

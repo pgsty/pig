@@ -27,9 +27,9 @@ var (
 	OSCode        string // Distribution version (el8, el9, d12, u22)
 	OSType        string // rpm / deb
 	OSVendor      string // rocky/debian/ubuntu from ID
-	OSVersion     string // 7/8/9/11/12/20/22/24
-	OSMajor       int    // 7/8/9/11/12/20/22/24 (int format)
-	OSVersionFull string // 9.3 / 22.04 / 12 from VERSION_ID
+	OSVersion     string // 7/8/9/10/11/12/13/20/22/24
+	OSMajor       int    // 7/8/9/10/11/12/13/20/22/24 (int format)
+	OSVersionFull string // 9.6 / 22.04 / 12 from VERSION_ID
 	OSVersionCode string // OS full version string
 	CurrentUser   string // current user
 	NodeHostname  string // hostname from /etc/hostname
