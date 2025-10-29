@@ -110,11 +110,19 @@ var buildPgrxCmd = &cobra.Command{
 
 // buildSpecCmd represents the `build spec` command
 var buildSpecCmd = &cobra.Command{
-	Use:     "spec",
+	Use:     "spec [mode]",
 	Short:   "Initialize building spec repo",
-	Aliases: []string{"s"},
+	Long: `Download and sync build spec repository.
+
+Modes:
+  (default) - Download tarball and incremental sync via rsync
+  new       - Download tarball and reset to default state (rsync --delete)
+  git       - Legacy mode using git clone (slower)`,
+	Aliases:     []string{"s"},
+	Args:        cobra.MaximumNArgs(1),
+	ValidArgs:   []string{"new", "git"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.GetSpecRepo()
+		return build.GetSpecRepo(args...)
 	},
 }
 
