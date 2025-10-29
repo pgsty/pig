@@ -4,18 +4,21 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
+	"pig/cli/ext"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/sirupsen/logrus"
 )
 
-func InstallExtensionDeps(args []string) error {
+func InstallExtensionDeps(args []string, pgVersions string) error {
 	switch config.OSType {
 	case config.DistroEL:
-		return installRpmDeps(args)
+		return installRpmDeps(args, pgVersions)
 	case config.DistroDEB:
 		return installDebDeps(args)
 	default:
@@ -23,26 +26,125 @@ func InstallExtensionDeps(args []string) error {
 	}
 }
 
-func installRpmDeps(extlist []string) error {
-	workDir := config.HomeDir + "/rpmbuild/"
-	if _, err := os.Stat(workDir); os.IsNotExist(err) {
-		return fmt.Errorf("rpmbuild directory not found, please run `pig build spec` first")
+func installRpmDeps(args []string, pgVersions string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no extensions specified")
 	}
-	os.Chdir(workDir)
 
-	logrus.Infof("install dependencies for extensions: %s in %s", strings.Join(extlist, ","), workDir)
-	for _, ext := range extlist {
-		logrus.Infof("################ %s install begin in %s", ext, workDir)
-		err := utils.Command([]string{"./dep", ext})
-		if err != nil {
-			logrus.Errorf("################  %s install failed: %v", ext, err)
-			return err
-		} else {
-			logrus.Infof("################  %s install success", ext)
+	specsDir := filepath.Join(config.HomeDir, "rpmbuild", "SPECS")
+	if _, err := os.Stat(specsDir); os.IsNotExist(err) {
+		return fmt.Errorf("SPECS directory not found at %s, please run `pig build spec` first", specsDir)
+	}
+
+	// Resolve extensions to packages
+	packages := resolveExtensionPackages(args)
+	if len(packages) == 0 {
+		return fmt.Errorf("no valid packages found")
+	}
+
+	// Process each package
+	for _, pkg := range packages {
+		specFile := filepath.Join(specsDir, pkg+".spec")
+
+		// Check spec file exists
+		if _, err := os.Stat(specFile); os.IsNotExist(err) {
+			logrus.Errorf("spec file not found: %s", specFile)
+			continue
 		}
+
+		// Determine PG version
+		pgVer := resolvePgVersion(pkg, pgVersions)
+		if pgVer == "" {
+			logrus.Warnf("could not determine PG version for %s", pkg)
+			continue
+		}
+
+		// Build and execute command
+		cmd := []string{
+			"dnf", "builddep", "-y",
+			"--define", fmt.Sprintf("pgmajorversion %s", pgVer),
+			specFile,
+		}
+
+		logrus.Infof("installing dependencies for %s (pg%s)", pkg, pgVer)
+		logrus.Debugf("executing: sudo %s", strings.Join(cmd, " "))
+
+		if err := utils.SudoCommand(cmd); err != nil {
+			logrus.Errorf("failed to install dependencies for %s: %v", pkg, err)
+			return err
+		}
+
+		logrus.Infof("successfully installed dependencies for %s", pkg)
 	}
 
 	return nil
+}
+
+// resolveExtensionPackages converts extension names to package names
+func resolveExtensionPackages(args []string) []string {
+	seen := make(map[string]bool)
+	var packages []string
+
+	for _, arg := range args {
+		arg = strings.TrimSpace(arg)
+		if arg == "" {
+			continue
+		}
+
+		// Try to resolve as extension
+		lowerArg := strings.ToLower(arg)
+		var pkg string
+
+		// Check extension catalogs
+		if e, ok := ext.Catalog.ExtNameMap[lowerArg]; ok && e.Lead {
+			pkg = e.Pkg
+		} else if e, ok := ext.Catalog.ExtAliasMap[lowerArg]; ok && e.Lead {
+			pkg = e.Pkg
+		} else {
+			// Treat as package name directly
+			pkg = arg
+		}
+
+		if pkg != "" && !seen[pkg] {
+			packages = append(packages, pkg)
+			seen[pkg] = true
+			logrus.Debugf("resolved %s -> package %s", arg, pkg)
+		}
+	}
+
+	return packages
+}
+
+// resolvePgVersion determines the PG version to use
+func resolvePgVersion(pkg string, pgVersions string) string {
+	// If explicitly specified, use the first version
+	if pgVersions != "" {
+		versions := strings.Split(pgVersions, ",")
+		if len(versions) > 0 {
+			return strings.TrimSpace(versions[0])
+		}
+	}
+
+	// Auto-detect from extension metadata
+	lowerPkg := strings.ToLower(pkg)
+	for _, e := range ext.Catalog.Extensions {
+		if strings.ToLower(e.Pkg) == lowerPkg && e.Lead {
+			// Find max version from RpmPg field
+			maxVer := 0
+			for _, ver := range e.RpmPg {
+				if v, err := strconv.Atoi(ver); err == nil && v > maxVer {
+					maxVer = v
+				}
+			}
+			if maxVer > 0 {
+				return strconv.Itoa(maxVer)
+			}
+			break
+		}
+	}
+
+	// Default fallback
+	return "16"
 }
 
 // deb does not support install deb dependencies easily, so we need to extract build-depends from control file
