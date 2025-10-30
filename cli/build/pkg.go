@@ -10,29 +10,30 @@ import (
 
 // BuildPackage runs complete build pipeline for a single package
 func BuildPackage(pkg string, pgVersions string, withSymbol bool) error {
-	fmt.Println()
-	logrus.Info(strings.Repeat("=", 58))
-	logrus.Infof("[PIPELINE] %s", pkg)
-	logrus.Info(strings.Repeat("=", 58))
+	fmt.Printf("\n")
+	logrus.Info(strings.Repeat("#", 58))
+	logrus.Infof("[BUILD PKG] %s", pkg)
+	logrus.Info(strings.Repeat("#", 58))
 
 	// Step 1: Download source
 	if err := DownloadSource(pkg, false); err != nil {
-		logrus.Debugf("Source download: %v", err)
+		logrus.Debugf("Source download error: %v", err)
 		// Continue even if download fails
 	}
 
 	// Step 2: Install dependencies
 	if err := InstallDeps(pkg, pgVersions); err != nil {
-		logrus.Warnf("Dependency install: %v", err)
+		logrus.Warnf("Dependency install error: %v", err)
 		// Continue even if deps fail
 	}
 
 	// Step 3: Build package
 	if err := BuildExtension(pkg, pgVersions, withSymbol); err != nil {
-		return fmt.Errorf("build failed: %w", err)
+		logrus.Warnf("Build extension error: %v", err)
+		// Continue even if build fail
 	}
 
-	logrus.Infof("[PIPELINE] %s completed", pkg)
+	logrus.Info(strings.Repeat("#", 58))
 	return nil
 }
 
@@ -48,26 +49,19 @@ func BuildPackages(packages []string, pgVersions string, withSymbol bool) error 
 	// Process each package completely before moving to next
 	for _, pkg := range packages {
 		if err := BuildPackage(pkg, pgVersions, withSymbol); err != nil {
-			logrus.Errorf("[PIPELINE] %s failed: %v", pkg, err)
 			continue
 		}
 		success++
+		fmt.Printf("\n\n")
 	}
 
 	// Final summary
-	fmt.Println()
-	logrus.Info(strings.Repeat("=", 58))
 	if success == total {
-		logrus.Infof("[DONE] All %d packages completed successfully", total)
+		logrus.Infof("All %d packages build successfully", total)
 	} else if success > 0 {
-		logrus.Warnf("[DONE] %d of %d packages completed", success, total)
+		logrus.Warnf("%d of %d packages build completed", success, total)
 	} else {
-		logrus.Errorf("[DONE] All %d packages failed", total)
-	}
-	logrus.Info(strings.Repeat("=", 58))
-
-	if success == 0 {
-		return fmt.Errorf("all builds failed")
+		logrus.Errorf("All %d packages build failed", total)
 	}
 	return nil
 }

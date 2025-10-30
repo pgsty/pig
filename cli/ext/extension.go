@@ -514,3 +514,26 @@ func (e *Extension) Available(pgVer int) bool {
 		return true
 	}
 }
+
+// GetPGVersions returns sorted list of supported PostgreSQL versions as integers
+func (e *Extension) GetPGVersions() []int {
+	seen := make(map[int]bool)
+	var versions []int
+	for _, v := range e.PgVer {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		ver, err := strconv.Atoi(v)
+		if err != nil {
+			continue
+		}
+		if ver >= 10 && ver <= 99 && !seen[ver] {
+			versions = append(versions, ver)
+			seen[ver] = true
+		}
+	}
+
+	sort.Sort(sort.IntSlice(versions))
+	return versions
+}
