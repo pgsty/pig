@@ -169,19 +169,33 @@ func BuildMake(pkg string, pgVersions string, debugPkg bool) error {
 	logrus.Infof("[BUILD MAKE] %s", pkg)
 	logrus.Info(strings.Repeat("=", 58))
 
-	// Check if Makefile exists in ext/pkg directory
-	makeDir := filepath.Join(config.HomeDir, "ext", pkg)
-	makeFile := filepath.Join(makeDir, "Makefile")
+	// Determine build directory and target based on OS type
+	var makeDir string
+	var makeTarget string
 
+	switch config.OSType {
+	case "rpm":
+		makeDir = filepath.Join(config.HomeDir, "rpmbuild")
+		makeTarget = pkg  // Use package name as make target
+	case "deb":
+		makeDir = filepath.Join(config.HomeDir, "deb")
+		makeTarget = pkg  // Use package name as make target
+	default:
+		return fmt.Errorf("unsupported OS type for make build: %s", config.OSType)
+	}
+
+	// Check if Makefile exists in the build directory
+	makeFile := filepath.Join(makeDir, "Makefile")
 	if _, err := os.Stat(makeFile); err != nil {
 		return fmt.Errorf("Makefile not found at %s", makeFile)
 	}
 
 	logrus.Infof("path : %s", makeFile)
+	logrus.Infof("target : %s", makeTarget)
 	logrus.Info(strings.Repeat("-", 58))
 
-	// Execute make command
-	cmd := exec.Command("make", "rpm")
+	// Execute make command with the package name as target
+	cmd := exec.Command("make", makeTarget)
 	cmd.Dir = makeDir
 
 	// Create build logger
@@ -197,7 +211,8 @@ func BuildMake(pkg string, pgVersions string, debugPkg bool) error {
 	metadata := []string{
 		fmt.Sprintf("BUILD: %s", pkg),
 		fmt.Sprintf("TIME : %s", time.Now().Format("2006-01-02 15:04:05 -07")),
-		fmt.Sprintf("CMD  : make rpm"),
+		fmt.Sprintf("DIR  : %s", makeDir),
+		fmt.Sprintf("CMD  : make %s", makeTarget),
 	}
 
 	result, err := RunBuildCommand(cmd, logFileName, false, metadata, pkg, 0)
@@ -383,8 +398,7 @@ func RunBuildCommand(cmd *exec.Cmd, logName string, appendMode bool, metadata []
 	stdoutReader := bufio.NewReader(stdout)
 	stderrReader := bufio.NewReader(stderr)
 
-	// Channel to collect output
-	outputChan := make(chan string, 100)
+	// Channel to signal completion
 	doneChan := make(chan bool, 2)
 
 	// Read stdout
@@ -398,11 +412,12 @@ func RunBuildCommand(cmd *exec.Cmd, logName string, appendMode bool, metadata []
 				break
 			}
 			line = strings.TrimRight(line, "\n\r")
-			outputChan <- line
 			logger.WriteMetadata(line)
 
-			// Display progress line with clear
-			fmt.Printf("\r\033[K[PG%d]  %s", pgVer, truncateLine(line, 60))
+			// Display progress line with clear (only show for PG versions > 0)
+			if pgVer > 0 {
+				fmt.Printf("\r\033[K[PG%d]  %s", pgVer, truncateLine(line, 60))
+			}
 		}
 		doneChan <- true
 	}()
