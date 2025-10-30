@@ -2,6 +2,8 @@ package build
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"pig/cli/ext"
 	"pig/internal/config"
 	"strconv"
@@ -196,4 +198,89 @@ func GetPGVersionsForExtension(extension *ext.Extension, userVersions []int) []i
 	}
 
 	return versions
+}
+
+// BuildResult represents the result of a build operation
+type BuildResult struct {
+	Success  bool
+	Output   string
+	LogPath  string
+	Artifact string
+	Size     int64
+	Marker   string // Unique marker for log searching
+}
+
+// BuildLogger handles logging for build operations
+type BuildLogger struct {
+	logFile *os.File
+	logPath string
+}
+
+// NewBuildLogger creates a new build logger
+func NewBuildLogger(logName string, append bool) (*BuildLogger, error) {
+	// Ensure log directory exists
+	logDir := filepath.Join(config.HomeDir, "ext", "log")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create log dir: %w", err)
+	}
+
+	// Open log file (append or create)
+	logPath := filepath.Join(logDir, logName)
+	var logFile *os.File
+	var err error
+
+	if append {
+		logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	} else {
+		logFile, err = os.Create(logPath)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to open log file: %w", err)
+	}
+
+	return &BuildLogger{
+		logFile: logFile,
+		logPath: logPath,
+	}, nil
+}
+
+// WriteMetadata writes build metadata to log file
+func (bl *BuildLogger) WriteMetadata(lines ...string) {
+	for _, line := range lines {
+		fmt.Fprintln(bl.logFile, line)
+	}
+}
+
+// WriteSeparator writes a separator to log file
+func (bl *BuildLogger) WriteSeparator() {
+	// Write 5 empty lines as separator
+	for i := 0; i < 5; i++ {
+		fmt.Fprintln(bl.logFile, "")
+	}
+}
+
+// Close closes the log file
+func (bl *BuildLogger) Close() {
+	if bl.logFile != nil {
+		bl.logFile.Close()
+	}
+}
+
+// displayScrollingLine displays a single line with truncation
+func displayScrollingLine(line string, pgVer int) {
+	// Prepare prefix
+	prefix := ""
+	if pgVer > 0 {
+		prefix = fmt.Sprintf("[PG%d]  ", pgVer)
+	}
+
+	// Get terminal width or default
+	maxLen := 70 - len(prefix)
+	if len(line) > maxLen {
+		line = "..." + line[len(line)-(maxLen-3):]
+	}
+
+	// Clear line and display
+	fmt.Printf("\r\033[K%s%s", prefix, line)
 }

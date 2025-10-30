@@ -92,7 +92,7 @@ var buildProxyCmd = &cobra.Command{
 	Use:     "proxy <id@remote> <local>",
 	Short:   "Initialize build proxy",
 	Args:    cobra.MaximumNArgs(2),
-	Aliases: []string{"p"},
+	Aliases: []string{"x"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var remote, local string
 		if len(args) == 0 {
@@ -122,7 +122,7 @@ var buildRustCmd = &cobra.Command{
 var buildPgrxCmd = &cobra.Command{
 	Use:     "pgrx",
 	Short:   "Install and initialize pgrx (requires Rust)",
-	Aliases: []string{"px"},
+	Aliases: []string{"rx"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return build.SetupPgrx(buildPgrxVer, buildPgrxPg)
 	},
@@ -151,29 +151,31 @@ var buildGetCmd = &cobra.Command{
 	Use:     "get <pkg...>",
 	Short:   "Download source code tarball",
 	Aliases: []string{"g"},
+	Args:    cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.DownloadCodeTarball(args, buildGetForce)
+		return build.DownloadSources(args, buildGetForce)
 	},
 }
 
 // buildDepCmd represents the `build dep` command
 var buildDepCmd = &cobra.Command{
-	Use:     "dep",
+	Use:     "dep <pkg...>",
 	Short:   "Install extension build dependencies",
 	Aliases: []string{"d"},
+	Args:    cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.InstallExtensionDeps(args, buildDepPg)
+		return build.InstallDepsList(args, buildDepPg)
 	},
 }
 
 // buildExtCmd represents the `build ext` command
 var buildExtCmd = &cobra.Command{
-	Use:     "ext <extname>",
+	Use:     "ext <pkg...>",
 	Short:   "Build extension package",
 	Aliases: []string{"e"},
-	Args:    cobra.ExactArgs(1),
+	Args:    cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.BuildExtension(args[0], buildPkgPg, buildPkgSymbol)
+		return build.BuildExtensions(args, buildPkgPg, buildPkgSymbol)
 	},
 }
 

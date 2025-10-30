@@ -1,7 +1,10 @@
+// Package build provides functions to build PostgreSQL extensions and packages
 package build
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,18 +18,141 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Build package (extension or normal package)
-func BuildExtension(pkgName string, pgVersions string, withSymbol bool) error {
-	// Try as PG extension
-	if ext, err := ResolvePackage(pkgName); err == nil {
-		return buildPGExtension(ext, pgVersions, withSymbol)
+// BuildExtension builds a single package (extension or normal)
+func BuildExtension(pkg string, pgVersions string, withSymbol bool) error {
+	if extension, err := ResolvePackage(pkg); err == nil {
+		return buildPGExtension(extension, pgVersions, withSymbol)
 	}
-
-	// Build as normal package
-	return buildNormalPackage(pkgName, withSymbol)
+	return buildNormalPackage(pkg, withSymbol)
 }
 
-// buildPGExtension builds PG extension packages
+// BuildExtensions processes multiple packages
+func BuildExtensions(packages []string, pgVersions string, withSymbol bool) error {
+	if len(packages) == 0 {
+		return fmt.Errorf("no packages specified")
+	}
+
+	for _, pkg := range packages {
+		logrus.Info(strings.Repeat("=", 58))
+		logrus.Infof("[BUILD EXT] %s", pkg)
+		logrus.Info(strings.Repeat("=", 58))
+
+		if err := BuildExtension(pkg, pgVersions, withSymbol); err != nil {
+			logrus.Errorf("Failed to build %s: %v", pkg, err)
+			// Continue with next package
+		}
+	}
+
+	return nil
+}
+
+// RunBuildCommand executes a build command with single-line output display
+func RunBuildCommand(cmd *exec.Cmd, logName string, append bool, metadata []string, pkgName string, pgVer int) (*BuildResult, error) {
+	// Create build logger
+	logger, err := NewBuildLogger(logName, append)
+	if err != nil {
+		return nil, err
+	}
+	defer logger.Close()
+
+	// Write metadata to log
+	if len(metadata) > 0 {
+		for _, line := range metadata {
+			logger.WriteMetadata(line)
+		}
+		logger.WriteMetadata(strings.Repeat("=", 58))
+	}
+
+	// Create pipes
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	// Start command
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start command: %w", err)
+	}
+
+	// Process output
+	done := make(chan error, 2)
+	var lastLineShown bool
+
+	// Process stdout
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			// Write to log file
+			fmt.Fprintln(logger.logFile, line)
+
+			// Display single line scrolling
+			if trimmed := strings.TrimSpace(line); trimmed != "" {
+				displayScrollingLine(trimmed, pgVer)
+				lastLineShown = true
+			}
+		}
+		done <- scanner.Err()
+	}()
+
+	// Process stderr
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			// Write to log file
+			fmt.Fprintln(logger.logFile, line)
+
+			// Display single line scrolling
+			if trimmed := strings.TrimSpace(line); trimmed != "" {
+				displayScrollingLine(trimmed, pgVer)
+				lastLineShown = true
+			}
+		}
+		done <- scanner.Err()
+	}()
+
+	// Wait for output processing
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil && err != io.EOF {
+			// Clear the scrolling line
+			if lastLineShown {
+				fmt.Print("\r\033[K")
+			}
+			// Write end marker to log
+			logger.WriteMetadata("", "#[END]"+strings.Repeat("=", 52), "", "", "", "")
+			return &BuildResult{
+				Success: false,
+				LogPath: logger.logPath,
+			}, err
+		}
+	}
+
+	// Wait for command completion
+	err = cmd.Wait()
+
+	// Clear the scrolling line
+	if lastLineShown {
+		fmt.Print("\r\033[K")
+	}
+
+	// Write end marker to log
+	logger.WriteMetadata("", "#[END]"+strings.Repeat("=", 52), "", "", "", "")
+
+	result := &BuildResult{
+		Success: err == nil,
+		LogPath: logger.logPath,
+	}
+
+	return result, err
+}
+
+// Build PG extension
 func buildPGExtension(extension *ext.Extension, pgVersions string, withSymbol bool) error {
 	// Validate build support
 	if err := ValidateBuildExtension(extension); err != nil {
@@ -45,21 +171,15 @@ func buildPGExtension(extension *ext.Extension, pgVersions string, withSymbol bo
 		return fmt.Errorf("no valid PG versions for %s", extension.Name)
 	}
 
-	// Sort versions from high to low for display
+	// Sort versions from high to low
 	sort.Sort(sort.Reverse(sort.IntSlice(versions)))
 
-	// Print header
-	logrus.Info(strings.Repeat("=", 58))
-	logrus.Infof("[BUILDING] %s", extension.Name)
-	logrus.Info(strings.Repeat("=", 58))
-
 	// Print build info
-	specFile := filepath.Join(config.HomeDir, "rpmbuild", "SPECS", fmt.Sprintf("%s.spec", extension.Pkg))
+	specFile := filepath.Join(config.HomeDir, "rpmbuild", "SPECS", extension.Pkg+".spec")
 	logrus.Infof("spec : %s", specFile)
 
-	// Read version from spec file if possible
-	specVersion := getSpecVersion(specFile)
-	if specVersion != "" {
+	// Read version from spec file
+	if specVersion := getSpecVersion(specFile); specVersion != "" {
 		logrus.Infof("ver  : %s", specVersion)
 	}
 
@@ -67,33 +187,24 @@ func buildPGExtension(extension *ext.Extension, pgVersions string, withSymbol bo
 		logrus.Infof("src  : %s", extension.Source)
 	}
 
-	logPath := filepath.Join(config.HomeDir, "ext", "log", fmt.Sprintf("%s.log", extension.Pkg))
+	logPath := filepath.Join(config.HomeDir, "ext", "log", extension.Pkg+".log")
 	logrus.Infof("log  : %s", logPath)
-
-	// Display PG versions
-	versionStrs := make([]string, len(versions))
-	for i, v := range versions {
-		versionStrs[i] = fmt.Sprintf("%d", v)
-	}
-	logrus.Infof("pg   : %s", strings.Join(versionStrs, " "))
+	logrus.Infof("pg   : %s", intSliceToString(versions))
 	logrus.Info(strings.Repeat("-", 58))
 
-	// Write header to log file
-	writeInitialLogHeader(extension, specFile, specVersion, versionStrs)
-
 	// Build for each PG version
-	results := make(map[int]*BuildResult)
 	successCount := 0
 	for i, pgVer := range versions {
-		// Show building status (will be overwritten by final result)
+		// Show building status
 		fmt.Printf("[PG%d]  Building %s...", pgVer, extension.Name)
 
-		// Build without showing header
-		isFirst := i == 0
-		result := buildForPgVersion(extension, pgVer, specFile, withSymbol, isFirst)
-		results[pgVer] = result
+		// Generate unique marker
+		marker := fmt.Sprintf("%s_%d_%s", extension.Pkg, pgVer, time.Now().Format("20060102150405"))
 
-		// Clear line and print final result
+		// Build
+		result := buildExtensionForPG(extension, pgVer, specFile, withSymbol, i == 0, marker)
+
+		// Clear line and print result
 		fmt.Print("\r\033[K")
 		if result.Success {
 			successCount++
@@ -103,55 +214,33 @@ func buildPGExtension(extension *ext.Extension, pgVersions string, withSymbol bo
 				logrus.Infof("[PG%d]  PASS", pgVer)
 			}
 		} else {
-			logrus.Errorf("[PG%d] FAIL grep -A60 -B1 %s %s", pgVer, result.Marker, logPath)
+			logrus.Errorf("[PG%d]  FAIL grep -A60 -B1 %s %s", pgVer, result.Marker, logPath)
 		}
 	}
 
-	// if success = total
+	// Summary
 	if successCount == len(versions) {
 		logrus.Infof("[DONE] PASS %d of %d packages generated", successCount, len(versions))
 	} else {
 		logrus.Warnf("[DONE] FAIL %d of %d packages generated, %d missing", successCount, len(versions), len(versions)-successCount)
 	}
-	logrus.Info(strings.Repeat("=", 58))
+
 	return nil
 }
 
-// buildForPgVersion builds the RPM package for a specific PG version
-func buildForPgVersion(extension *ext.Extension, pgVer int, specFile string, withSymbol bool, isFirst bool) *BuildResult {
-	// Generate unique marker: pkgName_pgVer_timestamp
-	marker := fmt.Sprintf("%s_%d_%s", extension.Pkg, pgVer, time.Now().Format("20060102150405"))
-
-	// Set PATH environment variable
+// Build extension for specific PG version
+func buildExtensionForPG(extension *ext.Extension, pgVer int, specFile string, withSymbol bool, isFirst bool, marker string) *BuildResult {
+	// Set PATH
 	envPATH := fmt.Sprintf("/usr/bin:/usr/pgsql-%d/bin:/root/.cargo/bin:/pg/bin:/usr/share/Modules/bin:/usr/lib64/ccache:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin:/home/vagrant/.cargo/bin", pgVer)
 
-	// Build rpmbuild command
-	args := []string{"rpmbuild"}
-
-	// Add PG version macro
-	args = append(args, "--define", fmt.Sprintf("pgmajorversion %d", pgVer))
-
-	// Control debug package generation
+	// Build command
+	args := []string{"rpmbuild", "--define", fmt.Sprintf("pgmajorversion %d", pgVer)}
 	if !withSymbol {
 		args = append(args, "--define", "debug_package %{nil}")
 	}
-
-	// Add spec file
 	args = append(args, "-ba", specFile)
 
-	// Debug log the command
-	logrus.Debugf("cmd: %s", strings.Join(args, " "))
-
-	// Set environment
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Env = append(os.Environ(), "PATH="+envPATH)
-
-	// Set QA_RPATHS for EL10+
-	if config.OSVersionCode == "el10" {
-		cmd.Env = append(cmd.Env, "QA_RPATHS=3")
-	}
-
-	// Prepare metadata for log file with marker
+	// Prepare metadata for log
 	metadata := []string{
 		strings.Repeat("#", 58),
 		marker,
@@ -163,20 +252,28 @@ func buildForPgVersion(extension *ext.Extension, pgVer int, specFile string, wit
 		fmt.Sprintf("CMD  : %s", strings.Join(args, " ")),
 	}
 
-	// Use unified log file name (one file per package)
-	logFileName := fmt.Sprintf("%s.log", extension.Pkg)
+	// Execute
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = append(os.Environ(), "PATH="+envPATH)
 
-	// First PG version creates new file, others append
-	append := !isFirst
-
-	result, err := RunBuildCommand(cmd, logFileName, append, metadata, extension.Name, pgVer)
-	result.Marker = marker
-
-	if err != nil {
-		result.Success = false
+	// Set QA_RPATHS for EL10+
+	if config.OSVersionCode == "el10" {
+		cmd.Env = append(cmd.Env, "QA_RPATHS=3")
 	}
 
-	// Find build artifact
+	logFileName := extension.Pkg + ".log"
+	result, err := RunBuildCommand(cmd, logFileName, !isFirst, metadata, extension.Name, pgVer)
+	if err != nil {
+		logrus.Errorf("Failed to run build command: %v", err)
+		return &BuildResult{
+			Marker:  marker,
+			Success: false,
+			Output:  err.Error(),
+		}
+	}
+	result.Marker = marker
+
+	// Find artifact
 	if result.Success {
 		arch := getArch()
 		rpmsDir := filepath.Join(config.HomeDir, "rpmbuild", "RPMS", arch)
@@ -193,7 +290,7 @@ func buildForPgVersion(extension *ext.Extension, pgVer int, specFile string, wit
 	return result
 }
 
-// Build a normal (non-PG) package
+// Build normal (non-PG) package
 func buildNormalPackage(pkgName string, withSymbol bool) error {
 	// Try spec file first
 	specFile := filepath.Join(config.HomeDir, "rpmbuild", "SPECS", pkgName+".spec")
@@ -210,9 +307,6 @@ func buildWithSpec(pkgName, specFile string, withSymbol bool) error {
 	// Generate marker
 	marker := fmt.Sprintf("%s_%s", pkgName, time.Now().Format("20060102150405"))
 
-	logrus.Info(strings.Repeat("=", 58))
-	logrus.Infof("[BUILDING] %s", pkgName)
-	logrus.Info(strings.Repeat("=", 58))
 	logrus.Infof("spec : %s", specFile)
 	logPath := filepath.Join(config.HomeDir, "ext", "log", pkgName+".log")
 	logrus.Infof("log  : %s", logPath)
@@ -225,7 +319,7 @@ func buildWithSpec(pkgName, specFile string, withSymbol bool) error {
 	}
 	args = append(args, "-ba", specFile)
 
-	// Log metadata with marker
+	// Log metadata
 	metadata := []string{
 		strings.Repeat("#", 58),
 		marker,
@@ -237,7 +331,7 @@ func buildWithSpec(pkgName, specFile string, withSymbol bool) error {
 	}
 
 	// Show building status
-	fmt.Printf("INFO[BUILDING] %s", pkgName)
+	fmt.Printf("Building %s...", pkgName)
 
 	// Execute
 	cmd := exec.Command(args[0], args[1:]...)
@@ -260,7 +354,6 @@ func buildWithSpec(pkgName, specFile string, withSymbol bool) error {
 		logrus.Errorf("[DONE] FAIL grep -A60 -B1 %s %s", marker, logPath)
 	}
 
-	logrus.Info(strings.Repeat("=", 58))
 	return err
 }
 
@@ -283,15 +376,12 @@ func buildWithMakefile(taskName string) error {
 		return fmt.Errorf("no spec file or Makefile found for %s", taskName)
 	}
 
-	logrus.Info(strings.Repeat("=", 58))
-	logrus.Infof("[BUILDING] %s (Makefile)", taskName)
-	logrus.Info(strings.Repeat("=", 58))
 	logrus.Infof("make : %s", makefilePath)
 	logPath := filepath.Join(config.HomeDir, "ext", "log", taskName+".log")
 	logrus.Infof("log  : %s", logPath)
 	logrus.Info(strings.Repeat("-", 58))
 
-	// Log metadata with marker
+	// Log metadata
 	metadata := []string{
 		strings.Repeat("#", 58),
 		marker,
@@ -303,7 +393,7 @@ func buildWithMakefile(taskName string) error {
 	}
 
 	// Show building status
-	fmt.Printf("INFO[BUILDING] %s (Makefile)", taskName)
+	fmt.Printf("Building %s (Makefile)...", taskName)
 
 	// Execute
 	cmd := exec.Command("make", taskName)
@@ -320,11 +410,10 @@ func buildWithMakefile(taskName string) error {
 		logrus.Errorf("[DONE] FAIL grep -A60 -B1 %s %s", marker, logPath)
 	}
 
-	logrus.Info(strings.Repeat("=", 58))
 	return err
 }
 
-// formatSize formats file size in human-readable format
+// Helper functions
 func formatSize(size int64) string {
 	if size < 1024 {
 		return fmt.Sprintf("%dB", size)
@@ -335,15 +424,13 @@ func formatSize(size int64) string {
 	}
 }
 
-// getSpecVersion reads version from spec file
 func getSpecVersion(specFile string) string {
 	content, err := os.ReadFile(specFile)
 	if err != nil {
 		return ""
 	}
 
-	lines := strings.Split(string(content), "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(string(content), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "Version:") {
 			parts := strings.Fields(line)
@@ -355,7 +442,6 @@ func getSpecVersion(specFile string) string {
 	return ""
 }
 
-// getArch returns the current system architecture
 func getArch() string {
 	output, err := utils.ShellOutput("uname", "-m")
 	if err != nil {
@@ -364,31 +450,10 @@ func getArch() string {
 	return strings.TrimSpace(output)
 }
 
-// writeInitialLogHeader writes the initial header to the log file
-func writeInitialLogHeader(extension *ext.Extension, specFile string, specVersion string, pgVersions []string) {
-	logName := fmt.Sprintf("%s.log", extension.Pkg)
-	logger, err := NewBuildLogger(logName, false)
-	if err != nil {
-		logrus.Warnf("Failed to create log header: %v", err)
-		return
+func intSliceToString(slice []int) string {
+	strs := make([]string, len(slice))
+	for i, v := range slice {
+		strs[i] = fmt.Sprintf("%d", v)
 	}
-	defer logger.Close()
-
-	// Write header
-	logger.WriteMetadata(strings.Repeat("#", 58))
-	logger.WriteMetadata(fmt.Sprintf("[BUILDING] %s", extension.Name))
-	logger.WriteMetadata(strings.Repeat("#", 58))
-	logger.WriteMetadata(fmt.Sprintf("spec : %s", specFile))
-
-	if specVersion != "" {
-		logger.WriteMetadata(fmt.Sprintf("ver  : %s", specVersion))
-	}
-
-	if extension.Source != "" {
-		logger.WriteMetadata(fmt.Sprintf("src  : %s", extension.Source))
-	}
-
-	logger.WriteMetadata(fmt.Sprintf("log  : %s", logger.logPath))
-	logger.WriteMetadata(fmt.Sprintf("pg   : %s", strings.Join(pgVersions, " ")))
-	logger.WriteMetadata("")
+	return strings.Join(strs, " ")
 }
