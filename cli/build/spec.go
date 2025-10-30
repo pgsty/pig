@@ -11,10 +11,6 @@ import (
 )
 
 const (
-	// Temp directory for spec operations
-	TempSpecRoot = "/tmp/ext"
-
-	// Legacy Git repositories
 	RPMGitRepo = "https://github.com/pgsty/rpm.git"
 	DEBGitRepo = "https://github.com/pgsty/deb.git"
 )
@@ -76,14 +72,19 @@ func specNewMode(spec *specConfig) error {
 
 // syncSpec: Common sync implementation with optional --delete flag
 func syncSpec(spec *specConfig, reset bool) error {
-	// Setup paths
-	tarballPath := filepath.Join(TempSpecRoot, spec.Tarball)
-	tempExtractDir := filepath.Join(TempSpecRoot, spec.TargetDir)
+	// Setup paths - use ~/ext as base directory
+	extDir := filepath.Join(config.HomeDir, "ext")
+	tarballPath := filepath.Join(extDir, spec.Tarball)
+	tempExtractDir := filepath.Join(extDir, spec.TargetDir)
 	targetDir := filepath.Join(config.HomeDir, spec.TargetDir)
 
-	// Ensure temp root exists
-	if err := os.MkdirAll(TempSpecRoot, 0755); err != nil {
-		return fmt.Errorf("failed to create temp dir: %w", err)
+	// Ensure ext directory exists (including log subdirectory)
+	if err := os.MkdirAll(extDir, 0755); err != nil {
+		return fmt.Errorf("failed to create ext dir: %w", err)
+	}
+	logDir := filepath.Join(extDir, "log")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return fmt.Errorf("failed to create log dir: %w", err)
 	}
 
 	// Download tarball (skip if exists)
@@ -102,7 +103,7 @@ func syncSpec(spec *specConfig, reset bool) error {
 	}
 
 	// Build rsync command
-	rsyncCmd := []string{"rsync", "-avz"}
+	rsyncCmd := []string{"rsync", "-az"}
 	if reset {
 		// Add --delete to reset directory to default state
 		rsyncCmd = append(rsyncCmd, "--delete")
@@ -120,6 +121,11 @@ func syncSpec(spec *specConfig, reset bool) error {
 	// Post-setup
 	if err := postSetup(spec); err != nil {
 		return err
+	}
+
+	// Create source symlinks for compatibility
+	if err := EnsureSourceDirectory(); err != nil {
+		logrus.Warnf("Failed to setup source directory symlinks: %v", err)
 	}
 
 	action := "synced"
@@ -155,9 +161,6 @@ func downloadTarball(filename, localPath string) error {
 
 	// Construct download URL
 	baseURL := config.RepoPigstyCC
-	if baseURL == "" {
-		baseURL = "https://repo.pigsty.cc"
-	}
 	url := fmt.Sprintf("%s/ext/spec/%s", baseURL, filename)
 
 	logrus.Infof("Downloading %s from %s", filename, url)
@@ -236,26 +239,19 @@ func gitCloneRPM() error {
 
 	// Setup RPM build tree
 	utils.Command([]string{"rpmdev-setuptree"})
-
-	// Sync to target
-	rsyncCmd := []string{"rsync", "-av",
-		filepath.Join(tempDir, "rpmbuild") + "/",
-		targetDir + "/"}
+	rsyncCmd := []string{"rsync", "-a", filepath.Join(tempDir, "rpmbuild") + "/", targetDir + "/"}
 	if err := utils.Command(rsyncCmd); err != nil {
 		return fmt.Errorf("failed to rsync: %w", err)
 	}
 
-	// Fix ownership to current user
+	// Fix ownership to current user (chown -R)
 	if config.CurrentUser != "" && config.CurrentUser != "root" {
 		logrus.Debugf("Fixing ownership of %s to %s", targetDir, config.CurrentUser)
-		chownCmd := []string{"chown", "-R",
-			fmt.Sprintf("%s:%s", config.CurrentUser, config.CurrentUser),
-			targetDir}
+		chownCmd := []string{"chown", "-R", fmt.Sprintf("%s:%s", config.CurrentUser, config.CurrentUser), targetDir}
 		if err := utils.SudoCommand(chownCmd); err != nil {
 			logrus.Warnf("Failed to fix ownership: %v", err)
 		}
 	}
-
 	logrus.Infof("RPM build environment ready at %s", targetDir)
 	return nil
 }

@@ -27,17 +27,37 @@ var buildCmd = &cobra.Command{
 	GroupID: "pgext",
 	Example: `pig build - Build Postgres Extension
 
+Environment Setup:
+  pig build init                   # init = spec + repo + tool + rust + pgrx
+  pig build spec  [new|git]        # init build spec and directory (~ext)
   pig build repo                   # init build repo (=repo set -ru)
   pig build tool  [mini|full|...]  # init build toolset
-  pig build proxy [id@host:port ]  # init build proxy (optional)
   pig build rust  [-y]             # install Rust toolchain
   pig build pgrx  [-v <ver>]       # install & init pgrx (0.16.1)
-  pig build spec                   # init build spec repo
-  pig build get   [ext|pkg|..]     # get extension source code tarball
-  pig build dep   [ext|pkg...]     # install extension build deps
-  pig build pkg   [ext|pkg]        # build extension package
-  pig build all   [ext|pkg...]     # all = get + dep + pkg
+  pig build proxy [id@host:port ]  # init build proxy (optional)
+
+Package Building:
+  pig build pkg   [ext|pkg...]     # complete pipeline: get + dep + ext
+  pig build get   [ext|pkg...]     # download extension source tarball
+  pig build dep   [ext|pkg...]     # install extension build dependencies
+  pig build ext   [ext|pkg...]     # build extension package
+
+Quick Start:
+  pig build init                   # setup complete build environment
+  pig build pkg citus              # build citus extension
+
 `,
+}
+
+// buildInitCmd represents the `build init` command
+var buildInitCmd = &cobra.Command{
+	Use:     "init",
+	Short:   "Initialize complete build environment",
+	Long:    "Setup complete build environment: spec + repo + tool + rust + pgrx",
+	Aliases: []string{"i"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return build.InitEnvironment()
+	},
 }
 
 // buildRepoCmd represents the `build repo` command
@@ -110,17 +130,17 @@ var buildPgrxCmd = &cobra.Command{
 
 // buildSpecCmd represents the `build spec` command
 var buildSpecCmd = &cobra.Command{
-	Use:     "spec [mode]",
-	Short:   "Initialize building spec repo",
+	Use:   "spec [mode]",
+	Short: "Initialize building spec repo",
 	Long: `Download and sync build spec repository.
 
 Modes:
   (default) - Download tarball and incremental sync via rsync
   new       - Download tarball and reset to default state (rsync --delete)
   git       - Legacy mode using git clone (slower)`,
-	Aliases:     []string{"s"},
-	Args:        cobra.MaximumNArgs(1),
-	ValidArgs:   []string{"new", "git"},
+	Aliases:   []string{"s"},
+	Args:      cobra.MaximumNArgs(1),
+	ValidArgs: []string{"new", "git"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return build.GetSpecRepo(args...)
 	},
@@ -148,34 +168,24 @@ var buildDepCmd = &cobra.Command{
 
 // buildExtCmd represents the `build ext` command
 var buildExtCmd = &cobra.Command{
-	Use:     "ext",
-	Short:   "Build extension",
+	Use:     "ext <extname>",
+	Short:   "Build extension package",
 	Aliases: []string{"e"},
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.BuildExtension(args)
+		return build.BuildExtension(args[0], buildPkgPg, buildPkgSymbol)
 	},
 }
 
 // buildPkgCmd represents the `build pkg` command
 var buildPkgCmd = &cobra.Command{
-	Use:     "pkg <extname>",
-	Short:   "Build package for extension",
-	Aliases: []string{"p"},
-	Args:    cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.BuildPackage(args[0], buildPkgPg, buildPkgSymbol)
-	},
-}
-
-// buildAllCmd represents the `build all` command
-var buildAllCmd = &cobra.Command{
-	Use:     "all <pkg...>",
-	Short:   "Complete build pipeline: get, dep, pkg",
+	Use:     "pkg <pkg...>",
+	Short:   "Complete build pipeline: get, dep, ext",
 	Long:    "Execute complete build pipeline for extensions: download source, install dependencies, and build package",
-	Aliases: []string{"a"},
+	Aliases: []string{"p"},
 	Args:    cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.BuildAll(args, buildAllPg, buildAllSymbol)
+		return build.BuildPackages(args, buildAllPg, buildAllSymbol)
 	},
 }
 
@@ -193,24 +203,24 @@ func init() {
 	// Add dep specific flags
 	buildDepCmd.Flags().StringVar(&buildDepPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
 
-	// Add pkg specific flags
-	buildPkgCmd.Flags().StringVar(&buildPkgPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
-	buildPkgCmd.Flags().BoolVarP(&buildPkgSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
+	// Add ext specific flags (formerly pkg)
+	buildExtCmd.Flags().StringVar(&buildPkgPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
+	buildExtCmd.Flags().BoolVarP(&buildPkgSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
 
-	// Add all specific flags
-	buildAllCmd.Flags().StringVar(&buildAllPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
-	buildAllCmd.Flags().BoolVarP(&buildAllSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
+	// Add pkg specific flags (formerly all)
+	buildPkgCmd.Flags().StringVar(&buildAllPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
+	buildPkgCmd.Flags().BoolVarP(&buildAllSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
 
 	// Add subcommands
+	buildCmd.AddCommand(buildInitCmd)
+	buildCmd.AddCommand(buildSpecCmd)
 	buildCmd.AddCommand(buildRepoCmd)
 	buildCmd.AddCommand(buildToolCmd)
-	buildCmd.AddCommand(buildProxyCmd)
 	buildCmd.AddCommand(buildRustCmd)
 	buildCmd.AddCommand(buildPgrxCmd)
-	buildCmd.AddCommand(buildSpecCmd)
+	buildCmd.AddCommand(buildProxyCmd)
 	buildCmd.AddCommand(buildGetCmd)
 	buildCmd.AddCommand(buildDepCmd)
 	buildCmd.AddCommand(buildExtCmd)
 	buildCmd.AddCommand(buildPkgCmd)
-	buildCmd.AddCommand(buildAllCmd)
 }
