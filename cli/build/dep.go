@@ -15,7 +15,11 @@ import (
 // InstallDeps installs build dependencies for a single package
 func InstallDeps(pkg string, pgVersion string) error {
 	logrus.Info(strings.Repeat("=", 58))
-	logrus.Infof("[DEPENDENCE] %s", pkg)
+	if pgVersion != "" {
+		logrus.Infof("[DEPENDENCE] %s (PG%s)", pkg, pgVersion)
+	} else {
+		logrus.Infof("[DEPENDENCE] %s", pkg)
+	}
 	logrus.Info(strings.Repeat("=", 58))
 
 	switch config.OSType {
@@ -29,15 +33,44 @@ func InstallDeps(pkg string, pgVersion string) error {
 }
 
 // InstallDepsList processes multiple packages
-func InstallDepsList(packages []string, pgVersion string) error {
+func InstallDepsList(packages []string, pgVersionsStr string) error {
 	if len(packages) == 0 {
 		return fmt.Errorf("no packages specified")
 	}
 
+	// Parse PG versions if provided
+	var pgVersions []string
+	if pgVersionsStr != "" {
+		pgVersions = strings.Split(pgVersionsStr, ",")
+		for i := range pgVersions {
+			pgVersions[i] = strings.TrimSpace(pgVersions[i])
+		}
+	}
+
 	for _, pkg := range packages {
-		if err := InstallDeps(pkg, pgVersion); err != nil {
-			logrus.Errorf("Failed to install deps for %s: %v", pkg, err)
-			// Continue with next package
+		// Check if package is an extension
+		_, err := ResolvePackage(pkg)
+		isExtension := err == nil
+
+		if isExtension && len(pgVersions) > 0 {
+			// For extensions with specified PG versions, install deps for each version
+			for _, pgVer := range pgVersions {
+				logrus.Infof("Installing deps for extension %s (PG%s)", pkg, pgVer)
+				if err := InstallDeps(pkg, pgVer); err != nil {
+					logrus.Errorf("Failed to install deps for %s (PG%s): %v", pkg, pgVer, err)
+					// Continue with next version
+				}
+			}
+		} else if isExtension && len(pgVersions) == 0 {
+			// For extensions without specified versions, use auto-detection
+			if err := InstallDeps(pkg, ""); err != nil {
+				logrus.Errorf("Failed to install deps for %s: %v", pkg, err)
+			}
+		} else {
+			// For non-extension packages, install once regardless of PG versions
+			if err := InstallDeps(pkg, ""); err != nil {
+				logrus.Errorf("Failed to install deps for %s: %v", pkg, err)
+			}
 		}
 	}
 
