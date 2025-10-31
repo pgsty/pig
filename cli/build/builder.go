@@ -17,16 +17,22 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// VersionBuild represents build info for a specific PG version
-type VersionBuild struct {
-	Success  bool   // Build succeeded
-	Error    string // Error message if failed
-	Artifact string // Path to built artifact
-	Size     int64  // Artifact size
+// BuildTask represents a single build task for a specific PG version
+type BuildTask struct {
+	ID        string            // Task ID: Package_PgVersion_Time
+	Package   string            // Package name
+	Success   bool              // Build succeeded
+	LogPath   string            // Log file path for this task
+	Artifact  string            // Path to built artifact
+	Size      int64             // Artifact size in bytes
+	BeginTime time.Time         // Build start time
+	EndTime   time.Time         // Build end time
+	Error     string            // Error message if failed
+	Builder   *ExtensionBuilder // Parent
 }
 
-// ExtBuilder encapsulates the state and operations for building extensions
-type ExtBuilder struct {
+// ExtensionBuilder encapsulates the state and operations for building extensions
+type ExtensionBuilder struct {
 	// Package information
 	PackageName  string         // Original package name from user
 	Extension    *ext.Extension // The extension being built
@@ -34,10 +40,10 @@ type ExtBuilder struct {
 	DebugPackage bool           // Include debug symbols
 
 	// System configuration
-	OSType       string // OS type (rpm/deb)
-	Architecture string // System architecture (x86_64/aarch64)
-	HomeDir      string // Build home directory
-	SpecPath     string // Path to spec/control file
+	OSType   string // OS type (rpm/deb)
+	OSArch   string // System architecture (x86_64/aarch64)
+	HomeDir  string // Build home directory
+	SpecPath string // Path to spec/control file
 
 	// Logging
 	LogDir    string   // Log directory path
@@ -46,52 +52,40 @@ type ExtBuilder struct {
 	LogAppend bool     // Append to existing log
 
 	// Build tracking
-	Builds      map[int]*VersionBuild // Build info per PG version
-	StartTime   time.Time             // Build start time
-	HeaderWidth int                   // Width for header separators
+	Builds      map[int]*BuildTask // Build tasks per PG version
+	StartTime   time.Time          // Build start time
+	HeaderWidth int                // Width for header separators
 }
 
-// NewExtBuilder creates a new ExtBuilder instance
-func NewExtBuilder(packageName string) (*ExtBuilder, error) {
+// NewExtensionBuilder creates a new ExtensionBuilder instance
+func NewExtensionBuilder(packageName string) (*ExtensionBuilder, error) {
 	extension, err := resolveExtension(packageName)
 	if err != nil {
-		logrus.Debugf("package %s is not a registered extension", packageName)
+		logrus.Debugf("package %s not found in extension catalog", packageName)
 	}
 
-	builder := &ExtBuilder{
-		PackageName:  packageName,
-		Extension:    extension, // could be nil
-		OSType:       config.OSType,
-		Architecture: getElArch(),
-		HomeDir:      config.HomeDir,
-		LogDir:       filepath.Join(config.HomeDir, "ext", "log"),
-		Builds:       make(map[int]*VersionBuild),
-		StartTime:    time.Now(),
-		HeaderWidth:  60,
+	builder := &ExtensionBuilder{
+		PackageName: packageName,
+		Extension:   extension, // could be nil, if it is not an extension
+		OSType:      config.OSType,
+		OSArch:      getElArch(),
+		HomeDir:     config.HomeDir,
+		LogDir:      filepath.Join(config.HomeDir, "ext", "log"),
+		LogAppend:   true,
+		Builds:      make(map[int]*BuildTask),
+		StartTime:   time.Now(),
+		HeaderWidth: 60,
 	}
 
 	if extension != nil {
 		builder.PGVersions = extension.GetPGVersions()
 	}
-
-	// Set spec/control file path based on OS type
-	switch config.OSType {
-	case "rpm":
-		if extension != nil {
-			builder.SpecPath = filepath.Join(config.HomeDir, "rpmbuild", "SPECS", extension.Pkg+".spec")
-		}
-	case "deb":
-		if extension != nil {
-			builder.SpecPath = filepath.Join(config.HomeDir, "deb", extension.Pkg, "debian", "control")
-		}
-	}
-
 	return builder, nil
 }
 
 // UpdateVersion updates the PG versions to build for
-func (b *ExtBuilder) UpdateVersion(pgVersions string) error {
-	if pgVersions == "" {
+func (b *ExtensionBuilder) UpdateVersion(pgVersions string) error {
+	if pgVersions == "" || b.Extension == nil {
 		return nil
 	}
 	if versions, err := parsePgVersions(pgVersions); err != nil {
@@ -103,35 +97,31 @@ func (b *ExtBuilder) UpdateVersion(pgVersions string) error {
 }
 
 // Build executes the build process
-func (b *ExtBuilder) Build() error {
-	// Display build header
-	b.printHeader()
-
-	// Validate build environment
-	if err := b.validateBuildFiles(); err != nil {
-		return err
-	}
-
-	// Setup logging
+func (b *ExtensionBuilder) Build() error {
 	if err := b.initLogger(); err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
 	defer b.closeLogger()
 
-	// Display build configuration
+	b.printHeader()
+	if err := b.validateBuildFiles(); err != nil {
+		return err
+	}
 	b.printBuildInfo()
 
 	// Execute builds for all PG versions
-	b.buildAllVersions()
+	for _, pgVer := range b.PGVersions {
+		logrus.Debugf("build %s for PG %d", b.PackageName, pgVer)
+		b.buildForPGVersion(pgVer)
+	}
 
 	// Display final summary
 	b.printSummary()
-
 	return nil
 }
 
 // printHeader prints the build header
-func (b *ExtBuilder) printHeader() {
+func (b *ExtensionBuilder) printHeader() {
 	separator := strings.Repeat("=", b.HeaderWidth)
 	logrus.Info(separator)
 	logrus.Infof("[BUILD %s] %s", strings.ToUpper(b.OSType), b.PackageName)
@@ -139,13 +129,19 @@ func (b *ExtBuilder) printHeader() {
 }
 
 // validateBuildFiles checks if necessary build files exist
-func (b *ExtBuilder) validateBuildFiles() error {
+func (b *ExtensionBuilder) validateBuildFiles() error {
 	switch b.OSType {
 	case config.DistroEL:
+		if b.Extension != nil {
+			b.SpecPath = filepath.Join(config.HomeDir, "rpmbuild", "SPECS", b.Extension.Pkg+".spec")
+		}
 		if _, err := os.Stat(b.SpecPath); err != nil {
 			return fmt.Errorf("build file not found: %s", b.SpecPath)
 		}
 	case config.DistroDEB:
+		if b.Extension != nil {
+			b.SpecPath = filepath.Join(config.HomeDir, "deb", b.Extension.Pkg, "debian", "control")
+		}
 		if _, err := os.Stat(b.SpecPath + ".in"); err != nil {
 			logrus.Debugf("control file not found: %s", b.SpecPath+".in")
 			if _, err := os.Stat(b.SpecPath); err != nil {
@@ -161,7 +157,7 @@ func (b *ExtBuilder) validateBuildFiles() error {
 }
 
 // printBuildInfo prints build configuration information
-func (b *ExtBuilder) printBuildInfo() {
+func (b *ExtensionBuilder) printBuildInfo() {
 	if b.OSType == "rpm" {
 		logrus.Infof("spec : %s", b.SpecPath)
 	} else {
@@ -176,7 +172,7 @@ func (b *ExtBuilder) printBuildInfo() {
 }
 
 // initLogger initializes the build log file
-func (b *ExtBuilder) initLogger() error {
+func (b *ExtensionBuilder) initLogger() error {
 	// Ensure log directory exists
 	if err := os.MkdirAll(b.LogDir, 0755); err != nil {
 		return fmt.Errorf("failed to create log dir %s: %w", b.LogDir, err)
@@ -200,14 +196,14 @@ func (b *ExtBuilder) initLogger() error {
 }
 
 // closeLogger closes the log file
-func (b *ExtBuilder) closeLogger() {
+func (b *ExtensionBuilder) closeLogger() {
 	if b.LogFile != nil {
 		_ = b.LogFile.Close()
 	}
 }
 
 // writeLog writes lines to the log file
-func (b *ExtBuilder) writeLog(lines ...string) {
+func (b *ExtensionBuilder) writeLog(lines ...string) {
 	if b.LogFile == nil {
 		return
 	}
@@ -216,8 +212,32 @@ func (b *ExtBuilder) writeLog(lines ...string) {
 	}
 }
 
+// writeTaskHeader writes task metadata header to log
+func (b *ExtensionBuilder) writeTaskHeader(task *BuildTask) {
+	b.writeLog("")
+	b.writeLog(strings.Repeat("=", b.HeaderWidth))
+	b.writeLog(task.ID)
+	b.writeLog(strings.Repeat("=", b.HeaderWidth))
+	b.writeLog(fmt.Sprintf("Package : %s", task.Package))
+	b.writeLog(fmt.Sprintf("Start   : %s", task.BeginTime.Format("2006-01-02 15:04:05")))
+	b.writeLog(strings.Repeat("=", b.HeaderWidth))
+}
+
+// writeTaskFooter writes task result footer to log
+func (b *ExtensionBuilder) writeTaskFooter(task *BuildTask) {
+	duration := task.EndTime.Sub(task.BeginTime)
+	status := "PASS"
+	if !task.Success {
+		status = "FAIL"
+	}
+
+	b.writeLog("", strings.Repeat("=", b.HeaderWidth))
+	b.writeLog(fmt.Sprintf("Build %s, duration %v ms", status, duration.Round(time.Microsecond)))
+	b.writeLog(strings.Repeat("=", b.HeaderWidth), "")
+}
+
 // formatPGVersions formats PG versions for display
-func (b *ExtBuilder) formatPGVersions() string {
+func (b *ExtensionBuilder) formatPGVersions() string {
 	parts := make([]string, len(b.PGVersions))
 	for i, v := range b.PGVersions {
 		parts[i] = fmt.Sprintf("%d", v)
@@ -225,21 +245,23 @@ func (b *ExtBuilder) formatPGVersions() string {
 	return strings.Join(parts, " ")
 }
 
-// buildAllVersions builds for all PG versions
-func (b *ExtBuilder) buildAllVersions() {
-	for _, pgVer := range b.PGVersions {
-		b.buildForPGVersion(pgVer)
-	}
-}
-
 // buildForPGVersion builds for a specific PG version
-func (b *ExtBuilder) buildForPGVersion(pgVer int) {
+func (b *ExtensionBuilder) buildForPGVersion(pgVer int) {
 	// Display progress
 	fmt.Printf("[PG%d]  Building %s...", pgVer, b.Extension.Name)
 
-	// Initialize build info
-	build := &VersionBuild{}
-	b.Builds[pgVer] = build
+	// Initialize build task
+	beginTime := time.Now()
+	taskID := fmt.Sprintf("%s_%d_%s", b.PackageName, pgVer, beginTime.Format("20060102150405"))
+
+	task := &BuildTask{
+		ID:        taskID,
+		Package:   b.PackageName,
+		BeginTime: beginTime,
+		LogPath:   b.LogPath,
+		Builder:   b,
+	}
+	b.Builds[pgVer] = task
 
 	// Create build command based on OS type
 	var cmd *exec.Cmd
@@ -247,15 +269,19 @@ func (b *ExtBuilder) buildForPGVersion(pgVer int) {
 
 	switch b.OSType {
 	case config.DistroEL:
-		cmd, metadata = b.createRPMBuildCommand(pgVer)
+		cmd, metadata = b.createRPMBuildCommand(pgVer, task)
 	case config.DistroDEB:
-		cmd, metadata = b.createDEBBuildCommand(pgVer)
+		cmd, metadata = b.createDEBBuildCommand(pgVer, task)
 	default:
-		build.Error = fmt.Sprintf("unsupported OS type: %s", b.OSType)
+		task.Error = fmt.Sprintf("unsupported OS type: %s", b.OSType)
+		task.EndTime = time.Now()
 		fmt.Print("\r\033[K") // Clear progress line
-		logrus.Errorf("[PG%d]  FAIL %s", pgVer, build.Error)
+		logrus.Errorf("[PG%d]  FAIL %s", pgVer, task.Error)
 		return
 	}
+
+	// Write task header to log
+	b.writeTaskHeader(task)
 
 	// Write metadata to log
 	if len(metadata) > 0 {
@@ -264,25 +290,30 @@ func (b *ExtBuilder) buildForPGVersion(pgVer int) {
 	}
 
 	// Execute build command
-	if err := b.executeBuildCommand(cmd, pgVer, build); err != nil {
-		build.Error = err.Error()
+	if err := b.executeBuildCommand(cmd, pgVer, task); err != nil {
+		task.Error = err.Error()
 	} else {
-		build.Success = true
-		b.findArtifact(pgVer, build)
+		task.Success = true
+		b.findArtifact(pgVer, task)
 	}
+
+	// Set end time
+	task.EndTime = time.Now()
+
+	// Write task footer to log
+	b.writeTaskFooter(task)
 
 	// Clear progress line and display result
 	fmt.Print("\r\033[K")
-	if build.Success {
-		logrus.Infof("[PG%d]  PASS %s    %s", pgVer,
-			formatSize(build.Size), build.Artifact)
+	if task.Success {
+		logrus.Infof("[PG%d] [PASS] %s", pgVer, task.Artifact)
 	} else {
-		logrus.Errorf("[PG%d]  FAIL %s", pgVer, build.Error)
+		logrus.Errorf("[PG%d] [FAIL] %s", pgVer, fmt.Sprintf("grep -A60 %s %s", task.ID, b.LogPath))
 	}
 }
 
 // createRPMBuildCommand creates the rpmbuild command
-func (b *ExtBuilder) createRPMBuildCommand(pgVer int) (*exec.Cmd, []string) {
+func (b *ExtensionBuilder) createRPMBuildCommand(pgVer int, task *BuildTask) (*exec.Cmd, []string) {
 	args := []string{
 		"rpmbuild", "-ba",
 		"--define", fmt.Sprintf("pgmajorversion %d", pgVer),
@@ -321,7 +352,7 @@ func (b *ExtBuilder) createRPMBuildCommand(pgVer int) (*exec.Cmd, []string) {
 }
 
 // createDEBBuildCommand creates the dpkg-buildpackage command
-func (b *ExtBuilder) createDEBBuildCommand(pgVer int) (*exec.Cmd, []string) {
+func (b *ExtensionBuilder) createDEBBuildCommand(pgVer int, task *BuildTask) (*exec.Cmd, []string) {
 	args := []string{
 		"dpkg-buildpackage", "-b", "-uc", "-us",
 	}
@@ -343,7 +374,7 @@ func (b *ExtBuilder) createDEBBuildCommand(pgVer int) (*exec.Cmd, []string) {
 }
 
 // executeBuildCommand executes the build command and captures output
-func (b *ExtBuilder) executeBuildCommand(cmd *exec.Cmd, pgVer int, build *VersionBuild) error {
+func (b *ExtensionBuilder) executeBuildCommand(cmd *exec.Cmd, pgVer int, task *BuildTask) error {
 	// Create pipes
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -375,7 +406,7 @@ func (b *ExtBuilder) executeBuildCommand(cmd *exec.Cmd, pgVer int, build *Versio
 }
 
 // processCommandOutput processes stdout and stderr from command
-func (b *ExtBuilder) processCommandOutput(stdout, stderr io.Reader, pgVer int) string {
+func (b *ExtensionBuilder) processCommandOutput(stdout, stderr io.Reader, pgVer int) string {
 	stdoutReader := bufio.NewReader(stdout)
 	stderrReader := bufio.NewReader(stderr)
 
@@ -437,13 +468,13 @@ func (b *ExtBuilder) processCommandOutput(stdout, stderr io.Reader, pgVer int) s
 }
 
 // findArtifact finds the build artifact
-func (b *ExtBuilder) findArtifact(pgVer int, build *VersionBuild) {
+func (b *ExtensionBuilder) findArtifact(pgVer int, task *BuildTask) {
 	var pattern string
 	var artifactDir string
 
 	switch b.OSType {
 	case "rpm":
-		artifactDir = filepath.Join(b.HomeDir, "rpmbuild", "RPMS", b.Architecture)
+		artifactDir = filepath.Join(b.HomeDir, "rpmbuild", "RPMS", b.OSArch)
 		pattern = filepath.Join(artifactDir, fmt.Sprintf("%s_%d*.rpm", b.Extension.Pkg, pgVer))
 	case "deb":
 		artifactDir = filepath.Join(b.HomeDir, "deb", "pool")
@@ -451,18 +482,18 @@ func (b *ExtBuilder) findArtifact(pgVer int, build *VersionBuild) {
 	}
 
 	if files, err := filepath.Glob(pattern); err == nil && len(files) > 0 {
-		build.Artifact = files[0]
+		task.Artifact = files[0]
 		if info, err := os.Stat(files[0]); err == nil {
-			build.Size = info.Size()
+			task.Size = info.Size()
 		}
 	}
 }
 
 // printSummary prints the build summary
-func (b *ExtBuilder) printSummary() {
+func (b *ExtensionBuilder) printSummary() {
 	successCount := 0
-	for _, build := range b.Builds {
-		if build.Success {
+	for _, task := range b.Builds {
+		if task.Success {
 			successCount++
 		}
 	}
@@ -482,10 +513,10 @@ func (b *ExtBuilder) printSummary() {
 }
 
 // GetSuccessCount returns the number of successful builds
-func (b *ExtBuilder) GetSuccessCount() int {
+func (b *ExtensionBuilder) GetSuccessCount() int {
 	count := 0
-	for _, build := range b.Builds {
-		if build.Success {
+	for _, task := range b.Builds {
+		if task.Success {
 			count++
 		}
 	}
@@ -493,14 +524,12 @@ func (b *ExtBuilder) GetSuccessCount() int {
 }
 
 // GetFailedVersions returns the PG versions that failed to build
-func (b *ExtBuilder) GetFailedVersions() []int {
+func (b *ExtensionBuilder) GetFailedVersions() []int {
 	var failed []int
-	for pgVer, build := range b.Builds {
-		if !build.Success {
+	for pgVer, task := range b.Builds {
+		if !task.Success {
 			failed = append(failed, pgVer)
 		}
 	}
 	return failed
 }
-
-// Helper functions

@@ -22,7 +22,7 @@ func BuildExtension(pkg string, pgVersions string, debugPkg bool) error {
 	}
 
 	// run extension builder for postgres extension
-	builder, err := NewExtBuilder(pkg)
+	builder, err := NewExtensionBuilder(pkg)
 	if err != nil {
 		return err
 	}

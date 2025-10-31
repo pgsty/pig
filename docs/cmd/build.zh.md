@@ -29,8 +29,11 @@ pig build - 构建 Postgres 扩展
   pig build proxy [id@host:port ]  # 初始化构建代理（可选）
   pig build rust  [-v <pgrx_ver>]  # 初始化 rustc & pgrx（0.12.9）
   pig build spec                   # 初始化构建规范仓库
-  pig build get   [all|std|..]     # 按前缀获取扩展源码包
-  pig build ext   [extname...]     # 构建扩展
+  
+  pig build pkg   [pkg|ext...]     # 完整的下载/依赖/构建打包流程
+  pig build get   [pkg|ext...]     # 按前缀获取扩展源码包
+  pig build dep   [pkg|ext...]     # 安装扩展构建所需依赖
+  pig build ext   [pkg|ext...]     # 构建并打包扩展
 
 可用子命令：
   ext         构建扩展
@@ -53,26 +56,42 @@ pig build - 构建 Postgres 扩展
 
 ------
 
-## 示例
+## 快速上手
 
-搭建构建环境
+搭建构建环境，初始化仓库，工具，构建目录
 
 ```bash
-# 初始化仓库与工具
-pig build repo
-pig build tool
+
+pig build repo    # 准备好构建所需的上游 DNF/APT 仓库
+pig build tool    # 安装
 pig build spec
-
-# 构建 Rust 扩展
-pig build rust
-
-# 下载标准扩展源码
-pig build get std                # 下载全部源码包
-pig build get citus timescaledb  # 下载指定源码包
-
-# 构建指定扩展
-pig build ext citus
 ```
+
+如果你需要构建 Rust 扩展，还需要安装 Rust 与 pgrx：
+
+```
+pig build rust    # 安装 Rust，用于编译 Rust 扩展
+pig build pgrx    # 安装 Rust 的 pgrx 框架，用于编译 Rust 扩展
+pig build pgrx -v 0.16.1  # 指定 pgrx 框架版本，默认为 0.16.1
+```
+
+
+常规的扩展构建，执行 `pig build pkg <pkg>` 即可：
+
+```bash
+pig build pkg pg_http
+pig build pkg pg_gzip pg_zstd pg_bzip
+```
+
+这实际上是替你一次性执行了三个步骤：`get`, `dep`, `ext`
+
+- `pig build get` : 下载扩展构建所需的软件包
+- `pig build dep` : 安装扩展构建所需的依赖（需要确保上游仓库已经配置）
+- `pig build ext` : 执行扩展构建与打包（需要已经有 Spec 文件和源码包）
+
+
+
+
 
 ------
 
@@ -129,19 +148,13 @@ pig build tool
 
 **参数**：
 
-- ```
-mode
-  ```
+- `mode`: 安装模式（默认：“mini”）
 
-: 安装模式（默认：“mini”）
-
-- 可用模式取决于操作系统与发行版
-
-此命令会安装如下构建依赖：
+可用模式取决于操作系统与发行版，此命令会安装如下构建依赖：
 
 **EL 发行版**（RHEL、Rocky、CentOS）：
 
-```
+```bash
 make, cmake, ninja-build, pkg-config, lld, git, lz4, unzip, ncdu, rsync, vray,
 rpmdevtools, dnf-utils, pgdg-srpm-macros, postgresql1*-devel, postgresql1*-server, jq,
 readline-devel, zlib-devel, libxml2-devel, lz4-devel, libzstd-devel, krb5-devel,
@@ -149,7 +162,7 @@ readline-devel, zlib-devel, libxml2-devel, lz4-devel, libzstd-devel, krb5-devel,
 
 **DEB 发行版**（Debian、Ubuntu）：
 
-```fallback
+```bash
 make, cmake, ninja-build, pkg-config, lld, git, lz4, unzip, ncdu, rsync, vray,
 debhelper, devscripts, fakeroot, postgresql-all, postgresql-server-dev-all, jq,
 libreadline-dev, zlib1g-dev, libxml2-dev, liblz4-dev, libzstd-dev, libkrb5-dev,
@@ -164,7 +177,7 @@ libreadline-dev, zlib1g-dev, libxml2-dev, liblz4-dev, libzstd-dev, libkrb5-dev,
 为构建 Rust 扩展配置 Rust 环境与 PGRX。
 
 ```bash
-pig build rust [-v <pgrx_ver>]
+pig build rust 
 ```
 
 **参数**：

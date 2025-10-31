@@ -35,7 +35,7 @@ var statusCmd = &cobra.Command{
 
 		fmt.Println("\n" + utils.PadHeader("OS Environment", padding))
 		utils.PadKV("OS Distro Code", config.OSCode)
-		utils.PadKV("OS Architecture", config.OSArch)
+		utils.PadKV("OS OSArch", config.OSArch)
 		utils.PadKV("OS Package Type", config.OSType)
 		utils.PadKV("OS Vendor ID", config.OSVendor)
 		utils.PadKV("OS Version", config.OSVersion)
