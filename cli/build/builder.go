@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path"
 	"path/filepath"
 	"pig/cli/ext"
@@ -203,6 +204,69 @@ func (b *ExtensionBuilder) closeLogger() {
 	}
 }
 
+// buildPath constructs the PATH environment variable properly
+func (b *ExtensionBuilder) buildPath(pgVer int) string {
+	// Get current PATH
+	currentPath := os.Getenv("PATH")
+	pathParts := strings.Split(currentPath, ":")
+
+	// Deduplicate function
+	dedup := func(paths []string) []string {
+		seen := make(map[string]bool)
+		result := []string{}
+		for _, p := range paths {
+			if p != "" && !seen[p] {
+				seen[p] = true
+				result = append(result, p)
+			}
+		}
+		return result
+	}
+
+	// Build the new PATH components
+	var newPaths []string
+
+	// 1. PostgreSQL bin directory (always first)
+	switch b.OSType {
+	case config.DistroEL:
+		newPaths = append(newPaths, fmt.Sprintf("/usr/pgsql-%d/bin", pgVer))
+	case config.DistroDEB:
+		newPaths = append(newPaths, fmt.Sprintf("/usr/lib/postgresql/%d/bin", pgVer))
+	default:
+		// For macOS or other systems, try to detect PostgreSQL location
+		// You may need to customize this based on your macOS setup
+		newPaths = append(newPaths, fmt.Sprintf("/usr/local/opt/postgresql@%d/bin", pgVer))
+	}
+
+	// 2. Cargo bin directory (expand home directory)
+	if currentUser, err := user.Current(); err == nil {
+		cargoPath := filepath.Join(currentUser.HomeDir, ".cargo", "bin")
+		if _, err := os.Stat(cargoPath); err == nil {
+			newPaths = append(newPaths, cargoPath)
+		}
+	}
+
+	// 3. Additional directories (in order of priority)
+	additionalPaths := []string{
+		"/usr/share/Modules/bin",
+		"/usr/lib64/ccache",
+		"/usr/local/sbin",
+		"/usr/local/bin",
+		"/usr/sbin",
+		"/usr/bin",
+		"/root/bin",
+	}
+
+	// Combine all paths: new paths first, then existing PATH (deduped)
+	allPaths := append(newPaths, additionalPaths...)
+	allPaths = append(allPaths, pathParts...)
+
+	// Deduplicate while preserving order
+	finalPaths := dedup(allPaths)
+
+	return strings.Join(finalPaths, ":")
+}
+
 // writeLog writes lines to the log file
 func (b *ExtensionBuilder) writeLog(lines ...string) {
 	if b.LogFile == nil {
@@ -337,7 +401,7 @@ func (b *ExtensionBuilder) createRPMBuildCommand(pgVer int, task *BuildTask) (*e
 	cmd := exec.Command(args[0], args[1:]...)
 
 	// Set environment
-	envPATH := fmt.Sprintf("/usr/pgsql-%d/bin:/usr/local/bin:/usr/bin:/bin", pgVer)
+	envPATH := b.buildPath(pgVer)
 	cmd.Env = append(os.Environ(), "PATH="+envPATH)
 
 	// Special case for EL10
@@ -366,7 +430,7 @@ func (b *ExtensionBuilder) createDEBBuildCommand(pgVer int, task *BuildTask) (*e
 	cmd := exec.Command(args[0], args[1:]...)
 
 	// Set environment
-	envPATH := fmt.Sprintf("/usr/lib/postgresql/%d/bin:/usr/local/bin:/usr/bin:/bin", pgVer)
+	envPATH := b.buildPath(pgVer)
 	cmd.Env = append(os.Environ(), "PATH="+envPATH)
 
 	metadata := []string{
