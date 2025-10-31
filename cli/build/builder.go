@@ -198,6 +198,7 @@ func (b *ExtensionBuilder) initLogger() error {
 // closeLogger closes the log file
 func (b *ExtensionBuilder) closeLogger() {
 	if b.LogFile != nil {
+		_ = b.LogFile.Sync() // Flush buffer to disk
 		_ = b.LogFile.Close()
 	}
 }
@@ -234,6 +235,11 @@ func (b *ExtensionBuilder) writeTaskFooter(task *BuildTask) {
 	b.writeLog("", strings.Repeat("=", b.HeaderWidth))
 	b.writeLog(fmt.Sprintf("Build %s, duration %v ms", status, duration.Round(time.Microsecond)))
 	b.writeLog(strings.Repeat("=", b.HeaderWidth), "")
+
+	// Flush to disk immediately after task completion
+	if b.LogFile != nil {
+		_ = b.LogFile.Sync()
+	}
 }
 
 // formatPGVersions formats PG versions for display
