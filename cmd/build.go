@@ -28,7 +28,6 @@ var buildCmd = &cobra.Command{
 	Example: `pig build - Build Postgres Extension
 
 Environment Setup:
-  pig build init                   # init = spec + repo + tool + rust + pgrx
   pig build spec  [new|git]        # init build spec and directory (~ext)
   pig build repo                   # init build repo (=repo set -ru)
   pig build tool  [mini|full|...]  # init build toolset
@@ -43,22 +42,12 @@ Package Building:
   pig build ext   [ext|pkg...]     # build extension package
 
 Quick Start:
-  pig build init                   # setup complete build environment
+  pig build spec                   # setup build spec and directory
   pig build pkg citus              # build citus extension
 
 `,
 }
 
-// buildInitCmd represents the `build init` command
-var buildInitCmd = &cobra.Command{
-	Use:     "init",
-	Short:   "Initialize complete build environment",
-	Long:    "Setup complete build environment: spec + repo + tool + rust + pgrx",
-	Aliases: []string{"i"},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.InitEnvironment()
-	},
-}
 
 // buildRepoCmd represents the `build repo` command
 var buildRepoCmd = &cobra.Command{
@@ -214,7 +203,6 @@ func init() {
 	buildPkgCmd.Flags().BoolVarP(&buildAllSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
 
 	// Add subcommands
-	buildCmd.AddCommand(buildInitCmd)
 	buildCmd.AddCommand(buildSpecCmd)
 	buildCmd.AddCommand(buildRepoCmd)
 	buildCmd.AddCommand(buildToolCmd)
