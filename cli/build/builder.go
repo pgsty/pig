@@ -108,6 +108,7 @@ func (b *ExtensionBuilder) Build() error {
 	if err := b.validateBuildFiles(); err != nil {
 		return err
 	}
+	b.checkRustEnvironment()
 	b.printBuildInfo()
 
 	// Execute builds for all PG versions
@@ -155,6 +156,79 @@ func (b *ExtensionBuilder) validateBuildFiles() error {
 		return fmt.Errorf("unsupported OS: %s", b.OSType)
 	}
 	return nil
+}
+
+// checkRustEnvironment validates Rust and PGRX setup for Rust extensions
+func (b *ExtensionBuilder) checkRustEnvironment() {
+	// Ensure no panic from this function
+	defer func() {
+		if r := recover(); r != nil {
+			logrus.Debugf("panic in checkRustEnvironment: %v", r)
+		}
+	}()
+
+	// Only check for Rust extensions
+	if b.Extension == nil || b.Extension.Lang != "Rust" {
+		return
+	}
+
+	// Check if cargo is available
+	cargoPath, err := exec.LookPath("cargo")
+	if err != nil {
+		logrus.Errorf("rust cargo is required to build this")
+		return
+	}
+	logrus.Debugf("cargo found at %s", cargoPath)
+
+	// Get installed pgrx version
+	cmd := exec.Command("cargo", "pgrx", "--version")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		logrus.Errorf("fail to get pgrx version: %v", err)
+		return
+	}
+
+	// Parse version from output (e.g., "cargo-pgrx 0.16.1" -> "0.16.1")
+	versionOutput := strings.TrimSpace(string(output))
+	fields := strings.Fields(versionOutput)
+	if len(fields) == 0 {
+		logrus.Debugf("empty pgrx version output")
+		return
+	}
+	installedVersion := fields[len(fields)-1] // Take last field
+	logrus.Debugf("installed pgrx version: %s", installedVersion)
+
+	// Get expected pgrx version from extension metadata
+	if b.Extension.Extra == nil {
+		logrus.Debugf("no extra metadata for pgrx version check")
+		return
+	}
+
+	expectedVersionRaw, ok := b.Extension.Extra["pgrx"]
+	if !ok {
+		logrus.Debugf("no pgrx version specified in extension metadata")
+		return
+	}
+
+	expectedVersion, ok := expectedVersionRaw.(string)
+	if !ok {
+		logrus.Debugf("pgrx version in metadata is not a string")
+		return
+	}
+
+	expectedVersion = strings.TrimSpace(expectedVersion)
+	if expectedVersion == "" {
+		logrus.Debugf("empty pgrx version in metadata")
+		return
+	}
+
+	// Compare versions
+	if installedVersion != expectedVersion {
+		logrus.Errorf("PGRX version mismatch: extension requires %s but system has %s",
+			expectedVersion, installedVersion)
+	} else {
+		logrus.Debugf("pgrx version matches: %s", installedVersion)
+	}
 }
 
 // printBuildInfo prints build configuration information
