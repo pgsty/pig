@@ -495,13 +495,13 @@ func (b *ExtensionBuilder) createRPMBuildCommand(pgVer int, task *BuildTask) (*e
 	return cmd, metadata
 }
 
-// createDEBBuildCommand creates the dpkg-buildpackage command
+// createDEBBuildCommand creates the make command for DEB build
 func (b *ExtensionBuilder) createDEBBuildCommand(pgVer int, task *BuildTask) (*exec.Cmd, []string) {
-	args := []string{
-		"dpkg-buildpackage", "-b", "-uc", "-us",
-	}
+	// Build in the extension directory
+	buildDir := filepath.Join(b.HomeDir, "debbuild", b.Extension.Pkg)
 
-	cmd := exec.Command(args[0], args[1:]...)
+	cmd := exec.Command("make")
+	cmd.Dir = buildDir
 
 	// Set environment
 	envPATH := b.buildPath(pgVer)
@@ -509,9 +509,10 @@ func (b *ExtensionBuilder) createDEBBuildCommand(pgVer int, task *BuildTask) (*e
 
 	metadata := []string{
 		fmt.Sprintf("BUILD: %s PG%d", b.Extension.Name, pgVer),
+		fmt.Sprintf("DIR  : %s", buildDir),
 		fmt.Sprintf("TIME : %s", time.Now().Format("2006-01-02 15:04:05 -07")),
 		fmt.Sprintf("PATH : %s", envPATH),
-		fmt.Sprintf("CMD  : %s", strings.Join(args, " ")),
+		fmt.Sprintf("CMD  : make"),
 	}
 
 	return cmd, metadata

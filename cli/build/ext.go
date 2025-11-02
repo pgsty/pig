@@ -14,9 +14,21 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// BuildExtensions processes multiple packages
+func BuildExtensions(packages []string, pgVersions string, debugPkg bool) error {
+	if len(packages) == 0 {
+		return fmt.Errorf("no packages specified")
+	}
+	for _, pkg := range packages {
+		if err := BuildExtension(pkg, pgVersions, debugPkg); err != nil {
+			logrus.Errorf("Failed to build %s: %v", pkg, err)
+		}
+	}
+	return nil
+}
+
 // BuildExtension is the main entry point for building a single package
 func BuildExtension(pkg string, pgVersions string, debugPkg bool) error {
-	// simply run make pkg on given dir for non-extension
 	if _, err := resolveExtension(pkg); err != nil {
 		return BuildMake(pkg, pgVersions, debugPkg)
 	}
@@ -31,20 +43,6 @@ func BuildExtension(pkg string, pgVersions string, debugPkg bool) error {
 		return err
 	}
 	return builder.Build()
-}
-
-// BuildExtensions processes multiple packages
-func BuildExtensions(packages []string, pgVersions string, debugPkg bool) error {
-	if len(packages) == 0 {
-		return fmt.Errorf("no packages specified")
-	}
-
-	for _, pkg := range packages {
-		if err := BuildExtension(pkg, pgVersions, debugPkg); err != nil {
-			logrus.Errorf("Failed to build %s: %v", pkg, err)
-		}
-	}
-	return nil
 }
 
 // BuildMake builds packages using Makefile

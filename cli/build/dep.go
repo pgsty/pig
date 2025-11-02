@@ -110,17 +110,13 @@ func installRpmDep(pkg string, pgVersion string) error {
 
 	specFile := filepath.Join(specsDir, pkgName+".spec")
 	if _, err := os.Stat(specFile); os.IsNotExist(err) {
-		logrus.Warnf("Spec file not found: %s (skipping)", specFile)
+		logrus.Warnf("spec %s not found (skipping)", specFile)
 		return nil
 	}
 
 	// Install dependencies
-	logrus.Infof("Installing deps for %s (PG%s)", pkgName, pgVer)
-	cmd := []string{
-		"dnf", "builddep", "-y",
-		"--define", fmt.Sprintf("pgmajorversion %s", pgVer),
-		specFile,
-	}
+	logrus.Infof("install deps for %s (PG%s)", pkgName, pgVer)
+	cmd := []string{"dnf", "builddep", "-y", "--define", fmt.Sprintf("pgmajorversion %s", pgVer), specFile}
 
 	if err := utils.SudoCommand(cmd); err != nil {
 		return fmt.Errorf("[FAIL] %s build dep missing: %v", pkgName, err)
@@ -138,14 +134,11 @@ func installDebDep(pkg string, pgVersion string) error {
 	}
 
 	// Convert package name
-	debPkg := strings.ReplaceAll(pkg, "_", "-")
-	controlFile := filepath.Join(debDir, debPkg, "debian", "control.in")
-
-	// Try alternate location
+	controlFile := filepath.Join(debDir, pkg, "debian", "control.in")
 	if _, err := os.Stat(controlFile); os.IsNotExist(err) {
-		controlFile = filepath.Join(debDir, debPkg, "debian", "control.in1")
+		controlFile = filepath.Join(debDir, pkg, "debian", "control")
 		if _, err := os.Stat(controlFile); os.IsNotExist(err) {
-			logrus.Warnf("Control file not found for %s (skipping)", pkg)
+			logrus.Warnf("control file not found for %s (skipping)", pkg)
 			return nil
 		}
 	}
@@ -175,14 +168,14 @@ func installDebDep(pkg string, pgVersion string) error {
 	}
 
 	if len(deps) > 0 {
-		logrus.Infof("Installing %d dependencies for %s", len(deps), pkg)
+		logrus.Infof("install deps for %s dependencies for %s", pkg)
 		cmd := append([]string{"apt", "install", "-y"}, deps...)
 
 		if err := utils.SudoCommand(cmd); err != nil {
-			return fmt.Errorf("failed to install dependencies: %v", err)
+			return fmt.Errorf("[FAIL] %s build dep missing: %v", pkg, err)
 		}
 	}
 
-	logrus.Info("✓ Dependencies installed")
+	logrus.Infof("[DONE] %s build dep complete", pkg)
 	return nil
 }
