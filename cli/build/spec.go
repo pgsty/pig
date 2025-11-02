@@ -10,209 +10,183 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const (
-	RPMGitRepo = "https://github.com/pgsty/rpm.git"
-	DEBGitRepo = "https://github.com/pgsty/deb.git"
-)
-
 // Spec configuration for build environments
 type specConfig struct {
-	Type      string // "rpm" or "deb"
-	Tarball   string // tarball filename
-	TargetDir string // target directory name
+	Type      string   // "rpm" or "deb"
+	Tarball   string   // tarball filename
+	TargetDir string   // target directory name (e.g., "rpmbuild" or "debbuild")
+	SubDirs   []string // subdirectories to create
+	PkgDir    string   // package output directory (e.g., "RPMS" or "DEBS")
+	SrcDir    string   // source directory (always "SOURCES")
 }
 
-// GetSpecRepo manages build spec repository
-// Modes: sync (default), new (overwrite), git (legacy)
-func GetSpecRepo(args ...string) error {
-	mode := "sync"
-	if len(args) > 0 {
-		mode = args[0]
-	}
-
-	// Get configuration based on OS
-	spec := getSpecConfig()
-	if spec == nil {
-		return fmt.Errorf("unsupported OS type: %s", config.OSType)
-	}
-
-	switch mode {
-	case "git":
-		return specGitMode(spec)
-	case "new":
-		return specNewMode(spec)
-	default:
-		return specSyncMode(spec)
-	}
-}
-
-// CreateSourceSymlinks creates symlinks from ~/ext/src to traditional build locations
-func CreateSourceSymlinks() error {
-	// Source directory (~/ext/src)
-	srcDir := filepath.Join(config.HomeDir, "ext", "src")
-
-	// Target directories based on OS type
-	var targetDirs []string
+// SpecDirSetup manages build spec fhs
+func SpecDirSetup(force bool) error {
+	var spec *specConfig
 	switch config.OSType {
 	case config.DistroEL:
-		targetDirs = append(targetDirs, filepath.Join(config.HomeDir, "rpmbuild", "SOURCES"))
+		spec = &specConfig{
+			Type:      "rpm",
+			Tarball:   "rpmbuild.tar.gz",
+			TargetDir: "rpmbuild",
+			SubDirs:   []string{"SPECS", "RPMS", "SOURCES", "BUILD", "BUILDROOT", "SRPMS"},
+			PkgDir:    "RPMS",
+			SrcDir:    "SOURCES",
+		}
 	case config.DistroDEB:
-		targetDirs = append(targetDirs, filepath.Join(config.HomeDir, "deb", "tarball"))
+		spec = &specConfig{
+			Type:      "deb",
+			Tarball:   "debbuild.tar.gz",
+			TargetDir: "debbuild",
+			SubDirs:   []string{"SPECS", "DEBS", "SOURCES", "BUILD"},
+			PkgDir:    "DEBS",
+			SrcDir:    "SOURCES",
+		}
+	default:
+		return fmt.Errorf("unsupported OS type: %s", config.OSType)
 	}
+	return syncSpec(spec, force)
+}
 
-	// Create symlinks for each target directory
-	for _, targetDir := range targetDirs {
-		if err := createDirSymlink(srcDir, targetDir); err != nil {
-			logrus.Warnf("Failed to create symlink %s -> %s: %v", targetDir, srcDir, err)
-		} else {
-			logrus.Debugf("Created symlink: %s -> %s", targetDir, srcDir)
+// setupBuildDirs creates complete directory structure and symlinks
+// Real directories: ~/ext/{pkg,src,log,tmp}
+// Symlinks in build dir point to ~/ext:
+// - ~/rpmbuild/RPMS -> ~/ext/pkg (or ~/debbuild/DEBS -> ~/ext/pkg)
+// - ~/rpmbuild/SOURCES -> ~/ext/src (or ~/debbuild/SOURCES -> ~/ext/src)
+func setupBuildDirs(spec *specConfig, force bool) error {
+	extDir := filepath.Join(config.HomeDir, "ext")
+	buildDir := filepath.Join(config.HomeDir, spec.TargetDir)
+
+	// 1. Create real directories under ~/ext
+	extPkgDir := filepath.Join(extDir, "pkg")
+	extSrcDir := filepath.Join(extDir, "src")
+	extLogDir := filepath.Join(extDir, "log")
+	extTmpDir := filepath.Join(extDir, "tmp")
+
+	for _, dir := range []string{extPkgDir, extSrcDir, extLogDir, extTmpDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", dir, err)
 		}
 	}
 
+	// 2. Create build subdirectories (skip PkgDir and SrcDir which will be symlinks)
+	for _, subDir := range spec.SubDirs {
+		if subDir == spec.PkgDir || subDir == spec.SrcDir {
+			continue // These will be created as symlinks below
+		}
+		dir := filepath.Join(buildDir, subDir)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", dir, err)
+		}
+	}
+
+	// 3. Create symlinks in build dir pointing to ~/ext
+	buildPkgLink := filepath.Join(buildDir, spec.PkgDir)
+	buildSrcLink := filepath.Join(buildDir, spec.SrcDir)
+
+	// Create: ~/rpmbuild/RPMS -> ~/ext/pkg (or ~/debbuild/DEBS -> ~/ext/pkg)
+	if err := createSymlink(extPkgDir, buildPkgLink, force); err != nil {
+		return fmt.Errorf("failed to create pkg symlink %s -> %s: %w", buildPkgLink, extPkgDir, err)
+	}
+	logrus.Debugf("Created symlink: %s -> %s", buildPkgLink, extPkgDir)
+
+	// Create: ~/rpmbuild/SOURCES -> ~/ext/src (or ~/debbuild/SOURCES -> ~/ext/src)
+	if err := createSymlink(extSrcDir, buildSrcLink, force); err != nil {
+		return fmt.Errorf("failed to create src symlink %s -> %s: %w", buildSrcLink, extSrcDir, err)
+	}
+	logrus.Debugf("Created symlink: %s -> %s", buildSrcLink, extSrcDir)
+
+	logrus.Infof("Build directory structure created at %s", buildDir)
 	return nil
 }
 
-// createDirSymlink creates a symbolic link from target to source
-func createDirSymlink(srcDir, targetDir string) error {
-	// Remove target if it exists (could be file, dir, or broken symlink)
-	if err := os.RemoveAll(targetDir); err != nil && !os.IsNotExist(err) {
-		return err
+// createSymlink creates a symbolic link: linkPath -> target
+// In force mode, aggressively removes any existing file/dir/symlink at linkPath
+func createSymlink(target, linkPath string, force bool) error {
+	// Remove existing file/dir/symlink at linkPath
+	if force {
+		// Force mode: ignore removal errors
+		os.RemoveAll(linkPath)
+	} else {
+		// Normal mode: return error if removal fails
+		if err := os.RemoveAll(linkPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove existing path: %w", err)
+		}
 	}
 
 	// Ensure parent directory exists
-	parentDir := filepath.Dir(targetDir)
+	parentDir := filepath.Dir(linkPath)
 	if err := os.MkdirAll(parentDir, 0755); err != nil {
-		return err
+		return fmt.Errorf("failed to create parent dir: %w", err)
 	}
 
-	// Create symlink
-	return os.Symlink(srcDir, targetDir)
+	// Create symlink: linkPath -> target
+	return os.Symlink(target, linkPath)
 }
 
-// EnsureSourceDirectory ensures ~/ext/src directory exists and sets up symlinks
-func EnsureSourceDirectory() error {
-	srcDir := filepath.Join(config.HomeDir, "ext", "src")
+// syncSpec: Download tarball and perform incremental sync via rsync
+func syncSpec(spec *specConfig, force bool) error {
+	logrus.Info("Syncing build spec repository")
 
-	// Create directory if not exists
-	if err := os.MkdirAll(srcDir, 0755); err != nil {
-		return err
-	}
-
-	// Create symlinks to traditional locations
-	return CreateSourceSymlinks()
-}
-
-// getSpecConfig returns spec configuration based on OS type
-func getSpecConfig() *specConfig {
-	switch config.OSType {
-	case config.DistroEL:
-		return &specConfig{"rpm", "rpm.tgz", "rpmbuild"}
-	case config.DistroDEB:
-		return &specConfig{"deb", "deb.tgz", "deb"}
-	default:
-		return nil
-	}
-}
-
-// specSyncMode: Download and incremental sync via rsync
-func specSyncMode(spec *specConfig) error {
-	logrus.Info("Syncing build spec repository (incremental mode)")
-	return syncSpec(spec, false)
-}
-
-// specNewMode: Download and reset to default state via rsync --delete
-func specNewMode(spec *specConfig) error {
-	logrus.Info("Resetting build spec repository to default state")
-	return syncSpec(spec, true)
-}
-
-// syncSpec: Common sync implementation with optional --delete flag
-func syncSpec(spec *specConfig, reset bool) error {
-	// Setup paths - use ~/ext as base directory
+	// Setup paths
 	extDir := filepath.Join(config.HomeDir, "ext")
 	tarballPath := filepath.Join(extDir, spec.Tarball)
 	tempExtractDir := filepath.Join(extDir, spec.TargetDir)
 	targetDir := filepath.Join(config.HomeDir, spec.TargetDir)
 
-	// Ensure ext directory exists (including log subdirectory)
-	if err := os.MkdirAll(extDir, 0755); err != nil {
-		return fmt.Errorf("failed to create ext dir: %w", err)
-	}
-	logDir := filepath.Join(extDir, "log")
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return fmt.Errorf("failed to create log dir: %w", err)
+	// 1. Setup complete directory structure and symlinks first
+	logrus.Infof("Setting up build directory structure at %s", targetDir)
+	if err := setupBuildDirs(spec, force); err != nil {
+		return fmt.Errorf("failed to setup build directories: %w", err)
 	}
 
-	// Download tarball (skip if exists)
-	if err := downloadTarball(spec.Tarball, tarballPath); err != nil {
+	// 2. Download tarball (force re-download if requested)
+	if err := downloadTarball(spec.Tarball, tarballPath, force); err != nil {
 		return err
 	}
 
-	// Extract to temp directory
+	// 3. Extract to temp directory (clean first in force mode)
+	if force {
+		os.RemoveAll(tempExtractDir) // Ignore errors in force mode
+	}
 	if err := extractToDir(tarballPath, tempExtractDir); err != nil {
 		return err
 	}
 
-	// Ensure target directory exists
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("failed to create target dir: %w", err)
-	}
-
-	// Build rsync command
-	rsyncCmd := []string{"rsync", "-az"}
-	if reset {
-		// Add --delete to reset directory to default state
-		rsyncCmd = append(rsyncCmd, "--delete")
-		logrus.Infof("Resetting %s to default state", targetDir)
-	} else {
-		logrus.Infof("Syncing changes to %s", targetDir)
-	}
-	rsyncCmd = append(rsyncCmd, tempExtractDir+"/", targetDir+"/")
-
-	// Execute rsync
+	// 4. Incremental sync via rsync
+	logrus.Infof("Syncing changes to %s", targetDir)
+	rsyncCmd := []string{"rsync", "-az", tempExtractDir + "/", targetDir + "/"}
 	if err := utils.Command(rsyncCmd); err != nil {
 		return fmt.Errorf("failed to rsync: %w", err)
 	}
 
-	// Post-setup
+	// 5. Post-setup (OS-specific tasks)
 	if err := postSetup(spec); err != nil {
 		return err
 	}
 
-	// Create source symlinks for compatibility
-	if err := EnsureSourceDirectory(); err != nil {
-		logrus.Warnf("Failed to setup source directory symlinks: %v", err)
-	}
-
-	action := "synced"
-	if reset {
-		action = "reset"
-	}
-	logrus.Infof("Successfully %s %s spec to %s", action, spec.Type, targetDir)
+	logrus.Infof("Successfully synced %s spec to %s", spec.Type, targetDir)
 	return nil
 }
 
-// specGitMode: Legacy git clone method
-func specGitMode(spec *specConfig) error {
-	logrus.Info("Using git clone method for build spec")
-
-	switch spec.Type {
-	case "rpm":
-		return gitCloneRPM()
-	case "deb":
-		return gitCloneDEB()
-	default:
-		return fmt.Errorf("unknown spec type: %s", spec.Type)
-	}
-}
-
 // downloadTarball downloads spec tarball if not already present
-func downloadTarball(filename, localPath string) error {
-	// Check if already exists
-	if info, err := os.Stat(localPath); err == nil {
-		logrus.Infof("Using existing tarball: %s (%.2f MB)",
-			localPath, float64(info.Size())/(1024*1024))
-		return nil
+func downloadTarball(filename, localPath string, force bool) error {
+	// If force is true, remove existing file
+	if force {
+		if err := os.RemoveAll(localPath); err != nil && !os.IsNotExist(err) {
+			logrus.Warnf("Failed to remove existing tarball: %v", err)
+		} else if err == nil {
+			logrus.Infof("Removed existing tarball for re-download: %s", localPath)
+		}
+	}
+
+	// Check if already exists (and not forcing)
+	if !force {
+		if info, err := os.Stat(localPath); err == nil {
+			logrus.Infof("Using existing tarball: %s (%.2f MB)",
+				localPath, float64(info.Size())/(1024*1024))
+			return nil
+		}
 	}
 
 	// Construct download URL
@@ -243,13 +217,13 @@ func extractToDir(tarballPath, targetDir string) error {
 
 // postSetup performs OS-specific post-installation setup
 func postSetup(spec *specConfig) error {
+	targetDir := filepath.Join(config.HomeDir, spec.TargetDir)
+
 	switch spec.Type {
 	case "rpm":
-		targetDir := filepath.Join(config.HomeDir, spec.TargetDir)
-
-		// Setup RPM build tree structure
+		// Setup RPM build tree structure (may create additional macros/config)
 		if err := utils.Command([]string{"rpmdev-setuptree"}); err != nil {
-			logrus.Debugf("rpmdev-setuptree failed: %v", err)
+			logrus.Debugf("rpmdev-setuptree failed (non-critical): %v", err)
 		}
 
 		// Fix ownership to current user
@@ -264,74 +238,12 @@ func postSetup(spec *specConfig) error {
 		}
 
 	case "deb":
-		// Create additional directories for DEB
-		dirs := []string{
-			filepath.Join(config.HomeDir, spec.TargetDir, "tarball"),
-			"/tmp/deb",
+		// Create /tmp/deb working directory for Debian builds
+		tmpDir := "/tmp/deb"
+		if err := os.MkdirAll(tmpDir, 0755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", tmpDir, err)
 		}
-		for _, dir := range dirs {
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				return fmt.Errorf("failed to create %s: %w", dir, err)
-			}
-		}
+		logrus.Debugf("Created temporary build directory: %s", tmpDir)
 	}
-	return nil
-}
-
-// Legacy git clone implementations
-
-func gitCloneRPM() error {
-	tempDir := "/tmp/rpm"
-	targetDir := filepath.Join(config.HomeDir, "rpmbuild")
-
-	// Clean temp directory
-	os.RemoveAll(tempDir)
-
-	// Clone repository
-	logrus.Infof("Cloning RPM repository from %s", RPMGitRepo)
-	if err := utils.Command([]string{"git", "clone", RPMGitRepo, tempDir}); err != nil {
-		return fmt.Errorf("failed to clone: %w", err)
-	}
-
-	// Setup RPM build tree
-	utils.Command([]string{"rpmdev-setuptree"})
-	rsyncCmd := []string{"rsync", "-a", filepath.Join(tempDir, "rpmbuild") + "/", targetDir + "/"}
-	if err := utils.Command(rsyncCmd); err != nil {
-		return fmt.Errorf("failed to rsync: %w", err)
-	}
-
-	// Fix ownership to current user (chown -R)
-	if config.CurrentUser != "" && config.CurrentUser != "root" {
-		logrus.Debugf("Fixing ownership of %s to %s", targetDir, config.CurrentUser)
-		chownCmd := []string{"chown", "-R", fmt.Sprintf("%s:%s", config.CurrentUser, config.CurrentUser), targetDir}
-		if err := utils.SudoCommand(chownCmd); err != nil {
-			logrus.Warnf("Failed to fix ownership: %v", err)
-		}
-	}
-	logrus.Infof("RPM build environment ready at %s", targetDir)
-	return nil
-}
-
-func gitCloneDEB() error {
-	targetDir := filepath.Join(config.HomeDir, "deb")
-
-	// Clean and clone
-	os.RemoveAll(targetDir)
-
-	logrus.Infof("Cloning DEB repository from %s", DEBGitRepo)
-	if err := utils.Command([]string{"git", "clone", DEBGitRepo, targetDir}); err != nil {
-		return fmt.Errorf("failed to clone: %w", err)
-	}
-
-	// Create additional directories
-	dirs := []string{
-		filepath.Join(targetDir, "tarball"),
-		"/tmp/deb",
-	}
-	for _, dir := range dirs {
-		os.MkdirAll(dir, 0755)
-	}
-
-	logrus.Infof("DEB build environment ready at %s", targetDir)
 	return nil
 }

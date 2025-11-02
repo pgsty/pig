@@ -141,7 +141,7 @@ func (b *ExtensionBuilder) validateBuildFiles() error {
 		}
 	case config.DistroDEB:
 		if b.Extension != nil {
-			b.SpecPath = filepath.Join(config.HomeDir, "deb", b.Extension.Pkg, "debian", "control")
+			b.SpecPath = filepath.Join(config.HomeDir, "debbuild", b.Extension.Pkg, "debian", "control")
 		}
 		if _, err := os.Stat(b.SpecPath + ".in"); err != nil {
 			logrus.Debugf("control file not found: %s", b.SpecPath+".in")
@@ -547,7 +547,7 @@ func (b *ExtensionBuilder) findArtifact(pgVer int, task *BuildTask) {
 		artifactDir = filepath.Join(b.HomeDir, "rpmbuild", "RPMS", b.OSArch)
 		pattern = filepath.Join(artifactDir, fmt.Sprintf("%s_%d*.rpm", b.Extension.Pkg, pgVer))
 	case "deb":
-		artifactDir = filepath.Join(b.HomeDir, "deb", "pool")
+		artifactDir = filepath.Join(b.HomeDir, "debbuild", "DEBS", "pool")
 		pattern = filepath.Join(artifactDir, fmt.Sprintf("%s_%d*.deb", b.Extension.Pkg, pgVer))
 	}
 

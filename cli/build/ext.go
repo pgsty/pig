@@ -61,7 +61,7 @@ func BuildMake(pkg string, pgVersions string, debugPkg bool) error {
 	case "rpm":
 		makeDir = filepath.Join(config.HomeDir, "rpmbuild")
 	case "deb":
-		makeDir = filepath.Join(config.HomeDir, "deb")
+		makeDir = filepath.Join(config.HomeDir, "debbuild")
 	default:
 		return fmt.Errorf("unsupported OS type for make build: %s", config.OSType)
 	}

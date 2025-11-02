@@ -132,9 +132,9 @@ func installRpmDep(pkg string, pgVersion string) error {
 
 // Install DEB build dependency for single package
 func installDebDep(pkg string, pgVersion string) error {
-	debDir := filepath.Join(config.HomeDir, "deb")
+	debDir := filepath.Join(config.HomeDir, "debbuild")
 	if _, err := os.Stat(debDir); os.IsNotExist(err) {
-		return fmt.Errorf("deb directory not found: run 'pig build spec' first")
+		return fmt.Errorf("debbuild directory not found: run 'pig build spec' first")
 	}
 
 	// Convert package name
