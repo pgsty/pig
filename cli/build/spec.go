@@ -106,7 +106,7 @@ func createSymlink(target, linkPath string, force bool) error {
 	// Remove existing file/dir/symlink at linkPath
 	if force {
 		// Force mode: ignore removal errors
-		os.RemoveAll(linkPath)
+		_ = os.RemoveAll(linkPath)
 	} else {
 		// Normal mode: return error if removal fails
 		if err := os.RemoveAll(linkPath); err != nil && !os.IsNotExist(err) {
@@ -126,7 +126,7 @@ func createSymlink(target, linkPath string, force bool) error {
 
 // syncSpec: Download tarball and perform incremental sync via rsync
 func syncSpec(spec *specConfig, force bool) error {
-	logrus.Info("Syncing build spec repository")
+	logrus.Info("sync extension specs")
 
 	// Setup paths
 	extDir := filepath.Join(config.HomeDir, "ext")
@@ -135,9 +135,9 @@ func syncSpec(spec *specConfig, force bool) error {
 	targetDir := filepath.Join(config.HomeDir, spec.TargetDir)
 
 	// 1. Setup complete directory structure and symlinks first
-	logrus.Infof("Setting up build directory structure at %s", targetDir)
+	logrus.Infof("create spec dir at %s", targetDir)
 	if err := setupBuildDirs(spec, force); err != nil {
-		return fmt.Errorf("failed to setup build directories: %w", err)
+		return fmt.Errorf("failed to setup spec dir: %w", err)
 	}
 
 	// 2. Download tarball (force re-download if requested)
@@ -147,14 +147,14 @@ func syncSpec(spec *specConfig, force bool) error {
 
 	// 3. Extract to temp directory (clean first in force mode)
 	if force {
-		os.RemoveAll(tempExtractDir) // Ignore errors in force mode
+		_ = os.RemoveAll(tempExtractDir) // Ignore errors in force mode
 	}
 	if err := extractToDir(tarballPath, tempExtractDir); err != nil {
 		return err
 	}
 
 	// 4. Incremental sync via rsync
-	logrus.Infof("Syncing changes to %s", targetDir)
+	logrus.Debugf("sync changes to %s", targetDir)
 	rsyncCmd := []string{"rsync", "-az", tempExtractDir + "/", targetDir + "/"}
 	if err := utils.Command(rsyncCmd); err != nil {
 		return fmt.Errorf("failed to rsync: %w", err)
@@ -165,7 +165,7 @@ func syncSpec(spec *specConfig, force bool) error {
 		return err
 	}
 
-	logrus.Infof("Successfully synced %s spec to %s", spec.Type, targetDir)
+	logrus.Infof("%s spec ready at %s", spec.Type, targetDir)
 	return nil
 }
 
@@ -174,16 +174,16 @@ func downloadTarball(filename, localPath string, force bool) error {
 	// If force is true, remove existing file
 	if force {
 		if err := os.RemoveAll(localPath); err != nil && !os.IsNotExist(err) {
-			logrus.Warnf("Failed to remove existing tarball: %v", err)
+			logrus.Warnf("fail to remove existing tarball: %v", err)
 		} else if err == nil {
-			logrus.Infof("Removed existing tarball for re-download: %s", localPath)
+			logrus.Infof("remove existing spec tarball and re-download: %s", localPath)
 		}
 	}
 
 	// Check if already exists (and not forcing)
 	if !force {
 		if info, err := os.Stat(localPath); err == nil {
-			logrus.Infof("Using existing tarball: %s (%.2f MB)",
+			logrus.Infof("found existing tarball: %s (%.2f MB)",
 				localPath, float64(info.Size())/(1024*1024))
 			return nil
 		}
@@ -193,7 +193,7 @@ func downloadTarball(filename, localPath string, force bool) error {
 	baseURL := config.RepoPigstyCC
 	url := fmt.Sprintf("%s/ext/spec/%s", baseURL, filename)
 
-	logrus.Infof("Downloading %s from %s", filename, url)
+	logrus.Debugf("download %s from %s", filename, url)
 	return utils.DownloadFile(url, localPath)
 }
 
@@ -228,7 +228,7 @@ func postSetup(spec *specConfig) error {
 
 		// Fix ownership to current user
 		if config.CurrentUser != "" && config.CurrentUser != "root" {
-			logrus.Debugf("Fixing ownership of %s to %s", targetDir, config.CurrentUser)
+			logrus.Debugf("fixing ownership of %s to %s", targetDir, config.CurrentUser)
 			chownCmd := []string{"chown", "-R",
 				fmt.Sprintf("%s:%s", config.CurrentUser, config.CurrentUser),
 				targetDir}
@@ -243,7 +243,7 @@ func postSetup(spec *specConfig) error {
 		if err := os.MkdirAll(tmpDir, 0755); err != nil {
 			return fmt.Errorf("failed to create %s: %w", tmpDir, err)
 		}
-		logrus.Debugf("Created temporary build directory: %s", tmpDir)
+		logrus.Debugf("create temporary build directory: %s", tmpDir)
 	}
 	return nil
 }

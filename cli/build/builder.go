@@ -539,24 +539,86 @@ func (b *ExtensionBuilder) processCommandOutput(stdout, stderr io.Reader, pgVer 
 
 // findArtifact finds the build artifact
 func (b *ExtensionBuilder) findArtifact(pgVer int, task *BuildTask) {
-	var pattern string
 	var artifactDir string
+	var globPattern string
 
 	switch b.OSType {
 	case "rpm":
 		artifactDir = filepath.Join(b.HomeDir, "rpmbuild", "RPMS", b.OSArch)
-		pattern = filepath.Join(artifactDir, fmt.Sprintf("%s_%d*.rpm", b.Extension.Pkg, pgVer))
+		globPattern = b.resolvePackageGlob(b.Extension.RpmPkg, pgVer, "rpm")
 	case "deb":
 		artifactDir = filepath.Join(b.HomeDir, "debbuild", "DEBS", "pool")
-		pattern = filepath.Join(artifactDir, fmt.Sprintf("%s_%d*.deb", b.Extension.Pkg, pgVer))
+		globPattern = b.resolvePackageGlob(b.Extension.DebPkg, pgVer, "deb")
+	default:
+		return
 	}
 
-	if files, err := filepath.Glob(pattern); err == nil && len(files) > 0 {
-		task.Artifact = files[0]
-		if info, err := os.Stat(files[0]); err == nil {
-			task.Size = info.Size()
+	// Build full glob path
+	fullPattern := filepath.Join(artifactDir, globPattern)
+
+	// Find all matching files using glob
+	candidates, err := filepath.Glob(fullPattern)
+	if err != nil {
+		logrus.Debugf("glob pattern error: %v", err)
+		return
+	}
+	if len(candidates) == 0 {
+		logrus.Debugf("no artifacts found matching %s", fullPattern)
+		return
+	}
+
+	// Select the shortest filename (usually the main package)
+	artifact := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if len(filepath.Base(candidate)) < len(filepath.Base(artifact)) {
+			artifact = candidate
 		}
 	}
+
+	task.Artifact = artifact
+	if info, err := os.Stat(artifact); err == nil {
+		task.Size = info.Size()
+	}
+}
+
+// resolvePackageGlob resolves the package glob pattern from pkg pattern
+// Example: "acl_$v*" with pgVer=18 -> "acl_18*"
+// Example: "timescaledb-tsl_$v" with pgVer=18 -> "timescaledb-tsl_18*" (adds * if missing)
+func (b *ExtensionBuilder) resolvePackageGlob(pkgPattern string, pgVer int, osType string) string {
+	var defaultPattern string
+	if osType == "rpm" {
+		defaultPattern = fmt.Sprintf("%s_%d*.rpm", b.Extension.Pkg, pgVer)
+	} else {
+		defaultPattern = fmt.Sprintf("%s_%d*.deb", b.Extension.Pkg, pgVer)
+	}
+
+	if pkgPattern == "" {
+		return defaultPattern
+	}
+
+	// Split by whitespace and take first element
+	fields := strings.Fields(pkgPattern)
+	if len(fields) == 0 {
+		return defaultPattern
+	}
+	pattern := fields[0]
+
+	// Replace $v with major version
+	pattern = strings.ReplaceAll(pattern, "$v", fmt.Sprintf("%d", pgVer))
+
+	// Add * suffix if not present
+	if !strings.HasSuffix(pattern, "*") {
+		pattern = pattern + "*"
+	}
+
+	// Add file extension if not present
+	if osType == "rpm" && !strings.Contains(pattern, ".rpm") {
+		pattern = pattern + ".rpm"
+	} else if osType == "deb" && !strings.Contains(pattern, ".deb") {
+		pattern = pattern + ".deb"
+	}
+
+	return pattern
 }
 
 // printSummary prints the build summary
