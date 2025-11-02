@@ -16,6 +16,7 @@ var (
 	buildAllPg     string
 	buildAllSymbol bool
 	buildGetForce  bool
+	buildSpecForce bool
 	buildRustYes   bool
 )
 
@@ -28,7 +29,7 @@ var buildCmd = &cobra.Command{
 	Example: `pig build - Build Postgres Extension
 
 Environment Setup:
-  pig build spec  [new|git]        # init build spec and directory (~ext)
+  pig build spec                   # init build spec and directory (~ext)
   pig build repo                   # init build repo (=repo set -ru)
   pig build tool  [mini|full|...]  # init build toolset
   pig build rust  [-y]             # install Rust toolchain
@@ -48,7 +49,6 @@ Quick Start:
 `,
 }
 
-
 // buildRepoCmd represents the `build repo` command
 var buildRepoCmd = &cobra.Command{
 	Use:     "repo",
@@ -57,7 +57,7 @@ var buildRepoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repoRemove = true
 		repoUpdate = true
-		return repoAddCmd.RunE(cmd, args)
+		return repoSetCmd.RunE(cmd, args)
 	},
 }
 
@@ -119,19 +119,13 @@ var buildPgrxCmd = &cobra.Command{
 
 // buildSpecCmd represents the `build spec` command
 var buildSpecCmd = &cobra.Command{
-	Use:   "spec [mode]",
-	Short: "Initialize building spec repo",
-	Long: `Download and sync build spec repository.
-
-Modes:
-  (default) - Download tarball and incremental sync via rsync
-  new       - Download tarball and reset to default state (rsync --delete)
-  git       - Legacy mode using git clone (slower)`,
-	Aliases:   []string{"s"},
-	Args:      cobra.MaximumNArgs(1),
-	ValidArgs: []string{"new", "git"},
+	Use:     "spec",
+	Short:   "Initialize building spec repo",
+	Long:    "Download and sync build spec repository via tarball and incremental rsync",
+	Aliases: []string{"s"},
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.GetSpecRepo(args...)
+		return build.SpecDirSetup(buildSpecForce)
 	},
 }
 
@@ -187,6 +181,9 @@ func init() {
 
 	// Add pgrx specific flags
 	buildPgrxCmd.Flags().StringVar(&buildPgrxPg, "pg", "", "comma-separated PG versions to init (e.g. '18,17,16'), 'init' for no args, or auto-detect if empty")
+
+	// Add spec specific flags
+	buildSpecCmd.Flags().BoolVarP(&buildSpecForce, "force", "f", false, "force re-download tarball even if exists")
 
 	// Add get specific flags
 	buildGetCmd.Flags().BoolVarP(&buildGetForce, "force", "f", false, "force download even if file exists")

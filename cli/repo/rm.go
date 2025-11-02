@@ -25,29 +25,47 @@ func (m *Manager) RemoveRepo(modules ...string) error {
 	if len(rmFileList) == 0 {
 		return fmt.Errorf("no module specified")
 	}
-	rmCmd := []string{"m", "-f"}
+	rmCmd := []string{"rm", "-f"}
 	rmCmd = append(rmCmd, rmFileList...)
-	logrus.Warnf("remove repo with: m -f %s", strings.Join(rmCmd, " "))
+	logrus.Warnf("remove repo with: rm -f %s", strings.Join(rmCmd, " "))
 	return utils.SudoCommand(rmCmd)
 }
 
 // BackupRepo makes a backup of the current repo files (sudo required)
 func (m *Manager) BackupRepo() error {
-	logrus.Infof("backup repos: %s to %s", m.RepoPattern, m.BackupDir)
+	logrus.Infof("backup repos from %s to %s", m.RepoDir, m.BackupDir)
 
 	// Create backup directory and move files using sudo
 	if err := utils.SudoCommand([]string{"mkdir", "-p", m.BackupDir}); err != nil {
 		return err
 	}
-	files, err := filepath.Glob(m.RepoPattern)
+
+	// Scan directory and collect all regular files
+	entries, err := os.ReadDir(m.RepoDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read repo directory: %w", err)
 	}
-	for _, file := range files {
-		dest := filepath.Join(m.BackupDir, filepath.Base(file))
-		logrus.Debugf("mv -f %s %s", file, dest)
-		if err := utils.SudoCommand([]string{"mv", "-f", file, dest}); err != nil {
-			logrus.Errorf("failed to mv %s to %s: %v", file, dest, err)
+
+	var filesToMove []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		fullPath := filepath.Join(m.RepoDir, entry.Name())
+		if strings.Contains(fullPath, m.BackupDir) {
+			continue
+		}
+		filesToMove = append(filesToMove, fullPath)
+	}
+
+	// Move all files in one command if any exist
+	if len(filesToMove) > 0 {
+		mvCmd := []string{"mv", "-f"}
+		mvCmd = append(mvCmd, filesToMove...)
+		mvCmd = append(mvCmd, m.BackupDir)
+		logrus.Debugf("mv -f %s... %s", filepath.Base(filesToMove[0]), m.BackupDir)
+		if err := utils.SudoCommand(mvCmd); err != nil {
+			return fmt.Errorf("failed to move repo files: %w", err)
 		}
 	}
 
