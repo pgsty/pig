@@ -94,6 +94,9 @@ release-new: goreleaser-release
 ###############################################################
 #                       Development                           #
 ###############################################################
+u: upload
+upload:
+	bin/upload.sh
 r: run
 run:
 	go run main.go
@@ -103,6 +106,7 @@ build:
 c: clean
 clean:
 	rm -rf pig
+
 d:
 	hugo serve
 b:

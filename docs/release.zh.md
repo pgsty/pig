@@ -8,6 +8,7 @@ breadcrumbs: false
 
 |       版本        |     日期     | 摘要                             |                           GitHub                           |
 |:---------------:|:----------:|--------------------------------|:----------------------------------------------------------:|
+| [v0.7.0](#v070) | 2025-11-05 | 强化 build 能力，大批量包更新             | [v0.7.0](https://github.com/pgsty/pig/releases/tag/v0.7.0) |
 | [v0.6.2](#v062) | 2025-10-03 | 正式提供 PG 18 支持                  | [v0.6.2](https://github.com/pgsty/pig/releases/tag/v0.6.2) |
 | [v0.6.1](#v061) | 2025-08-13 | 添加 CI/CD 管道，使用 PIGSTY PGDG 仓库  | [v0.6.1](https://github.com/pgsty/pig/releases/tag/v0.6.1) |
 | [v0.6.0](#v060) | 2025-07-17 | 423 个扩展，percona pg_tde，mcp 工具箱 | [v0.6.0](https://github.com/pgsty/pig/releases/tag/v0.6.0) |
@@ -28,6 +29,23 @@ breadcrumbs: false
 | [v0.1.1](#v011) | 2025-01-09 | 更新扩展列表                         | [v0.1.1](https://github.com/pgsty/pig/releases/tag/v0.1.1) |
 | [v0.1.0](#v010) | 2024-12-29 | repo、ext、sty 和自更新              | [v0.1.0](https://github.com/pgsty/pig/releases/tag/v0.1.0) |
 | [v0.0.1](#v001) | 2024-12-23 | 创世发布                           | [v0.0.1](https://github.com/pgsty/pig/releases/tag/v0.0.1) |
+
+
+## v0.7.0
+
+- 大批量扩展更新至最新版本，带有 PostgreSQL 18 支持。
+- 几乎所有 Rust 扩展现已通过 pgrx 0.16.1 支持 PG 18
+- `pig build` 命令彻底重做
+    - `pig build pkg <pkg>` 现在会一条龙完成扩展的下载，依赖安装，构建
+    - `pig build pgrx` 命令现在从 `pig build rust` 中分离
+    - `pig build pgrx [-v pgrx_version]` 现在可以直接使用现有的 PG 安装
+    - `pig build dep` 现在会处理 EL 和 Debian 系统下的扩展依赖
+    - `pig build ext` 命令现在有了更为紧凑和美观的输出，可在 EL 下不依赖 build 脚本直接构建 RPM
+    - `pig build spec` 现在支持直接从Pigsty仓库下载 spec 文件包
+    - `pig build repo` / `pig repo add` / `pig repo set` 现在默认使用 `node,pgsql,infra` 仓库模块，取代原本的 `node,pgdg,pigsty`
+- 大量优化了错误日志记录。
+- 基于 hugo 与 hextra 全新目录网站
+
 
 
 ## v0.6.2

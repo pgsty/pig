@@ -36,16 +36,16 @@ You can also download `pig` package (`RPM`/`DEB`/ Tarball) directly from the [La
 
 {{< filetree/container >}}
 {{< filetree/file name="latest" >}}
-{{< filetree/folder name="v0.6.0" state="open" >}}
-{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig_0.6.0-1_amd64.deb" >}}
-{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig_0.6.0-1_arm64.deb" >}}
-{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig-0.6.1-1.aarch64.rpm" >}}
-{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig-0.6.1-1.x86_64.rpm" >}}
-{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig-v0.6.0.linux-amd64.tar.gz" >}}
-{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig-v0.6.0.linux-arm64.tar.gz" >}}
+{{< filetree/folder name="v0.7.0" state="open" >}}
+{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig_0.7.0-1_amd64.deb" >}}
+{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig_0.7.0-1_arm64.deb" >}}
+{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig-0.7.0-1.aarch64.rpm" >}}
+{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig-0.7.0-1.x86_64.rpm" >}}
+{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig-v0.7.0.linux-amd64.tar.gz" >}}
+{{< filetree/file name="https://repo.pigsty.io/pkg/pig/v0.6.0/pig-v0.7.0.linux-arm64.tar.gz" >}}
 
 {{< /filetree/folder >}}
-{{< filetree/folder name="v0.5.0" state="closed" >}}{{< /filetree/folder >}}
+{{< filetree/folder name="v0.6.2" state="closed" >}}{{< /filetree/folder >}}
 {{< filetree/folder name="......" state="closed" >}}{{< /filetree/folder >}}
 {{< /filetree/container >}}
 

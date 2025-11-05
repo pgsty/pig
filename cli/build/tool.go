@@ -25,19 +25,19 @@ var buildTools = map[string][]string{
 	},
 	"d12": {
 		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
-		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
+		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "libxslt1-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
 	},
 	"d13": {
 		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
-		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
+		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "libxslt1-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
 	},
 	"u22": {
 		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
-		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
+		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "libxslt1-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
 	},
 	"u24": {
 		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
-		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
+		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "libxslt1-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
 	},
 }
 

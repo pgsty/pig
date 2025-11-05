@@ -17,6 +17,8 @@ var SpecialSourceMapping = map[string][]string{
 	"scws":       {"scws-1.2.3.tar.bz2"},
 	"openhalodb": {"openhalodb-1.0.tar.gz"},
 	"oriolepg":   {"oriolepg-17.11.tar.gz"},
+	"hunspell":   {"hunspell-1.0.tar.gz"},
+	"libfq":      {"libfq-0.6.1.tar.gz"},
 
 	// Multi-version PostgreSQL source packages
 	"libfepgutils": {
