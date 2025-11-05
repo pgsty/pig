@@ -111,10 +111,16 @@ func (b *ExtensionBuilder) Build() error {
 	b.checkRustEnvironment()
 	b.printBuildInfo()
 
-	// Execute builds for all PG versions
-	for _, pgVer := range b.PGVersions {
-		logrus.Debugf("build %s for PG %d", b.PackageName, pgVer)
-		b.buildForPGVersion(pgVer)
+	// Execute builds based on OS type
+	if b.OSType == config.DistroDEB {
+		// Debian/Ubuntu builds all PG versions at once
+		b.buildForAll()
+	} else {
+		// EL builds for each PG version separately
+		for _, pgVer := range b.PGVersions {
+			logrus.Debugf("build %s for PG %d", b.PackageName, pgVer)
+			b.buildForPGVersion(pgVer)
+		}
 	}
 
 	// Display final summary
@@ -456,6 +462,85 @@ func (b *ExtensionBuilder) buildForPGVersion(pgVer int) {
 	}
 }
 
+// buildForAll builds all PG versions at once (Debian/Ubuntu)
+func (b *ExtensionBuilder) buildForAll() {
+	// Display progress
+	fmt.Printf("[ALL]  Building %s for all PG versions...", b.Extension.Name)
+
+	// Initialize build task (use pgVer=0 as special marker for "all versions")
+	beginTime := time.Now()
+	taskID := fmt.Sprintf("%s_all_%s", b.PackageName, beginTime.Format("20060102150405"))
+
+	task := &BuildTask{
+		ID:        taskID,
+		Package:   b.PackageName,
+		BeginTime: beginTime,
+		LogPath:   b.LogPath,
+		Builder:   b,
+	}
+	b.Builds[0] = task // Use 0 as key for "all versions" build
+
+	// Build directory
+	buildDir := filepath.Join(b.HomeDir, "debbuild", b.Extension.Pkg)
+
+	// Create command
+	cmd := exec.Command("make")
+	cmd.Dir = buildDir
+
+	// Set environment
+	envPATH := os.Getenv("PATH")
+	cmd.Env = append(os.Environ(), "PATH="+envPATH)
+
+	// Prepare metadata
+	metadata := []string{
+		fmt.Sprintf("BUILD: %s (all PG versions)", b.Extension.Name),
+		fmt.Sprintf("DIR  : %s", buildDir),
+		fmt.Sprintf("TIME : %s", time.Now().Format("2006-01-02 15:04:05 -07")),
+		fmt.Sprintf("PATH : %s", envPATH),
+		fmt.Sprintf("CMD  : make"),
+	}
+
+	// Write task header to log
+	b.writeTaskHeader(task)
+
+	// Write metadata to log
+	if len(metadata) > 0 {
+		b.writeLog(metadata...)
+		b.writeLog(strings.Repeat("=", b.HeaderWidth))
+	}
+
+	// Execute build command
+	if err := b.executeBuildCommand(cmd, 0, task); err != nil {
+		task.Error = err.Error()
+	} else {
+		task.Success = true
+		b.findDebianArtifacts(task)
+	}
+
+	// Set end time
+	task.EndTime = time.Now()
+
+	// Write task footer to log
+	b.writeTaskFooter(task)
+
+	// Clear progress line and display result
+	fmt.Print("\r\033[K")
+	if task.Success {
+		logrus.Infof("[ALL] [PASS] Built packages:")
+		// Print each artifact
+		if task.Artifact != "" {
+			artifacts := strings.Split(task.Artifact, "\n")
+			for _, artifact := range artifacts {
+				if artifact != "" {
+					logrus.Infof("  - %s", artifact)
+				}
+			}
+		}
+	} else {
+		logrus.Errorf("[ALL] [FAIL] %s", fmt.Sprintf("grep -A60 %s %s", task.ID, b.LogPath))
+	}
+}
+
 // createRPMBuildCommand creates the rpmbuild command
 func (b *ExtensionBuilder) createRPMBuildCommand(pgVer int, task *BuildTask) (*exec.Cmd, []string) {
 	args := []string{
@@ -574,6 +659,9 @@ func (b *ExtensionBuilder) processCommandOutput(stdout, stderr io.Reader, pgVer 
 			// Display progress
 			if pgVer > 0 {
 				fmt.Printf("\r\033[K[PG%d]  %s", pgVer, truncateLine(line, 60))
+			} else if pgVer == 0 && b.OSType == config.DistroDEB {
+				// Debian all-versions build
+				fmt.Printf("\r\033[K[ALL]  %s", truncateLine(line, 60))
 			}
 		}
 		doneChan <- true
@@ -656,6 +744,70 @@ func (b *ExtensionBuilder) findArtifact(pgVer int, task *BuildTask) {
 	}
 }
 
+// findDebianArtifacts finds all build artifacts for Debian (all PG versions)
+func (b *ExtensionBuilder) findDebianArtifacts(task *BuildTask) {
+	artifactDir := filepath.Join(b.HomeDir, "ext", "pkg")
+
+	// Check if directory exists
+	if _, err := os.Stat(artifactDir); err != nil {
+		logrus.Debugf("artifact directory not found: %s", artifactDir)
+		return
+	}
+
+	// Find packages for each PG version
+	var foundArtifacts []string
+	var missingVersions []int
+	var totalSize int64
+
+	for _, pgVer := range b.PGVersions {
+		// Build glob pattern for this PG version
+		globPattern := b.resolvePackageGlob(b.Extension.DebPkg, pgVer, "deb")
+		fullPattern := filepath.Join(artifactDir, globPattern)
+
+		// Find matching files
+		candidates, err := filepath.Glob(fullPattern)
+		if err != nil {
+			logrus.Debugf("glob pattern error for PG%d: %v", pgVer, err)
+			missingVersions = append(missingVersions, pgVer)
+			continue
+		}
+
+		if len(candidates) == 0 {
+			logrus.Debugf("no artifacts found for PG%d matching %s", pgVer, fullPattern)
+			missingVersions = append(missingVersions, pgVer)
+			continue
+		}
+
+		// Select the shortest filename (usually the main package)
+		artifact := candidates[0]
+		for _, candidate := range candidates[1:] {
+			if len(filepath.Base(candidate)) < len(filepath.Base(artifact)) {
+				artifact = candidate
+			}
+		}
+
+		foundArtifacts = append(foundArtifacts, artifact)
+		if info, err := os.Stat(artifact); err == nil {
+			totalSize += info.Size()
+		}
+	}
+
+	// Store results
+	if len(foundArtifacts) > 0 {
+		task.Artifact = strings.Join(foundArtifacts, "\n")
+		task.Size = totalSize
+	}
+
+	// Log missing versions if any
+	if len(missingVersions) > 0 {
+		var missingStrs []string
+		for _, v := range missingVersions {
+			missingStrs = append(missingStrs, fmt.Sprintf("%d", v))
+		}
+		logrus.Warnf("Missing packages for PG versions: %s", strings.Join(missingStrs, ", "))
+	}
+}
+
 // resolvePackageGlob resolves the package glob pattern from pkg pattern
 // Example: "acl_$v*" with pgVer=18 -> "acl_18*"
 // Example: "timescaledb-tsl_$v" with pgVer=18 -> "timescaledb-tsl_18*" (adds * if missing)
@@ -698,24 +850,49 @@ func (b *ExtensionBuilder) resolvePackageGlob(pkgPattern string, pgVer int, osTy
 
 // printSummary prints the build summary
 func (b *ExtensionBuilder) printSummary() {
-	successCount := 0
-	for _, task := range b.Builds {
-		if task.Success {
-			successCount++
-		}
-	}
-
-	totalCount := len(b.PGVersions)
-	duration := time.Since(b.StartTime)
-
 	logrus.Info(strings.Repeat("-", b.HeaderWidth))
 
-	if successCount < totalCount {
-		logrus.Warnf("[DONE] FAIL %d of %d packages built (%d failed) in %v",
-			successCount, totalCount, totalCount-successCount, duration.Round(time.Second))
+	duration := time.Since(b.StartTime)
+	totalCount := len(b.PGVersions)
+
+	// Handle Debian all-versions build differently
+	if b.OSType == config.DistroDEB {
+		task := b.Builds[0]
+		if task != nil && task.Success {
+			// Count how many artifacts were found
+			artifactCount := 0
+			if task.Artifact != "" {
+				artifactCount = len(strings.Split(task.Artifact, "\n"))
+			}
+
+			if artifactCount == totalCount {
+				logrus.Infof("[DONE] PASS all %d packages built in %v",
+					totalCount, duration.Round(time.Second))
+			} else if artifactCount > 0 {
+				logrus.Warnf("[DONE] PARTIAL %d of %d packages built (%d missing) in %v",
+					artifactCount, totalCount, totalCount-artifactCount, duration.Round(time.Second))
+			} else {
+				logrus.Errorf("[DONE] FAIL no packages found in %v", duration.Round(time.Second))
+			}
+		} else {
+			logrus.Errorf("[DONE] FAIL build failed in %v", duration.Round(time.Second))
+		}
 	} else {
-		logrus.Infof("[DONE] PASS all %d packages built in %v",
-			totalCount, duration.Round(time.Second))
+		// EL per-version build
+		successCount := 0
+		for _, task := range b.Builds {
+			if task.Success {
+				successCount++
+			}
+		}
+
+		if successCount < totalCount {
+			logrus.Warnf("[DONE] FAIL %d of %d packages built (%d failed) in %v",
+				successCount, totalCount, totalCount-successCount, duration.Round(time.Second))
+		} else {
+			logrus.Infof("[DONE] PASS all %d packages built in %v",
+				totalCount, duration.Round(time.Second))
+		}
 	}
 }
 
