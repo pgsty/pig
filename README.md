@@ -2,14 +2,14 @@
 
 [![Website: pig.pgsty.com](https://img.shields.io/badge/Website-pig.pgsty.com-slategray?style=flat&logo=cilium&logoColor=white)](https://pig.pgsty.com)
 [![Catalog: ext.pgsty.com](https://img.shields.io/badge/Catalog-ext.pgsty.com-slategray?style=flat&logo=cilium&logoColor=white)](https://ext.pgsty.com/list)
-[![Version: v0.6.2](https://img.shields.io/badge/version-v0.6.2-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.6.2)
+[![Version: v0.7.0](https://img.shields.io/badge/version-v0.7.0-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.7.0)
 [![Pigsty: v3.6.1](https://img.shields.io/badge/Pigsty-v3.6.1-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com/release/latest)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 423](https://img.shields.io/badge/extensions-423-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pgsty.com/list)
+[![Extensions: 428](https://img.shields.io/badge/extensions-423-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://ext.pgsty.com/list)
 
 [**pig**](https://pig.pgsty.com) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](#compatibility) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13~17 along with [423 extensions](https://ext.pgsty.com/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13~18 along with [423 extensions](https://ext.pgsty.com/list) on (`amd64` / `arm64`) with native OS package manager
 
 > Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
 
@@ -20,10 +20,10 @@ Install PostgreSQL 13~17 along with [423 extensions](https://ext.pgsty.com/list)
 
 ## Get Started
 
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18b2,17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://doc.pgsty.com/pgsql)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18,17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://doc.pgsty.com/pgsql)
 [![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://doc.pgsty.com/node)
-[![EL Support: 8/9](https://img.shields.io/badge/EL-8/9-red?style=flat&logo=redhat&logoColor=red)](https://doc.pgsty.com/prepare/linux)
-[![Debian Support: 12](https://img.shields.io/badge/Debian-12-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://doc.pgsty.com/prepare/linux)
+[![EL Support: 8/9](https://img.shields.io/badge/EL-8/9/10-red?style=flat&logo=redhat&logoColor=red)](https://doc.pgsty.com/prepare/linux)
+[![Debian Support: 12](https://img.shields.io/badge/Debian-12/13-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://doc.pgsty.com/prepare/linux)
 [![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://doc.pgsty.com/prepare/linux)
 
 [Install](#installation) the `pig` package first, (you can also use the `apt` / `yum` or just copy the binary)
@@ -435,20 +435,18 @@ You can use the `pig sty` subcommand to bootstrap pigsty on current node.
 
 ## Compatibility
 
-`pig` runs on: RHEL 8/9, Ubuntu 22.04/24.04, and Debian 12 and compatible OS
+`pig` runs on: RHEL 8/9/10, Ubuntu 22.04/24.04, and Debian 12/13 and compatible OS
 
 |  Code   | Distribution                   |  `x86_64`  | `aarch64`  |
 |:-------:|--------------------------------|:----------:|:----------:|
-| **el9** | RHEL 9 / Rocky9 / Alma9  / ... | PG 17 - 13 | PG 17 - 13 |
-| **el8** | RHEL 8 / Rocky8 / Alma8 / ...  | PG 17 - 13 | PG 17 - 13 |
-| **u24** | Ubuntu 24.04 (`noble`)         | PG 17 - 13 | PG 17 - 13 |
-| **u22** | Ubuntu 22.04 (`jammy`)         | PG 17 - 13 | PG 17 - 13 |
-| **d12** | Debian 12 (`bookworm`)         | PG 17 - 13 | PG 17 - 13 |
+| **el9** | RHEL 9 / Rocky9 / Alma9  / ... | PG 18 - 13 | PG 18 - 13 |
+| **el8** | RHEL 8 / Rocky8 / Alma8 / ...  | PG 18 - 13 | PG 18 - 13 |
+| **u24** | Ubuntu 24.04 (`noble`)         | PG 18 - 13 | PG 18 - 13 |
+| **u22** | Ubuntu 22.04 (`jammy`)         | PG 18 - 13 | PG 18 - 13 |
+| **d12** | Debian 12 (`bookworm`)         | PG 18 - 13 | PG 18 - 13 |
 
 Here are some bad cases and limitations for above Linux distros:
 
-- [`pg_duckdb`](https://ext.pgsty.com/e/pg_duckdb) `el8:*:*`
-- [`pg_mooncake`](https://ext.pgsty.com/e/pg_mooncake) `el8:*:*`
 - [`pljava`](https://ext.pgsty.com/e/pljava): `el8:*:*`
 - [`pllua`](https://ext.pgsty.com/e/pllua): `el8:arm:13,14,15`
 - [`h3`](https://ext.pgsty.com/e/h3): `el8.amd.pg17`
