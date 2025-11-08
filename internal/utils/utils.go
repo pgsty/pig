@@ -74,11 +74,12 @@ func SudoCommand(args []string) error {
 		return fmt.Errorf("no command specified")
 	}
 	if config.CurrentUser != "root" {
-		// insert sudo as first cmd arg
 		args = append([]string{"sudo"}, args...)
+		logrus.Debugf("executing sudo command: %v", args)
+	} else {
+		logrus.Debugf("executing root command: %v", args)
 	}
 
-	logrus.Debugf("executing sudo command: %v", args)
 	// now split command and args again
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
@@ -95,12 +96,15 @@ func QuietSudoCommand(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no command specified")
 	}
+
+	// append sudo if not run as root
 	if config.CurrentUser != "root" {
-		// insert sudo as first cmd arg
 		args = append([]string{"sudo"}, args...)
+		logrus.Debugf("executing quite sudo command: %v", args)
+	} else {
+		logrus.Debugf("executing quite root command: %v", args)
 	}
 
-	logrus.Debugf("executing quiet sudo command: %v", args)
 	// now split command and args again
 	cmd := exec.Command(args[0], args[1:]...)
 	if err := cmd.Run(); err != nil {

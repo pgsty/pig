@@ -21,7 +21,7 @@ var buildTools = map[string][]string{
 	},
 	"el10": {
 		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "rpmdevtools", "dnf-utils", "pgdg-srpm-macros",
-		"readline-devel", "zlib-devel", "libxml2-devel", "lz4-devel", "libzstd-devel", "krb5-devel", "postgresql1*-devel", "postgresql1*-server",
+		"readline-devel", "zlib-devel", "libxml2-devel", "lz4-devel", "libzstd-devel", "openssl-devel", "krb5-devel", "postgresql1*-devel", "postgresql1*-server",
 	},
 	"d12": {
 		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",

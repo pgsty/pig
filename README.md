@@ -264,7 +264,7 @@ pig ext install pg_duckdb -p /usr/lib/postgresql/17/bin/pg_config    # specify a
 You can also install PostgreSQL kernel packages with:
 
 ```bash
-pig ext install pgvector=0.7.0 # install pgvector 0.7.0
+pig ext install pgvector=0.7.1 # install pgvector 0.7.0
 pig ext install pg16=16.5      # install PostgreSQL 16 with a specific minor version
 ```
 

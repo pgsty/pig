@@ -22,7 +22,7 @@ var updateCmd = &cobra.Command{
   
   pig update 				    # update pig to the latest version
   pig update [-v version]       # update pig to given version
-  pig update -v 0.7.0 		    # update pig to version 0.6.2
+  pig update -v 0.7.1 		    # update pig to version 0.6.2
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return get.UpdatePig(updateVersion, updateRegion)
