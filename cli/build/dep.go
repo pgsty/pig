@@ -168,7 +168,7 @@ func installDebDep(pkg string, pgVersion string) error {
 	}
 
 	if len(deps) > 0 {
-		logrus.Infof("install deps for %s dependencies for %s", pkg)
+		logrus.Infof("install deps for %s dependencies", pkg)
 		cmd := append([]string{"apt", "install", "-y"}, deps...)
 
 		if err := utils.SudoCommand(cmd); err != nil {
