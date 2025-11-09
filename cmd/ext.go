@@ -235,7 +235,8 @@ var extLinkCmd = &cobra.Command{
 	Aliases:      []string{"ln"},
 	SilenceUsage: true,
 	Example: `
-  pig ext link 16                      # link pgdg postgresql 16 to /usr/pgsql
+  pig ext link 18                      # link pgdg postgresql 18 to /usr/pgsql
+  pig ext link pg17                    # link postgresql 17 to /usr/pgsql (pg prefix stripped)
   pig ext link /usr/pgsql-16           # link specific pg to /usr/pgsql
   pig ext link /u01/polardb_pg         # link polardb pg to /usr/pgsql
   pig ext link null|none|nil|nop|no    # unlink current postgres install

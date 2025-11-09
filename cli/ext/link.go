@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/utils"
+	"regexp"
 	"strconv"
 
 	"github.com/sirupsen/logrus"
@@ -113,7 +114,8 @@ func generateProfile(pgHome, binDir string) []byte {
 // Usage:
 // 1) LinkPostgres("none")             -> Unlink
 // 2) LinkPostgres("14")               -> Link to system default path
-// 3) LinkPostgres("/custom/pg/path")  -> Link to custom directory
+// 3) LinkPostgres("pg17")             -> Link to PostgreSQL 17 (strip pg prefix)
+// 4) LinkPostgres("/custom/pg/path")  -> Link to custom directory
 func LinkPostgres(args ...string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("exactly one argument required, got %d", len(args))
@@ -122,6 +124,13 @@ func LinkPostgres(args ...string) error {
 	arg := args[0]
 	if unlinkKeywords[arg] {
 		return UnlinkPostgres()
+	}
+
+	// Handle pg<version> format (e.g., pg17, pg18)
+	pgVersionPattern := regexp.MustCompile(`^pg(\d+)$`)
+	if matches := pgVersionPattern.FindStringSubmatch(arg); matches != nil {
+		arg = matches[1] // Extract the version number
+		logrus.Debugf("remove %s pg prefix and use %s as pg version: %s", args[0], arg)
 	}
 
 	// Resolve and validate PGHOME
@@ -150,6 +159,7 @@ func LinkPostgres(args ...string) error {
 	}
 
 	logrus.Infof("profile updated: %s (PGHOME=%s)", pgProfilePath, pgHome)
-	logrus.Infof("run: . %s", pgProfilePath)
+	logrus.Infof("run this command to activate PATH in your current session:")
+	logrus.Warnf("$ . %s", pgProfilePath)
 	return nil
 }
