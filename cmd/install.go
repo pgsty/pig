@@ -4,7 +4,10 @@ Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
 package cmd
 
 import (
+	"os"
+	"pig/cli/ext"
 	"pig/cli/install"
+	"strconv"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -12,6 +15,7 @@ import (
 
 var (
 	installPgVer         int
+	installPgConfig      string
 	installYes           bool
 	installNoTranslation bool
 )
@@ -43,12 +47,10 @@ Examples:
   pig install pg_vector=1.0.0          # install specific version
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pgVer := installPgVer
-		if pgVer == 0 {
-			// Try to detect from active PostgreSQL installation
-			pgVer = 17 // fallback to latest if not detected
+		var pgVer int
+		if !installNoTranslation {
+			pgVer = installProbeVersion()
 		}
-
 		if err := install.InstallPackages(pgVer, args, installYes, installNoTranslation); err != nil {
 			logrus.Errorf("failed to install packages: %v", err)
 			return nil
@@ -57,8 +59,56 @@ Examples:
 	},
 }
 
+// installProbeVersion returns the PostgreSQL version to use
+func installProbeVersion() int {
+	// check args
+	if installPgVer != 0 && installPgConfig != "" {
+		logrus.Errorf("both pg version and pg_config path are specified, please specify only one")
+		os.Exit(1)
+	}
+
+	// detect postgres installation, but don't fail if not found
+	err := ext.DetectPostgres()
+	if err != nil {
+		logrus.Debugf("failed to detect PostgreSQL: %v", err)
+	}
+
+	// if pg version is specified, try if we can find the actual installation
+	if installPgVer != 0 {
+		_, err := ext.GetPostgres(strconv.Itoa(installPgVer))
+		if err != nil {
+			logrus.Debugf("PostgreSQL installation %d not found: %v , but it's ok", installPgVer, err)
+			// if version is explicitly given, we can fallback without any installation
+		}
+		return installPgVer
+	}
+
+	// if pg_config is specified, we must find the actual installation, to get the major version
+	if installPgConfig != "" {
+		_, err := ext.GetPostgres(installPgConfig)
+		if err != nil {
+			logrus.Errorf("failed to get PostgreSQL by pg_config path %s: %v", installPgConfig, err)
+			os.Exit(3)
+		} else {
+			return ext.Postgres.MajorVersion
+		}
+	}
+
+	// if none given, we can fall back to active installation, or if we can't infer the version, we can fallback to no version tabulate
+	if ext.Active != nil {
+		logrus.Debugf("fallback to active PostgreSQL: %d", ext.Active.MajorVersion)
+		ext.Postgres = ext.Active
+		return ext.Active.MajorVersion
+	} else {
+		logrus.Debugf("no active PostgreSQL found, fall back to the latest Major %d", ext.PostgresLatestMajorVersion)
+		return ext.PostgresLatestMajorVersion // 18 by default
+	}
+}
+
 func init() {
 	installCmd.Flags().IntVarP(&installPgVer, "version", "v", 0, "specify PostgreSQL major version for package translation")
+	installCmd.PersistentFlags().StringVarP(&installPgConfig, "path", "p", "", "specify a postgres by pg_config path")
+
 	installCmd.Flags().BoolVarP(&installYes, "yes", "y", false, "auto confirm installation")
 	installCmd.Flags().BoolVarP(&installNoTranslation, "no-translation", "n", false, "disable package name translation, use names as-is")
 }
