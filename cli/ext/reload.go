@@ -13,11 +13,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// UpgradeCatalog downloads the latest extension catalog from the fastest available source
-func UpgradeCatalog() error {
+// ReloadCatalog downloads the latest extension catalog from the fastest available source
+func ReloadExtensionCatalog() error {
 	urls := []string{
-		config.RepoPigstyIO + "/etc/extension.csv",
-		config.RepoPigstyCC + "/etc/extension.csv",
+		config.RepoPigstyIO + "/ext/data/extension.csv",
+		config.RepoPigstyCC + "/ext/data/extension.csv",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

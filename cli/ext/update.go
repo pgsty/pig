@@ -25,7 +25,7 @@ func UpdateExtensions(pgVer int, names []string, yes bool) error {
 	switch config.OSType {
 	case config.DistroEL:
 		updateCmds = append(updateCmds, []string{"yum", "update"}...)
-		if config.OSVersion == "8" || config.OSVersion == "9" {
+		if config.OSVersion == "8" || config.OSVersion == "9" || config.OSVersion == "10" {
 			updateCmds[0] = "dnf"
 		}
 		if yes {

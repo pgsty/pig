@@ -26,17 +26,14 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "pig",
 	Short: "Postgres Install Guide",
-	Long:  `pig - the Linux Package Manager for PostgreSQL and CLI tool for Pigsty`,
+	Long:  `pig - the Linux Package Manager for PostgreSQL`,
 	Example: `
-  pig repo add -ru        # overwrite existing repo & update cache
-  pig ext  add pg17       # install optional postgresql 17 package
-  pig ext  add pg_duckdb  # install certain postgresql extension
+  pig repo add -ru            # overwrite existing repo & update cache
+  pig install pg17            # install postgresql 17 PGDG package
+  pig install pg_duckdb       # install certain postgresql extension
+  pig install pgactive -v 18  # install extension for specifc pg major
 
-  pig repo : add rm update list info status create boot cache
-  pig ext  : add rm update list info status import link build
-  pig sty  : init boot conf install get list
-
-  check https://pigsty.io/ext/pig for details
+  check https://pig.pgsty.com for details
 `,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initAll()

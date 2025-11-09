@@ -31,8 +31,15 @@ breadcrumbs: false
 | [v0.0.1](#v001) | 2024-12-23 | 创世发布                           | [v0.0.1](https://github.com/pgsty/pig/releases/tag/v0.0.1) |
 
 
+## v0.7.1
+
+- 修复了不必要的 sudo 使用问题，现在可以方便的在容器中使用
+- 允许 pig ext link 命令使用形如 pg17 pg18 的参数形式
+- 新增环境变量 `PIG_NOSUDO`
+
 ## v0.7.0
 
+- 提供针对 Debian 13 和 EL 10 发行版的支持
 - 大批量扩展更新至最新版本，带有 PostgreSQL 18 支持。
 - 几乎所有 Rust 扩展现已通过 pgrx 0.16.1 支持 PG 18
 - `pig build` 命令彻底重做
@@ -45,7 +52,7 @@ breadcrumbs: false
     - `pig build repo` / `pig repo add` / `pig repo set` 现在默认使用 `node,pgsql,infra` 仓库模块，取代原本的 `node,pgdg,pigsty`
 - 大量优化了错误日志记录。
 - 基于 hugo 与 hextra 全新目录网站
-
+- 从本版本开始，pig 发布注记将不再包含扩展例行更新的内容，这一部分可以在 RPM/DEB/INFRA 仓库更新日志查阅。
 
 
 ## v0.6.2

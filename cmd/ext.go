@@ -44,7 +44,7 @@ var extCmd = &cobra.Command{
   pig ext update  [ext...]     # update extension to the latest version
   pig ext import  [ext...]     # download extension to local repo
   pig ext link    [ext...]     # link postgres installation to path
-  pig ext upgrade              # upgrade to the latest extension catalog
+  pig ext reload               # reload the latest extension catalog data
 `, PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if err := initAll(); err != nil {
 			return err
@@ -246,13 +246,13 @@ var extLinkCmd = &cobra.Command{
 	},
 }
 
-var extUpgradeCmd = &cobra.Command{
-	Use:          "upgrade",
-	Short:        "upgrade extension catalog to the latest version",
+var extReloadCmd = &cobra.Command{
+	Use:          "reload",
+	Short:        "reload extension catalog to the latest version",
 	SilenceUsage: true,
-	Aliases:      []string{"ug"},
+	Aliases:      []string{"r", "re"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return ext.UpgradeCatalog()
+		return ext.ReloadExtensionCatalog()
 	},
 }
 
@@ -321,5 +321,5 @@ func init() {
 	extCmd.AddCommand(extStatusCmd)
 	extCmd.AddCommand(extImportCmd)
 	extCmd.AddCommand(extLinkCmd)
-	extCmd.AddCommand(extUpgradeCmd)
+	extCmd.AddCommand(extReloadCmd)
 }

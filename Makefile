@@ -111,18 +111,21 @@ d:
 	hugo serve
 b:
 	hugo --minify
-t:
+
+###############################################################
+#                         Testing                            #
+###############################################################
+t: arm 2c
+arm:
 	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -a -ldflags "$(LD_FLAGS) -extldflags '-static'" -o pig
-	scp pig meta:/tmp/pig
-	ssh meta sudo mv /tmp/pig /usr/bin/pig
-tt:
+amd:
 	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -a -ldflags "$(LD_FLAGS) -extldflags '-static'" -o pig
-	scp pig meta:/tmp/pig
-	ssh meta sudo mv /tmp/pig /usr/bin/pig
-t2:
-	CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -a -ldflags "$(LD_FLAGS) -extldflags '-static'" -o pig
-	scp pig ai:/tmp/pig
-	ssh ai sudo mv /tmp/pig /usr/bin/pig
+2m:
+	scp pig meta:/tmp/pig; ssh meta sudo mv /tmp/pig /usr/bin/pig
+2c:
+	docker cp pig d13a:/usr/bin/pig
+2a:
+	scp pig ai:/tmp/pig; ssh ai sudo mv /tmp/pig /usr/bin/pig
 
 .PHONY: run build clean build-linux-amd64 build-linux-arm64 release release-linux linux-amd64 linux-arm64 \
  goreleaser-install goreleaser-snapshot goreleaser-build goreleaser-release goreleaser-test-release \
