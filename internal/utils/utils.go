@@ -73,20 +73,36 @@ func SudoCommand(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no command specified")
 	}
-	if config.CurrentUser != "root" {
-		args = append([]string{"sudo"}, args...)
-		logrus.Debugf("executing sudo command: %v", args)
-	} else {
-		logrus.Debugf("executing root command: %v", args)
+
+	// Check environment variable to force no sudo (useful in Docker)
+	if nosudoEnv := os.Getenv("PIG_NO_SUDO"); nosudoEnv == "1" || nosudoEnv == "true" {
+		logrus.Debugf("PIG_NO_SUDO set, executing without sudo: %v", args)
+		return Command(args)
 	}
 
-	// now split command and args again
+	if isRoot := os.Geteuid() == 0 || config.CurrentUser == "root"; !isRoot {
+		// Check if sudo exists before trying to use it
+		if _, err := exec.LookPath("sudo"); err != nil {
+			// sudo not found - common in Docker containers
+			// Try to execute directly as we might be root anyway
+			logrus.Debugf("sudo not found, attempting direct execution: %v", args)
+			logrus.Warnf("sudo command not available, trying to execute directly")
+		} else {
+			// sudo exists, prepend it to the command
+			args = append([]string{"sudo"}, args...)
+			logrus.Debugf("executing sudo command: %v", args)
+		}
+	} else {
+		logrus.Debugf("executing as root: %v", args)
+	}
+
+	// Execute the command
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("sudo command failed: %w", err)
+		return fmt.Errorf("command failed: %w", err)
 	}
 	return nil
 }
@@ -97,18 +113,31 @@ func QuietSudoCommand(args []string) error {
 		return fmt.Errorf("no command specified")
 	}
 
-	// append sudo if not run as root
-	if config.CurrentUser != "root" {
-		args = append([]string{"sudo"}, args...)
-		logrus.Debugf("executing quite sudo command: %v", args)
-	} else {
-		logrus.Debugf("executing quite root command: %v", args)
+	// Check environment variable to force no sudo (useful in Docker)
+	if nosudoEnv := os.Getenv("PIG_NO_SUDO"); nosudoEnv == "1" || nosudoEnv == "true" {
+		logrus.Debugf("PIG_NO_SUDO set, executing quietly without sudo: %v", args)
+		cmd := exec.Command(args[0], args[1:]...)
+		return cmd.Run()
 	}
 
-	// now split command and args again
+	if isRoot := os.Geteuid() == 0 || config.CurrentUser == "root"; !isRoot {
+		// Check if sudo exists before trying to use it
+		if _, err := exec.LookPath("sudo"); err != nil {
+			// sudo not found - common in Docker containers
+			logrus.Debugf("sudo not found, attempting quiet direct execution: %v", args)
+		} else {
+			// sudo exists, prepend it to the command
+			args = append([]string{"sudo"}, args...)
+			logrus.Debugf("executing quiet sudo command: %v", args)
+		}
+	} else {
+		logrus.Debugf("executing quietly as root: %v", args)
+	}
+
+	// Execute the command quietly
 	cmd := exec.Command(args[0], args[1:]...)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("quiet sudo command failed: %w", err)
+		return fmt.Errorf("quiet command failed: %w", err)
 	}
 	return nil
 }

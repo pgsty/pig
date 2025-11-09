@@ -266,16 +266,24 @@ func DetectEnvironment() {
 	OSArch = runtime.GOARCH
 	NodeHostname, _ = os.Hostname()
 	NodeCPUCount = runtime.NumCPU()
-	if user, err := user.Current(); err == nil {
+
+	// Priority 1: Check if we're root by UID (most reliable in Docker)
+	if os.Geteuid() == 0 {
+		CurrentUser = "root"
+		logrus.Debugf("detected root user by UID")
+	} else if user, err := user.Current(); err == nil {
+		// Priority 2: Use system user detection
 		CurrentUser = user.Username
+		logrus.Debugf("detected user: %s", CurrentUser)
 	} else {
+		// Priority 3: Fallback to environment variable
 		logrus.Debugf("could not determine current user: %v", err)
-		// Fallback 1: check if we're root by UID
-		if os.Geteuid() == 0 {
-			CurrentUser = "root"
-		} else if envUser := os.Getenv("USER"); envUser != "" {
-			// Fallback 2: use USER environment variable
+		if envUser := os.Getenv("USER"); envUser != "" {
 			CurrentUser = envUser
+			logrus.Debugf("using USER env variable: %s", CurrentUser)
+		} else {
+			CurrentUser = "unknown"
+			logrus.Warnf("could not determine current user, using 'unknown'")
 		}
 	}
 	if runtime.GOOS != "linux" {
