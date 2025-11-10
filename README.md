@@ -1,6 +1,6 @@
 # PIG - Postgres Install Genius
 
-[![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud.com-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
+[![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
 [![Version: v0.7.1](https://img.shields.io/badge/version-v0.7.1-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.7.1)
 [![Pigsty: v3.6.1](https://img.shields.io/badge/Pigsty-v3.6.1-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com/release/latest)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
@@ -10,7 +10,7 @@
 
 Install PostgreSQL 13 ~ 18 along with [431 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
 
-> Blog: [The idea way to deliver PostgreSQL extensions](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
+Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the package manager, repository and extension catalog.
 
 [![PostgreSQL Extension Ecosystem](https://pigsty.io/img/pigsty/ecosystem.jpg)](https://medium.com/@fengruohang/postgres-is-eating-the-database-world-157c204dcfc4)
 
