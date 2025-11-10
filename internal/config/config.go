@@ -71,6 +71,8 @@ func InitConfig(inventory, pigstyHome string) {
 		logrus.Debugf("failed to get user home directory, trying user.Current()")
 		if usr, err := user.Current(); err == nil {
 			homeDir = "/home/" + usr.Username
+		} else if os.Getuid() == 0 {
+			homeDir = "/root"
 		} else {
 			logrus.Fatalf("failed to determine user home directory: %v", err)
 		}
