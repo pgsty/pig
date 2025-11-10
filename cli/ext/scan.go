@@ -56,10 +56,10 @@ var matchSpecialCase = map[string]string{
 }
 
 var matchGlobCase = map[string]string{
-	"libMobilityDB-*":   "mobilitydb",
-	"libpgrouting-*":    "pgrouting",
-	"libpljava-so-*":    "pljava",
-	"timescaledb-tsl-*": "timescaledb",
+	"libMobilityDB-*": "mobilitydb",
+	"libpgrouting-*":  "pgrouting",
+	"libpljava-so-*":  "pljava",
+	"timescaledb-*":   "timescaledb",
 }
 
 var matchBuiltInLib = map[string]bool{
