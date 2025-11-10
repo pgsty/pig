@@ -57,7 +57,7 @@ type Extension struct {
 
 // SummaryURL returns the URL to the pigsty.io catalog summary page
 func (e *Extension) SummaryURL() string {
-	return fmt.Sprintf("https://ext.pgsty.com/e/%s", e.Name)
+	return fmt.Sprintf("https://pgext.cloud/e/%s", e.Name)
 }
 
 // CompactVersion returns the compact version string like 17-13

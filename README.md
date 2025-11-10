@@ -21,11 +21,11 @@ Install PostgreSQL 13 ~ 18 along with [431 extensions](https://pgext.cloud/list)
 
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18,17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://doc.pgsty.com/pgsql)
 [![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://doc.pgsty.com/node)
-[![EL Support: 8/9](https://img.shields.io/badge/EL-8/9/10-red?style=flat&logo=redhat&logoColor=red)](https://doc.pgsty.com/prepare/linux)
-[![Debian Support: 12](https://img.shields.io/badge/Debian-12/13-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://doc.pgsty.com/prepare/linux)
+[![EL Support: 8/9/10](https://img.shields.io/badge/EL-8/9/10-red?style=flat&logo=redhat&logoColor=red)](https://doc.pgsty.com/prepare/linux)
+[![Debian Support: 12/13](https://img.shields.io/badge/Debian-12/13-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://doc.pgsty.com/prepare/linux)
 [![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://doc.pgsty.com/prepare/linux)
 
-[Install](#installation) the `pig` package first, (you can also use the `apt` / `yum` or just copy the binary)
+[Install](https://pgext.cloud/pig/install) the `pig` package first, (you can also use the `apt` / `yum` or just copy the binary)
 
 ```bash
 curl -fsSL https://repo.pigsty.io/pig | bash
@@ -318,7 +318,7 @@ $ pig ext info pg_duckdb
 │ Version   : 1.1.0                                                          │
 │ License   : MIT                                                            │
 │ Website   : https://github.com/duckdb/pg_duckdb                            │
-│ Details   : https://ext.pgsty.com/e/pg_duckdb                              │
+│ Details   : https://pgext.cloud/e/pg_duckdb                                │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Extension Properties                                                       │
 ├────────────────────────────────────────────────────────────────────────────┤
