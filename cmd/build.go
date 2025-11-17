@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"pig/cli/build"
+	"pig/cli/ext"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -46,7 +47,12 @@ Quick Start:
   pig build spec                   # setup build spec and directory
   pig build pkg citus              # build citus extension
 
-`,
+`, PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := initAll(); err != nil {
+			return err
+		}
+		return ext.ReloadCatalog()
+	},
 }
 
 // buildRepoCmd represents the `build repo` command

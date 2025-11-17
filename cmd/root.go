@@ -33,7 +33,7 @@ var rootCmd = &cobra.Command{
   pig install pg_duckdb       # install certain postgresql extension
   pig install pgactive -v 18  # install extension for specifc pg major
 
-  check https://pig.pgsty.com for details
+  check https://pgext.cloud for details
 `,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initAll()

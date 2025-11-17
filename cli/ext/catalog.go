@@ -34,8 +34,9 @@ type ExtensionCatalog struct {
 }
 
 // ReloadCatalog reloads the extension catalog from the default data path
-func ReloadCatalog(paths ...string) {
-	Catalog, _ = NewExtensionCatalog(paths...)
+func ReloadCatalog(paths ...string) (err error) {
+	Catalog, err = NewExtensionCatalog(paths...)
+	return
 }
 
 // NewExtensionCatalog creates a new ExtensionCatalog, using embedded data if any error occurs

@@ -28,7 +28,7 @@ var extCmd = &cobra.Command{
 	GroupID: "pgext",
 	Long: `pig ext - Manage PostgreSQL Extensions
 
-  Get Started: https://pigsty.io/ext/pig/
+  Get Started: https://pgext.cloud/pig/
   pig repo add -ru             # add all repo and update cache (brute but effective)
   pig ext add pg17             # install optional postgresql 17 package
   pig ext list duck            # search extension in catalog
@@ -49,8 +49,7 @@ var extCmd = &cobra.Command{
 		if err := initAll(); err != nil {
 			return err
 		}
-		ext.ReloadCatalog()
-		return nil
+		return ext.ReloadCatalog()
 	},
 }
 

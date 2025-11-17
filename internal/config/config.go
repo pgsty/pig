@@ -39,7 +39,6 @@ var (
 const (
 	PigstyIO       = "https://pigsty.io"
 	PigstyCC       = "https://pigsty.cc"
-	PgstyCom       = "https://pgsty.com"
 	RepoPigstyIO   = "https://repo.pigsty.io"
 	RepoPigstyCC   = "https://repo.pigsty.cc"
 	PigstyGPGCheck = false
