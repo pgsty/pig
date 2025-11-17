@@ -1,7 +1,7 @@
 # PIG - Postgres Install Genius
 
 [![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
-[![Version: v0.7.1](https://img.shields.io/badge/version-v0.7.1-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.7.1)
+[![Version: v0.7.2](https://img.shields.io/badge/version-v0.7.2-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.7.1)
 [![Pigsty: v3.6.1](https://img.shields.io/badge/Pigsty-v3.6.1-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com/release/latest)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 431](https://img.shields.io/badge/extensions-431-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
@@ -87,7 +87,7 @@ sudo yum makecache; sudo yum install -y pig
 
 ```bash
 pig update                  # self-update to the latest version
-pig update -v 0.7.1         # self-update to the specific version
+pig update -v 0.7.2         # self-update to the specific version
 pig ext reload              # update extension catalog metadata only
 ```
 
@@ -262,7 +262,7 @@ pig ext install pg_duckdb -p /usr/lib/postgresql/16/bin/pg_config    # specify a
 You can also install PostgreSQL kernel packages with:
 
 ```bash
-pig ext install pgvector=0.7.1 # install pgvector 0.7.1
+pig ext install pgvector=0.7.2 # install pgvector 0.7.2
 pig ext install pg16=16.5      # install PostgreSQL 16 with a specific minor version
 ```
 
