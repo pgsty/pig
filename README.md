@@ -1,14 +1,14 @@
 # PIG - Postgres Install Genius
 
 [![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
-[![Version: v0.7.2](https://img.shields.io/badge/version-v0.7.2-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.7.1)
+[![Version: v0.7.2](https://img.shields.io/badge/version-v0.7.2-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.7.2)
 [![Pigsty: v3.6.1](https://img.shields.io/badge/Pigsty-v3.6.1-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com/release/latest)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 431](https://img.shields.io/badge/extensions-431-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
+[![Extensions: 437](https://img.shields.io/badge/extensions-473-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
 
 [**pig**](https://pig.pgsty.com) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pgext.cloud/os) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13 ~ 18 along with [431 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13 ~ 18 along with [473 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
 
 Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the package manager, repository and extension catalog.
 
