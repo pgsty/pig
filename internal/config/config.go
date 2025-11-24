@@ -354,6 +354,7 @@ func DetectEnvironment() {
 	// Extract major version
 	if versionID != "" {
 		OSVersion = strings.Split(versionID, ".")[0]
+		OSMajor, _ = strconv.Atoi(OSVersion)
 	}
 
 	// Determine OS code based on distribution and package type
@@ -368,6 +369,6 @@ func DetectEnvironment() {
 			OSCode = "d" + OSVersion
 		}
 	}
-	logrus.Debugf("Detected OS: code=%s arch=%s type=%s vendor=%s version=%s %s",
-		OSCode, OSArch, OSType, OSVendor, OSVersion, OSVersionCode)
+	logrus.Debugf("Detected OS: code=%s arch=%s type=%s vendor=%s version=%s %s major=%d full=%s",
+		OSCode, OSArch, OSType, OSVendor, OSVersion, OSVersionCode, OSMajor, OSVersionFull)
 }

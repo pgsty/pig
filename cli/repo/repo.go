@@ -107,6 +107,14 @@ func (r *Repository) Available(code string, arch string) bool {
 	return true
 }
 
+// needsEL10VersionFix checks if this repo needs the EL10 aarch64 version workaround
+func (r *Repository) needsEL10VersionFix() bool {
+	if config.OSMajor == 10 && (config.OSArch == "aarch64" || config.OSArch == "arm64") && config.OSType == config.DistroEL {
+		return strings.HasPrefix(strings.ToLower(r.Name), "pgdg") && len(r.Name) >= 6 && r.Name[4] >= '0' && r.Name[4] <= '9'
+	}
+	return false
+}
+
 // Content returns the repo file content for a given region
 func (r *Repository) Content(region ...string) string {
 	regionStr := "default"
@@ -131,7 +139,15 @@ func (r *Repository) Content(region ...string) string {
 		for _, k := range keys {
 			rpmMeta += fmt.Sprintf("%s=%s\n", k, r.Meta[k])
 		}
-		return fmt.Sprintf("[%s]\nname=%s\nbaseurl=%s\n%s", r.Name, r.Name, r.GetBaseURL(regionStr), rpmMeta)
+
+		// EL10 aarch64 pgdg repos bad case (missing rhel-10-aarch64, got rhel-10.0-aarch64)
+		baseURL := r.GetBaseURL(regionStr)
+		if r.needsEL10VersionFix() {
+			logrus.Debugf("substituting $releasever with 10.0 for el10.aarch64 pgdg repo")
+			baseURL = strings.ReplaceAll(baseURL, "$releasever", "10.0")
+		}
+
+		return fmt.Sprintf("[%s]\nname=%s\nbaseurl=%s\n%s", r.Name, r.Name, baseURL, rpmMeta)
 
 	case config.DistroDEB:
 		logrus.Debugf("generate DEB repo content for %s.%s", r.Name, r.Distro)
