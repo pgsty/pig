@@ -219,8 +219,8 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 	case "deb", "d10", "d11", "d12", "d13", "u20", "u22", "u24":
 		pkgMap := map[string]string{
 			"postgresql":          "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v postgresql-server-dev-$v",
-			"pgsql-common":        "patroni pgbouncer pgbackrest pg-exporter pgbackrest-exporter vip-manager",
-			"patroni":             "patroni",
+			"pgsql-common":        "patroni python3-etcd pgbouncer pgbackrest pg-exporter pgbackrest-exporter vip-manager",
+			"patroni":             "patroni python3-etcd",
 			"pgbouncer":           "pgbouncer",
 			"pgbackrest":          "pgbackrest",
 			"pg_exporter":         "pg-exporter",
