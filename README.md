@@ -2,7 +2,7 @@
 
 [![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
 [![Version: v0.7.2](https://img.shields.io/badge/version-v0.7.2-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.7.2)
-[![Pigsty: v3.6.1](https://img.shields.io/badge/Pigsty-v3.6.1-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com/release/latest)
+[![Pigsty: v3.7.0](https://img.shields.io/badge/Pigsty-v3.7.0-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com/release/latest)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 437](https://img.shields.io/badge/extensions-473-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
 
