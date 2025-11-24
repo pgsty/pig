@@ -302,7 +302,7 @@ var repoCreateCmd = &cobra.Command{
 	Example: `
   pig repo create                    # create repo on /www/pigsty
   pig repo create /www/mssql /www/b  # create repo on multiple locations
-  
+
   (Beware that system repo management require sudo/root privilege)
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -311,6 +311,16 @@ var repoCreateCmd = &cobra.Command{
 			repos = args
 		}
 		return repo.CreateRepos(repos...)
+	},
+}
+
+var repoReloadCmd = &cobra.Command{
+	Use:          "reload",
+	Short:        "reload repo catalog to the latest version",
+	SilenceUsage: true,
+	Aliases:      []string{"r", "re"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return repo.ReloadRepoCatalog()
 	},
 }
 
@@ -339,4 +349,5 @@ func init() {
 	repoCmd.AddCommand(repoBootCmd)
 	repoCmd.AddCommand(repoCacheCmd)
 	repoCmd.AddCommand(repoCreateCmd)
+	repoCmd.AddCommand(repoReloadCmd)
 }
