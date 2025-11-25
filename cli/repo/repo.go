@@ -140,12 +140,12 @@ func (r *Repository) Content(region ...string) string {
 			rpmMeta += fmt.Sprintf("%s=%s\n", k, r.Meta[k])
 		}
 
-		// EL10 aarch64 pgdg repos bad case (missing rhel-10-aarch64, got rhel-10.0-aarch64)
 		baseURL := r.GetBaseURL(regionStr)
-		if r.needsEL10VersionFix() {
-			logrus.Debugf("substituting $releasever with 10.0 for el10.aarch64 pgdg repo")
-			baseURL = strings.ReplaceAll(baseURL, "$releasever", "10.0")
-		}
+		// EL10 aarch64 pgdg repos bad case (missing rhel-10-aarch64, got rhel-10.0-aarch64)
+		// if r.needsEL10VersionFix() {
+		// 	logrus.Debugf("substituting $releasever with 10.0 for el10.aarch64 pgdg repo")
+		// 	baseURL = strings.ReplaceAll(baseURL, "$releasever", "10.0")
+		// }
 
 		return fmt.Sprintf("[%s]\nname=%s\nbaseurl=%s\n%s", r.Name, r.Name, baseURL, rpmMeta)
 
