@@ -6,7 +6,7 @@
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 437](https://img.shields.io/badge/extensions-473-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
 
-[**pig**](https://pig.pgsty.com) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pgext.cloud/os) (EL/Debian/Ubuntu) Linux.
+[**pig**](https://pgext.cloud/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pgext.cloud/os) (EL/Debian/Ubuntu) Linux.
 
 Install PostgreSQL 13 ~ 18 along with [473 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
 
@@ -228,8 +228,8 @@ Take el for examples:
 "polardb":             "PolarDB",
 "orioledb":            "orioledb_17 oriolepg_17",
 "openhalodb":          "openhalodb",
-"percona-core":        "percona-postgresql17,percona-postgresql17-server,percona-postgresql17-contrib,percona-postgresql17-plperl,percona-postgresql17-plpython3,percona-postgresql17-pltcl",
-"percona-main":        "percona-postgresql17,percona-postgresql17-server,percona-postgresql17-contrib,percona-postgresql17-plperl,percona-postgresql17-plpython3,percona-postgresql17-pltcl,percona-postgis33_17,percona-postgis33_17-client,percona-postgis33_17-utils,percona-pgvector_17,percona-wal2json17,percona-pg_repack17,percona-pgaudit17,percona-pgaudit17_set_user,percona-pg_stat_monitor17,percona-pg_gather",
+"percona-core":        "percona-postgresql18,percona-postgresql18-server,percona-postgresql18-contrib,percona-postgresql18-plperl,percona-postgresql18-plpython3,percona-postgresql18-pltcl,percona-pg_tde18",
+"percona-main":        "percona-postgresql18,percona-postgresql18-server,percona-postgresql18-contrib,percona-postgresql18-plperl,percona-postgresql18-plpython3,percona-postgresql18-pltcl,percona-pg_tde18,percona-postgis35_18,percona-postgis35_18-client,percona-postgis35_18-utils,percona-pgvector_18,percona-wal2json18,percona-pg_repack18,percona-pgaudit18,percona-pgaudit18_set_user,percona-pg_stat_monitor18,percona-pg_gather",
 "ferretdb":            "ferretdb2",
 "duckdb":              "duckdb",
 "etcd":                "etcd",
@@ -262,7 +262,7 @@ pig ext install pg_duckdb -p /usr/lib/postgresql/16/bin/pg_config    # specify a
 You can also install PostgreSQL kernel packages with:
 
 ```bash
-pig ext install pgvector=0.7.4 # install pgvector 0.7.4
+pig ext install pgvector=0.8.0 # install pgvector 0.8.0
 pig ext install pg16=16.5      # install PostgreSQL 16 with a specific minor version
 ```
 
@@ -373,12 +373,12 @@ repo_upstream:  # Available Repo: 15
   - { name: pigsty-pgsql   ,description: 'Pigsty PgSQL'       ,module: pgsql    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.pigsty.io/apt/pgsql/${distro_codename} ${distro_codename} main' }
   - { name: pigsty-infra   ,description: 'Pigsty Infra'       ,module: infra    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.pigsty.io/apt/infra/ generic main' }
   - { name: docker-ce      ,description: 'Docker'             ,module: infra    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.docker.com/linux/${distro_name} ${distro_codename} stable' }
-  - { name: base           ,description: 'Debian Basic'       ,module: node     ,releases: [11,12,13]       ,arch: [x86_64, aarch64]  ,baseurl: 'http://deb.debian.org/debian/ ${distro_codename} main non-free-firmware' }
-  - { name: updates        ,description: 'Debian Updates'     ,module: node     ,releases: [11,12,13]       ,arch: [x86_64, aarch64]  ,baseurl: 'http://deb.debian.org/debian/ ${distro_codename}-updates main non-free-firmware' }
-  - { name: security       ,description: 'Debian Security'    ,module: node     ,releases: [11,12,13]       ,arch: [x86_64, aarch64]  ,baseurl: 'http://security.debian.org/debian-security ${distro_codename}-security main non-free-firmware' }
-  - { name: pgdg           ,description: 'PGDG'               ,module: pgsql    ,releases: [11,12,13,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg main' }
-  - { name: pgdg-beta      ,description: 'PGDG Beta'          ,module: beta     ,releases: [11,12,13,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg-testing main 19' }
-  - { name: groonga        ,description: 'Groonga Debian'     ,module: groonga  ,releases: [11,12,13]       ,arch: [x86_64, aarch64]  ,baseurl: 'https://packages.groonga.org/debian/ ${distro_codename} main' }
+  - { name: base           ,description: 'Debian Basic'       ,module: node     ,releases: [11,12,13         ] ,arch: [x86_64, aarch64]  ,baseurl: 'http://deb.debian.org/debian/ ${distro_codename} main non-free-firmware' }
+  - { name: updates        ,description: 'Debian Updates'     ,module: node     ,releases: [11,12,13         ] ,arch: [x86_64, aarch64]  ,baseurl: 'http://deb.debian.org/debian/ ${distro_codename}-updates main non-free-firmware' }
+  - { name: security       ,description: 'Debian Security'    ,module: node     ,releases: [11,12,13         ] ,arch: [x86_64, aarch64]  ,baseurl: 'http://security.debian.org/debian-security ${distro_codename}-security main non-free-firmware' }
+  - { name: pgdg           ,description: 'PGDG'               ,module: pgsql    ,releases: [11,12,13,22,24   ] ,arch: [x86_64, aarch64]  ,baseurl: 'http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg main' }
+  - { name: pgdg-beta      ,description: 'PGDG Beta'          ,module: beta     ,releases: [11,12,13,22,24   ] ,arch: [x86_64, aarch64]  ,baseurl: 'http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg-testing main 19' }
+  - { name: groonga        ,description: 'Groonga Debian'     ,module: groonga  ,releases: [11,12,13         ] ,arch: [x86_64, aarch64]  ,baseurl: 'https://packages.groonga.org/debian/ ${distro_codename} main' }
   - { name: grafana        ,description: 'Grafana'            ,module: grafana  ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://apt.grafana.com stable main' }
   - { name: kubernetes     ,description: 'Kubernetes'         ,module: kube     ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /' }
   - { name: gitlab-ee      ,description: 'Gitlab EE'          ,module: gitlab   ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://packages.gitlab.com/gitlab/gitlab-ee/${distro_name}/ ${distro_codename} main' }

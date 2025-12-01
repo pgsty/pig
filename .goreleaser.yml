@@ -53,7 +53,7 @@ nfpms:
         {{- else }}{{ .Arch }}{{ end }}
       {{- end }}
     vendor: "PGSTY"
-    homepage: "https://pig.pgsty.com"
+    homepage: "https://pgext.cloud/pig"
     maintainer: "Ruohang Feng <rh@vonng.com>"
     description: |
       PostgreSQL Extension Package Manager and CLI Tool
