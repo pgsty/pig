@@ -223,7 +223,7 @@ Take el for examples:
 "pgloader":            "pgloader",
 "pg_timetable":        "pg_timetable",
 "timescaledb-utils":   "timescaledb-tools timescaledb-event-streamer",
-"ivorysql":            "ivorysql4",
+"ivorysql":            "ivorysql5",
 "wiltondb":            "wiltondb",
 "polardb":             "PolarDB",
 "orioledb":            "orioledb_17 oriolepg_17",
