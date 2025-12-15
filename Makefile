@@ -97,6 +97,9 @@ release-new: goreleaser-release
 u: upload
 upload:
 	bin/upload.sh
+tag:
+	git tag -d $(VERSION) || true
+	git tag $(VERSION)
 r: run
 run:
 	go run main.go
