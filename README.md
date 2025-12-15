@@ -1,7 +1,7 @@
 # PIG - Postgres Install Genius
 
 [![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
-[![Version: v0.7.4](https://img.shields.io/badge/version-v0.7.4-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.7.4)
+[![Version: v0.7.5](https://img.shields.io/badge/version-v0.7.5-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.7.5)
 [![Pigsty: v3.7.0](https://img.shields.io/badge/Pigsty-v3.7.0-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com/release/latest)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 437](https://img.shields.io/badge/extensions-473-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
@@ -87,7 +87,7 @@ sudo yum makecache; sudo yum install -y pig
 
 ```bash
 pig update                  # self-update to the latest version
-pig update -v 0.7.4         # self-update to the specific version
+pig update -v 0.7.5         # self-update to the specific version
 pig ext reload              # update extension catalog metadata only
 ```
 
