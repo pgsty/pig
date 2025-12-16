@@ -51,8 +51,8 @@ const (
 // BuildDate format follows RFC3339: YYYY-MM-DDTHH:MM:SSZ (e.g., 2025-01-10T10:20:00Z)
 // This matches the format used in Makefile: date -u +'%Y-%m-%dT%H:%M:%SZ'
 var (
-	PigVersion    = "0.7.5"
-	PigstyVersion = "3.7.0"
+	PigVersion    = "0.8.0"
+	PigstyVersion = "4.0.0"
 	Branch        = "main"        // Will be set during release build
 	Revision      = "HEAD"        // Will be set to commit hash during release build
 	BuildDate     = "development" // Will be set to RFC3339 format during release build
