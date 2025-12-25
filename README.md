@@ -1,7 +1,7 @@
 # PIG - Postgres Install Genius
 
 [![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
-[![Version: v0.8.1](https://img.shields.io/badge/version-v0.8.1-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.8.1)
+[![Version: v0.8.0](https://img.shields.io/badge/version-v0.8.0-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.8.0)
 [![Pigsty: v4.0.0](https://img.shields.io/badge/Pigsty-v4.0.0-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com/release/latest)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 440](https://img.shields.io/badge/extensions-440-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
@@ -189,15 +189,15 @@ You can also use other package aliases, it will translate to corresponding packa
 and the `$v` will be replaced with the active or given pg version number, such as `17`, `16`, etc...
 
 ```yaml
-pgsql:        "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit"
-pg18:         "postgresql18 postgresql18-server postgresql18-libs postgresql18-contrib postgresql18-plperl postgresql18-plpython3 postgresql18-pltcl postgresql18-llvmjit"
+pgsql:        "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl"
+pg18:         "postgresql18 postgresql18-server postgresql18-libs postgresql18-contrib postgresql18-plperl postgresql18-plpython3 postgresql18-pltcl"
 pg17-client:  "postgresql17"
 pg17-server:  "postgresql17-server postgresql17-libs postgresql17-contrib"
 pg17-devel:   "postgresql17-devel"
-pg17-basic:   "pg_repack_17* wal2json_17* pgvector_17*"
+pg17-basic:   "pg_repack_17 wal2json_17 pgvector_17"
 pg16-mini:    "postgresql16 postgresql16-server postgresql16-libs postgresql16-contrib"
 pg15-full:    "postgresql15 postgresql15-server postgresql15-libs postgresql15-contrib postgresql15-plperl postgresql15-plpython3 postgresql15-pltcl postgresql15-llvmjit postgresql15-test postgresql15-devel"
-pg14-main:    "postgresql14 postgresql14-server postgresql14-libs postgresql14-contrib postgresql14-plperl postgresql14-plpython3 postgresql14-pltcl postgresql14-llvmjit pg_repack_14* wal2json_14* pgvector_14*"
+pg14-main:    "postgresql14 postgresql14-server postgresql14-libs postgresql14-contrib postgresql14-plperl postgresql14-plpython3 postgresql14-pltcl postgresql14-llvmjit pg_repack_14 wal2json_14 pgvector_14"
 pg13-core:    "postgresql13 postgresql13-server postgresql13-libs postgresql13-contrib postgresql13-plperl postgresql13-plpython3 postgresql13-pltcl postgresql13-llvmjit"
 ```
 
@@ -206,7 +206,7 @@ pg13-core:    "postgresql13 postgresql13-server postgresql13-libs postgresql13-c
 Take el for examples:
 
 ```yaml
-"postgresql":          "postgresql$v*",
+"postgresql":          "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl",
 "pgsql-common":        "patroni patroni-etcd pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager",
 "patroni":             "patroni patroni-etcd",
 "pgbouncer":           "pgbouncer",
@@ -283,7 +283,7 @@ citus           avail  13.2.0   OLAP  -dsl--  AGPL-3.0      PIGSTY   14-17  post
 citus_columnar  avail  13.2.0   OLAP  -ds---  AGPL-3.0      PIGSTY   14-17  postgresql-17-citus         Citus columnar storage engine
 columnar        n/a    1.1.2    OLAP  -ds---  AGPL-3.0      PIGSTY   13-16  postgresql-17-hydra         Hydra Columnar extension
 pg_analytics    avail  0.3.7    OLAP  -ds-t-  PostgreSQL    PIGSTY   14-17  postgresql-17-pg-analytics  Postgres for analytics, powered by DuckDB
-pg_duckdb       added  1.1.0    OLAP  -dsl--  MIT           PIGSTY   14-18  postgresql-17-pg-duckdb     DuckDB Embedded in Postgres
+pg_duckdb       added  1.1.1    OLAP  -dsl--  MIT           PIGSTY   14-18  postgresql-17-pg-duckdb     DuckDB Embedded in Postgres
 pg_mooncake     added  0.2.0    OLAP  -d----  MIT           PIGSTY   14-18  postgresql-17-pg-mooncake   Columnstore Table in Postgres
 duckdb_fdw      avail  1.1.2    OLAP  -ds--r  MIT           PIGSTY   13-17  postgresql-17-duckdb-fdw    DuckDB Foreign Data Wrapper
 pg_parquet      avail  0.5.1    OLAP  -dslt-  PostgreSQL    PIGSTY   14-18  postgresql-17-pg-parquet    copy data between Postgres and Parquet
@@ -315,7 +315,7 @@ $ pig ext info pg_duckdb
 │ Lead Ext  : pg_duckdb                                                      │
 │ Category  : OLAP                                                           │
 │ State     : available                                                      │
-│ Version   : 1.1.0                                                          │
+│ Version   : 1.1.1                                                          │
 │ License   : MIT                                                            │
 │ Website   : https://github.com/duckdb/pg_duckdb                            │
 │ Details   : https://pgext.cloud/e/pg_duckdb                                │
@@ -342,17 +342,17 @@ $ pig ext info pg_duckdb
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Repository     │  PIGSTY                                                   │
 │ Package        │  pg_duckdb_$v*                                            │
-│ Version        │  1.1.0                                                    │
+│ Version        │  1.1.1                                                    │
 │ Availability   │  18, 17, 16, 15, 14                                       │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ DEB Package                                                                │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Repository     │  PIGSTY                                                   │
 │ Package        │  postgresql-$v-pg-duckdb                                  │
-│ Version        │  1.1.0                                                    │
+│ Version        │  1.1.1                                                    │
 │ Availability   │  18, 17, 16, 15, 14                                       │
 ├────────────────────────────────────────────────────────────────────────────┤
-│ Source: pg_duckdb-1.1.0.tar.gz                                             │
+│ Source: pg_duckdb-1.1.1.tar.gz                                             │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Additional Comments                                                        │
 ├────────────────────────────────────────────────────────────────────────────┤
