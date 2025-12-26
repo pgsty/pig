@@ -145,6 +145,15 @@ func GetDependency(name string) []string {
 	return Catalog.Dependency[name]
 }
 
+// ArchAliasOverride contains package name overrides for specific OS+arch combinations
+// Key format: "el9.arm64", value is a map of alias -> package names
+var ArchAliasOverride = map[string]map[string]string{
+	"el9.arm64": {
+		"patroni":      "patroni-4.1.0 patroni-etcd-4.1.0",
+		"pgsql-common": "patroni-4.1.0 patroni-etcd-4.1.0 pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager",
+	},
+}
+
 // LoadAliasMap loads the alias map for the given distribution code
 func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 	if distroCode == "" {
@@ -282,4 +291,12 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 		ec.AliasMap = pkgMap
 	}
 
+	// Apply architecture-specific overrides
+	archCode := config.OSCode + "." + config.OSArch
+	if overrides, ok := ArchAliasOverride[archCode]; ok {
+		logrus.Debugf("applying alias overrides for %s", archCode)
+		for k, v := range overrides {
+			ec.AliasMap[k] = v
+		}
+	}
 }
