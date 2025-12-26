@@ -21,7 +21,8 @@ type Repository struct {
 	Arch        []string          `yaml:"arch"`
 	BaseURL     map[string]string `yaml:"baseurl"`
 	Meta        map[string]string `yaml:"meta"`
-	Distro      string            `yaml:"-"` // el|deb
+	Minor       bool              `yaml:"minor"`  // if true, use full version (e.g. 9.6) instead of major (e.g. 9) in $releasever
+	Distro      string            `yaml:"-"`      // el|deb
 }
 
 // SupportAmd64 checks if the repository supports amd64 architecture
@@ -115,6 +116,34 @@ func (r *Repository) needsEL10VersionFix() bool {
 	return false
 }
 
+// useMinorVersion checks if this repo should use full minor version (e.g. 9.6) instead of major (e.g. 9) in $releasever
+// This is required for:
+// 1. Repos with Minor=true explicitly set
+// 2. EPEL repos on EL10+ where EPEL started building for specific minor versions
+// 3. PGDG repos on specific EL versions (9.6, 9.7, 10.0, 10.1) where PGDG builds for minor versions
+func (r *Repository) useMinorVersion() bool {
+	// Only applies to EL (RPM) systems
+	if config.OSType != config.DistroEL {
+		return false
+	}
+	// Explicit minor flag takes precedence
+	if r.Minor {
+		return true
+	}
+	// Auto-enable for EPEL on EL10+
+	if config.OSMajor >= 10 && strings.HasPrefix(strings.ToLower(r.Name), "epel") {
+		return true
+	}
+	// Auto-enable for PGDG repos on specific EL versions that require minor version
+	if strings.HasPrefix(strings.ToLower(r.Name), "pgdg") {
+		switch config.OSVersionFull {
+		case "9.6", "9.7", "10.0", "10.1":
+			return true
+		}
+	}
+	return false
+}
+
 // Content returns the repo file content for a given region
 func (r *Repository) Content(region ...string) string {
 	regionStr := "default"
@@ -141,11 +170,12 @@ func (r *Repository) Content(region ...string) string {
 		}
 
 		baseURL := r.GetBaseURL(regionStr)
-		// EL10 aarch64 pgdg repos bad case (missing rhel-10-aarch64, got rhel-10.0-aarch64)
-		// if r.needsEL10VersionFix() {
-		// 	logrus.Debugf("substituting $releasever with 10.0 for el10.aarch64 pgdg repo")
-		// 	baseURL = strings.ReplaceAll(baseURL, "$releasever", "10.0")
-		// }
+		// Substitute $releasever with full version (e.g. 9.6, 10.0) if minor version is required
+		// This is needed for EPEL on EL10+ and repos with Minor=true
+		if r.useMinorVersion() {
+			logrus.Debugf("substituting $releasever with %s for repo %s", config.OSVersionFull, r.Name)
+			baseURL = strings.ReplaceAll(baseURL, "$releasever", config.OSVersionFull)
+		}
 
 		return fmt.Sprintf("[%s]\nname=%s\nbaseurl=%s\n%s", r.Name, r.Name, baseURL, rpmMeta)
 
