@@ -41,12 +41,12 @@ var styCmd = &cobra.Command{
 	Short:   "Manage Pigsty Installation",
 	Aliases: []string{"s", "pigsty"},
 	GroupID: "pigsty",
-	Long: `pig sty -Init (Download), Bootstrap, Configure, and Install Pigsty
+	Long: `pig sty -Init (Download), Bootstrap, Configure, and Deploy Pigsty
 
   pig sty init    [-pfvd]      # install pigsty (~/pigsty by default)
   pig sty boot    [-rpk]       # install ansible and prepare offline pkg
   pig sty conf    [-civrsxn]   # configure pigsty and generate config
-  pig sty install              # use pigsty to install & provisioning env (DANGEROUS!)
+  pig sty deploy               # use pigsty to deploy everything (CAUTION!)
   pig sty get                  # download pigsty source tarball
   pig sty list                 # list available pigsty versions
 `,
@@ -54,7 +54,7 @@ var styCmd = &cobra.Command{
   pig sty init                 # extract and init ~/pigsty
   pig sty boot                 # install ansible & other deps
   pig sty conf                 # generate pigsty.yml config file
-  pig sty install              # run pigsty/install.yml playbook`,
+  pig sty deploy               # run the deploy.yml playbook`,
 }
 
 // pigstyInitCmd will extract and setup ~/pigsty
@@ -355,10 +355,25 @@ var pigstyGetcmd = &cobra.Command{
 	},
 }
 
-var pigstyInstallcmd = &cobra.Command{
-	Use:     "install",
-	Short:   "run pigsty install.yml playbook",
-	Aliases: []string{"ins", "install"},
+var pigstyDeployCmd = &cobra.Command{
+	Use:     "deploy",
+	Short:   "run pigsty deploy.yml playbook",
+	Aliases: []string{"d", "de", "install", "ins"},
+	Long: `Deploy Pigsty using the deploy.yml playbook
+
+This command runs the deploy.yml playbook from your Pigsty installation.
+For backward compatibility, if deploy.yml doesn't exist but install.yml does,
+it will use install.yml instead.
+
+Aliases: deploy, d, de, install, ins (for backward compatibility)
+
+WARNING: This operation makes changes to your system. Use with caution!
+`,
+	Example: `  pig sty deploy       # run deploy.yml (or install.yml if deploy.yml not found)
+  pig sty install      # same as deploy (backward compatible)
+  pig sty d            # short alias
+  pig sty de           # short alias
+  pig sty ins          # short alias`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPigstyInstall()
 	},
@@ -386,18 +401,30 @@ func runPigstyInstall() error {
 		return err
 	}
 
-	// check install.yml playbook exists
-	playbookPath := filepath.Join(config.PigstyHome, "install.yml")
-	if _, err := os.Stat(playbookPath); os.IsNotExist(err) {
-		logrus.Errorf("pigsty playbook install.yml not found: %s", playbookPath)
-		return err
+	// check for deploy.yml playbook first, fallback to install.yml for backward compatibility
+	var playbookName string
+	deployPath := filepath.Join(config.PigstyHome, "deploy.yml")
+	installPath := filepath.Join(config.PigstyHome, "install.yml")
+
+	if _, err := os.Stat(deployPath); err == nil {
+		// deploy.yml exists, use it
+		playbookName = "deploy.yml"
+		logrus.Debugf("using deploy.yml playbook: %s", deployPath)
+	} else if _, err := os.Stat(installPath); err == nil {
+		// deploy.yml not found, fallback to install.yml
+		playbookName = "install.yml"
+		logrus.Warnf("deploy.yml not found, falling back to install.yml for backward compatibility")
+	} else {
+		// neither exists
+		logrus.Errorf("pigsty playbook not found: neither deploy.yml nor install.yml exists in %s", config.PigstyHome)
+		return fmt.Errorf("playbook not found")
 	}
 
-	// run the install.yml playbook
+	// run the playbook
 	os.Chdir(config.PigstyHome)
-	logrus.Infof("run playbook %s", playbookPath)
+	logrus.Infof("run playbook %s", playbookName)
 	logrus.Warnf("IT'S DANGEROUS TO RUN THIS ON INSTALLED SYSTEM!!! Use Ctrl+C to abort")
-	return utils.Command([]string{"ansible-playbook", "install.yml"})
+	return utils.Command([]string{"ansible-playbook", playbookName})
 }
 
 func init() {
@@ -421,6 +448,6 @@ func init() {
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
 
-	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyListcmd, pigstyGetcmd, pigstyInstallcmd)
+	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyDeployCmd, pigstyListcmd, pigstyGetcmd)
 
 }
