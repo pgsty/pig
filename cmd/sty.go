@@ -27,9 +27,12 @@ var (
 	pigstyConfIP             string
 	pigstyConfVer            string
 	pigstyConfRegion         string
+	pigstyConfOutput         string
 	pigstyConfSkip           bool
 	pigstyConfProxy          bool
 	pigstyConfNonInteractive bool
+	pigstyConfPort           string
+	pigstyConfGenerate       bool
 
 	pigstyDownloadDir string
 	pigstyVersion     string
@@ -43,12 +46,12 @@ var styCmd = &cobra.Command{
 	GroupID: "pigsty",
 	Long: `pig sty -Init (Download), Bootstrap, Configure, and Deploy Pigsty
 
-  pig sty init    [-pfvd]      # install pigsty (~/pigsty by default)
-  pig sty boot    [-rpk]       # install ansible and prepare offline pkg
-  pig sty conf    [-civrsxn]   # configure pigsty and generate config
-  pig sty deploy               # use pigsty to deploy everything (CAUTION!)
-  pig sty get                  # download pigsty source tarball
-  pig sty list                 # list available pigsty versions
+  pig sty init    [-pfvd]         # install pigsty (~/pigsty by default)
+  pig sty boot    [-rpk]          # install ansible and prepare offline pkg
+  pig sty conf    [-cvrsoxnpg]   # configure pigsty and generate config
+  pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
+  pig sty get                     # download pigsty source tarball
+  pig sty list                    # list available pigsty versions
 `,
 	Example: `  Get Started: https://pigsty.io/docs/setup/install/
   pig sty init                 # extract and init ~/pigsty
@@ -202,23 +205,31 @@ var pigstyConfCmd = &cobra.Command{
 	Long: `Configure pigsty with ./configure
 
 pig sty conf
-  [-c|--conf <name>       # [meta|dual|trio|full|prod]
+  [-c|--conf <name>]      # config template: [meta|rich|slim|full|supabase|...]
   [--ip <ip>]             # primary IP address (skip with -s)
-  [-v|--version <pgver>   # [17|16|15|14|13]
-  [-r|--region <region>   # [default|china|europe]
+  [-v|--version <pgver>]  # postgres major version: [18|17|16|15|14|13]
+  [-r|--region <region>]  # upstream repo region: [default|china|europe]
+  [-o|--output <file>]    # output config file path (default: pigsty.yml)
   [-s|--skip]             # skip IP address probing
+  [-p|--port <port>]      # specify SSH port (for ssh accessibility check)
   [-x|--proxy]            # write proxy env from environment
-  [-n|--non-interactive]  # non-interactively mode
+  [-n|--non-interactive]  # non-interactive mode
+  
+  [-g|--generate]         # generate random default passwords (RECOMMENDED!)
 
 Check https://pigsty.io/docs/setup/install/#configure for details
 `,
 	Example: `
-  pig sty conf                       # use the default conf/meta.yml config
-  pig sty conf -c rich -x            # use the rich.yml template, add your proxy env to config
-  pig sty conf -c supa --ip=10.9.8.7 # use the supa template with 10.9.8.7 as primary IP
-  pig sty conf -c full -v 16         # use the 4-node full template with pg16 as default
-  pig sty conf -c oss -s             # use the oss template, skip IP probing and replacement
-  pig sty conf -c slim -s -r china   # use the 2-node slim template, designate china as region  
+  pig sty conf                       # use default meta.yml config
+  pig sty conf -g                    # generate with random passwords (RECOMMENDED!)
+  pig sty conf -c rich               # use conf/rich.yml template (with more extensions)
+  pig sty conf -c ha/full            # use conf/ha/full.yml 4-node ha template
+  pig sty conf -c slim               # use conf/slim.yml template (minimal install)
+  pig sty conf -c supabase           # use conf/supabase.yml template (self-hosting)
+  pig sty conf -v 17 -c rich         # use conf/rich.yml template with PostgreSQL 17
+  pig sty conf -r china -s           # use china region mirrors, skip IP probe
+  pig sty conf -x                    # write proxy env from environment to config
+  pig sty conf -c full -g -o ha.yml  # full HA template with random passwords to ha.yml
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if config.PigstyHome == "" {
@@ -244,11 +255,23 @@ Check https://pigsty.io/docs/setup/install/#configure for details
 		if pigstyConfRegion != "" {
 			cmdArgs = append(cmdArgs, "-r", pigstyConfRegion)
 		}
+		if pigstyConfOutput != "" {
+			cmdArgs = append(cmdArgs, "-o", pigstyConfOutput)
+		}
 		if pigstyConfSkip {
 			cmdArgs = append(cmdArgs, "-s")
 		}
 		if pigstyConfProxy {
-			cmdArgs = append(cmdArgs, "-p")
+			cmdArgs = append(cmdArgs, "-x")
+		}
+		if pigstyConfNonInteractive {
+			cmdArgs = append(cmdArgs, "-n")
+		}
+		if pigstyConfPort != "" {
+			cmdArgs = append(cmdArgs, "-p", pigstyConfPort)
+		}
+		if pigstyConfGenerate {
+			cmdArgs = append(cmdArgs, "-g")
 		}
 		cmdArgs = append(cmdArgs, args...)
 		if err := os.Chdir(config.PigstyHome); err != nil {
@@ -441,9 +464,12 @@ func init() {
 	pigstyConfCmd.Flags().StringVar(&pigstyConfIP, "ip", "", "primary ip address")
 	pigstyConfCmd.Flags().StringVarP(&pigstyConfVer, "version", "v", "", "postgres major version")
 	pigstyConfCmd.Flags().StringVarP(&pigstyConfRegion, "region", "r", "", "upstream repo region")
+	pigstyConfCmd.Flags().StringVarP(&pigstyConfOutput, "output", "o", "", "output config file path")
 	pigstyConfCmd.Flags().BoolVarP(&pigstyConfSkip, "skip", "s", false, "skip ip probe")
-	pigstyConfCmd.Flags().BoolVarP(&pigstyConfProxy, "proxy", "p", false, "configure proxy env")
-	pigstyConfCmd.Flags().BoolVarP(&pigstyConfNonInteractive, "non-interactive", "n", false, "configure non-interactive")
+	pigstyConfCmd.Flags().BoolVarP(&pigstyConfProxy, "proxy", "x", false, "write proxy env from environment")
+	pigstyConfCmd.Flags().BoolVarP(&pigstyConfNonInteractive, "non-interactive", "n", false, "non-interactive mode")
+	pigstyConfCmd.Flags().StringVarP(&pigstyConfPort, "port", "p", "", "SSH port (only used if set)")
+	pigstyConfCmd.Flags().BoolVarP(&pigstyConfGenerate, "generate", "g", false, "generate random passwords")
 
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
