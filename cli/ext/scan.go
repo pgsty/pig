@@ -49,10 +49,10 @@ var matchSpecialCase = map[string]string{
 	"plugin_debugger":               "pldbgapi",
 	"ddl_deparse":                   "pgl_ddl_deploy",
 	"pg_timestamp":                  "pg_bulkload",
-	"pg_documentdb":                 "documentdb",
-	"pg_documentdb_core":            "documentdb",
-	"pg_documentdb_distributed":     "documentdb",
+	"documentdb_extended_rum":       "documentdb",
 	"pg_mooncake_duckdb":            "pg_mooncake",
+	"weighted_statistics":           "pg_weighted_statistics",
+	"mobilitydb_datagen":            "mobilitydb",
 }
 
 var matchGlobCase = map[string]string{
@@ -60,6 +60,7 @@ var matchGlobCase = map[string]string{
 	"libpgrouting-*":  "pgrouting",
 	"libpljava-so-*":  "pljava",
 	"timescaledb-*":   "timescaledb",
+	"pg_documentdb*":  "documentdb",
 }
 
 var matchBuiltInLib = map[string]bool{
@@ -214,17 +215,29 @@ func (p *PostgresInstall) ScanExtensions() error {
 			if badCaseExtensions[extName] {
 				continue
 			}
-			extInstall := &ExtensionInstall{Postgres: p, ControlName: extName}
-			extMap[extName] = extInstall
-			extensions = append(extensions, extInstall)
-			extInstall.Libraries = make(map[string]bool, 0)
-			_ = extInstall.ParseControlFile()
-			// DEPENDENCY: find the extension object in the global Extensions list
 
+			// Normalize extension name for omni extensions (e.g., omni_sqlite--0.2.2 -> omni_sqlite)
 			normExtName := extName
 			if strings.HasPrefix(extName, "omni") {
 				normExtName = strings.SplitN(extName, "--", 2)[0]
 			}
+
+			// Skip if normalized name already exists (avoid duplicates for versioned control files)
+			if _, alreadyExists := extMap[normExtName]; alreadyExists {
+				continue
+			}
+
+			extInstall := &ExtensionInstall{Postgres: p, ControlName: extName}
+			extMap[extName] = extInstall
+			// Also add normalized name to extMap for control-less lookup
+			if normExtName != extName {
+				extMap[normExtName] = extInstall
+			}
+			extensions = append(extensions, extInstall)
+			extInstall.Libraries = make(map[string]bool, 0)
+			_ = extInstall.ParseControlFile()
+
+			// DEPENDENCY: find the extension object in the global Extensions list
 			ext := Catalog.ExtNameMap[normExtName]
 			if ext == nil {
 				logrus.Debugf("failed to find extension %s in catalog", normExtName)
@@ -238,6 +251,10 @@ func (p *PostgresInstall) ScanExtensions() error {
 	// add control less extensions if found
 	for name := range Catalog.ControlLess {
 		if _, exists := shareLibs[name]; exists {
+			// skip if already added from control file
+			if _, alreadyExists := extMap[name]; alreadyExists {
+				continue
+			}
 			extInstall := &ExtensionInstall{Postgres: p}
 			// DEPENDENCY: find the control less extension in catalog
 			extInstall.Extension = Catalog.ExtNameMap[name]
@@ -270,9 +287,13 @@ func (p *PostgresInstall) ScanExtensions() error {
 
 // ExtensionInstallSummary prints a summary of the PostgreSQL installation and its extensions & shared libraries
 func (pg *PostgresInstall) ExtensionInstallSummary() {
-	// Sort extensions by name for consistent output
+	// Sort extensions by ID for consistent output
 	extensions := pg.Extensions
 	sort.Slice(extensions, func(i, j int) bool {
+		// Sort by extension ID if available, otherwise by name
+		if extensions[i].Extension != nil && extensions[j].Extension != nil {
+			return extensions[i].Extension.ID < extensions[j].Extension.ID
+		}
 		return extensions[i].ExtName() < extensions[j].ExtName()
 	})
 
