@@ -51,7 +51,6 @@ var matchSpecialCase = map[string]string{
 	"pg_timestamp":                  "pg_bulkload",
 	"documentdb_extended_rum":       "documentdb",
 	"pg_mooncake_duckdb":            "pg_mooncake",
-	"weighted_statistics":           "pg_weighted_statistics",
 	"mobilitydb_datagen":            "mobilitydb",
 }
 
