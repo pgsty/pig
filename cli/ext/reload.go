@@ -13,7 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// ReloadCatalog downloads the latest extension catalog from the fastest available source
+// ReloadExtensionCatalog downloads the latest extension catalog from the fastest available source
 func ReloadExtensionCatalog() error {
 	urls := []string{
 		config.RepoPigstyIO + "/ext/data/extension.csv",

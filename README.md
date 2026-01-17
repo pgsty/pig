@@ -2,7 +2,7 @@
 
 [![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
 [![Version: v0.9.1](https://img.shields.io/badge/version-v0.9.1-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v0.9.1)
-[![Pigsty: v4.0.0](https://img.shields.io/badge/Pigsty-v4.0.0-slategray?style=flat&logo=cilium&logoColor=white)](https://doc.pgsty.com/release/latest)
+[![Pigsty: v4.0.0](https://img.shields.io/badge/Pigsty-v4.0.0-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 444](https://img.shields.io/badge/extensions-444-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
 
@@ -19,11 +19,11 @@ Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the p
 
 ## Get Started
 
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18,17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://doc.pgsty.com/pgsql)
-[![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://doc.pgsty.com/node)
-[![EL Support: 8/9/10](https://img.shields.io/badge/EL-8/9/10-red?style=flat&logo=redhat&logoColor=red)](https://doc.pgsty.com/prepare/linux)
-[![Debian Support: 12/13](https://img.shields.io/badge/Debian-12/13-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://doc.pgsty.com/prepare/linux)
-[![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://doc.pgsty.com/prepare/linux)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18,17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://pigsty.io/docs/pgsql)
+[![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://pigsty.io/docs/node)
+[![EL Support: 8/9/10](https://img.shields.io/badge/EL-8/9/10-red?style=flat&logo=redhat&logoColor=red)](https://pigsty.io/docs/ref/linux#el)
+[![Debian Support: 12/13](https://img.shields.io/badge/Debian-12/13-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pigsty.io/docs/ref/linux#debian)
+[![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://pigsty.io/docs/ref/linux#ubuntu)
 
 [Install](https://pgext.cloud/pig/install) the `pig` package first, (you can also use the `apt` / `yum` or just copy the binary)
 
@@ -111,13 +111,13 @@ pig ext  status               # show pg extensions status
 ```bash
 pig ext list    [query]       # list & search extension      
 pig ext info    [ext...]      # get information of a specific extension
-pig ext status  [-v]          # show installed extension and pg status
+pig ext status  [-c]          # show installed extension and pg status
 pig ext add     [ext...]      # install extension for current pg version
 pig ext rm      [ext...]      # remove extension for current pg version
 pig ext update  [ext...]      # update extension to the latest version
 pig ext import  [ext...]      # download extension to local repo
 pig ext link    [ext...]      # link postgres installation to path
-pig ext upgrade               # fetch the latest extension catalog
+pig ext reload                # reload the latest extension catalog
 ```
 
 **Repo Management**
@@ -133,6 +133,7 @@ pig repo update                  # update repo pkg cache
 pig repo create                  # create repo on current system
 pig repo boot                    # boot repo from offline package
 pig repo cache                   # cache repo as offline package
+pig repo reload                  # reload repo catalog to latest version
 ```
 
 **Build Management**
