@@ -84,16 +84,29 @@ func printExtensionSummary(repocount map[string]int, totalExtensions int) {
 
 func tabulateExtensions(exts []*Extension) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Name\tVersion\tCate\tFlags\tLicense\tRepo\tPackage\tDescription")
+	if ShowPkg {
+		fmt.Fprintln(w, "Pkg\tVersion\tCate\tFlags\tLicense\tRepo\tPackage\tDescription")
+	} else {
+		fmt.Fprintln(w, "Name\tVersion\tCate\tFlags\tLicense\tRepo\tPackage\tDescription")
+	}
 	fmt.Fprintln(w, "----\t-------\t----\t------\t-------\t------\t------------\t---------------------")
+	count := 0
 	for _, ext := range exts {
+		if ShowPkg && !ext.Lead {
+			continue
+		}
 		desc := ext.EnDesc
 		if len(desc) > 64 {
 			desc = desc[:64]
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", ext.Name, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.PackageName(Postgres.MajorVersion), desc)
+		firstCol := ext.Name
+		if ShowPkg {
+			firstCol = ext.Pkg
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", firstCol, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.PackageName(Postgres.MajorVersion), desc)
+		count++
 	}
 	w.Flush()
 
-	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(exts))
+	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", count)
 }
