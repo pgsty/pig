@@ -19,6 +19,7 @@ var (
 	buildGetForce  bool
 	buildSpecForce bool
 	buildRustYes   bool
+	buildMirror    bool
 )
 
 // buildCmd represents the top-level `build` command
@@ -131,7 +132,7 @@ var buildSpecCmd = &cobra.Command{
 	Aliases: []string{"s"},
 	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.SpecDirSetup(buildSpecForce)
+		return build.SpecDirSetup(buildSpecForce, buildMirror)
 	},
 }
 
@@ -142,7 +143,7 @@ var buildGetCmd = &cobra.Command{
 	Aliases: []string{"g"},
 	Args:    cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.DownloadSources(args, buildGetForce)
+		return build.DownloadSources(args, buildGetForce, buildMirror)
 	},
 }
 
@@ -190,9 +191,11 @@ func init() {
 
 	// Add spec specific flags
 	buildSpecCmd.Flags().BoolVarP(&buildSpecForce, "force", "f", false, "force re-download tarball even if exists")
+	buildSpecCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "use mirror (pigsty.cc) instead of default")
 
 	// Add get specific flags
 	buildGetCmd.Flags().BoolVarP(&buildGetForce, "force", "f", false, "force download even if file exists")
+	buildGetCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "use mirror (pigsty.cc) instead of default")
 
 	// Add dep specific flags
 	buildDepCmd.Flags().StringVar(&buildDepPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")

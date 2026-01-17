@@ -21,7 +21,7 @@ type specConfig struct {
 }
 
 // SpecDirSetup manages build spec fhs
-func SpecDirSetup(force bool) error {
+func SpecDirSetup(force bool, mirror bool) error {
 	var spec *specConfig
 	switch config.OSType {
 	case config.DistroEL:
@@ -45,7 +45,7 @@ func SpecDirSetup(force bool) error {
 	default:
 		return fmt.Errorf("unsupported OS type: %s", config.OSType)
 	}
-	return syncSpec(spec, force)
+	return syncSpec(spec, force, mirror)
 }
 
 // setupBuildDirs creates complete directory structure and symlinks
@@ -125,7 +125,7 @@ func createSymlink(target, linkPath string, force bool) error {
 }
 
 // syncSpec: Download tarball and perform incremental sync via rsync
-func syncSpec(spec *specConfig, force bool) error {
+func syncSpec(spec *specConfig, force bool, mirror bool) error {
 	logrus.Info("sync extension specs")
 
 	// Setup paths
@@ -141,7 +141,7 @@ func syncSpec(spec *specConfig, force bool) error {
 	}
 
 	// 2. Download tarball (force re-download if requested)
-	if err := downloadTarball(spec.Tarball, tarballPath, force); err != nil {
+	if err := downloadTarball(spec.Tarball, tarballPath, force, mirror); err != nil {
 		return err
 	}
 
@@ -170,7 +170,7 @@ func syncSpec(spec *specConfig, force bool) error {
 }
 
 // downloadTarball downloads spec tarball if not already present
-func downloadTarball(filename, localPath string, force bool) error {
+func downloadTarball(filename, localPath string, force bool, mirror bool) error {
 	// If force is true, remove existing file
 	if force {
 		if err := os.RemoveAll(localPath); err != nil && !os.IsNotExist(err) {
@@ -189,8 +189,11 @@ func downloadTarball(filename, localPath string, force bool) error {
 		}
 	}
 
-	// Construct download URL
-	baseURL := config.RepoPigstyCC
+	// Construct download URL (default: pigsty.io, mirror: pigsty.cc)
+	baseURL := config.RepoPigstyIO
+	if mirror {
+		baseURL = config.RepoPigstyCC
+	}
 	url := fmt.Sprintf("%s/ext/spec/%s", baseURL, filename)
 
 	logrus.Debugf("download %s from %s", filename, url)

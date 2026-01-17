@@ -30,6 +30,9 @@ var SpecialSourceMapping = map[string][]string{
 	},
 }
 
+// sourceBaseURL holds the base URL for source downloads
+var sourceBaseURL string
+
 // DownloadSource downloads source tarball for a single package
 func DownloadSource(pkg string, force bool) error {
 	logrus.Info(strings.Repeat("=", 58))
@@ -60,9 +63,15 @@ func DownloadSource(pkg string, force bool) error {
 }
 
 // DownloadSources processes multiple packages
-func DownloadSources(packages []string, force bool) error {
+func DownloadSources(packages []string, force bool, mirror bool) error {
 	if len(packages) == 0 {
 		return fmt.Errorf("no packages specified")
+	}
+
+	// Set base URL (default: pigsty.io, mirror: pigsty.cc)
+	sourceBaseURL = config.RepoPigstyIO
+	if mirror {
+		sourceBaseURL = config.RepoPigstyCC
 	}
 
 	for _, pkg := range packages {
@@ -109,8 +118,12 @@ func downloadFile(filename, dstDir string, force bool) error {
 		os.Remove(dstPath)
 	}
 
-	// Download
-	url := fmt.Sprintf("%s/ext/src/%s", config.RepoPigstyCC, filename)
+	// Use default baseURL if not set (e.g., when called from BuildPackage)
+	baseURL := sourceBaseURL
+	if baseURL == "" {
+		baseURL = config.RepoPigstyIO
+	}
+	url := fmt.Sprintf("%s/ext/src/%s", baseURL, filename)
 	logrus.Infof("Downloading from %s", url)
 
 	if err := utils.DownloadFile(url, dstPath); err != nil {
