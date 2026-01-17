@@ -304,6 +304,7 @@ func extProbeVersion() int {
 func init() {
 	extCmd.PersistentFlags().IntVarP(&extPgVer, "version", "v", 0, "specify a postgres by major version")
 	extCmd.PersistentFlags().StringVarP(&extPgConfig, "path", "p", "", "specify a postgres by pg_config path")
+	extCmd.PersistentFlags().BoolVar(&ext.ShowPkg, "pkg", false, "show Pkg instead of Name, only list lead extensions")
 
 	extStatusCmd.Flags().BoolVarP(&extShowContrib, "contrib", "c", false, "show contrib extensions too")
 	extAddCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm install")

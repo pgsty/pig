@@ -11,6 +11,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// ShowPkg controls whether to show Pkg instead of Name and filter by Lead=true
+var ShowPkg bool
+
 var CategoryMap = map[string]string{
 	"time":  "TIME",
 	"gis":   "GIS",
@@ -38,12 +41,20 @@ type SearchResult struct {
 // TabulteVersion prints a tabulated list of extensions available to given version
 func TabulteVersion(pgVer int, data []*Extension) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Name\tState\tVersion\tCate\tFlags\tLicense\tRepo\tPGVer\tPackage\tDescription")
+	if ShowPkg {
+		fmt.Fprintln(w, "Pkg\tState\tVersion\tCate\tFlags\tLicense\tRepo\tPGVer\tPackage\tDescription")
+	} else {
+		fmt.Fprintln(w, "Name\tState\tVersion\tCate\tFlags\tLicense\tRepo\tPGVer\tPackage\tDescription")
+	}
 	fmt.Fprintln(w, "----\t-----\t-------\t----\t------\t-------\t------\t-----\t------------\t---------------------")
 	if Postgres != nil {
 		pgVer = Postgres.MajorVersion
 	}
+	count := 0
 	for _, ext := range data {
+		if ShowPkg && !ext.Lead {
+			continue
+		}
 		desc := ext.EnDesc
 		if len(desc) > 64 {
 			desc = desc[:64]
@@ -52,27 +63,45 @@ func TabulteVersion(pgVer int, data []*Extension) {
 		if strings.Contains(pkgStr, "$v") {
 			pkgStr = fmt.Sprintf("[%s]", pkgStr)
 		}
+		firstCol := ext.Name
+		if ShowPkg {
+			firstCol = ext.Pkg
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			ext.Name, ext.GetStatus(pgVer), ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.Availability(config.OSCode), pkgStr, desc)
+			firstCol, ext.GetStatus(pgVer), ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.Availability(config.OSCode), pkgStr, desc)
+		count++
 	}
 	w.Flush()
-	fmt.Printf("\n(%d Rows) (State: added|avail|n/a, Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(data))
+	fmt.Printf("\n(%d Rows) (State: added|avail|n/a, Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", count)
 }
 
 func TabulteCommon(data []*Extension) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Name\tVersion\tCate\tFlags\tLicense\tRPM\tDEB\tPG Ver\tDescription")
+	if ShowPkg {
+		fmt.Fprintln(w, "Pkg\tVersion\tCate\tFlags\tLicense\tRPM\tDEB\tPG Ver\tDescription")
+	} else {
+		fmt.Fprintln(w, "Name\tVersion\tCate\tFlags\tLicense\tRPM\tDEB\tPG Ver\tDescription")
+	}
 	fmt.Fprintln(w, "----\t-------\t----\t------\t-------\t------\t------\t------\t---------------------")
+	count := 0
 	for _, ext := range data {
+		if ShowPkg && !ext.Lead {
+			continue
+		}
 		desc := ext.EnDesc
 		if len(desc) > 64 {
 			desc = desc[:64] + "..."
 		}
+		firstCol := ext.Name
+		if ShowPkg {
+			firstCol = ext.Pkg
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			ext.Name, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RpmRepo, ext.DebRepo, CompactVersion(ext.PgVer), desc)
+			firstCol, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RpmRepo, ext.DebRepo, CompactVersion(ext.PgVer), desc)
+		count++
 	}
 	w.Flush()
-	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", len(data))
+	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", count)
 }
 
 // SearchExtensions performs fuzzy search on extensions
