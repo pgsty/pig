@@ -255,6 +255,38 @@ var extReloadCmd = &cobra.Command{
 	},
 }
 
+var extAvailCmd = &cobra.Command{
+	Use:     "avail [ext...]",
+	Short:   "show extension availability matrix",
+	Aliases: []string{"av", "m", "matrix"},
+	Example: `
+  pig ext avail                     # show all packages availability on current OS
+  pig ext avail timescaledb         # show availability matrix for timescaledb
+  pig ext avail postgis pg_duckdb   # show matrix for multiple extensions
+  pig ext av pgvector               # show availability for pgvector
+  pig ext matrix citus              # alias for avail command
+`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			// No arguments: show global package availability matrix for current OS
+			ext.PrintGlobalAvailability()
+			return nil
+		}
+		for _, name := range args {
+			e, ok := ext.Catalog.ExtNameMap[name]
+			if !ok {
+				e, ok = ext.Catalog.ExtPkgMap[name]
+				if !ok {
+					logrus.Errorf("extension '%s' not found", name)
+					continue
+				}
+			}
+			ext.PrintAvailability(e)
+		}
+		return nil
+	},
+}
+
 // extProbeVersion returns the PostgreSQL version to use
 func extProbeVersion() int {
 	// check args
@@ -322,4 +354,5 @@ func init() {
 	extCmd.AddCommand(extImportCmd)
 	extCmd.AddCommand(extLinkCmd)
 	extCmd.AddCommand(extReloadCmd)
+	extCmd.AddCommand(extAvailCmd)
 }
