@@ -3,7 +3,7 @@
 # Mtime     :   2026-01-16
 # Copyright (C) 2018-2026 Ruohang Feng
 #==============================================================#
-VERSION=v0.9.1
+VERSION=v1.0.0
 
 # Build Variables
 BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")

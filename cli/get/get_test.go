@@ -96,7 +96,7 @@ func TestCompareVersions(t *testing.T) {
 func TestParseChecksums(t *testing.T) {
 	data := `
 649c7b9f778c61324cb6d350dbda4f5e  pigsty-v0.8.1.tgz
-8436905916465e74bfcb3d8192c11c85  pigsty-v0.9.1.tgz
+8436905916465e74bfcb3d8192c11c85  pigsty-v1.0.0.tgz
 0b9958a9305775a703a990d7c6728c21  pigsty-v1.0.0.tgz
 invalid line without proper format
 e62f9ce9f89a58958609da7b234bf2f2  pigsty-v3.1.0.tgz
