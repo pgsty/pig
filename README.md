@@ -109,9 +109,11 @@ pig ext  status               # show pg extensions status
 **Extension Management**
 
 ```bash
-pig ext list    [query]       # list & search extension      
+pig ext list    [query]       # list & search extension
 pig ext info    [ext...]      # get information of a specific extension
+pig ext avail   [ext...]      # show extension availability matrix
 pig ext status  [-c]          # show installed extension and pg status
+pig ext scan                  # scan installed extensions for active pg
 pig ext add     [ext...]      # install extension for current pg version
 pig ext rm      [ext...]      # remove extension for current pg version
 pig ext update  [ext...]      # update extension to the latest version
@@ -198,8 +200,8 @@ pg17-devel:   "postgresql17-devel"
 pg17-basic:   "pg_repack_17 wal2json_17 pgvector_17"
 pg16-mini:    "postgresql16 postgresql16-server postgresql16-libs postgresql16-contrib"
 pg15-full:    "postgresql15 postgresql15-server postgresql15-libs postgresql15-contrib postgresql15-plperl postgresql15-plpython3 postgresql15-pltcl postgresql15-llvmjit postgresql15-test postgresql15-devel"
-pg14-main:    "postgresql14 postgresql14-server postgresql14-libs postgresql14-contrib postgresql14-plperl postgresql14-plpython3 postgresql14-pltcl postgresql14-llvmjit pg_repack_14 wal2json_14 pgvector_14"
-pg13-core:    "postgresql13 postgresql13-server postgresql13-libs postgresql13-contrib postgresql13-plperl postgresql13-plpython3 postgresql13-pltcl postgresql13-llvmjit"
+pg14-main:    "postgresql14 postgresql14-server postgresql14-libs postgresql14-contrib postgresql14-plperl postgresql14-plpython3 postgresql14-pltcl pg_repack_14 wal2json_14 pgvector_14"
+pg13-core:    "postgresql13 postgresql13-server postgresql13-libs postgresql13-contrib postgresql13-plperl postgresql13-plpython3 postgresql13-pltcl"
 ```
 
 <details><summary>More Alias</summary>
@@ -241,6 +243,11 @@ Take el for examples:
 "restic":              "restic",
 "rclone":              "rclone",
 "genai-toolbox":       "genai-toolbox",
+"tigerbeetle":         "tigerbeetle",
+"clickhouse":          "clickhouse-server clickhouse-client clickhouse-common-static",
+"victoria":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscil vlagent grafana-victorialogs-ds",
+"vmetrics":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds",
+"vlogs":               "victoria-logs vlogscil vlagent grafana-victorialogs-ds",
 ```
 
 </details>
@@ -277,27 +284,37 @@ You can perform fuzzy search on extension name, description, and category.
 ```bash
 $ pig ext ls olap
 INFO[14:04:25] found 14 extensions matching 'olap':
-Name            State  Version  Cate  Flags   License       Repo     PGVer  Package               Description
-----            -----  -------  ----  ------  -------       ------   -----  ------------          ---------------------
-citus           added  14.0.0   OLAP  -dsl--  AGPL-3.0      PIGSTY   16-18  citus_18              Distributed PostgreSQL as an extension
-citus_columnar  added  14.0.0   OLAP  -ds---  AGPL-3.0      PIGSTY   16-18  citus_18              Citus columnar storage engine
-columnar        n/a    1.1.2    OLAP  -ds---  AGPL-3.0      PIGSTY   13-16  hydra_18              Hydra Columnar extension
-pg_analytics    n/a    0.3.7    OLAP  -ds-t-  PostgreSQL    PIGSTY   14-17  pg_analytics_18       Postgres for analytics, powered by DuckDB
-pg_duckdb       added  1.1.1    OLAP  -dsl--  MIT           PIGSTY   14-18  pg_duckdb_18          DuckDB Embedded in Postgres
-pg_mooncake     added  0.2.0    OLAP  -d-l--  MIT           PIGSTY   14-18  pg_mooncake_18        Columnstore Table in Postgres
-pg_clickhouse   added  0.1.2    OLAP  -ds---  Apache-2.0    PIGSTY   13-18  pg_clickhouse_18      Interfaces to query ClickHouse databases from PostgreSQL
-duckdb_fdw      n/a    1.1.2    OLAP  -ds--r  MIT           PIGSTY   13-17  duckdb_fdw_18         DuckDB Foreign Data Wrapper
-pg_parquet      added  0.5.1    OLAP  -dslt-  PostgreSQL    PIGSTY   14-18  pg_parquet_18         copy data between Postgres and Parquet
-pg_fkpart       added  1.7.0    OLAP  -d----  GPL-2.0       PIGSTY   13-18  pg_fkpart_18          Table partitioning by foreign key utility
-pg_partman      added  5.4.0    OLAP  -ds---  PostgreSQL    PGDG     13-18  pg_partman_18         Extension to manage partitioned tables by time or ID
-plproxy         added  2.11.0   OLAP  -ds---  BSD 0-Clause  PGDG     13-18  plproxy_18            Database partitioning implemented as procedural language
-pg_strom        n/a    6.0      OLAP  -ds--x  PostgreSQL    PGDG     13-17  pg_strom_18           PG-Strom - big-data processing acceleration using GPU and NVME
-tablefunc       added  1.0      OLAP  -ds-tx  PostgreSQL    CONTRIB  13-18  postgresql18-contrib  functions that manipulate whole tables, including crosstab
+Name            Status     Version  Cate  Flags   License       Repo     PGVer  Package               Description
+----            ------     -------  ----  ------  -------       ------   -----  ------------          ---------------------
+citus           installed  14.0.0   OLAP  -dsl--  AGPL-3.0      PIGSTY   16-18  citus_18              Distributed PostgreSQL as an extension
+citus_columnar  installed  14.0.0   OLAP  -ds---  AGPL-3.0      PIGSTY   16-18  citus_18              Citus columnar storage engine
+columnar        not avail  1.1.2    OLAP  -ds---  AGPL-3.0      PIGSTY   13-16  hydra_18              Hydra Columnar extension
+pg_analytics    not avail  0.3.7    OLAP  -ds-t-  PostgreSQL    PIGSTY   14-17  pg_analytics_18       Postgres for analytics, powered by DuckDB
+pg_duckdb       installed  1.1.1    OLAP  -dsl--  MIT           PIGSTY   14-18  pg_duckdb_18          DuckDB Embedded in Postgres
+pg_mooncake     installed  0.2.0    OLAP  -d-l--  MIT           PIGSTY   14-18  pg_mooncake_18        Columnstore Table in Postgres
+pg_clickhouse   available  0.1.2    OLAP  -ds---  Apache-2.0    PIGSTY   13-18  pg_clickhouse_18      Interfaces to query ClickHouse databases from PostgreSQL
+duckdb_fdw      available  1.1.2    OLAP  -ds--r  MIT           PIGSTY   13-17  duckdb_fdw_18         DuckDB Foreign Data Wrapper
+pg_parquet      installed  0.5.1    OLAP  -dslt-  PostgreSQL    PIGSTY   14-18  pg_parquet_18         copy data between Postgres and Parquet
+pg_fkpart       available  1.7.0    OLAP  -d----  GPL-2.0       PIGSTY   13-18  pg_fkpart_18          Table partitioning by foreign key utility
+pg_partman      available  5.4.0    OLAP  -ds---  PostgreSQL    PGDG     13-18  pg_partman_18         Extension to manage partitioned tables by time or ID
+plproxy         available  2.11.0   OLAP  -ds---  BSD 0-Clause  PGDG     13-18  plproxy_18            Database partitioning implemented as procedural language
+pg_strom        not avail  6.0      OLAP  -ds--x  PostgreSQL    PGDG     13-17  pg_strom_18           PG-Strom - big-data processing acceleration using GPU and NVME
+tablefunc       installed  1.0      OLAP  -ds-tx  PostgreSQL    CONTRIB  13-18  postgresql18-contrib  functions that manipulate whole tables, including crosstab
 
-(14 Rows) (State: added|avail|n/a, Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)
+(14 Rows) (Status: installed, available, not avail | Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)
 ```
 
 You can use the `-v 16` or `-p /path/to/pg_config` to find extension availability for other PostgreSQL installation.
+
+**Extension Availability Matrix**
+
+You can check the availability matrix for extensions across different OS/Arch/PG combinations:
+
+```bash
+$ pig ext avail pg_duckdb            # show availability matrix for pg_duckdb
+$ pig ext avail postgis pgvector     # show matrix for multiple extensions
+$ pig ext avail                      # show all packages availability on current OS
+```
 
 
 **Print Extension Summary**
@@ -364,6 +381,50 @@ $ pig ext info pg_duckdb
 │ Comment: conflict with duckdb_fdw                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
+
+**Print Extension Availability**
+
+You can get extension package availability with `pig ext avail` subcommand:
+
+```bash
+$ pig ext avail citus
+
+citus (citus) - Distributed PostgreSQL as an extension
+Latest: 14.0.0 | 70/84 avail, PG16, PG17, PG18
+Details: https://pgext.cloud/e/citus  (green = PIGSTY, blue = PGDG)
+
+╭──────────────┬──────────────┬──────────────┬──────────────┬──────────────┬──────────────┬──────────────╮
+│ OS \ PG      │      18      │      17      │      16      │      15      │      14      │      13      │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el8.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │    11.3.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el8.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │    11.3.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el9.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │    11.3.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el9.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │    11.3.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el10.x86_64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el10.aarch64 │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ d12.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ d12.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ d13.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ d13.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ u22.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ u22.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ u24.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ u24.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
+╰──────────────┴──────────────┴──────────────┴──────────────┴──────────────┴──────────────┴──────────────╯
+````
 
 **List Repo**
 
@@ -480,7 +541,7 @@ $ pig build pkg timescaledb  # now you can build extension with pig!
 
 ## Compatibility
 
-`pig` runs on: RHEL 8/9/10, Ubuntu 22.04/24.04, and Debian 12/13 and compatible OS
+`pig` runs on: RHEL 8/9/10, Ubuntu 22.04/24.04, and Debian 12/13 and [compatible OS](https://pigsty.io/docs/ref/linux)
 
 |   Code   | Distribution                      |  `x86_64`  | `aarch64`  |
 |:--------:|-----------------------------------|:----------:|:----------:|

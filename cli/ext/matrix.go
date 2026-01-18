@@ -301,6 +301,74 @@ const (
 	colorGray    = "\033[90m"
 )
 
+// Status display strings
+const (
+	StatusInstalled = "installed"
+	StatusAvailable = "available"
+	StatusNotAvail  = "not avail"
+)
+
+// GetExtensionStatus returns colored status string for an extension
+// Priority: 1) Check if installed, 2) Check Matrix availability, 3) Fallback to PgVer
+func GetExtensionStatus(e *Extension, pgVer int, osCode, arch string) string {
+	if e == nil {
+		return colorRed + StatusNotAvail + colorReset
+	}
+
+	// Check if installed (Postgres must be detected and extension in map)
+	if Postgres != nil && Postgres.ExtensionMap != nil {
+		if Postgres.ExtensionMap[e.Name] != nil {
+			return colorGreen + StatusInstalled + colorReset
+		}
+	}
+
+	// Check availability via Matrix (preferred method)
+	available := checkMatrixAvailability(e, pgVer, osCode, arch)
+	if available {
+		return colorYellow + StatusAvailable + colorReset
+	}
+
+	return colorRed + StatusNotAvail + colorReset
+}
+
+// getLeadExtension returns the lead extension for matrix data lookup
+func getLeadExtension(e *Extension) *Extension {
+	if e == nil {
+		return nil
+	}
+	if e.Lead || e.LeadExt == "" || Catalog == nil {
+		return e
+	}
+	if lead, ok := Catalog.ExtNameMap[e.LeadExt]; ok {
+		return lead
+	}
+	return e
+}
+
+// checkMatrixAvailability checks if extension is available using Matrix data with PgVer fallback
+func checkMatrixAvailability(e *Extension, pgVer int, osCode, arch string) bool {
+	leadExt := getLeadExtension(e)
+	if leadExt == nil {
+		return false
+	}
+
+	// Try Matrix data first
+	matrix := leadExt.GetPkgMatrix()
+	if len(matrix) > 0 {
+		entry := matrix.Get(osCode, arch, pgVer)
+		return entry != nil && entry.State == PkgAvail
+	}
+
+	// Fallback: use PgVer field
+	pgVerStr := strconv.Itoa(pgVer)
+	for _, v := range leadExt.PgVer {
+		if strings.TrimSpace(v) == pgVerStr {
+			return true
+		}
+	}
+	return false
+}
+
 // centerStr centers a string within width
 func centerStr(s string, width int) string {
 	if len(s) >= width {
@@ -459,12 +527,9 @@ func PrintAvailability(e *Extension) {
 	fmt.Printf("\n%s (%s) - %s\n", e.Name, e.Pkg, e.EnDesc)
 
 	// Get lead extension for matrix data
-	leadExt := e
-	if !e.Lead && e.LeadExt != "" && Catalog != nil {
-		if lead, ok := Catalog.ExtNameMap[e.LeadExt]; ok {
-			leadExt = lead
-			fmt.Printf("(Matrix data from lead extension: %s)\n", leadExt.Name)
-		}
+	leadExt := getLeadExtension(e)
+	if leadExt != e {
+		fmt.Printf("(Matrix data from lead extension: %s)\n", leadExt.Name)
 	}
 
 	matrix := leadExt.GetPkgMatrix()
@@ -473,14 +538,21 @@ func PrintAvailability(e *Extension) {
 		return
 	}
 
-	// Format PG versions from extension's PgVer field
-	pgVers := leadExt.GetPGVersions()
-	pgStrs := make([]string, len(pgVers))
-	for i, pg := range pgVers {
-		pgStrs[i] = fmt.Sprintf("PG%d", pg)
+	// Build info line: "Latest: x.y.z | N/M avail, PG18, PG17, ..."
+	var info strings.Builder
+	if ver := matrix.LatestVersion(); ver != "" {
+		info.WriteString("Latest: " + ver + " | ")
 	}
+	info.WriteString(matrix.Summary())
+	if pgVers := leadExt.GetPGVersions(); len(pgVers) > 0 {
+		pgStrs := make([]string, len(pgVers))
+		for i, pg := range pgVers {
+			pgStrs[i] = fmt.Sprintf("PG%d", pg)
+		}
+		info.WriteString(", " + strings.Join(pgStrs, ", "))
+	}
+	fmt.Println(info.String())
 
-	fmt.Printf("Latest: %s | %s, %s\n", matrix.LatestVersion(), matrix.Summary(), strings.Join(pgStrs, ", "))
 	fmt.Printf("Details: https://pgext.cloud/e/%s  %s\n\n", e.Name, colorLegend())
 	fmt.Print(matrix.TabulateAvailability())
 }
