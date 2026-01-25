@@ -15,3 +15,4 @@ CLAUDE.md
 .hugo_build.lock
 public/
 bin/
+plan/

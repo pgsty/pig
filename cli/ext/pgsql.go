@@ -338,3 +338,74 @@ func validatePgConfigPath(path string) (string, error) {
 	}
 	return realPath, nil
 }
+
+// ============================================================================
+// PostgreSQL Binary Path Helpers (for pig pg commands)
+// ============================================================================
+
+const PgLinkPath = "/usr/pgsql" // symlink created by 'pig ext link'
+
+// PgCtl returns the full path to pg_ctl
+func (p *PostgresInstall) PgCtl() string {
+	return filepath.Join(p.BinPath, "pg_ctl")
+}
+
+// Initdb returns the full path to initdb
+func (p *PostgresInstall) Initdb() string {
+	return filepath.Join(p.BinPath, "initdb")
+}
+
+// Psql returns the full path to psql
+func (p *PostgresInstall) Psql() string {
+	return filepath.Join(p.BinPath, "psql")
+}
+
+// FindPostgres finds a PostgreSQL installation by version or uses Active/default
+// Priority: specified version > Active (in PATH) > /usr/pgsql > latest installed
+func FindPostgres(pgVersion int) (*PostgresInstall, error) {
+	// Ensure detection has run
+	if !Inited {
+		if err := DetectPostgres(); err != nil {
+			logrus.Debugf("DetectPostgres: %v", err)
+		}
+	}
+
+	// 1. If version specified, find that exact version
+	if pgVersion > 0 {
+		if pi, ok := Installs[pgVersion]; ok {
+			Postgres = pi
+			return pi, nil
+		}
+		return nil, fmt.Errorf("PostgreSQL %d not installed", pgVersion)
+	}
+
+	// 2. Use Active (from PATH)
+	if Active != nil {
+		Postgres = Active
+		return Active, nil
+	}
+
+	// 3. Try /usr/pgsql/bin (set by 'pig ext link')
+	pgConfigPath := filepath.Join(PgLinkPath, "bin", "pg_config")
+	if _, err := os.Stat(pgConfigPath); err == nil {
+		if pi, err := NewPostgresInstall(pgConfigPath); err == nil {
+			logrus.Debugf("found PostgreSQL at %s", PgLinkPath)
+			Postgres = pi
+			return pi, nil
+		}
+	}
+
+	// 4. Use the latest installed version
+	var latest *PostgresInstall
+	for _, pi := range Installs {
+		if latest == nil || pi.MajorVersion > latest.MajorVersion {
+			latest = pi
+		}
+	}
+	if latest != nil {
+		Postgres = latest
+		return latest, nil
+	}
+
+	return nil, fmt.Errorf("no PostgreSQL installation found")
+}
