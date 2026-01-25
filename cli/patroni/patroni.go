@@ -11,8 +11,8 @@ import (
 
 // ConfigPaths contains the possible paths to patroni config file
 var ConfigPaths = []string{
-	"/etc/pigsty/patronictl.yml", // on admin node
-	"/pg/bin/patroni.yml",        // on pgsql node
+	"/infra/conf/patronictl.yml", // on admin node
+	"/etc/patroni/patroni.yml",   // on pgsql node
 }
 
 // FindConfig returns the path to the patroni config file
