@@ -234,7 +234,7 @@ var (
 
 var pbRestoreCmd = &cobra.Command{
 	Use:     "restore",
-	Aliases: []string{"rt", "r"},
+	Aliases: []string{"rt", "r", "pitr"},
 	Short:   "Restore from backup (PITR)",
 	Long: `Restore from backup with point-in-time recovery (PITR) support.
 
@@ -318,7 +318,7 @@ var pbCreateCmd = &cobra.Command{
 	Use:     "create",
 	Aliases: []string{"cr"},
 	Short:   "Create stanza (stanza-create)",
-	Long:  `Initialize a new stanza. Must be run before the first backup.`,
+	Long:    `Initialize a new stanza. Must be run before the first backup.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return pgbackrest.Create(pbConfig, &pgbackrest.CreateOptions{
 			NoOnline: pbCreateNoOnline,
@@ -333,7 +333,7 @@ var pbUpgradeCmd = &cobra.Command{
 	Use:     "upgrade",
 	Aliases: []string{"up"},
 	Short:   "Upgrade stanza (stanza-upgrade)",
-	Long:  `Update stanza after PostgreSQL major version upgrade.`,
+	Long:    `Update stanza after PostgreSQL major version upgrade.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return pgbackrest.Upgrade(pbConfig, &pgbackrest.UpgradeOptions{
 			NoOnline: pbUpgradeNoOnline,
@@ -370,7 +370,7 @@ var pbCheckCmd = &cobra.Command{
 	Use:     "check",
 	Aliases: []string{"ck"},
 	Short:   "Verify backup repository",
-	Long:  `Verify the backup repository integrity and configuration.`,
+	Long:    `Verify the backup repository integrity and configuration.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return pgbackrest.Check(pbConfig)
 	},
@@ -380,7 +380,7 @@ var pbStartCmd = &cobra.Command{
 	Use:     "start",
 	Aliases: []string{"on"},
 	Short:   "Enable pgBackRest operations",
-	Long:  `Allow pgBackRest to perform operations on the stanza.`,
+	Long:    `Allow pgBackRest to perform operations on the stanza.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return pgbackrest.Start(pbConfig)
 	},
@@ -392,7 +392,7 @@ var pbStopCmd = &cobra.Command{
 	Use:     "stop",
 	Aliases: []string{"off"},
 	Short:   "Disable pgBackRest operations",
-	Long:  `Prevent pgBackRest from performing operations on the stanza (for maintenance).`,
+	Long:    `Prevent pgBackRest from performing operations on the stanza (for maintenance).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return pgbackrest.Stop(pbConfig, &pgbackrest.StopOptions{
 			Force: pbStopForce,
@@ -408,7 +408,7 @@ var pbLogLines int
 
 var pbLogCmd = &cobra.Command{
 	Use:     "log [list|tail|cat]",
-	Aliases: []string{"lg"},
+	Aliases: []string{"l", "lg"},
 	Short:   "View pgBackRest logs",
 	Long: `View pgBackRest log files from /pg/log/pgbackrest/.
 

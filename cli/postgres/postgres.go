@@ -341,11 +341,18 @@ func RunSystemctl(action, service string) error {
 	return utils.RunSystemctl(action, service)
 }
 
-// RunCommandQuiet runs a command and prints output, does not fail on error
+// RunCommandQuiet runs a command as DBSU and prints output, does not fail on error.
+// Uses the same 3-tier execution strategy as utils.DBSUCommand:
+//   - If current user is DBSU: execute directly
+//   - If current user is root: use "su - <dbsu> -c"
+//   - Otherwise: use "sudo -inu <dbsu> --"
 func RunCommandQuiet(dbsu string, args []string) {
 	var cmd *exec.Cmd
 	if utils.IsDBSU(dbsu) {
 		cmd = exec.Command(args[0], args[1:]...)
+	} else if config.CurrentUser == "root" {
+		cmdStr := utils.ShellQuoteArgs(args)
+		cmd = exec.Command("su", "-", dbsu, "-c", cmdStr)
 	} else {
 		sudoArgs := append([]string{"-inu", dbsu, "--"}, args...)
 		cmd = exec.Command("sudo", sudoArgs...)

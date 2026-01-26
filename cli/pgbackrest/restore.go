@@ -67,7 +67,7 @@ func Restore(cfg *Config, opts *RestoreOptions) error {
 
 	// Confirmation with signal handling
 	if !opts.Yes {
-		if err := confirmWithCountdown(
+		if err := ConfirmWithCountdown(
 			fmt.Sprintf("This will overwrite data in %s", getDataDir(effCfg, opts.DataDir)),
 			"restore",
 		); err != nil {
@@ -239,8 +239,9 @@ func getDataDir(cfg *Config, optDataDir string) string {
 	return "/pg/data"
 }
 
-// confirmWithCountdown shows a warning and countdown, returns error if cancelled.
-func confirmWithCountdown(warning, action string) error {
+// ConfirmWithCountdown shows a warning and countdown, returns error if cancelled.
+// This is exported for use by pitr and other packages that need confirmation.
+func ConfirmWithCountdown(warning, action string) error {
 	fmt.Fprintf(os.Stderr, "\n%sWARNING: %s%s\n", utils.ColorYellow, warning, utils.ColorReset)
 	fmt.Fprintln(os.Stderr, "Press Ctrl+C to cancel, or wait for countdown...")
 

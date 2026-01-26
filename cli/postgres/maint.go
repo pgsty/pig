@@ -37,7 +37,7 @@ func RunPsqlMaintenance(cfg *Config, dbname, sql string) error {
 	dbsu := GetDbSU(cfg)
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
-		return fmt.Errorf("PostgreSQL not found: %w", err)
+		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
 	if dbname == "" {

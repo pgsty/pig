@@ -30,7 +30,7 @@ func Ps(cfg *Config, opts *PsOptions) error {
 	dbsu := GetDbSU(cfg)
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
-		return fmt.Errorf("PostgreSQL not found: %w", err)
+		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
 	// Validate identifiers to prevent SQL injection
@@ -87,7 +87,7 @@ func Kill(cfg *Config, opts *KillOptions) error {
 	dbsu := GetDbSU(cfg)
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
-		return fmt.Errorf("PostgreSQL not found: %w", err)
+		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
 	// Validate inputs to prevent SQL injection
@@ -190,7 +190,7 @@ func Psql(cfg *Config, dbname string, opts *PsqlOptions) error {
 	dbsu := GetDbSU(cfg)
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
-		return fmt.Errorf("PostgreSQL not found: %w", err)
+		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
 	// Validate database name

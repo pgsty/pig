@@ -75,7 +75,7 @@ func checkPrimaryRole() error {
 		return fmt.Errorf("backup should run on primary instance, current is replica (source: %s)", roleResult.Source)
 	default:
 		if !roleResult.Alive {
-			return fmt.Errorf("PostgreSQL is not running, cannot perform backup")
+			return fmt.Errorf("postgresql is not running, cannot perform backup")
 		}
 		logrus.Warnf("cannot determine instance role (source: %s)", roleResult.Source)
 		return fmt.Errorf("cannot confirm primary role, use --force to override")

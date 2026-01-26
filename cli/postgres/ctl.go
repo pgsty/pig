@@ -47,7 +47,7 @@ func InitDB(cfg *Config, opts *InitOptions) error {
 		// Force mode: check if PostgreSQL is running (NEVER allow overwrite if running)
 		running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
 		if running {
-			return fmt.Errorf("PostgreSQL is running (PID %d) in %s, cannot overwrite running database", pid, dataDir)
+			return fmt.Errorf("postgresql is running (PID %d) in %s, cannot overwrite running database", pid, dataDir)
 		}
 
 		// Safe to remove: not running, user confirmed with --force
@@ -67,7 +67,7 @@ func InitDB(cfg *Config, opts *InitOptions) error {
 	}
 	pg, err := ext.FindPostgres(pgVer)
 	if err != nil {
-		return fmt.Errorf("PostgreSQL not found: %w", err)
+		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
 	// Build initdb command
@@ -150,7 +150,7 @@ func Start(cfg *Config, opts *StartOptions) error {
 			utils.ColorYellow, pid, dataDir, utils.ColorReset)
 		if opts == nil || !opts.Force {
 			fmt.Printf("%sUse -y to force start anyway%s\n", utils.ColorYellow, utils.ColorReset)
-			return fmt.Errorf("PostgreSQL already running, use -y to force")
+			return fmt.Errorf("postgresql already running, use -y to force")
 		}
 		fmt.Printf("%sForcing start as requested (-y)%s\n", utils.ColorYellow, utils.ColorReset)
 	}
@@ -158,7 +158,7 @@ func Start(cfg *Config, opts *StartOptions) error {
 	// Find PostgreSQL
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
-		return fmt.Errorf("PostgreSQL not found: %w", err)
+		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
 	// Build pg_ctl start command
@@ -229,7 +229,7 @@ func Stop(cfg *Config, opts *StopOptions) error {
 	// Find PostgreSQL
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
-		return fmt.Errorf("PostgreSQL not found: %w", err)
+		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
 	// Build pg_ctl stop command
@@ -283,7 +283,7 @@ func Restart(cfg *Config, opts *RestartOptions) error {
 	// Find PostgreSQL
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
-		return fmt.Errorf("PostgreSQL not found: %w", err)
+		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
 	// Build pg_ctl restart command
@@ -314,7 +314,7 @@ func Reload(cfg *Config) error {
 	// Find PostgreSQL
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
-		return fmt.Errorf("PostgreSQL not found: %w", err)
+		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
 	// Build pg_ctl reload command
@@ -453,7 +453,7 @@ func Promote(cfg *Config, opts *PromoteOptions) error {
 	// Find PostgreSQL
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
-		return fmt.Errorf("PostgreSQL not found: %w", err)
+		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
 	// Build pg_ctl promote command

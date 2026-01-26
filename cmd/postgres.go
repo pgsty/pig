@@ -576,7 +576,7 @@ For direct pg_ctl operations, use the parent commands instead.`,
 
 var pgSvcStartCmd = &cobra.Command{
 	Use:     "start",
-	Aliases: []string{"up"},
+	Aliases: []string{"boot", "up"},
 	Short:   "Start postgres systemd service",
 	Example: `  pig pg svc start                 # systemctl start postgres`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -586,7 +586,7 @@ var pgSvcStartCmd = &cobra.Command{
 
 var pgSvcStopCmd = &cobra.Command{
 	Use:     "stop",
-	Aliases: []string{"dn", "down"},
+	Aliases: []string{"halt", "dn", "down"},
 	Short:   "Stop postgres systemd service",
 	Example: `  pig pg svc stop                  # systemctl stop postgres`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -596,7 +596,7 @@ var pgSvcStopCmd = &cobra.Command{
 
 var pgSvcRestartCmd = &cobra.Command{
 	Use:     "restart",
-	Aliases: []string{"rt"},
+	Aliases: []string{"reboot", "rt"},
 	Short:   "Restart postgres systemd service",
 	Example: `  pig pg svc restart               # systemctl restart postgres`,
 	RunE: func(cmd *cobra.Command, args []string) error {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -298,86 +297,6 @@ func formatLocalTimePITRQuoted(t time.Time) string {
 	return fmt.Sprintf("\"%s\"", formatLocalTimePITR(t))
 }
 
-// getRecoveryEndTime tries to determine the recovery window end time.
-// It attempts to find the mtime of the latest WAL segment file.
-// Returns the time and a source description.
-func getRecoveryEndTime(info *PgBackRestInfo) (time.Time, string) {
-	// Try to find the latest WAL file and get its mtime
-	if len(info.Archive) > 0 {
-		maxWAL := info.Archive[0].Max
-		if maxWAL != "" {
-			// Try common archive locations
-			archivePaths := []string{
-				"/pg/arcwal",                    // Pigsty default
-				"/var/lib/pgbackrest/archive",   // pgBackRest default
-				"/pg/backup/arcwal",             // Alternative
-			}
-
-			for _, basePath := range archivePaths {
-				// WAL files are organized by stanza and timeline
-				// Try to find the file directly or in subdirectories
-				walPath := findWALFile(basePath, info.Name, maxWAL)
-				if walPath != "" {
-					if fi, err := os.Stat(walPath); err == nil {
-						return fi.ModTime(), fmt.Sprintf("wal:%s", maxWAL)
-					}
-				}
-			}
-		}
-	}
-
-	// Fallback to current time
-	return time.Now(), "now"
-}
-
-// findWALFile tries to locate a WAL file in common directory structures
-func findWALFile(basePath, stanza, walName string) string {
-	// Common patterns:
-	// /pg/arcwal/<stanza>/<timeline>/<walname>
-	// /pg/arcwal/<stanza>/<walname>
-	// /var/lib/pgbackrest/archive/<stanza>/<db-id>-<repo-key>/<walname>
-
-	if len(walName) < 8 {
-		return ""
-	}
-
-	// Extract timeline from WAL name (first 8 chars)
-	timeline := walName[:8]
-
-	// Try various path patterns
-	patterns := []string{
-		filepath.Join(basePath, stanza, timeline, walName),
-		filepath.Join(basePath, stanza, walName),
-		filepath.Join(basePath, stanza, timeline, walName+".gz"),
-		filepath.Join(basePath, stanza, walName+".gz"),
-		filepath.Join(basePath, stanza, timeline, walName+".lz4"),
-		filepath.Join(basePath, stanza, walName+".lz4"),
-		filepath.Join(basePath, stanza, timeline, walName+".zst"),
-		filepath.Join(basePath, stanza, walName+".zst"),
-	}
-
-	for _, path := range patterns {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-
-	// Try globbing for any file starting with the WAL name
-	globPatterns := []string{
-		filepath.Join(basePath, stanza, "*", walName+"*"),
-		filepath.Join(basePath, stanza, walName+"*"),
-	}
-
-	for _, pattern := range globPatterns {
-		matches, err := filepath.Glob(pattern)
-		if err == nil && len(matches) > 0 {
-			return matches[0]
-		}
-	}
-
-	return ""
-}
-
 // formatDurationCompactLong formats duration in compact but readable form
 // Format: 1d 5h 46m
 func formatDurationCompactLong(d time.Duration) string {
@@ -543,61 +462,6 @@ func formatBytesCompact(bytes int64) string {
 	default:
 		return fmt.Sprintf("%dB", bytes)
 	}
-}
-
-// formatDurationLong formats duration in long form (e.g., "2 days 3 hours")
-func formatDurationLong(d time.Duration) string {
-	days := int(d.Hours() / 24)
-	hours := int(d.Hours()) % 24
-	mins := int(d.Minutes()) % 60
-
-	var parts []string
-	if days > 0 {
-		if days == 1 {
-			parts = append(parts, "1 day")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d days", days))
-		}
-	}
-	if hours > 0 {
-		if hours == 1 {
-			parts = append(parts, "1 hour")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d hours", hours))
-		}
-	}
-	if mins > 0 && days == 0 { // Only show minutes if less than a day
-		if mins == 1 {
-			parts = append(parts, "1 minute")
-		} else {
-			parts = append(parts, fmt.Sprintf("%d minutes", mins))
-		}
-	}
-
-	if len(parts) == 0 {
-		return "< 1 minute"
-	}
-	return strings.Join(parts, " ")
-}
-
-// shortenWAL shortens a WAL segment name for display
-// e.g., "000000010000000000000003" -> "1/3" (timeline/segment)
-func shortenWAL(wal string) string {
-	if len(wal) != 24 {
-		return wal
-	}
-	// WAL format: TTTTTTTTSSSSSSSSSSSSSSSS (8 chars timeline + 16 chars segment)
-	// Timeline is first 8 hex chars, segment is last 16 hex chars
-	// We want to show timeline and the significant part of the segment
-	timeline := strings.TrimLeft(wal[:8], "0")
-	if timeline == "" {
-		timeline = "0"
-	}
-	segment := strings.TrimLeft(wal[8:], "0")
-	if segment == "" {
-		segment = "0"
-	}
-	return fmt.Sprintf("%s/%s", timeline, segment)
 }
 
 // LsOptions holds options for the ls command.

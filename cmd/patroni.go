@@ -71,7 +71,7 @@ var patroniListCmd = &cobra.Command{
 // patroniRestartCmd: pig pt restart [member] - restart PostgreSQL via patronictl
 var patroniRestartCmd = &cobra.Command{
 	Use:     "restart [member]",
-	Aliases: []string{"rt"},
+	Aliases: []string{"reboot", "rt"},
 	Short:   "Restart PostgreSQL instance(s) via Patroni",
 	Long: `Restart PostgreSQL instance(s) managed by Patroni.
 
@@ -107,7 +107,7 @@ while keeping Patroni running.`,
 // patroniReloadCmd: pig pt reload - reload PostgreSQL config via patronictl
 var patroniReloadCmd = &cobra.Command{
 	Use:     "reload",
-	Aliases: []string{"rl"},
+	Aliases: []string{"rl", "hup"},
 	Short:   "Reload PostgreSQL configuration via Patroni",
 	Long: `Reload PostgreSQL configuration for all cluster members.
 
@@ -289,7 +289,7 @@ Actions:
 // patroniLogCmd: pig pt log
 var patroniLogCmd = &cobra.Command{
 	Use:     "log",
-	Aliases: []string{"lg"},
+	Aliases: []string{"l", "lg"},
 	Short:   "View patroni logs",
 	Long:    `View patroni service logs using journalctl.`,
 	Example: `
@@ -327,7 +327,7 @@ var patroniStatusCmd = &cobra.Command{
 // patroniStartCmd: pig pt start - shortcut for pig pt svc start
 var patroniStartCmd = &cobra.Command{
 	Use:     "start",
-	Aliases: []string{"up"},
+	Aliases: []string{"boot", "up"},
 	Short:   "Start patroni service (shortcut for 'svc start')",
 	Long:    `Start the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc start'.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -338,7 +338,7 @@ var patroniStartCmd = &cobra.Command{
 // patroniStopCmd: pig pt stop - shortcut for pig pt svc stop
 var patroniStopCmd = &cobra.Command{
 	Use:     "stop",
-	Aliases: []string{"dn", "down"},
+	Aliases: []string{"halt", "dn", "down"},
 	Short:   "Stop patroni service (shortcut for 'svc stop')",
 	Long:    `Stop the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc stop'.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -364,7 +364,7 @@ instances it manages. For PostgreSQL operations, use:
 
 var patroniSvcStartCmd = &cobra.Command{
 	Use:     "start",
-	Aliases: []string{"up"},
+	Aliases: []string{"boot", "up"},
 	Short:   "Start patroni service",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return patroni.Systemctl("start")
@@ -373,7 +373,7 @@ var patroniSvcStartCmd = &cobra.Command{
 
 var patroniSvcStopCmd = &cobra.Command{
 	Use:     "stop",
-	Aliases: []string{"dn", "down"},
+	Aliases: []string{"halt", "dn", "down"},
 	Short:   "Stop patroni service",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return patroni.Systemctl("stop")
@@ -382,7 +382,7 @@ var patroniSvcStopCmd = &cobra.Command{
 
 var patroniSvcRestartCmd = &cobra.Command{
 	Use:     "restart",
-	Aliases: []string{"rt"},
+	Aliases: []string{"reboot", "rt"},
 	Short:   "Restart patroni service",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return patroni.Systemctl("restart")
@@ -413,7 +413,7 @@ var patroniSvcStatusCmd = &cobra.Command{
 
 func init() {
 	// Global flags for patroni command
-	patroniCmd.PersistentFlags().StringVarP(&patroniDBSU, "user", "u", "", "Database superuser (default: postgres)")
+	patroniCmd.PersistentFlags().StringVarP(&patroniDBSU, "dbsu", "U", "", "Database superuser (default: postgres)")
 
 	// list subcommand flags
 	patroniListCmd.Flags().BoolP("watch", "W", false, "Watch mode")
