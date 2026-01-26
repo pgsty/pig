@@ -24,6 +24,7 @@ var CategoryMap = map[string]string{
 	"lang":  "LANG",
 	"type":  "TYPE",
 	"func":  "FUNC",
+	"util":  "UTIL",
 	"admin": "ADMIN",
 	"stat":  "STAT",
 	"sec":   "SEC",
