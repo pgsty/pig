@@ -206,7 +206,7 @@ func roleFromSQL(cfg *Config, dbsu string, verbose bool) *RoleResult {
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
 		if verbose {
-			fmt.Printf("    PostgreSQL not found: %v\n", err)
+			fmt.Printf("    postgresql not found: %v\n", err)
 		}
 		return result
 	}
@@ -214,30 +214,16 @@ func roleFromSQL(cfg *Config, dbsu string, verbose bool) *RoleResult {
 	// Build psql command to check pg_is_in_recovery()
 	cmdArgs := []string{pg.Psql(), "-AXtqw", "-d", "postgres", "-c", "SELECT pg_is_in_recovery()"}
 
-	var cmd *exec.Cmd
-	if utils.IsDBSU(dbsu) {
-		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	} else {
-		sudoArgs := append([]string{"-inu", dbsu, "--"}, cmdArgs...)
-		cmd = exec.Command("sudo", sudoArgs...)
-	}
-
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
+	// Use utils.DBSUCommandOutput for consistent privilege escalation
+	output, err := utils.DBSUCommandOutput(dbsu, cmdArgs)
+	if err != nil {
 		if verbose {
 			fmt.Printf("    psql command failed: %v\n", err)
-			if stderr.Len() > 0 {
-				fmt.Printf("    stderr: %s\n", strings.TrimSpace(stderr.String()))
-			}
 		}
 		return result
 	}
 
-	output := strings.TrimSpace(out.String())
+	output = strings.TrimSpace(output)
 	result.Alive = true
 
 	switch output {

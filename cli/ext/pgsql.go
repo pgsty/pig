@@ -323,7 +323,7 @@ func GetPostgres(args ...string) (pi *PostgresInstall, err error) {
 		Postgres = pi
 		return pi, nil
 	}
-	return nil, fmt.Errorf("PostgreSQL %d not found", major)
+	return nil, fmt.Errorf("postgresql %d not found", major)
 }
 
 func validatePgConfigPath(path string) (string, error) {
@@ -376,7 +376,7 @@ func FindPostgres(pgVersion int) (*PostgresInstall, error) {
 			Postgres = pi
 			return pi, nil
 		}
-		return nil, fmt.Errorf("PostgreSQL %d not installed", pgVersion)
+		return nil, fmt.Errorf("postgresql %d not installed", pgVersion)
 	}
 
 	// 2. Use Active (from PATH)

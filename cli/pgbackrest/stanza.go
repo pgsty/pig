@@ -75,7 +75,7 @@ func Delete(cfg *Config, opts *DeleteOptions) error {
 		fmt.Fprintf(os.Stderr, "This will permanently delete stanza '%s' and ALL its backups.\n", effCfg.Stanza)
 		fmt.Fprintf(os.Stderr, "This operation is %sIRREVERSIBLE%s.\n", utils.ColorRed, utils.ColorReset)
 
-		if err := confirmWithCountdown("stanza deletion", "stanza deletion"); err != nil {
+		if err := ConfirmWithCountdown("stanza deletion", "stanza deletion"); err != nil {
 			return err
 		}
 	}

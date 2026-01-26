@@ -123,6 +123,7 @@ func init() {
 		pgCmd,
 		patroniCmd,
 		pbCmd,
+		pitrCmd,
 		peCmd,
 		doCmd,
 		styCmd,
