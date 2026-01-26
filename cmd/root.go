@@ -115,13 +115,15 @@ func init() {
 	rootCmd.AddCommand(
 		extCmd,
 		repoCmd,
-		pgCmd,
 		buildCmd,
 		installCmd,
 
+		pgCmd,
+		patroniCmd,
+		pbCmd,
+		peCmd,
 		doCmd,
 		styCmd,
-		patroniCmd,
 
 		statusCmd,
 		licenseCmd,
