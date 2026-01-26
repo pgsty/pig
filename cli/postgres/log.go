@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"pig/internal/utils"
 )
 
 // getLatestLogFile finds the latest CSV log file in the log directory
@@ -102,11 +104,11 @@ func LogList(logDir string) error {
 		return files[i].ModTime().After(files[j].ModTime())
 	})
 
-	fmt.Printf("%s%-40s %10s  %s%s\n", ColorBold, "NAME", "SIZE", "MODIFIED", ColorReset)
+	fmt.Printf("%s%-40s %10s  %s%s\n", utils.ColorBold, "NAME", "SIZE", "MODIFIED", utils.ColorReset)
 	for _, f := range files {
 		fmt.Printf("%-40s %10s  %s\n", f.Name(), FormatSize(f.Size()), f.ModTime().Format("2006-01-02 15:04:05"))
 	}
-	fmt.Printf("\n%sTotal: %d files, %s%s\n", ColorCyan, len(files), FormatSize(totalSize), ColorReset)
+	fmt.Printf("\n%sTotal: %d files, %s%s\n", utils.ColorCyan, len(files), FormatSize(totalSize), utils.ColorReset)
 	return nil
 }
 

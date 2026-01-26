@@ -1,15 +1,12 @@
 package pgbackrest
 
 import (
-	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"pig/internal/config"
 	"pig/internal/utils"
 )
 
@@ -50,15 +47,8 @@ func getLogFiles(logDir, dbsu string) ([]string, error) {
 		dbsu = utils.GetDBSU("")
 	}
 
-	var output string
-	var err error
-
-	// If current user is DBSU, read directly
-	if utils.IsDBSU(dbsu) {
-		entries, dirErr := os.ReadDir(logDir)
-		if dirErr != nil {
-			return nil, fmt.Errorf("cannot read log directory: %w", dirErr)
-		}
+	// Try direct read if we have permission
+	if entries, err := os.ReadDir(logDir); err == nil {
 		var files []string
 		for _, entry := range entries {
 			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".log") {
@@ -67,32 +57,12 @@ func getLogFiles(logDir, dbsu string) ([]string, error) {
 		}
 		sort.Sort(sort.Reverse(sort.StringSlice(files)))
 		return files, nil
+	} else if !os.IsPermission(err) {
+		return nil, fmt.Errorf("cannot read log directory: %w", err)
 	}
 
-	// If current user is root, use su
-	if config.CurrentUser == "root" {
-		output, err = runAsDBSU(dbsu, []string{"ls", "-1", logDir})
-	} else {
-		// Try direct read first
-		entries, dirErr := os.ReadDir(logDir)
-		if dirErr == nil {
-			var files []string
-			for _, entry := range entries {
-				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".log") {
-					files = append(files, entry.Name())
-				}
-			}
-			sort.Sort(sort.Reverse(sort.StringSlice(files)))
-			return files, nil
-		}
-		// Permission denied - try sudo as DBSU
-		if os.IsPermission(dirErr) {
-			output, err = runAsDBSUSudo(dbsu, []string{"ls", "-1", logDir})
-		} else {
-			return nil, fmt.Errorf("cannot read log directory: %w", dirErr)
-		}
-	}
-
+	// Permission denied - use DBSU privilege escalation
+	output, err := utils.DBSUCommandOutput(dbsu, []string{"ls", "-1", logDir})
 	if err != nil {
 		return nil, fmt.Errorf("cannot read log directory: %w", err)
 	}
@@ -193,30 +163,3 @@ func findLatestLog(logDir, dbsu string) (string, error) {
 	return files[0], nil
 }
 
-// runAsDBSU runs a command as DBSU using su (when current user is root)
-func runAsDBSU(dbsu string, args []string) (string, error) {
-	cmdStr := utils.ShellQuoteArgs(args)
-	cmd := exec.Command("su", "-", dbsu, "-c", cmdStr)
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("su failed: %w: %s", err, stderr.String())
-	}
-	return out.String(), nil
-}
-
-// runAsDBSUSudo runs a command as DBSU using sudo (when current user is neither DBSU nor root)
-func runAsDBSUSudo(dbsu string, args []string) (string, error) {
-	sudoArgs := append([]string{"-inu", dbsu, "--"}, args...)
-	cmd := exec.Command("sudo", sudoArgs...)
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("sudo failed: %w: %s", err, stderr.String())
-	}
-	return out.String(), nil
-}

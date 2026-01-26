@@ -8,17 +8,16 @@ and database maintenance tasks.
 package postgres
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"pig/cli/ext"
+	"pig/internal/config"
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
@@ -54,27 +53,10 @@ const (
 	DefaultSystemdService = "postgres"
 )
 
-// ANSI color codes for terminal output
-const (
-	ColorReset  = "\033[0m"
-	ColorBlue   = "\033[34m"
-	ColorGreen  = "\033[32m"
-	ColorYellow = "\033[33m"
-	ColorRed    = "\033[31m"
-	ColorCyan   = "\033[36m"
-	ColorBold   = "\033[1m"
-)
-
-// IdentifierRegex validates PostgreSQL identifiers (usernames, database names, schema names, table names)
-// Allows alphanumeric, underscore, and dollar sign (PostgreSQL naming rules)
-var IdentifierRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_$]*$`)
-
-// ValidateIdentifier checks if a string is a valid PostgreSQL identifier
+// ValidateIdentifier checks if a string is a valid PostgreSQL identifier.
+// This is a convenience wrapper around utils.ValidateIdentifier.
 func ValidateIdentifier(s string) bool {
-	if s == "" {
-		return true // empty is allowed (means no filter)
-	}
-	return IdentifierRegex.MatchString(s)
+	return utils.ValidateIdentifier(s)
 }
 
 // ============================================================================
@@ -216,39 +198,67 @@ func CheckDataDirAsDBSU(dbsu, dataDir string) (exists, initialized bool) {
 // Returns (running bool, pid int) where:
 //   - running: true if postmaster.pid exists and process is alive
 //   - pid: the PID from postmaster.pid (0 if not running or can't determine)
+//
+// Uses utils.ReadFileAsDBSU for privilege escalation (dbsu direct / root su / sudo).
 func CheckPostgresRunningAsDBSU(dbsu, dataDir string) (bool, int) {
 	pidFile := filepath.Join(dataDir, "postmaster.pid")
 
-	// Check if postmaster.pid exists
-	cmd := buildTestCmd(dbsu, "-f", pidFile)
-	if err := cmd.Run(); err != nil {
-		return false, 0 // no pid file
-	}
-
-	// Read the pid file content as dbsu
-	output, err := utils.DBSUCommandOutput(dbsu, []string{"head", "-1", pidFile})
+	// Read PID from postmaster.pid using DBSU privilege escalation
+	pidContent, err := utils.ReadFileAsDBSU(pidFile, dbsu)
 	if err != nil {
+		// File doesn't exist or can't be read - not running
+		logrus.Debugf("cannot read postmaster.pid: %v", err)
 		return false, 0
 	}
 
-	pid, err := strconv.Atoi(strings.TrimSpace(output))
-	if err != nil {
+	// Parse PID (first line of postmaster.pid)
+	lines := strings.Split(pidContent, "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		logrus.Debugf("postmaster.pid is empty")
 		return false, 0
 	}
 
-	// Check if process exists (signal 0 test)
-	process, err := os.FindProcess(pid)
+	pid, err := strconv.Atoi(strings.TrimSpace(lines[0]))
 	if err != nil {
+		logrus.Debugf("cannot parse PID from postmaster.pid: %v", err)
+		return false, 0
+	}
+
+	// Check if process exists using kill -0 via DBSU privilege escalation
+	// This is necessary because current user may not have permission to signal the postgres process
+	running := checkProcessRunningAsDBSU(dbsu, pid)
+	if !running {
+		logrus.Debugf("process %d not running (stale pid file)", pid)
 		return false, pid
 	}
-	if err := process.Signal(syscall.Signal(0)); err != nil {
-		return false, pid // stale pid file
-	}
 
+	logrus.Debugf("PostgreSQL is running with PID %d", pid)
 	return true, pid
 }
 
-// buildTestCmd creates a command to run 'test' as dbsu
+// checkProcessRunningAsDBSU checks if a process is running using kill -0 as DBSU.
+// This handles the case where current user doesn't have permission to signal the process.
+func checkProcessRunningAsDBSU(dbsu string, pid int) bool {
+	// If current user is DBSU, use direct signal check (faster)
+	if utils.IsDBSU(dbsu) {
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			return false
+		}
+		return process.Signal(syscall.Signal(0)) == nil
+	}
+
+	// Use kill -0 via DBSU privilege escalation
+	// kill -0 returns 0 if process exists and we can signal it, non-zero otherwise
+	_, err := utils.DBSUCommandOutput(dbsu, []string{"kill", "-0", strconv.Itoa(pid)})
+	return err == nil
+}
+
+// buildTestCmd creates a command to run 'test' as dbsu.
+// Uses the same 3-tier execution strategy as utils.DBSUCommand:
+//   - If current user is DBSU: execute directly
+//   - If current user is root: use "su - <dbsu> -c"
+//   - Otherwise: use "sudo -inu <dbsu> --"
 func buildTestCmd(dbsu string, flag, path string) *exec.Cmd {
 	args := []string{"test", flag, path}
 
@@ -256,7 +266,7 @@ func buildTestCmd(dbsu string, flag, path string) *exec.Cmd {
 		return exec.Command(args[0], args[1:]...)
 	}
 
-	if os.Getenv("USER") == "root" || os.Geteuid() == 0 {
+	if config.CurrentUser == "root" {
 		cmdStr := strings.Join(args, " ")
 		return exec.Command("su", "-", dbsu, "-c", cmdStr)
 	}
@@ -319,35 +329,16 @@ func CheckPostgresRunning(dataDir string) (bool, int, error) {
 // Output Helpers
 // ============================================================================
 
-// PrintHint prints command hint in blue color
+// PrintHint prints command hint in blue color.
+// This is a convenience wrapper around utils.PrintHint.
 func PrintHint(cmdArgs []string) {
-	fmt.Printf("%s$ %s%s\n", ColorBlue, strings.Join(cmdArgs, " "), ColorReset)
+	utils.PrintHint(cmdArgs)
 }
 
-// RunSystemctl runs systemctl command as root (via sudo if needed)
-// Returns ExitCodeError if the command exits with non-zero status.
+// RunSystemctl runs systemctl command as root (via sudo if needed).
+// This is a convenience wrapper around utils.RunSystemctl.
 func RunSystemctl(action, service string) error {
-	cmdArgs := []string{"systemctl", action, service}
-	PrintHint(cmdArgs)
-
-	var cmd *exec.Cmd
-	if os.Geteuid() == 0 {
-		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	} else {
-		cmd = exec.Command("sudo", cmdArgs...)
-	}
-
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return &utils.ExitCodeError{Code: exitErr.ExitCode(), Err: err}
-		}
-		return fmt.Errorf("systemctl %s failed: %w", action, err)
-	}
-	return nil
+	return utils.RunSystemctl(action, service)
 }
 
 // RunCommandQuiet runs a command and prints output, does not fail on error
@@ -365,46 +356,10 @@ func RunCommandQuiet(dbsu string, args []string) {
 	}
 }
 
-// RunWithSudoFallback runs command directly first, retries with sudo if permission denied
+// RunWithSudoFallback runs command directly first, retries with sudo if permission denied.
+// This is a convenience wrapper around utils.RunWithSudoFallback.
 func RunWithSudoFallback(args []string) error {
-	// If already root, just run directly
-	if os.Geteuid() == 0 {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
-	}
-
-	// Try running directly first
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if err == nil {
-		return nil
-	}
-
-	// Check if it's a permission error
-	stderrStr := stderr.String()
-	if strings.Contains(stderrStr, "Permission denied") ||
-		strings.Contains(stderrStr, "permission denied") ||
-		strings.Contains(stderrStr, "Operation not permitted") {
-		// Retry with sudo
-		logrus.Debugf("permission denied, retrying with sudo")
-		sudoCmd := exec.Command("sudo", args...)
-		sudoCmd.Stdin = os.Stdin
-		sudoCmd.Stdout = os.Stdout
-		sudoCmd.Stderr = os.Stderr
-		return sudoCmd.Run()
-	}
-
-	// Not a permission error, print the stderr and return the error
-	fmt.Fprint(os.Stderr, stderrStr)
-	return err
+	return utils.RunWithSudoFallback(args)
 }
 
 // FormatSize formats bytes into human-readable format

@@ -7,43 +7,12 @@ package postgres
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
 	"pig/internal/utils"
 )
 
-// validStateValues contains valid PostgreSQL connection states
-var validStateValues = map[string]bool{
-	"active":                 true,
-	"idle":                   true,
-	"idle in transaction":    true,
-	"idle in transaction (aborted)": true,
-	"fastpath function call": true,
-	"disabled":               true,
-}
-
-// sqlLikePatternRegex validates LIKE pattern (allows alphanumeric, spaces, common punctuation)
-var sqlLikePatternRegex = regexp.MustCompile(`^[a-zA-Z0-9_\s%*.,;:!?@#$^&()\[\]{}<>+=/-]+$`)
-
-// escapeSQLString escapes single quotes in a string for SQL
-func escapeSQLString(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
-}
-
-// escapeSQLLikePattern escapes special characters in a LIKE pattern.
-// This handles: backslash (escape char), % and _ (LIKE wildcards), and single quotes (SQL string).
-func escapeSQLLikePattern(s string) string {
-	// Order matters: escape backslash first since it's the escape character
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	// Escape LIKE wildcards
-	s = strings.ReplaceAll(s, "%", "\\%")
-	s = strings.ReplaceAll(s, "_", "\\_")
-	// Escape single quotes for SQL string
-	s = strings.ReplaceAll(s, "'", "''")
-	return s
-}
 
 // ============================================================================
 // Connection List (ps)
@@ -130,11 +99,11 @@ func Kill(cfg *Config, opts *KillOptions) error {
 			return fmt.Errorf("invalid database name: %s", opts.Db)
 		}
 		// State can contain spaces (e.g., "idle in transaction"), validate against known values
-		if opts.State != "" && !validStateValues[strings.ToLower(opts.State)] {
+		if !utils.ValidateConnectionState(opts.State) {
 			return fmt.Errorf("invalid state: %s (valid: active, idle, idle in transaction)", opts.State)
 		}
 		// Query pattern: allow alphanumeric, spaces, and wildcards; escape SQL special chars
-		if opts.Query != "" && !sqlLikePatternRegex.MatchString(opts.Query) {
+		if !utils.ValidateSQLLikePattern(opts.Query) {
 			return fmt.Errorf("invalid query pattern: %s (use alphanumeric characters, spaces, and wildcards)", opts.Query)
 		}
 	}
@@ -163,11 +132,11 @@ func Kill(cfg *Config, opts *KillOptions) error {
 				conditions = append(conditions, fmt.Sprintf("datname = '%s'", opts.Db))
 			}
 			if opts != nil && opts.State != "" {
-				conditions = append(conditions, fmt.Sprintf("state = '%s'", escapeSQLString(opts.State)))
+				conditions = append(conditions, fmt.Sprintf("state = '%s'", utils.EscapeSQLString(opts.State)))
 			}
 			if opts != nil && opts.Query != "" {
 				// Escape LIKE wildcards and single quotes for safe pattern matching
-				escapedQuery := escapeSQLLikePattern(opts.Query)
+				escapedQuery := utils.EscapeSQLLikePattern(opts.Query)
 				conditions = append(conditions, fmt.Sprintf("query ILIKE '%%%s%%' ESCAPE '\\\\'", escapedQuery))
 			}
 
@@ -182,7 +151,7 @@ func Kill(cfg *Config, opts *KillOptions) error {
 		}
 
 		if (opts == nil || !opts.Execute) && (opts == nil || opts.Pid == 0) {
-			fmt.Printf("%s[DRY-RUN] Connections that would be killed:%s\n", ColorYellow, ColorReset)
+			fmt.Printf("%s[DRY-RUN] Connections that would be killed:%s\n", utils.ColorYellow, utils.ColorReset)
 		}
 
 		cmdArgs := []string{pg.Psql(), "-d", "postgres", "-c", sql}
@@ -192,14 +161,14 @@ func Kill(cfg *Config, opts *KillOptions) error {
 		}
 
 		if (opts == nil || !opts.Execute) && (opts == nil || opts.Pid == 0) {
-			fmt.Printf("\n%sUse -x/--execute to actually kill these connections%s\n", ColorYellow, ColorReset)
+			fmt.Printf("\n%sUse -x/--execute to actually kill these connections%s\n", utils.ColorYellow, utils.ColorReset)
 		}
 
 		// Watch mode
 		if opts == nil || opts.Watch <= 0 {
 			break
 		}
-		fmt.Printf("\n%sWaiting %d seconds... (Ctrl+C to stop)%s\n", ColorCyan, opts.Watch, ColorReset)
+		fmt.Printf("\n%sWaiting %d seconds... (Ctrl+C to stop)%s\n", utils.ColorCyan, opts.Watch, utils.ColorReset)
 		time.Sleep(time.Duration(opts.Watch) * time.Second)
 	}
 

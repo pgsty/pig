@@ -50,7 +50,7 @@ func DetectRole(cfg *Config, opts *RoleOptions) (*RoleResult, error) {
 
 	// Strategy 1: Check processes first (quick, non-invasive)
 	if verbose {
-		fmt.Printf("%s[1] Checking PostgreSQL processes...%s\n", ColorCyan, ColorReset)
+		fmt.Printf("%s[1] Checking PostgreSQL processes...%s\n", utils.ColorCyan, utils.ColorReset)
 	}
 	psResult := roleFromProcesses(dbsu, verbose)
 	if verbose {
@@ -60,7 +60,7 @@ func DetectRole(cfg *Config, opts *RoleOptions) (*RoleResult, error) {
 	// Strategy 2: If alive, try SQL query (most accurate)
 	if psResult.Alive {
 		if verbose {
-			fmt.Printf("%s[2] Querying pg_is_in_recovery()...%s\n", ColorCyan, ColorReset)
+			fmt.Printf("%s[2] Querying pg_is_in_recovery()...%s\n", utils.ColorCyan, utils.ColorReset)
 		}
 		sqlResult := roleFromSQL(cfg, dbsu, verbose)
 		if sqlResult.Role != RoleUnknown {
@@ -82,7 +82,7 @@ func DetectRole(cfg *Config, opts *RoleOptions) (*RoleResult, error) {
 
 	// Strategy 3: Check data directory files (works when PG is down)
 	if verbose {
-		fmt.Printf("%s[3] Checking data directory files...%s\n", ColorCyan, ColorReset)
+		fmt.Printf("%s[3] Checking data directory files...%s\n", utils.ColorCyan, utils.ColorReset)
 	}
 	fileResult := roleFromDataDir(dbsu, dataDir, verbose)
 	if verbose {
@@ -281,9 +281,10 @@ func roleFromDataDir(dbsu, dataDir string, verbose bool) *RoleResult {
 	}
 
 	files := strings.Split(strings.TrimSpace(output), "\n")
-	if len(files) < 10 {
+	if len(files) < utils.MinDataDirFileCount {
 		if verbose {
-			fmt.Printf("    data directory has only %d files, likely not initialized\n", len(files))
+			fmt.Printf("    data directory has only %d files (expected >= %d), likely not initialized\n",
+				len(files), utils.MinDataDirFileCount)
 		}
 		return result
 	}
@@ -400,14 +401,14 @@ func PrintRole(cfg *Config, opts *RoleOptions) error {
 	verbose := opts != nil && opts.Verbose
 
 	if verbose {
-		fmt.Printf("\n%s══════════════════════════════════════════════════════════════════%s\n", ColorCyan, ColorReset)
-		fmt.Printf("%s PostgreSQL Instance Role%s\n", ColorBold, ColorReset)
-		fmt.Printf("%s══════════════════════════════════════════════════════════════════%s\n", ColorCyan, ColorReset)
+		fmt.Printf("\n%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
+		fmt.Printf("%s PostgreSQL Instance Role%s\n", utils.ColorBold, utils.ColorReset)
+		fmt.Printf("%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
 
 		// Status
-		aliveStatus := fmt.Sprintf("%sdown%s", ColorRed, ColorReset)
+		aliveStatus := fmt.Sprintf("%sdown%s", utils.ColorRed, utils.ColorReset)
 		if result.Alive {
-			aliveStatus = fmt.Sprintf("%srunning%s", ColorGreen, ColorReset)
+			aliveStatus = fmt.Sprintf("%srunning%s", utils.ColorGreen, utils.ColorReset)
 		}
 		fmt.Printf("  Status:  %s\n", aliveStatus)
 
@@ -415,15 +416,15 @@ func PrintRole(cfg *Config, opts *RoleOptions) error {
 		var roleStatus string
 		switch result.Role {
 		case RolePrimary:
-			roleStatus = fmt.Sprintf("%sprimary%s", ColorGreen, ColorReset)
+			roleStatus = fmt.Sprintf("%sprimary%s", utils.ColorGreen, utils.ColorReset)
 		case RoleReplica:
-			roleStatus = fmt.Sprintf("%sreplica%s", ColorYellow, ColorReset)
+			roleStatus = fmt.Sprintf("%sreplica%s", utils.ColorYellow, utils.ColorReset)
 		default:
-			roleStatus = fmt.Sprintf("%sunknown%s", ColorRed, ColorReset)
+			roleStatus = fmt.Sprintf("%sunknown%s", utils.ColorRed, utils.ColorReset)
 		}
 		fmt.Printf("  Role:    %s\n", roleStatus)
 		fmt.Printf("  Source:  %s\n", result.Source)
-		fmt.Printf("%s══════════════════════════════════════════════════════════════════%s\n", ColorCyan, ColorReset)
+		fmt.Printf("%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
 	} else {
 		// Simple output for scripting
 		fmt.Println(result.Role)

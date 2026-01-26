@@ -104,14 +104,8 @@ func Resume(dbsu string, wait bool) error {
 
 // Systemctl runs systemctl command for patroni service
 func Systemctl(action string) error {
-	cmdArgs := []string{"sudo", "systemctl", action, "patroni"}
-	utils.PrintHint(cmdArgs)
 	logrus.Debugf("systemctl %s patroni", action)
-	cmd := exec.Command("sudo", "systemctl", action, "patroni")
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return utils.RunSystemctl(action, "patroni")
 }
 
 // Status shows comprehensive patroni status (systemctl + ps + patronictl list)
@@ -121,7 +115,11 @@ func Status(dbsu string) error {
 	cmd1 := exec.Command("sudo", "systemctl", "status", "patroni", "--no-pager", "-l")
 	cmd1.Stdout = os.Stdout
 	cmd1.Stderr = os.Stderr
-	cmd1.Run() // ignore error, service might not exist
+	if err := cmd1.Run(); err != nil {
+		// Intentionally not failing: service might not exist or not be running
+		// This is informational output, not a failure condition
+		logrus.Debugf("systemctl status patroni: %v (may be expected)", err)
+	}
 
 	// 2. ps aux | grep patroni
 	fmt.Println("\n=== Patroni Processes ===")

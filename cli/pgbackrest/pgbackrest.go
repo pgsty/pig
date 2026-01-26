@@ -3,14 +3,12 @@ package pgbackrest
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 
-	"pig/internal/config"
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
@@ -121,10 +119,10 @@ func GetPgPathFromConfig(configPath, stanza, dbsu string) string {
 }
 
 // readConfigFile reads the config file content, using DBSU privilege escalation if needed.
-// Execution strategy:
+// Uses the 3-tier execution strategy from utils.DBSUCommandOutput:
 //   - If current user is DBSU: read directly
 //   - If current user is root: use "su - <dbsu> -c cat"
-//   - Otherwise: try direct read first, then fallback to "sudo -inu <dbsu> cat"
+//   - Otherwise: use "sudo -inu <dbsu> cat"
 func readConfigFile(configPath, dbsu string) (string, error) {
 	if dbsu == "" {
 		dbsu = utils.GetDBSU("")
@@ -132,62 +130,26 @@ func readConfigFile(configPath, dbsu string) (string, error) {
 
 	// If current user is DBSU, read directly
 	if utils.IsDBSU(dbsu) {
-		return readFileDirect(configPath)
+		content, err := os.ReadFile(configPath)
+		if err != nil {
+			return "", err
+		}
+		return string(content), nil
 	}
 
-	// If current user is root, use su
-	if config.CurrentUser == "root" {
-		return readFileAsSU(configPath, dbsu)
-	}
-
-	// Otherwise: try direct first, then sudo fallback
-	content, err := readFileDirect(configPath)
+	// Try direct read first (may succeed if file is world-readable)
+	content, err := os.ReadFile(configPath)
 	if err == nil {
-		return content, nil
+		return string(content), nil
 	}
 
-	// Check if it's a permission error
+	// Check if it's a permission error - if so, use DBSU
 	if os.IsPermission(err) {
 		logrus.Debugf("permission denied reading %s, trying as %s", configPath, dbsu)
-		return readFileAsSudo(configPath, dbsu)
+		return utils.DBSUCommandOutput(dbsu, []string{"cat", configPath})
 	}
 
 	return "", err
-}
-
-// readFileDirect reads file directly
-func readFileDirect(path string) (string, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(content), nil
-}
-
-// readFileAsSU reads file using su - dbsu -c "cat file"
-func readFileAsSU(path, dbsu string) (string, error) {
-	cmd := exec.Command("su", "-", dbsu, "-c", fmt.Sprintf("cat '%s'", path))
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("su failed: %w: %s", err, stderr.String())
-	}
-	return out.String(), nil
-}
-
-// readFileAsSudo reads file using sudo -inu dbsu cat file
-func readFileAsSudo(path, dbsu string) (string, error) {
-	cmd := exec.Command("sudo", "-inu", dbsu, "cat", path)
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("sudo failed: %w: %s", err, stderr.String())
-	}
-	return out.String(), nil
 }
 
 // GetEffectiveConfig returns merged config with defaults and auto-detection.

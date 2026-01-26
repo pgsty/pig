@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"pig/cli/postgres"
+	"pig/internal/config"
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
@@ -197,7 +198,7 @@ func buildRestoreArgs(cfg *Config, opts *RestoreOptions, normalizedTime string) 
 }
 
 // checkPostgresStopped verifies PostgreSQL is not running.
-// Returns error if PostgreSQL is running.
+// Prints a WARNING and returns error if PostgreSQL is running.
 // Uses DBSU privilege escalation to read postmaster.pid file.
 func checkPostgresStopped(cfg *Config, dataDir string) error {
 	dir := getDataDir(cfg, dataDir)
@@ -206,10 +207,17 @@ func checkPostgresStopped(cfg *Config, dataDir string) error {
 		dbsu = utils.GetDBSU("")
 	}
 
+	logrus.Debugf("checking PostgreSQL status: dataDir=%s, dbsu=%s, currentUser=%s",
+		dir, dbsu, config.CurrentUser)
+
 	// Use DBSU-aware function to check PostgreSQL status
 	running, pid := postgres.CheckPostgresRunningAsDBSU(dbsu, dir)
+	logrus.Debugf("PostgreSQL check result: running=%v, pid=%d", running, pid)
+
 	if running {
-		return fmt.Errorf("PostgreSQL is still running (PID: %d), stop it first: pig pg stop", pid)
+		fmt.Fprintf(os.Stderr, "\n%sWARNING: PostgreSQL is running (PID: %d) in %s%s\n", utils.ColorYellow, pid, dir, utils.ColorReset)
+		fmt.Fprintf(os.Stderr, "%sPlease stop PostgreSQL first: pig pg stop%s\n\n", utils.ColorYellow, utils.ColorReset)
+		return fmt.Errorf("cannot restore while PostgreSQL is running")
 	}
 	return nil
 }

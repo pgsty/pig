@@ -147,12 +147,12 @@ func Start(cfg *Config, opts *StartOptions) error {
 	running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
 	if running {
 		fmt.Printf("%sWARNING: PostgreSQL is already running (PID: %d) in %s%s\n",
-			ColorYellow, pid, dataDir, ColorReset)
+			utils.ColorYellow, pid, dataDir, utils.ColorReset)
 		if opts == nil || !opts.Force {
-			fmt.Printf("%sUse -y to force start anyway%s\n", ColorYellow, ColorReset)
+			fmt.Printf("%sUse -y to force start anyway%s\n", utils.ColorYellow, utils.ColorReset)
 			return fmt.Errorf("PostgreSQL already running, use -y to force")
 		}
-		fmt.Printf("%sForcing start as requested (-y)%s\n", ColorYellow, ColorReset)
+		fmt.Printf("%sForcing start as requested (-y)%s\n", utils.ColorYellow, utils.ColorReset)
 	}
 
 	// Find PostgreSQL
@@ -330,15 +330,15 @@ func Status(cfg *Config) error {
 	dataDir := GetPgData(cfg)
 	dbsu := GetDbSU(cfg)
 
-	fmt.Printf("%s══════════════════════════════════════════════════════════════════%s\n", ColorCyan, ColorReset)
-	fmt.Printf("%s PostgreSQL Status Summary%s\n", ColorBold, ColorReset)
-	fmt.Printf("%s══════════════════════════════════════════════════════════════════%s\n", ColorCyan, ColorReset)
+	fmt.Printf("%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
+	fmt.Printf("%s PostgreSQL Status Summary%s\n", utils.ColorBold, utils.ColorReset)
+	fmt.Printf("%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
 
 	// 1. pg_ctl status
-	fmt.Printf("\n%s[pg_ctl status]%s\n", ColorBold, ColorReset)
+	fmt.Printf("\n%s[pg_ctl status]%s\n", utils.ColorBold, utils.ColorReset)
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
-		fmt.Printf("  %sPostgreSQL not found: %v%s\n", ColorYellow, err, ColorReset)
+		fmt.Printf("  %sPostgreSQL not found: %v%s\n", utils.ColorYellow, err, utils.ColorReset)
 	} else {
 		cmdArgs := []string{pg.PgCtl(), "status", "-D", dataDir}
 		PrintHint(cmdArgs)
@@ -346,12 +346,12 @@ func Status(cfg *Config) error {
 	}
 
 	// 2. PostgreSQL processes (ps)
-	fmt.Printf("\n%s[PostgreSQL Processes]%s\n", ColorBold, ColorReset)
+	fmt.Printf("\n%s[PostgreSQL Processes]%s\n", utils.ColorBold, utils.ColorReset)
 	PrintHint([]string{"ps", "-u", dbsu, "-o", "pid,ppid,start,command"})
 	showPostgresProcesses(dbsu)
 
 	// 3. Related services (systemctl)
-	fmt.Printf("\n%s[Related Services]%s\n", ColorBold, ColorReset)
+	fmt.Printf("\n%s[Related Services]%s\n", utils.ColorBold, utils.ColorReset)
 	showServiceStatus("postgres") // pigsty postgres service name
 	showServiceStatus("patroni")
 	showServiceStatus("pgbouncer")
@@ -359,7 +359,7 @@ func Status(cfg *Config) error {
 	showServiceStatus("vip-manager")
 	showServiceStatus("haproxy")
 
-	fmt.Printf("\n%s══════════════════════════════════════════════════════════════════%s\n", ColorCyan, ColorReset)
+	fmt.Printf("\n%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
 	return nil
 }
 
@@ -371,13 +371,13 @@ func showPostgresProcesses(dbsu string) {
 	cmd.Stderr = &out
 
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("  %s(no processes found)%s\n", ColorYellow, ColorReset)
+		fmt.Printf("  %s(no processes found)%s\n", utils.ColorYellow, utils.ColorReset)
 		return
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if len(lines) <= 1 {
-		fmt.Printf("  %s(no processes found)%s\n", ColorYellow, ColorReset)
+		fmt.Printf("  %s(no processes found)%s\n", utils.ColorYellow, utils.ColorReset)
 		return
 	}
 
@@ -397,7 +397,7 @@ func showPostgresProcesses(dbsu string) {
 	}
 
 	if count == 0 {
-		fmt.Printf("  %s(no postgres processes)%s\n", ColorYellow, ColorReset)
+		fmt.Printf("  %s(no postgres processes)%s\n", utils.ColorYellow, utils.ColorReset)
 	}
 }
 
@@ -416,20 +416,20 @@ func showServiceStatus(serviceName string) {
 	var statusColor string
 	switch status {
 	case "active":
-		statusColor = ColorGreen
+		statusColor = utils.ColorGreen
 	case "inactive":
-		statusColor = ColorYellow
+		statusColor = utils.ColorYellow
 	case "failed":
-		statusColor = ColorRed
+		statusColor = utils.ColorRed
 	default:
 		// Service doesn't exist or unknown status, skip silently
 		if status == "" || status == "unknown" {
 			return
 		}
-		statusColor = ColorYellow
+		statusColor = utils.ColorYellow
 	}
 
-	fmt.Printf("  %-16s %s%s%s\n", serviceName+":", statusColor, status, ColorReset)
+	fmt.Printf("  %-16s %s%s%s\n", serviceName+":", statusColor, status, utils.ColorReset)
 }
 
 // PromoteOptions contains options for Promote

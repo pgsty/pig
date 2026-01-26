@@ -57,7 +57,9 @@ func GetDBSU(override string) string {
 
 // IsDBSU checks if current user is the database superuser
 func IsDBSU(dbsu string) bool {
-	return config.CurrentUser == dbsu
+	result := config.CurrentUser == dbsu
+	logrus.Debugf("IsDBSU: currentUser=%q, dbsu=%q, result=%v", config.CurrentUser, dbsu, result)
+	return result
 }
 
 // DBSUCommand executes a command as the database superuser.

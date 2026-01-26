@@ -101,10 +101,12 @@ func runMaintTask(cfg *Config, dbname string, task *maintTask) error {
 		sql = fmt.Sprintf("%s %s %s", task.command, task.options, table)
 	} else if task.schema != "" {
 		// All tables in schema (need to iterate via DO block)
+		// Schema name is pre-validated by validateMaintOptions() using ValidateIdentifier()
+		// Use quote_literal for defense-in-depth against SQL injection
 		sql = fmt.Sprintf(`DO $$ DECLARE r RECORD; BEGIN
-FOR r IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname = '%s'
+FOR r IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname = quote_literal('%s')::name
 LOOP EXECUTE '%s %s ' || quote_ident(r.schemaname) || '.' || quote_ident(r.tablename);
-END LOOP; END $$`, task.schema, task.command, task.options)
+END LOOP; END $$`, utils.EscapeSQLString(task.schema), task.command, task.options)
 	} else {
 		// Entire database
 		sql = fmt.Sprintf("%s %s", task.command, task.options)
@@ -120,7 +122,7 @@ func runMaintAllDatabases(cfg *Config, task *maintTask) error {
 		return fmt.Errorf("failed to get databases: %w", err)
 	}
 	for _, db := range dbs {
-		fmt.Printf("\n%s=== %s database: %s ===%s\n", ColorCyan, task.taskName, db, ColorReset)
+		fmt.Printf("\n%s=== %s database: %s ===%s\n", utils.ColorCyan, task.taskName, db, utils.ColorReset)
 		sql := fmt.Sprintf("%s %s", task.command, task.options)
 		if err := RunPsqlMaintenance(cfg, db, sql); err != nil {
 			logrus.Warnf("%s %s failed: %v", strings.ToLower(task.taskName), db, err)
