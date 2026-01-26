@@ -59,7 +59,7 @@ func Ps(cfg *Config, opts *PsOptions) error {
 	sql := `SELECT pid, usename AS user, datname AS db,
        CASE WHEN client_addr IS NULL THEN 'local' ELSE client_addr::text END AS client,
        state, COALESCE(LEFT(query, 50), '') AS query
-FROM pg_stat_activity WHERE pid <> pg_backend_pid()`
+  FROM pg_stat_activity WHERE pid <> pg_backend_pid()`
 
 	if opts == nil || !opts.All {
 		sql += " AND backend_type = 'client backend'"
