@@ -82,6 +82,9 @@ var (
 	pgMaintFull    bool
 	pgMaintJobs    int
 	pgMaintDryRun  bool
+
+	// role flags
+	pgRoleVerbose bool
 )
 
 // ============================================================================
@@ -103,6 +106,7 @@ Server Control (pg_ctl wrapper):
   pig pg reload   [-D datadir]              reload configuration
   pig pg status   [-D datadir]              show server status
   pig pg promote  [-D datadir]              promote standby to primary
+  pig pg role     [-D datadir] [-V]         detect instance role (primary/replica)
 
 Connection & Query:
   pig pg psql     [db] [-c cmd]             connect to database via psql
@@ -271,6 +275,25 @@ var pgPromoteCmd = &cobra.Command{
 			NoWait:  pgPromoteNoWait,
 		}
 		return postgres.Promote(pgConfig, opts)
+	},
+}
+
+// ============================================================================
+// Subcommand: pig pg role
+// ============================================================================
+
+var pgRoleCmd = &cobra.Command{
+	Use:     "role",
+	Short:   "Detect PostgreSQL instance role (primary or replica)",
+	Aliases: []string{"r"},
+	Example: `  pig pg role                     # output: primary, replica, or unknown
+  pig pg role -V                  # verbose output with detection details
+  pig pg role -D /data/pg18       # specify data directory`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts := &postgres.RoleOptions{
+			Verbose: pgRoleVerbose,
+		}
+		return postgres.PrintRole(pgConfig, opts)
 	},
 }
 
@@ -562,6 +585,9 @@ func init() {
 	pgPromoteCmd.Flags().IntVarP(&pgPromoteTimeout, "timeout", "t", 0, "wait timeout in seconds")
 	pgPromoteCmd.Flags().BoolVarP(&pgPromoteNoWait, "no-wait", "W", false, "do not wait for promotion")
 
+	// role subcommand flags
+	pgRoleCmd.Flags().BoolVarP(&pgRoleVerbose, "verbose", "V", false, "show detailed detection process")
+
 	// Register subcommands - Phase 1
 	pgCmd.AddCommand(pgInitCmd)
 	pgCmd.AddCommand(pgStartCmd)
@@ -570,6 +596,7 @@ func init() {
 	pgCmd.AddCommand(pgReloadCmd)
 	pgCmd.AddCommand(pgStatusCmd)
 	pgCmd.AddCommand(pgPromoteCmd)
+	pgCmd.AddCommand(pgRoleCmd)
 
 	// ========== Phase 2 Commands ==========
 
