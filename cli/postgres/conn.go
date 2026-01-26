@@ -24,12 +24,25 @@ var validStateValues = map[string]bool{
 	"disabled":               true,
 }
 
-// sqlLikePatternRegex validates LIKE pattern (allows alphanumeric, spaces, wildcards)
-var sqlLikePatternRegex = regexp.MustCompile(`^[a-zA-Z0-9_\s%*]+$`)
+// sqlLikePatternRegex validates LIKE pattern (allows alphanumeric, spaces, common punctuation)
+var sqlLikePatternRegex = regexp.MustCompile(`^[a-zA-Z0-9_\s%*.,;:!?@#$^&()\[\]{}<>+=/-]+$`)
 
 // escapeSQLString escapes single quotes in a string for SQL
 func escapeSQLString(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
+}
+
+// escapeSQLLikePattern escapes special characters in a LIKE pattern.
+// This handles: backslash (escape char), % and _ (LIKE wildcards), and single quotes (SQL string).
+func escapeSQLLikePattern(s string) string {
+	// Order matters: escape backslash first since it's the escape character
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	// Escape LIKE wildcards
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	// Escape single quotes for SQL string
+	s = strings.ReplaceAll(s, "'", "''")
+	return s
 }
 
 // ============================================================================
@@ -153,9 +166,9 @@ func Kill(cfg *Config, opts *KillOptions) error {
 				conditions = append(conditions, fmt.Sprintf("state = '%s'", escapeSQLString(opts.State)))
 			}
 			if opts != nil && opts.Query != "" {
-				// Escape single quotes and use ILIKE for case-insensitive matching
-				escapedQuery := escapeSQLString(opts.Query)
-				conditions = append(conditions, fmt.Sprintf("query ILIKE '%%%s%%'", escapedQuery))
+				// Escape LIKE wildcards and single quotes for safe pattern matching
+				escapedQuery := escapeSQLLikePattern(opts.Query)
+				conditions = append(conditions, fmt.Sprintf("query ILIKE '%%%s%%' ESCAPE '\\\\'", escapedQuery))
 			}
 
 			whereClause := strings.Join(conditions, " AND ")

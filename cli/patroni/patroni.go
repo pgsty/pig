@@ -114,6 +114,33 @@ func Systemctl(action string) error {
 	return cmd.Run()
 }
 
+// Status shows comprehensive patroni status (systemctl + ps + patronictl list)
+func Status(dbsu string) error {
+	// 1. systemctl status patroni
+	fmt.Println("=== Patroni Service Status ===")
+	cmd1 := exec.Command("sudo", "systemctl", "status", "patroni", "--no-pager", "-l")
+	cmd1.Stdout = os.Stdout
+	cmd1.Stderr = os.Stderr
+	cmd1.Run() // ignore error, service might not exist
+
+	// 2. ps aux | grep patroni
+	fmt.Println("\n=== Patroni Processes ===")
+	cmd2 := exec.Command("bash", "-c", "ps aux | grep -E '[p]atroni' || echo 'No patroni processes found'")
+	cmd2.Stdout = os.Stdout
+	cmd2.Stderr = os.Stderr
+	cmd2.Run()
+
+	// 3. patronictl list
+	fmt.Println("\n=== Patroni Cluster Status ===")
+	binPath, err := exec.LookPath("patronictl")
+	if err != nil {
+		fmt.Println("patronictl not found, skipping cluster status")
+		return nil
+	}
+	cmdArgs := []string{binPath, "-c", DefaultConfigPath, "list", "-e", "-t"}
+	return utils.DBSUCommand(dbsu, cmdArgs)
+}
+
 // Log views patroni logs using journalctl
 func Log(follow bool, lines string) error {
 	args := []string{"-u", "patroni"}

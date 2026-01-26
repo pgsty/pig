@@ -1,6 +1,7 @@
 package pgbackrest
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,7 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"pig/cli/postgres"
+	"pig/internal/config"
+	"pig/internal/utils"
 )
 
 // LogDir returns the pgbackrest log directory.
@@ -18,14 +20,10 @@ func LogDir() string {
 }
 
 // LogList lists pgbackrest log files in the log directory.
-func LogList() error {
+func LogList(dbsu string) error {
 	logDir := LogDir()
 
-	if _, err := os.Stat(logDir); os.IsNotExist(err) {
-		return fmt.Errorf("log directory not found: %s", logDir)
-	}
-
-	files, err := getLogFiles(logDir)
+	files, err := getLogFiles(logDir, dbsu)
 	if err != nil {
 		return err
 	}
@@ -46,35 +44,61 @@ func LogList() error {
 // getLogFiles returns sorted list of .log files in the directory
 // Files are sorted by name in reverse order (newest first, since pgbackrest
 // uses timestamp-based names like pg-meta-backup.log)
-func getLogFiles(logDir string) ([]string, error) {
-	entries, err := os.ReadDir(logDir)
-	if err != nil {
-		// Try with sudo if permission denied
-		return getLogFilesWithSudo(logDir)
+// Uses DBSU privilege escalation if needed.
+func getLogFiles(logDir, dbsu string) ([]string, error) {
+	if dbsu == "" {
+		dbsu = utils.GetDBSU("")
 	}
 
-	var files []string
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".log") {
-			files = append(files, entry.Name())
+	var output string
+	var err error
+
+	// If current user is DBSU, read directly
+	if utils.IsDBSU(dbsu) {
+		entries, dirErr := os.ReadDir(logDir)
+		if dirErr != nil {
+			return nil, fmt.Errorf("cannot read log directory: %w", dirErr)
+		}
+		var files []string
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".log") {
+				files = append(files, entry.Name())
+			}
+		}
+		sort.Sort(sort.Reverse(sort.StringSlice(files)))
+		return files, nil
+	}
+
+	// If current user is root, use su
+	if config.CurrentUser == "root" {
+		output, err = runAsDBSU(dbsu, []string{"ls", "-1", logDir})
+	} else {
+		// Try direct read first
+		entries, dirErr := os.ReadDir(logDir)
+		if dirErr == nil {
+			var files []string
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".log") {
+					files = append(files, entry.Name())
+				}
+			}
+			sort.Sort(sort.Reverse(sort.StringSlice(files)))
+			return files, nil
+		}
+		// Permission denied - try sudo as DBSU
+		if os.IsPermission(dirErr) {
+			output, err = runAsDBSUSudo(dbsu, []string{"ls", "-1", logDir})
+		} else {
+			return nil, fmt.Errorf("cannot read log directory: %w", dirErr)
 		}
 	}
 
-	// Sort by name (reverse for newest first)
-	sort.Sort(sort.Reverse(sort.StringSlice(files)))
-	return files, nil
-}
-
-// getLogFilesWithSudo tries to list log files with sudo (for permission issues)
-func getLogFilesWithSudo(logDir string) ([]string, error) {
-	cmd := exec.Command("sudo", "ls", "-1", logDir)
-	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("cannot read log directory: %w", err)
 	}
 
 	var files []string
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" && strings.HasSuffix(line, ".log") {
 			files = append(files, line)
@@ -86,11 +110,14 @@ func getLogFilesWithSudo(logDir string) ([]string, error) {
 }
 
 // LogTail shows real-time log output using tail -f
-func LogTail(n int) error {
+func LogTail(dbsu string, n int) error {
 	logDir := LogDir()
+	if dbsu == "" {
+		dbsu = utils.GetDBSU("")
+	}
 
 	// Find latest log file
-	latestLog, err := findLatestLog(logDir)
+	latestLog, err := findLatestLog(logDir, dbsu)
 	if err != nil {
 		return err
 	}
@@ -104,14 +131,18 @@ func LogTail(n int) error {
 		nStr = fmt.Sprintf("%d", n)
 	}
 
-	return postgres.RunWithSudoFallback([]string{"tail", "-f", "-n", nStr, logPath})
+	args := []string{"tail", "-f", "-n", nStr, logPath}
+	return utils.DBSUCommand(dbsu, args)
 }
 
 // LogCat displays log file contents.
 // If filename is empty, shows the latest log file.
 // If n > 0, shows only the last n lines.
-func LogCat(filename string, n int) error {
+func LogCat(dbsu string, filename string, n int) error {
 	logDir := LogDir()
+	if dbsu == "" {
+		dbsu = utils.GetDBSU("")
+	}
 
 	var logFile string
 	if filename != "" {
@@ -123,7 +154,7 @@ func LogCat(filename string, n int) error {
 		}
 	} else {
 		var err error
-		logFile, err = findLatestLog(logDir)
+		logFile, err = findLatestLog(logDir, dbsu)
 		if err != nil {
 			return err
 		}
@@ -138,16 +169,19 @@ func LogCat(filename string, n int) error {
 		return fmt.Errorf("invalid log file path")
 	}
 
+	var args []string
 	if n > 0 {
-		return postgres.RunWithSudoFallback([]string{"tail", "-n", fmt.Sprintf("%d", n), logPath})
+		args = []string{"tail", "-n", fmt.Sprintf("%d", n), logPath}
+	} else {
+		args = []string{"cat", logPath}
 	}
 
-	return postgres.RunWithSudoFallback([]string{"cat", logPath})
+	return utils.DBSUCommand(dbsu, args)
 }
 
 // findLatestLog finds the most recent log file by name
-func findLatestLog(logDir string) (string, error) {
-	files, err := getLogFiles(logDir)
+func findLatestLog(logDir, dbsu string) (string, error) {
+	files, err := getLogFiles(logDir, dbsu)
 	if err != nil {
 		return "", err
 	}
@@ -157,4 +191,32 @@ func findLatestLog(logDir string) (string, error) {
 	}
 
 	return files[0], nil
+}
+
+// runAsDBSU runs a command as DBSU using su (when current user is root)
+func runAsDBSU(dbsu string, args []string) (string, error) {
+	cmdStr := utils.ShellQuoteArgs(args)
+	cmd := exec.Command("su", "-", dbsu, "-c", cmdStr)
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("su failed: %w: %s", err, stderr.String())
+	}
+	return out.String(), nil
+}
+
+// runAsDBSUSudo runs a command as DBSU using sudo (when current user is neither DBSU nor root)
+func runAsDBSUSudo(dbsu string, args []string) (string, error) {
+	sudoArgs := append([]string{"-inu", dbsu, "--"}, args...)
+	cmd := exec.Command("sudo", sudoArgs...)
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("sudo failed: %w: %s", err, stderr.String())
+	}
+	return out.String(), nil
 }

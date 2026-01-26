@@ -78,7 +78,7 @@ func Restore(cfg *Config, opts *RestoreOptions) error {
 		return err
 	}
 
-	printPostRestoreHints(opts)
+	printPostRestoreHints(effCfg, opts)
 	return nil
 }
 
@@ -197,13 +197,17 @@ func buildRestoreArgs(cfg *Config, opts *RestoreOptions, normalizedTime string) 
 }
 
 // checkPostgresStopped verifies PostgreSQL is not running.
+// Returns error if PostgreSQL is running.
+// Uses DBSU privilege escalation to read postmaster.pid file.
 func checkPostgresStopped(cfg *Config, dataDir string) error {
 	dir := getDataDir(cfg, dataDir)
-	running, pid, err := postgres.CheckPostgresRunning(dir)
-	if err != nil {
-		logrus.Warnf("cannot check PostgreSQL status: %v", err)
-		return nil // Continue anyway - restore will fail if PG is running
+	dbsu := cfg.DbSU
+	if dbsu == "" {
+		dbsu = utils.GetDBSU("")
 	}
+
+	// Use DBSU-aware function to check PostgreSQL status
+	running, pid := postgres.CheckPostgresRunningAsDBSU(dbsu, dir)
 	if running {
 		return fmt.Errorf("PostgreSQL is still running (PID: %d), stop it first: pig pg stop", pid)
 	}
@@ -217,7 +221,7 @@ func getDataDir(cfg *Config, optDataDir string) string {
 	}
 	// Try to get from pgbackrest config
 	if cfg != nil && cfg.ConfigPath != "" && cfg.Stanza != "" {
-		if pgPath := GetPgPathFromConfig(cfg.ConfigPath, cfg.Stanza); pgPath != "" {
+		if pgPath := GetPgPathFromConfig(cfg.ConfigPath, cfg.Stanza, cfg.DbSU); pgPath != "" {
 			return pgPath
 		}
 	}
@@ -284,21 +288,40 @@ func printRestorePlan(cfg *Config, opts *RestoreOptions, normalizedTime string) 
 }
 
 // printPostRestoreHints displays post-restore instructions to stderr.
-func printPostRestoreHints(opts *RestoreOptions) {
+func printPostRestoreHints(cfg *Config, opts *RestoreOptions) {
 	fmt.Fprintf(os.Stderr, "\n%s=== Next Steps ===%s\n", utils.ColorGreen, utils.ColorReset)
-	fmt.Fprintln(os.Stderr, "1. Start PostgreSQL:")
-	fmt.Fprintln(os.Stderr, "   pig pg start")
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "2. Verify data integrity:")
-	fmt.Fprintln(os.Stderr, "   pig pg ps")
-	fmt.Fprintln(os.Stderr)
 
-	if !opts.Promote {
-		fmt.Fprintln(os.Stderr, "3. If satisfied, promote to primary:")
-		fmt.Fprintln(os.Stderr, "   pig pg promote")
+	// Check if using custom data directory
+	dataDir := getDataDir(cfg, opts.DataDir)
+	isCustomDataDir := opts.DataDir != "" && opts.DataDir != "/pg/data"
+
+	if isCustomDataDir {
+		// Simplified hints for custom data directory
+		fmt.Fprintln(os.Stderr, "1. Start PostgreSQL with custom data directory:")
+		fmt.Fprintf(os.Stderr, "   pg_ctl -D %s start\n", dataDir)
 		fmt.Fprintln(os.Stderr)
-	}
 
-	fmt.Fprintln(os.Stderr, "4. Re-create stanza if needed:")
-	fmt.Fprintln(os.Stderr, "   pig pb create")
+		if !opts.Promote {
+			fmt.Fprintln(os.Stderr, "2. If satisfied, promote to primary:")
+			fmt.Fprintf(os.Stderr, "   pg_ctl -D %s promote\n", dataDir)
+			fmt.Fprintln(os.Stderr)
+		}
+	} else {
+		// Detailed hints for default data directory
+		fmt.Fprintln(os.Stderr, "1. Start PostgreSQL:")
+		fmt.Fprintln(os.Stderr, "   pig pg start")
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "2. Verify data integrity:")
+		fmt.Fprintln(os.Stderr, "   pig pg ps")
+		fmt.Fprintln(os.Stderr)
+
+		if !opts.Promote {
+			fmt.Fprintln(os.Stderr, "3. If satisfied, promote to primary:")
+			fmt.Fprintln(os.Stderr, "   pig pg promote")
+			fmt.Fprintln(os.Stderr)
+		}
+
+		fmt.Fprintln(os.Stderr, "4. Re-create stanza if needed:")
+		fmt.Fprintln(os.Stderr, "   pig pb create")
+	}
 }

@@ -95,16 +95,32 @@ Control:
 
 var pbInfoOutput string
 var pbInfoSet string
+var pbInfoRaw bool
 
 var pbInfoCmd = &cobra.Command{
 	Use:     "info",
 	Aliases: []string{"i"},
 	Short:   "Show backup repository info",
-	Long:  `Display detailed information about the backup repository including all backup sets and WAL archive status.`,
+	Long: `Display detailed information about the backup repository including
+all backup sets, recovery window, WAL archive status, and backup list.
+
+By default, displays a parsed and formatted view of backup information including:
+  - Recovery window (earliest to latest recovery point)
+  - WAL archive range
+  - LSN range
+  - Backup list with type, duration, size, and WAL range
+
+Use --raw/-R for original pgbackrest output format.`,
+	Example: `
+  pig pb info                      # detailed formatted output
+  pig pb info -R                   # raw pgbackrest text output
+  pig pb info --raw -o json        # raw JSON output
+  pig pb info --set 20250101-*     # show specific backup set`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return pgbackrest.Info(pbConfig, &pgbackrest.InfoOptions{
 			Output: pbInfoOutput,
 			Set:    pbInfoSet,
+			Raw:    pbInfoRaw,
 		})
 	},
 }
@@ -222,7 +238,10 @@ var pbRestoreCmd = &cobra.Command{
 	Short:   "Restore from backup (PITR)",
 	Long: `Restore from backup with point-in-time recovery (PITR) support.
 
-Recovery Targets (mutually exclusive):
+IMPORTANT: You must specify a recovery target. Running without arguments
+will show this help message to prevent accidental restores.
+
+Recovery Targets (mutually exclusive, at least one required):
   --default, -d      Recover to end of WAL stream (latest data)
   --immediate, -I    Recover to backup consistency point only
   --time, -t         Recover to specific timestamp
@@ -247,21 +266,31 @@ The restore process:
 
 IMPORTANT: PostgreSQL must be stopped before restore.`,
 	Example: `
-  pig pb restore                   # restore to latest (default)
-  pig pb restore -d                # restore to latest (explicit)
+  pig pb restore -d                # restore to latest (end of WAL)
   pig pb restore -I                # restore to consistency point
   pig pb restore -t "2025-01-01 12:00:00+08"   # restore to time
   pig pb restore -t "2025-01-01"   # restore to start of day
   pig pb restore -t "12:00:00"     # restore to time today
   pig pb restore -n my-savepoint   # restore to named point
   pig pb restore -l "0/7C82CB8"    # restore to LSN
-  pig pb restore -b 20251225-120000F           # restore specific backup
+  pig pb restore -b 20251225-120000F -d        # restore specific backup to latest
 
   # Options
-  pig pb restore -t "..." -X       # exclusive (stop before target)
-  pig pb restore -t "..." -P       # auto-promote after recovery
-  pig pb restore -t "..." -y       # skip confirmation`,
+  pig pb restore -d -X             # exclusive (stop before target)
+  pig pb restore -d -P             # auto-promote after recovery
+  pig pb restore -d -y             # skip confirmation
+  pig pb restore -d -D /data/pg    # restore to custom data directory`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Check if any recovery target is specified
+		hasTarget := pbRestoreDefault || pbRestoreImmediate ||
+			pbRestoreTime != "" || pbRestoreName != "" ||
+			pbRestoreLSN != "" || pbRestoreXID != ""
+
+		// If no target specified, show help instead of running restore
+		if !hasTarget {
+			return cmd.Help()
+		}
+
 		return pgbackrest.Restore(pbConfig, &pgbackrest.RestoreOptions{
 			Default:   pbRestoreDefault,
 			Immediate: pbRestoreImmediate,
@@ -398,19 +427,21 @@ Subcommands:
 			subCmd = args[0]
 		}
 
+		dbsu := pbConfig.DbSU
+
 		switch subCmd {
 		case "list", "ls":
-			return pgbackrest.LogList()
+			return pgbackrest.LogList(dbsu)
 		case "tail", "follow", "f":
-			return pgbackrest.LogTail(pbLogLines)
+			return pgbackrest.LogTail(dbsu, pbLogLines)
 		case "cat", "show":
 			filename := ""
 			if len(args) > 1 {
 				filename = args[1]
 			}
-			return pgbackrest.LogCat(filename, pbLogLines)
+			return pgbackrest.LogCat(dbsu, filename, pbLogLines)
 		default:
-			return pgbackrest.LogList()
+			return pgbackrest.LogList(dbsu)
 		}
 	},
 }
@@ -430,8 +461,9 @@ func init() {
 	pbCmd.PersistentFlags().StringVarP(&pbConfig.DbSU, "dbsu", "U", "", "database superuser (default: $PIG_DBSU or postgres)")
 
 	// Info command flags
-	pbInfoCmd.Flags().StringVarP(&pbInfoOutput, "output", "o", "", "output format: text, json")
+	pbInfoCmd.Flags().StringVarP(&pbInfoOutput, "output", "o", "", "output format: text, json (only with --raw)")
 	pbInfoCmd.Flags().StringVar(&pbInfoSet, "set", "", "show specific backup set")
+	pbInfoCmd.Flags().BoolVarP(&pbInfoRaw, "raw", "R", false, "raw output mode (pass through pgbackrest output)")
 
 	// Backup command flags
 	pbBackupCmd.Flags().BoolVarP(&pbBackupForce, "force", "f", false, "skip primary role check")

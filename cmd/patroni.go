@@ -33,6 +33,9 @@ Cluster Operations (via patronictl):
   pig pt config <action>           manage cluster config
 
 Service Management (via systemctl):
+  pig pt status                    show comprehensive patroni status
+  pig pt start                     start patroni service (shortcut)
+  pig pt stop                      stop patroni service (shortcut)
   pig pt svc start                 start patroni service
   pig pt svc stop                  stop patroni service
   pig pt svc restart               restart patroni service
@@ -300,6 +303,49 @@ var patroniLogCmd = &cobra.Command{
 	},
 }
 
+// patroniStatusCmd: pig pt status - comprehensive status check
+var patroniStatusCmd = &cobra.Command{
+	Use:     "status",
+	Aliases: []string{"st", "stat"},
+	Short:   "Show comprehensive patroni status",
+	Long: `Show comprehensive Patroni status including:
+  1. Patroni service status (systemctl status patroni)
+  2. Patroni processes (ps aux | grep patroni)
+  3. Patroni cluster status (patronictl list)`,
+	Example: `
+  pig pt status       # Show comprehensive status
+  pig pt st           # Same as above (shortcut)`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return patroni.Status(utils.GetDBSU(patroniDBSU))
+	},
+}
+
+// ============================================================================
+// Service Shortcuts (via systemctl) - pig pt start/stop
+// ============================================================================
+
+// patroniStartCmd: pig pt start - shortcut for pig pt svc start
+var patroniStartCmd = &cobra.Command{
+	Use:     "start",
+	Aliases: []string{"up"},
+	Short:   "Start patroni service (shortcut for 'svc start')",
+	Long:    `Start the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc start'.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return patroni.Systemctl("start")
+	},
+}
+
+// patroniStopCmd: pig pt stop - shortcut for pig pt svc stop
+var patroniStopCmd = &cobra.Command{
+	Use:     "stop",
+	Aliases: []string{"dn", "down"},
+	Short:   "Stop patroni service (shortcut for 'svc stop')",
+	Long:    `Stop the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc stop'.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return patroni.Systemctl("stop")
+	},
+}
+
 // ============================================================================
 // Service Management (via systemctl) - pig pt svc
 // ============================================================================
@@ -422,6 +468,10 @@ func init() {
 		patroniResumeCmd,
 		patroniConfigCmd,
 		patroniLogCmd,
+		patroniStatusCmd,
+		// Service shortcuts (systemctl)
+		patroniStartCmd,
+		patroniStopCmd,
 		// Service management (systemctl)
 		patroniSvcCmd,
 	)

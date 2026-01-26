@@ -128,6 +128,8 @@ amd:
 	docker cp pig d13a:/usr/bin/pig
 2a:
 	scp pig ai:/tmp/pig; ssh ai sudo mv /tmp/pig /usr/bin/pig
+2j: amd
+	scp pig jp:/tmp/pig; ssh jp sudo mv /tmp/pig /usr/bin/pig
 
 .PHONY: run build clean build-linux-amd64 build-linux-arm64 release release-linux linux-amd64 linux-arm64 \
  goreleaser-install goreleaser-snapshot goreleaser-build goreleaser-release goreleaser-test-release \

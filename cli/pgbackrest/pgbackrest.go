@@ -3,12 +3,14 @@ package pgbackrest
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 
+	"pig/internal/config"
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
@@ -50,8 +52,8 @@ var (
 
 // GetStanza extracts the first non-global stanza name from config file.
 // It looks for section headers like [pg-meta] and skips [global*] sections.
-func GetStanza(configPath string) (string, error) {
-	stanzas, err := ListStanzaNames(configPath)
+func GetStanza(configPath, dbsu string) (string, error) {
+	stanzas, err := ListStanzaNames(configPath, dbsu)
 	if err != nil {
 		return "", err
 	}
@@ -66,15 +68,15 @@ func GetStanza(configPath string) (string, error) {
 }
 
 // ListStanzaNames returns all non-global stanza names from config file.
-func ListStanzaNames(configPath string) ([]string, error) {
-	file, err := os.Open(configPath)
+// Uses DBSU privilege escalation if needed.
+func ListStanzaNames(configPath, dbsu string) ([]string, error) {
+	content, err := readConfigFile(configPath, dbsu)
 	if err != nil {
-		return nil, fmt.Errorf("cannot open config file: %w", err)
+		return nil, fmt.Errorf("cannot read config file: %w", err)
 	}
-	defer file.Close()
 
 	var stanzas []string
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(strings.NewReader(content))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if matches := sectionRegex.FindStringSubmatch(line); matches != nil {
@@ -85,21 +87,21 @@ func ListStanzaNames(configPath string) ([]string, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading config file: %w", err)
+		return nil, fmt.Errorf("error parsing config file: %w", err)
 	}
 	return stanzas, nil
 }
 
 // GetPgPathFromConfig reads pg1-path from the stanza section in config file.
-func GetPgPathFromConfig(configPath, stanza string) string {
-	file, err := os.Open(configPath)
+// Uses DBSU privilege escalation if needed.
+func GetPgPathFromConfig(configPath, stanza, dbsu string) string {
+	content, err := readConfigFile(configPath, dbsu)
 	if err != nil {
 		return ""
 	}
-	defer file.Close()
 
 	inStanza := false
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(strings.NewReader(content))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
@@ -118,6 +120,76 @@ func GetPgPathFromConfig(configPath, stanza string) string {
 	return ""
 }
 
+// readConfigFile reads the config file content, using DBSU privilege escalation if needed.
+// Execution strategy:
+//   - If current user is DBSU: read directly
+//   - If current user is root: use "su - <dbsu> -c cat"
+//   - Otherwise: try direct read first, then fallback to "sudo -inu <dbsu> cat"
+func readConfigFile(configPath, dbsu string) (string, error) {
+	if dbsu == "" {
+		dbsu = utils.GetDBSU("")
+	}
+
+	// If current user is DBSU, read directly
+	if utils.IsDBSU(dbsu) {
+		return readFileDirect(configPath)
+	}
+
+	// If current user is root, use su
+	if config.CurrentUser == "root" {
+		return readFileAsSU(configPath, dbsu)
+	}
+
+	// Otherwise: try direct first, then sudo fallback
+	content, err := readFileDirect(configPath)
+	if err == nil {
+		return content, nil
+	}
+
+	// Check if it's a permission error
+	if os.IsPermission(err) {
+		logrus.Debugf("permission denied reading %s, trying as %s", configPath, dbsu)
+		return readFileAsSudo(configPath, dbsu)
+	}
+
+	return "", err
+}
+
+// readFileDirect reads file directly
+func readFileDirect(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
+// readFileAsSU reads file using su - dbsu -c "cat file"
+func readFileAsSU(path, dbsu string) (string, error) {
+	cmd := exec.Command("su", "-", dbsu, "-c", fmt.Sprintf("cat '%s'", path))
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("su failed: %w: %s", err, stderr.String())
+	}
+	return out.String(), nil
+}
+
+// readFileAsSudo reads file using sudo -inu dbsu cat file
+func readFileAsSudo(path, dbsu string) (string, error) {
+	cmd := exec.Command("sudo", "-inu", dbsu, "cat", path)
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("sudo failed: %w: %s", err, stderr.String())
+	}
+	return out.String(), nil
+}
+
 // GetEffectiveConfig returns merged config with defaults and auto-detection.
 // Priority: explicit flags > auto-detected values > defaults
 func GetEffectiveConfig(cfg *Config) (*Config, error) {
@@ -134,17 +206,38 @@ func GetEffectiveConfig(cfg *Config) (*Config, error) {
 	if result.DbSU == "" {
 		result.DbSU = utils.GetDBSU("")
 	}
-	if _, err := os.Stat(result.ConfigPath); err != nil {
-		return nil, fmt.Errorf("config file not found: %s", result.ConfigPath)
+
+	// Check config file exists (use DBSU if needed for permission)
+	if err := checkConfigExists(result.ConfigPath, result.DbSU); err != nil {
+		return nil, err
 	}
+
 	if result.Stanza == "" {
-		stanza, err := GetStanza(result.ConfigPath)
+		stanza, err := GetStanza(result.ConfigPath, result.DbSU)
 		if err != nil {
 			return nil, fmt.Errorf("cannot detect stanza: %w (use --stanza to specify)", err)
 		}
 		result.Stanza = stanza
 	}
 	return result, nil
+}
+
+// checkConfigExists checks if config file exists, using DBSU privilege if needed
+func checkConfigExists(configPath, dbsu string) error {
+	// Try direct stat first
+	if _, err := os.Stat(configPath); err == nil {
+		return nil
+	} else if !os.IsPermission(err) {
+		// Not a permission error - file doesn't exist
+		return fmt.Errorf("config file not found: %s", configPath)
+	}
+
+	// Permission denied - try reading with DBSU to verify existence
+	_, err := readConfigFile(configPath, dbsu)
+	if err != nil {
+		return fmt.Errorf("config file not accessible: %s", configPath)
+	}
+	return nil
 }
 
 // buildPgBackRestArgs builds the argument list for pgbackrest command.

@@ -265,33 +265,45 @@ func buildTestCmd(dbsu string, flag, path string) *exec.Cmd {
 	return exec.Command("sudo", sudoArgs...)
 }
 
-// CheckPostgresRunning checks if PostgreSQL is running in the data directory
-// Returns (running bool, pid int, err error)
+// CheckPostgresRunning checks if PostgreSQL is running in the data directory.
+// Returns (running bool, pid int, err error) where:
+//   - running=false, pid=0, err=nil: definitely not running (no pid file)
+//   - running=false, pid>0, err=nil: pid file exists but process is dead (stale)
+//   - running=true, pid>0, err=nil: PostgreSQL is running
+//   - running=false, pid=0, err!=nil: cannot determine status (permission denied, etc.)
+//
+// IMPORTANT: When err != nil, callers should NOT assume PostgreSQL is stopped.
 func CheckPostgresRunning(dataDir string) (bool, int, error) {
 	pidFile := filepath.Join(dataDir, "postmaster.pid")
 	data, err := os.ReadFile(pidFile)
 	if os.IsNotExist(err) {
-		return false, 0, nil // No pid file, not running
+		return false, 0, nil // No pid file, definitely not running
+	}
+	if os.IsPermission(err) {
+		// Permission denied - we cannot determine the status
+		// Return error so caller doesn't assume PostgreSQL is stopped
+		return false, 0, fmt.Errorf("cannot read %s: permission denied (run as postgres user or root)", pidFile)
 	}
 	if err != nil {
-		return false, 0, err
+		// Other errors - also cannot determine status
+		return false, 0, fmt.Errorf("cannot read %s: %w", pidFile, err)
 	}
 
 	// First line of postmaster.pid is the PID
 	lines := strings.Split(string(data), "\n")
 	if len(lines) == 0 {
-		return false, 0, nil
+		return false, 0, nil // Empty file, treat as not running
 	}
 
 	pid, err := strconv.Atoi(strings.TrimSpace(lines[0]))
 	if err != nil {
-		return false, 0, nil // Invalid PID, assume not running
+		return false, 0, nil // Invalid PID format, treat as stale
 	}
 
 	// Check if process exists
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return false, pid, nil // Can't find process
+		return false, pid, nil // Can't find process, stale pid file
 	}
 
 	// On Unix, FindProcess always succeeds. Send signal 0 to check if process exists
@@ -313,6 +325,7 @@ func PrintHint(cmdArgs []string) {
 }
 
 // RunSystemctl runs systemctl command as root (via sudo if needed)
+// Returns ExitCodeError if the command exits with non-zero status.
 func RunSystemctl(action, service string) error {
 	cmdArgs := []string{"systemctl", action, service}
 	PrintHint(cmdArgs)
@@ -330,7 +343,7 @@ func RunSystemctl(action, service string) error {
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			os.Exit(exitErr.ExitCode())
+			return &utils.ExitCodeError{Code: exitErr.ExitCode(), Err: err}
 		}
 		return fmt.Errorf("systemctl %s failed: %w", action, err)
 	}
