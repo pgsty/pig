@@ -82,7 +82,9 @@ func List(configFile, dcsURL string, insecure bool, cluster string, watch bool, 
 }
 
 // Config shows or edits cluster configuration
-func Config(configFile, dcsURL string, insecure bool, kvPairs []string) error {
+// If interactive is false (default), changes are applied without confirmation (--force)
+// If interactive is true, patronictl will prompt for confirmation
+func Config(configFile, dcsURL string, insecure bool, kvPairs []string, interactive bool) error {
 	args := buildBaseArgs(configFile, dcsURL, insecure)
 
 	if len(kvPairs) == 0 {
@@ -92,7 +94,10 @@ func Config(configFile, dcsURL string, insecure bool, kvPairs []string) error {
 	}
 
 	// Edit config with key=value pairs
-	args = append(args, "edit-config", "--force")
+	args = append(args, "edit-config")
+	if !interactive {
+		args = append(args, "--force")
+	}
 	for _, kv := range kvPairs {
 		args = append(args, "-s", kv)
 	}

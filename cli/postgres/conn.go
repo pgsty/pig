@@ -110,6 +110,12 @@ func Kill(cfg *Config, opts *KillOptions) error {
 		if !validateIdentifier(opts.Db) {
 			return fmt.Errorf("invalid database name: %s", opts.Db)
 		}
+		if !validateIdentifier(opts.State) {
+			return fmt.Errorf("invalid state: %s", opts.State)
+		}
+		if !validateIdentifier(opts.Query) {
+			return fmt.Errorf("invalid query pattern: %s (use simple alphanumeric patterns)", opts.Query)
+		}
 	}
 
 	// Choose function: pg_cancel_backend or pg_terminate_backend

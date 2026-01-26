@@ -53,9 +53,11 @@ var patroniConfigCmd = &cobra.Command{
 	Example: `
   pig pt config                           # Show current config
   pig pt config ttl=60                    # Set single value
-  pig pt config ttl=60 loop_wait=15       # Set multiple values`,
+  pig pt config ttl=60 loop_wait=15       # Set multiple values
+  pig pt config -I ttl=60                 # Interactive mode (confirm before apply)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return patroni.Config(patroniConfigFile, patroniDcsURL, patroniInsecure, args)
+		interactive, _ := cmd.Flags().GetBool("interactive")
+		return patroni.Config(patroniConfigFile, patroniDcsURL, patroniInsecure, args, interactive)
 	},
 }
 
@@ -129,6 +131,9 @@ func init() {
 	// list subcommand flags
 	patroniListCmd.Flags().BoolP("watch", "W", false, "Watch mode")
 	patroniListCmd.Flags().StringP("interval", "w", "", "Watch interval in seconds")
+
+	// config subcommand flags
+	patroniConfigCmd.Flags().BoolP("interactive", "I", false, "Interactive mode (confirm before apply)")
 
 	// log subcommand flags
 	patroniLogCmd.Flags().BoolP("follow", "f", false, "Follow log output")

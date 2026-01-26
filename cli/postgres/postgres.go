@@ -74,6 +74,7 @@ type Config struct {
 	PgData    string // Data directory
 	DbSU      string // Database superuser
 	Systemd   bool   // Use systemctl instead of pg_ctl
+	LogDir    string // Log directory (for log commands)
 }
 
 // DefaultConfig returns a Config with default values
@@ -93,6 +94,14 @@ func GetPgData(cfg *Config) string {
 		return cfg.PgData
 	}
 	return DefaultPgData
+}
+
+// GetLogDir returns log directory from config or default
+func GetLogDir(cfg *Config) string {
+	if cfg != nil && cfg.LogDir != "" {
+		return cfg.LogDir
+	}
+	return DefaultLogDir
 }
 
 // GetTimeout returns timeout: value > $PGCTLTIMEOUT > default

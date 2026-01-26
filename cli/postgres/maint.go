@@ -8,6 +8,7 @@ package postgres
 import (
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -26,6 +27,17 @@ type MaintOptions struct {
 	Schema  string // schema name
 	Table   string // table name
 	Verbose bool   // verbose output
+}
+
+// identifierRegex validates PostgreSQL identifiers
+var maintIdentifierRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_$]*$`)
+
+// validateMaintIdentifier checks if a string is a valid PostgreSQL identifier
+func validateMaintIdentifier(s string) bool {
+	if s == "" {
+		return true
+	}
+	return maintIdentifierRegex.MatchString(s)
 }
 
 // ============================================================================
@@ -96,6 +108,16 @@ type VacuumOptions struct {
 
 // Vacuum runs VACUUM on database tables
 func Vacuum(cfg *Config, dbname string, opts *VacuumOptions) error {
+	// Validate identifiers
+	if opts != nil {
+		if !validateMaintIdentifier(opts.Schema) {
+			return fmt.Errorf("invalid schema name: %s", opts.Schema)
+		}
+		if !validateMaintIdentifier(opts.Table) {
+			return fmt.Errorf("invalid table name: %s", opts.Table)
+		}
+	}
+
 	// Build VACUUM options
 	var vacOpts []string
 	if opts != nil && opts.Verbose {
@@ -157,6 +179,16 @@ END LOOP; END $$`, opts.Schema, optStr)
 
 // Analyze runs ANALYZE on database tables
 func Analyze(cfg *Config, dbname string, opts *MaintOptions) error {
+	// Validate identifiers
+	if opts != nil {
+		if !validateMaintIdentifier(opts.Schema) {
+			return fmt.Errorf("invalid schema name: %s", opts.Schema)
+		}
+		if !validateMaintIdentifier(opts.Table) {
+			return fmt.Errorf("invalid table name: %s", opts.Table)
+		}
+	}
+
 	optStr := ""
 	if opts != nil && opts.Verbose {
 		optStr = "(VERBOSE)"
@@ -214,6 +246,16 @@ type FreezeOptions struct {
 
 // Freeze runs VACUUM FREEZE on database
 func Freeze(cfg *Config, dbname string, opts *FreezeOptions) error {
+	// Validate identifiers
+	if opts != nil {
+		if !validateMaintIdentifier(opts.Schema) {
+			return fmt.Errorf("invalid schema name: %s", opts.Schema)
+		}
+		if !validateMaintIdentifier(opts.Table) {
+			return fmt.Errorf("invalid table name: %s", opts.Table)
+		}
+	}
+
 	vacOpts := []string{"FREEZE"}
 	if opts != nil && opts.Verbose {
 		vacOpts = append(vacOpts, "VERBOSE")
@@ -271,6 +313,16 @@ type RepackOptions struct {
 
 // Repack runs pg_repack on database tables
 func Repack(cfg *Config, dbname string, opts *RepackOptions) error {
+	// Validate identifiers
+	if opts != nil {
+		if !validateMaintIdentifier(opts.Schema) {
+			return fmt.Errorf("invalid schema name: %s", opts.Schema)
+		}
+		if !validateMaintIdentifier(opts.Table) {
+			return fmt.Errorf("invalid table name: %s", opts.Table)
+		}
+	}
+
 	dbsu := GetDbSU(cfg)
 
 	// Check if pg_repack exists

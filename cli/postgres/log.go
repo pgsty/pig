@@ -17,15 +17,15 @@ import (
 	"strings"
 )
 
-// getLatestLogFile finds the latest CSV log file in /pg/log/postgres
-func getLatestLogFile() (string, error) {
-	entries, err := os.ReadDir(DefaultLogDir)
+// getLatestLogFile finds the latest CSV log file in the log directory
+func getLatestLogFile(logDir string) (string, error) {
+	entries, err := os.ReadDir(logDir)
 	if err != nil {
 		// Permission denied, try sudo ls
 		if os.IsPermission(err) {
-			return getLatestLogFileWithSudo()
+			return getLatestLogFileWithSudo(logDir)
 		}
-		return "", fmt.Errorf("cannot read log directory %s: %w", DefaultLogDir, err)
+		return "", fmt.Errorf("cannot read log directory %s: %w", logDir, err)
 	}
 
 	var files []os.FileInfo
@@ -41,44 +41,44 @@ func getLatestLogFile() (string, error) {
 	}
 
 	if len(files) == 0 {
-		return "", fmt.Errorf("no CSV log files found in %s", DefaultLogDir)
+		return "", fmt.Errorf("no CSV log files found in %s", logDir)
 	}
 
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].ModTime().After(files[j].ModTime())
 	})
 
-	return filepath.Join(DefaultLogDir, files[0].Name()), nil
+	return filepath.Join(logDir, files[0].Name()), nil
 }
 
 // getLatestLogFileWithSudo uses sudo ls to find the latest CSV log file
-func getLatestLogFileWithSudo() (string, error) {
+func getLatestLogFileWithSudo(logDir string) (string, error) {
 	// ls -t sorts by modification time (newest first), filter *.csv
-	cmd := exec.Command("sudo", "ls", "-t", DefaultLogDir)
+	cmd := exec.Command("sudo", "ls", "-t", logDir)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("cannot read log directory %s with sudo: %w", DefaultLogDir, err)
+		return "", fmt.Errorf("cannot read log directory %s with sudo: %w", logDir, err)
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	for _, line := range lines {
 		if strings.HasSuffix(line, ".csv") {
-			return filepath.Join(DefaultLogDir, line), nil
+			return filepath.Join(logDir, line), nil
 		}
 	}
-	return "", fmt.Errorf("no CSV log files found in %s", DefaultLogDir)
+	return "", fmt.Errorf("no CSV log files found in %s", logDir)
 }
 
-// LogList lists all log files in /pg/log/postgres
-func LogList() error {
-	entries, err := os.ReadDir(DefaultLogDir)
+// LogList lists all log files in the log directory
+func LogList(logDir string) error {
+	entries, err := os.ReadDir(logDir)
 	if err != nil {
 		// Permission denied, try sudo ls
 		if os.IsPermission(err) {
-			return logListWithSudo()
+			return logListWithSudo(logDir)
 		}
-		return fmt.Errorf("cannot read log directory %s: %w", DefaultLogDir, err)
+		return fmt.Errorf("cannot read log directory %s: %w", logDir, err)
 	}
 
 	var files []os.FileInfo
@@ -106,8 +106,8 @@ func LogList() error {
 }
 
 // logListWithSudo uses sudo ls to list log files when permission denied
-func logListWithSudo() error {
-	cmdArgs := []string{"ls", "-lhtr", DefaultLogDir}
+func logListWithSudo(logDir string) error {
+	cmdArgs := []string{"ls", "-lhtr", logDir}
 	PrintHint(append([]string{"sudo"}, cmdArgs...))
 	cmd := exec.Command("sudo", cmdArgs...)
 	cmd.Stdout = os.Stdout
@@ -116,13 +116,13 @@ func logListWithSudo() error {
 }
 
 // LogTail tails the latest log file (follow mode)
-func LogTail(file string, lines int) error {
+func LogTail(logDir, file string, lines int) error {
 	var logFile string
 	if file != "" {
-		logFile = filepath.Join(DefaultLogDir, file)
+		logFile = filepath.Join(logDir, file)
 	} else {
 		var err error
-		logFile, err = getLatestLogFile()
+		logFile, err = getLatestLogFile(logDir)
 		if err != nil {
 			return err
 		}
@@ -138,13 +138,13 @@ func LogTail(file string, lines int) error {
 }
 
 // LogCat outputs log file content
-func LogCat(file string, lines int) error {
+func LogCat(logDir, file string, lines int) error {
 	var logFile string
 	if file != "" {
-		logFile = filepath.Join(DefaultLogDir, file)
+		logFile = filepath.Join(logDir, file)
 	} else {
 		var err error
-		logFile, err = getLatestLogFile()
+		logFile, err = getLatestLogFile(logDir)
 		if err != nil {
 			return err
 		}
@@ -160,13 +160,13 @@ func LogCat(file string, lines int) error {
 }
 
 // LogLess opens the latest log file in less
-func LogLess(file string) error {
+func LogLess(logDir, file string) error {
 	var logFile string
 	if file != "" {
-		logFile = filepath.Join(DefaultLogDir, file)
+		logFile = filepath.Join(logDir, file)
 	} else {
 		var err error
-		logFile, err = getLatestLogFile()
+		logFile, err = getLatestLogFile(logDir)
 		if err != nil {
 			return err
 		}
@@ -178,13 +178,13 @@ func LogLess(file string) error {
 }
 
 // LogGrep searches log files
-func LogGrep(pattern, file string, ignoreCase bool, context int) error {
+func LogGrep(logDir, pattern, file string, ignoreCase bool, context int) error {
 	var logFile string
 	if file != "" {
-		logFile = filepath.Join(DefaultLogDir, file)
+		logFile = filepath.Join(logDir, file)
 	} else {
 		var err error
-		logFile, err = getLatestLogFile()
+		logFile, err = getLatestLogFile(logDir)
 		if err != nil {
 			return err
 		}

@@ -295,7 +295,7 @@ var pgLogListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List log files",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return postgres.LogList()
+		return postgres.LogList(postgres.GetLogDir(pgConfig))
 	},
 }
 
@@ -307,7 +307,7 @@ var pgLogTailCmd = &cobra.Command{
 		if len(args) > 0 {
 			file = args[0]
 		}
-		return postgres.LogTail(file, pgLogNum)
+		return postgres.LogTail(postgres.GetLogDir(pgConfig), file, pgLogNum)
 	},
 }
 
@@ -319,7 +319,7 @@ var pgLogCatCmd = &cobra.Command{
 		if len(args) > 0 {
 			file = args[0]
 		}
-		return postgres.LogCat(file, pgLogNum)
+		return postgres.LogCat(postgres.GetLogDir(pgConfig), file, pgLogNum)
 	},
 }
 
@@ -331,7 +331,7 @@ var pgLogLessCmd = &cobra.Command{
 		if len(args) > 0 {
 			file = args[0]
 		}
-		return postgres.LogLess(file)
+		return postgres.LogLess(postgres.GetLogDir(pgConfig), file)
 	},
 }
 
@@ -344,7 +344,7 @@ var pgLogGrepCmd = &cobra.Command{
 		if len(args) > 1 {
 			file = args[1]
 		}
-		return postgres.LogGrep(args[0], file, pgLogGrepIgnoreCase, pgLogGrepContext)
+		return postgres.LogGrep(postgres.GetLogDir(pgConfig), args[0], file, pgLogGrepIgnoreCase, pgLogGrepContext)
 	},
 }
 
@@ -573,7 +573,8 @@ func init() {
 
 	// ========== Phase 2 Commands ==========
 
-	// Log command flags (simple: just -n for lines, grep has -i and -C)
+	// Log command flags
+	pgLogCmd.PersistentFlags().StringVar(&pgConfig.LogDir, "log-dir", "", "log directory (default: /pg/log/postgres)")
 	pgLogCmd.PersistentFlags().IntVarP(&pgLogNum, "lines", "n", 0, "number of lines")
 	pgLogGrepCmd.Flags().BoolVarP(&pgLogGrepIgnoreCase, "ignore-case", "i", false, "ignore case")
 	pgLogGrepCmd.Flags().IntVarP(&pgLogGrepContext, "context", "C", 0, "show N lines of context")
