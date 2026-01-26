@@ -1,15 +1,47 @@
 package utils
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
+
 	"pig/internal/config"
 
 	"github.com/sirupsen/logrus"
 )
 
 const DefaultDBSU = "postgres"
+
+// ExitCodeError represents an error with an associated exit code.
+// Use this when you want to propagate subprocess exit codes to callers.
+type ExitCodeError struct {
+	Code int
+	Err  error
+}
+
+func (e *ExitCodeError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("command exited with code %d: %v", e.Code, e.Err)
+	}
+	return fmt.Sprintf("command exited with code %d", e.Code)
+}
+
+func (e *ExitCodeError) Unwrap() error {
+	return e.Err
+}
+
+// ExitCode returns the exit code from an ExitCodeError, or 1 if not an ExitCodeError.
+func ExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	if exitErr, ok := err.(*ExitCodeError); ok {
+		return exitErr.Code
+	}
+	return 1
+}
 
 // GetDBSU returns the database superuser name
 // Priority: override parameter > PIG_DBSU env > default "postgres"
@@ -28,36 +60,80 @@ func IsDBSU(dbsu string) bool {
 	return config.CurrentUser == dbsu
 }
 
-// DBSUCommand executes a command as the database superuser
-// If current user is already DBSU, execute directly
-// Otherwise use sudo -inu <dbsu> -- to switch user
+// DBSUCommand executes a command as the database superuser.
+// Execution strategy based on current user:
+//   - If current user is DBSU: execute directly
+//   - If current user is root: use "su - <dbsu> -c" (no sudo needed, works in containers)
+//   - Otherwise: use "sudo -inu <dbsu> --" (requires sudo privileges)
+//
+// Returns ExitCodeError if the command exits with non-zero status.
+// Callers can use ExitCode(err) to get the exit code if needed.
 func DBSUCommand(dbsu string, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no command specified")
 	}
 
-	var cmd *exec.Cmd
-	if IsDBSU(dbsu) {
-		logrus.Debugf("executing as %s: %v", dbsu, args)
-		cmd = exec.Command(args[0], args[1:]...)
-	} else {
-		// sudo -i: simulate login shell, load user environment
-		// sudo -n: non-interactive (fail if password needed)
-		// sudo -u: specify target user
-		sudoArgs := append([]string{"-inu", dbsu, "--"}, args...)
-		logrus.Debugf("executing via sudo: sudo %v", sudoArgs)
-		cmd = exec.Command("sudo", sudoArgs...)
-	}
-
+	cmd := buildDBSUCmd(dbsu, args)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			os.Exit(exitErr.ExitCode())
+			return &ExitCodeError{Code: exitErr.ExitCode(), Err: err}
 		}
 		return fmt.Errorf("command failed: %w", err)
 	}
 	return nil
+}
+
+// DBSUCommandOutput executes a command as the database superuser and captures output.
+// Uses the same execution strategy as DBSUCommand.
+func DBSUCommandOutput(dbsu string, args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("no command specified")
+	}
+
+	cmd := buildDBSUCmd(dbsu, args)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	if err := cmd.Run(); err != nil {
+		return out.String(), fmt.Errorf("command failed: %w", err)
+	}
+	return out.String(), nil
+}
+
+// buildDBSUCmd creates an exec.Cmd for running a command as DBSU.
+func buildDBSUCmd(dbsu string, args []string) *exec.Cmd {
+	if IsDBSU(dbsu) {
+		logrus.Debugf("executing as %s: %v", dbsu, args)
+		return exec.Command(args[0], args[1:]...)
+	}
+
+	if config.CurrentUser == "root" {
+		cmdStr := ShellQuoteArgs(args)
+		logrus.Debugf("executing via su: su - %s -c %q", dbsu, cmdStr)
+		return exec.Command("su", "-", dbsu, "-c", cmdStr)
+	}
+
+	sudoArgs := append([]string{"-inu", dbsu, "--"}, args...)
+	logrus.Debugf("executing via sudo: sudo %v", sudoArgs)
+	return exec.Command("sudo", sudoArgs...)
+}
+
+// ShellQuoteArgs joins args into a shell-safe command string.
+// Each argument is properly quoted to handle spaces and special characters.
+func ShellQuoteArgs(args []string) string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		// Wrap in single quotes and escape existing single quotes
+		if strings.ContainsAny(arg, " \t\n'\"\\$`!*?[]{}()<>|&;#~") {
+			quoted[i] = "'" + strings.ReplaceAll(arg, "'", "'\"'\"'") + "'"
+		} else {
+			quoted[i] = arg
+		}
+	}
+	return strings.Join(quoted, " ")
 }

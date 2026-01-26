@@ -27,6 +27,7 @@ type InitOptions struct {
 	Encoding  string
 	Locale    string
 	Checksum  bool
+	Force     bool // Force init, remove existing data directory (DANGEROUS)
 	ExtraArgs []string
 }
 
@@ -35,10 +36,28 @@ func InitDB(cfg *Config, opts *InitOptions) error {
 	dataDir := GetPgData(cfg)
 	dbsu := GetDbSU(cfg)
 
-	// Check data directory state
-	exists, initialized := CheckDataDir(dataDir)
+	// Check data directory state as dbsu (handles permission issues for non-dbsu users)
+	exists, initialized := CheckDataDirAsDBSU(dbsu, dataDir)
 	if initialized {
-		return fmt.Errorf("data directory %s already initialized", dataDir)
+		// Data directory already initialized - this is a dangerous operation
+		if opts == nil || !opts.Force {
+			return fmt.Errorf("data directory %s already initialized, use --force to overwrite (DANGEROUS)", dataDir)
+		}
+
+		// Force mode: check if PostgreSQL is running (NEVER allow overwrite if running)
+		running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
+		if running {
+			return fmt.Errorf("PostgreSQL is running (PID %d) in %s, cannot overwrite running database", pid, dataDir)
+		}
+
+		// Safe to remove: not running, user confirmed with --force
+		logrus.Warnf("removing existing data directory: %s", dataDir)
+		rmArgs := []string{"rm", "-rf", dataDir}
+		PrintHint(rmArgs)
+		if err := utils.DBSUCommand(dbsu, rmArgs); err != nil {
+			return fmt.Errorf("failed to remove existing data directory: %w", err)
+		}
+		exists = false // directory removed, treat as non-existent
 	}
 
 	// Find PostgreSQL (handle nil cfg)
@@ -106,14 +125,8 @@ type StartOptions struct {
 	Force   bool
 }
 
-// Start starts PostgreSQL server
+// Start starts PostgreSQL server using pg_ctl
 func Start(cfg *Config, opts *StartOptions) error {
-	// Use systemctl if configured
-	if cfg != nil && cfg.Systemd {
-		logrus.Infof("starting PostgreSQL via systemctl")
-		return RunSystemctl("start", DefaultSystemdService)
-	}
-
 	dataDir := GetPgData(cfg)
 	dbsu := GetDbSU(cfg)
 
@@ -124,17 +137,14 @@ func Start(cfg *Config, opts *StartOptions) error {
 	}
 	timeout := GetTimeout(optTimeout)
 
-	// Check data directory
-	_, initialized := CheckDataDir(dataDir)
+	// Check data directory as dbsu (handles permission issues for non-dbsu users)
+	_, initialized := CheckDataDirAsDBSU(dbsu, dataDir)
 	if !initialized {
 		return fmt.Errorf("data directory %s not initialized (run 'pig pg init' first)", dataDir)
 	}
 
-	// Check if PostgreSQL is already running
-	running, pid, err := CheckPostgresRunning(dataDir)
-	if err != nil {
-		logrus.Warnf("failed to check running status: %v", err)
-	}
+	// Check if PostgreSQL is already running as dbsu
+	running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
 	if running {
 		fmt.Printf("%sWARNING: PostgreSQL is already running (PID: %d) in %s%s\n",
 			ColorYellow, pid, dataDir, ColorReset)
@@ -161,7 +171,9 @@ func Start(cfg *Config, opts *StartOptions) error {
 		// Ensure log directory exists
 		if idx := strings.LastIndex(opts.LogFile, "/"); idx > 0 {
 			logDir := opts.LogFile[:idx]
-			_ = utils.DBSUCommand(dbsu, []string{"mkdir", "-p", logDir})
+			if err := utils.DBSUCommand(dbsu, []string{"mkdir", "-p", logDir}); err != nil {
+				logrus.Warnf("failed to create log directory %s: %v", logDir, err)
+			}
 		}
 	}
 
@@ -193,14 +205,8 @@ type StopOptions struct {
 	NoWait  bool
 }
 
-// Stop stops PostgreSQL server
+// Stop stops PostgreSQL server using pg_ctl
 func Stop(cfg *Config, opts *StopOptions) error {
-	// Use systemctl if configured
-	if cfg != nil && cfg.Systemd {
-		logrus.Infof("stopping PostgreSQL via systemctl")
-		return RunSystemctl("stop", DefaultSystemdService)
-	}
-
 	dataDir := GetPgData(cfg)
 	dbsu := GetDbSU(cfg)
 
@@ -253,14 +259,8 @@ type RestartOptions struct {
 	Options string
 }
 
-// Restart restarts PostgreSQL server
+// Restart restarts PostgreSQL server using pg_ctl
 func Restart(cfg *Config, opts *RestartOptions) error {
-	// Use systemctl if configured
-	if cfg != nil && cfg.Systemd {
-		logrus.Infof("restarting PostgreSQL via systemctl")
-		return RunSystemctl("restart", DefaultSystemdService)
-	}
-
 	dataDir := GetPgData(cfg)
 	dbsu := GetDbSU(cfg)
 
@@ -306,14 +306,8 @@ func Restart(cfg *Config, opts *RestartOptions) error {
 	return utils.DBSUCommand(dbsu, cmdArgs)
 }
 
-// Reload reloads PostgreSQL configuration
+// Reload reloads PostgreSQL configuration using pg_ctl
 func Reload(cfg *Config) error {
-	// Use systemctl if configured
-	if cfg != nil && cfg.Systemd {
-		logrus.Infof("reloading PostgreSQL via systemctl")
-		return RunSystemctl("reload", DefaultSystemdService)
-	}
-
 	dataDir := GetPgData(cfg)
 	dbsu := GetDbSU(cfg)
 

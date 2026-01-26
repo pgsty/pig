@@ -6,106 +6,106 @@ import (
 	"os/exec"
 	"strings"
 
+	"pig/internal/utils"
+
 	"github.com/sirupsen/logrus"
 )
 
-// ConfigPaths contains the possible paths to patroni config file (in priority order)
-var ConfigPaths = []string{
-	"/infra/conf/patronictl.yml", // admin node conf
-	"/etc/patroni/patroni.yml",   // pgsql node conf
-}
+// DefaultConfigPath is the fixed patroni config file path
+const DefaultConfigPath = "/etc/patroni/patroni.yml"
 
-// findConfig returns the path to the first readable patroni config file
-func findConfig() string {
-	for _, path := range ConfigPaths {
-		if file, err := os.Open(path); err == nil {
-			file.Close()
-			return path
-		}
-	}
-	return ""
-}
+// DefaultDBSU is the default database superuser
+const DefaultDBSU = "postgres"
 
-// buildBaseArgs builds common patronictl arguments (-c, -d, -k)
-func buildBaseArgs(configFile, dcsURL string, insecure bool) []string {
-	var args []string
-
-	// Use provided config or auto-detect
-	config := configFile
-	if config == "" {
-		config = findConfig()
-	}
-	if config != "" {
-		args = append(args, "-c", config)
-	}
-
-	if dcsURL != "" {
-		args = append(args, "-d", dcsURL)
-	}
-	if insecure {
-		args = append(args, "-k")
-	}
-	return args
-}
-
-// runPatronictl executes patronictl with given arguments
-func runPatronictl(args []string) error {
+// runPatronictl executes patronictl with given arguments as DBSU
+func runPatronictl(dbsu string, args []string) error {
 	binPath, err := exec.LookPath("patronictl")
 	if err != nil {
 		return fmt.Errorf("patronictl not found in PATH, please install patroni first")
 	}
 
+	// Build full command: patronictl -c <config> <args...>
+	cmdArgs := []string{binPath, "-c", DefaultConfigPath}
+	cmdArgs = append(cmdArgs, args...)
+
+	utils.PrintHint(cmdArgs)
 	logrus.Debugf("patronictl %s", strings.Join(args, " "))
-	cmd := exec.Command(binPath, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return utils.DBSUCommand(dbsu, cmdArgs)
 }
 
 // List runs patronictl list with -e -t flags
-func List(configFile, dcsURL string, insecure bool, cluster string, watch bool, interval string) error {
-	args := buildBaseArgs(configFile, dcsURL, insecure)
-	args = append(args, "list", "-e", "-t")
-
+func List(dbsu string, watch bool, interval float64) error {
+	args := []string{"list", "-e", "-t"}
 	if watch {
 		args = append(args, "-W")
 	}
-	if interval != "" {
-		args = append(args, "-w", interval)
+	if interval > 0 {
+		args = append(args, "-w", fmt.Sprintf("%g", interval))
 	}
-	if cluster != "" {
-		args = append(args, cluster)
-	}
-
-	return runPatronictl(args)
+	return runPatronictl(dbsu, args)
 }
 
-// Config shows or edits cluster configuration
-// If interactive is false (default), changes are applied without confirmation (--force)
-// If interactive is true, patronictl will prompt for confirmation
-func Config(configFile, dcsURL string, insecure bool, kvPairs []string, interactive bool) error {
-	args := buildBaseArgs(configFile, dcsURL, insecure)
+// ConfigEdit opens interactive config editor
+func ConfigEdit(dbsu string) error {
+	return runPatronictl(dbsu, []string{"edit-config"})
+}
 
+// ConfigShow displays cluster configuration
+func ConfigShow(dbsu string) error {
+	return runPatronictl(dbsu, []string{"show-config"})
+}
+
+// ConfigSet sets Patroni configuration with key=value pairs (non-interactive)
+func ConfigSet(dbsu string, kvPairs []string) error {
 	if len(kvPairs) == 0 {
-		// No key=value pairs, show config
-		args = append(args, "show-config")
-		return runPatronictl(args)
+		return fmt.Errorf("no key=value pairs provided\nUsage: pig pt config set key=value ...")
 	}
-
-	// Edit config with key=value pairs
-	args = append(args, "edit-config")
-	if !interactive {
-		args = append(args, "--force")
-	}
+	args := []string{"edit-config", "--force"}
 	for _, kv := range kvPairs {
 		args = append(args, "-s", kv)
 	}
-	return runPatronictl(args)
+	return runPatronictl(dbsu, args)
+}
+
+// ConfigPG sets PostgreSQL configuration with key=value pairs (non-interactive)
+func ConfigPG(dbsu string, kvPairs []string) error {
+	if len(kvPairs) == 0 {
+		return fmt.Errorf("no key=value pairs provided\nUsage: pig pt config pg key=value ...")
+	}
+	args := []string{"edit-config", "--force"}
+	for _, kv := range kvPairs {
+		args = append(args, "-p", kv)
+	}
+	return runPatronictl(dbsu, args)
+}
+
+// Reload reloads PostgreSQL configuration via patronictl reload
+func Reload(dbsu string) error {
+	return runPatronictl(dbsu, []string{"reload"})
+}
+
+// Pause pauses automatic failover for the cluster
+func Pause(dbsu string, wait bool) error {
+	args := []string{"pause"}
+	if wait {
+		args = append(args, "--wait")
+	}
+	return runPatronictl(dbsu, args)
+}
+
+// Resume resumes automatic failover for the cluster
+func Resume(dbsu string, wait bool) error {
+	args := []string{"resume"}
+	if wait {
+		args = append(args, "--wait")
+	}
+	return runPatronictl(dbsu, args)
 }
 
 // Systemctl runs systemctl command for patroni service
 func Systemctl(action string) error {
+	cmdArgs := []string{"sudo", "systemctl", action, "patroni"}
+	utils.PrintHint(cmdArgs)
 	logrus.Debugf("systemctl %s patroni", action)
 	cmd := exec.Command("sudo", "systemctl", action, "patroni")
 	cmd.Stdin = os.Stdin
@@ -124,10 +124,126 @@ func Log(follow bool, lines string) error {
 		args = append(args, "-n", lines)
 	}
 
+	cmdArgs := append([]string{"journalctl"}, args...)
+	utils.PrintHint(cmdArgs)
 	logrus.Debugf("journalctl %s", strings.Join(args, " "))
 	cmd := exec.Command("journalctl", args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// RestartOptions holds options for patronictl restart
+type RestartOptions struct {
+	Member  string // specific member to restart (empty = all)
+	Role    string // filter by role: leader, replica, any
+	Force   bool   // skip confirmation
+	Pending bool   // only restart members with pending restart
+}
+
+// Restart restarts PostgreSQL via patronictl restart
+func Restart(dbsu string, opts *RestartOptions) error {
+	args := []string{"restart"}
+
+	if opts != nil {
+		// Add role filter if specified
+		if opts.Role != "" {
+			args = append(args, "--role", opts.Role)
+		}
+
+		// Add member name if specified (positional argument after cluster)
+		// patronictl restart <cluster> [member]
+		// Since we use -c config, cluster name is auto-detected
+		if opts.Member != "" {
+			args = append(args, opts.Member)
+		}
+
+		if opts.Force {
+			args = append(args, "--force")
+		}
+		if opts.Pending {
+			args = append(args, "--pending")
+		}
+	}
+
+	return runPatronictl(dbsu, args)
+}
+
+// ReinitOptions holds options for patronictl reinit
+type ReinitOptions struct {
+	Member string // specific member to reinit (required)
+	Force  bool   // skip confirmation
+	Wait   bool   // wait for reinit to complete
+}
+
+// Reinit reinitializes a cluster member via patronictl reinit
+func Reinit(dbsu string, opts *ReinitOptions) error {
+	if opts == nil || opts.Member == "" {
+		return fmt.Errorf("member name is required for reinit")
+	}
+
+	args := []string{"reinit"}
+	args = append(args, opts.Member)
+
+	if opts.Force {
+		args = append(args, "--force")
+	}
+	if opts.Wait {
+		args = append(args, "--wait")
+	}
+
+	return runPatronictl(dbsu, args)
+}
+
+// SwitchoverOptions holds options for patronictl switchover
+type SwitchoverOptions struct {
+	Leader    string // current leader (optional, auto-detected)
+	Candidate string // target candidate (optional)
+	Force     bool   // skip confirmation
+	Scheduled string // scheduled time (e.g., "2024-01-01T12:00:00")
+}
+
+// Switchover performs a planned switchover via patronictl switchover
+func Switchover(dbsu string, opts *SwitchoverOptions) error {
+	args := []string{"switchover"}
+
+	if opts != nil {
+		if opts.Leader != "" {
+			args = append(args, "--leader", opts.Leader)
+		}
+		if opts.Candidate != "" {
+			args = append(args, "--candidate", opts.Candidate)
+		}
+		if opts.Force {
+			args = append(args, "--force")
+		}
+		if opts.Scheduled != "" {
+			args = append(args, "--scheduled", opts.Scheduled)
+		}
+	}
+
+	return runPatronictl(dbsu, args)
+}
+
+// FailoverOptions holds options for patronictl failover
+type FailoverOptions struct {
+	Candidate string // target candidate (optional)
+	Force     bool   // skip confirmation
+}
+
+// Failover performs an unplanned failover via patronictl failover
+func Failover(dbsu string, opts *FailoverOptions) error {
+	args := []string{"failover"}
+
+	if opts != nil {
+		if opts.Candidate != "" {
+			args = append(args, "--candidate", opts.Candidate)
+		}
+		if opts.Force {
+			args = append(args, "--force")
+		}
+	}
+
+	return runPatronictl(dbsu, args)
 }

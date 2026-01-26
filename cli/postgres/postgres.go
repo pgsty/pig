@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -64,6 +65,18 @@ const (
 	ColorBold   = "\033[1m"
 )
 
+// IdentifierRegex validates PostgreSQL identifiers (usernames, database names, schema names, table names)
+// Allows alphanumeric, underscore, and dollar sign (PostgreSQL naming rules)
+var IdentifierRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_$]*$`)
+
+// ValidateIdentifier checks if a string is a valid PostgreSQL identifier
+func ValidateIdentifier(s string) bool {
+	if s == "" {
+		return true // empty is allowed (means no filter)
+	}
+	return IdentifierRegex.MatchString(s)
+}
+
 // ============================================================================
 // Configuration (set by cmd layer via flags)
 // ============================================================================
@@ -73,7 +86,6 @@ type Config struct {
 	PgVersion int    // PostgreSQL major version
 	PgData    string // Data directory
 	DbSU      string // Database superuser
-	Systemd   bool   // Use systemctl instead of pg_ctl
 	LogDir    string // Log directory (for log commands)
 }
 
@@ -132,8 +144,9 @@ func GetPgInstall(cfg *Config) (*ext.PostgresInstall, error) {
 		ver = cfg.PgVersion
 	}
 	dataDir := GetPgData(cfg)
+	dbsu := GetDbSU(cfg)
 	if ver == 0 && dataDir != "" {
-		if v, err := ReadPgVersion(dataDir); err == nil {
+		if v, err := ReadPgVersionAsDBSU(dbsu, dataDir); err == nil {
 			ver = v
 			logrus.Debugf("inferred PostgreSQL %d from %s", ver, dataDir)
 		}
@@ -141,7 +154,19 @@ func GetPgInstall(cfg *Config) (*ext.PostgresInstall, error) {
 	return ext.FindPostgres(ver)
 }
 
+// ReadPgVersionAsDBSU reads major version from PG_VERSION file as database superuser
+func ReadPgVersionAsDBSU(dbsu, dataDir string) (int, error) {
+	pgVersionFile := filepath.Join(dataDir, "PG_VERSION")
+	output, err := utils.DBSUCommandOutput(dbsu, []string{"cat", pgVersionFile})
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(output))
+}
+
 // ReadPgVersion reads major version from PG_VERSION file
+// Note: This runs as current user, may fail due to permission issues.
+// Use ReadPgVersionAsDBSU for reliable reads when running as non-dbsu user.
 func ReadPgVersion(dataDir string) (int, error) {
 	data, err := os.ReadFile(filepath.Join(dataDir, "PG_VERSION"))
 	if err != nil {
@@ -151,6 +176,8 @@ func ReadPgVersion(dataDir string) (int, error) {
 }
 
 // CheckDataDir checks if data directory exists and is initialized
+// Note: This runs as current user, may fail due to permission issues.
+// Use CheckDataDirAsDBSU for reliable checks when running as non-dbsu user.
 func CheckDataDir(dataDir string) (exists, initialized bool) {
 	info, err := os.Stat(dataDir)
 	if os.IsNotExist(err) {
@@ -161,6 +188,81 @@ func CheckDataDir(dataDir string) (exists, initialized bool) {
 	}
 	_, err = os.Stat(filepath.Join(dataDir, "PG_VERSION"))
 	return true, err == nil
+}
+
+// CheckDataDirAsDBSU checks data directory state as the database superuser.
+// This is necessary when the current user may not have permission to read the data directory.
+// Returns (exists, initialized bool) where:
+//   - exists: true if directory exists
+//   - initialized: true if PG_VERSION file exists (indicating initialized database)
+func CheckDataDirAsDBSU(dbsu, dataDir string) (exists, initialized bool) {
+	// Use test command to check directory and file existence as dbsu
+	// test -d checks if directory exists
+	cmd := buildTestCmd(dbsu, "-d", dataDir)
+	if err := cmd.Run(); err != nil {
+		return false, false // directory doesn't exist
+	}
+
+	// test -f checks if PG_VERSION file exists
+	cmd = buildTestCmd(dbsu, "-f", filepath.Join(dataDir, "PG_VERSION"))
+	if err := cmd.Run(); err != nil {
+		return true, false // directory exists but not initialized
+	}
+
+	return true, true
+}
+
+// CheckPostgresRunningAsDBSU checks if PostgreSQL is running as the database superuser.
+// Returns (running bool, pid int) where:
+//   - running: true if postmaster.pid exists and process is alive
+//   - pid: the PID from postmaster.pid (0 if not running or can't determine)
+func CheckPostgresRunningAsDBSU(dbsu, dataDir string) (bool, int) {
+	pidFile := filepath.Join(dataDir, "postmaster.pid")
+
+	// Check if postmaster.pid exists
+	cmd := buildTestCmd(dbsu, "-f", pidFile)
+	if err := cmd.Run(); err != nil {
+		return false, 0 // no pid file
+	}
+
+	// Read the pid file content as dbsu
+	output, err := utils.DBSUCommandOutput(dbsu, []string{"head", "-1", pidFile})
+	if err != nil {
+		return false, 0
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(output))
+	if err != nil {
+		return false, 0
+	}
+
+	// Check if process exists (signal 0 test)
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false, pid
+	}
+	if err := process.Signal(syscall.Signal(0)); err != nil {
+		return false, pid // stale pid file
+	}
+
+	return true, pid
+}
+
+// buildTestCmd creates a command to run 'test' as dbsu
+func buildTestCmd(dbsu string, flag, path string) *exec.Cmd {
+	args := []string{"test", flag, path}
+
+	if utils.IsDBSU(dbsu) {
+		return exec.Command(args[0], args[1:]...)
+	}
+
+	if os.Getenv("USER") == "root" || os.Geteuid() == 0 {
+		cmdStr := strings.Join(args, " ")
+		return exec.Command("su", "-", dbsu, "-c", cmdStr)
+	}
+
+	sudoArgs := append([]string{"-inu", dbsu, "--"}, args...)
+	return exec.Command("sudo", sudoArgs...)
 }
 
 // CheckPostgresRunning checks if PostgreSQL is running in the data directory
@@ -207,7 +309,7 @@ func CheckPostgresRunning(dataDir string) (bool, int, error) {
 
 // PrintHint prints command hint in blue color
 func PrintHint(cmdArgs []string) {
-	fmt.Printf("%sHINT: %s%s\n", ColorBlue, strings.Join(cmdArgs, " "), ColorReset)
+	fmt.Printf("%s$ %s%s\n", ColorBlue, strings.Join(cmdArgs, " "), ColorReset)
 }
 
 // RunSystemctl runs systemctl command as root (via sudo if needed)

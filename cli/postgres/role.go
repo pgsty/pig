@@ -10,10 +10,8 @@ Uses multiple fallback strategies:
 package postgres
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -86,7 +84,7 @@ func DetectRole(cfg *Config, opts *RoleOptions) (*RoleResult, error) {
 	if verbose {
 		fmt.Printf("%s[3] Checking data directory files...%s\n", ColorCyan, ColorReset)
 	}
-	fileResult := roleFromDataDir(dataDir, verbose)
+	fileResult := roleFromDataDir(dbsu, dataDir, verbose)
 	if verbose {
 		fmt.Printf("    File check: alive=%v, role=%s\n", fileResult.Alive, fileResult.Role)
 	}
@@ -257,26 +255,35 @@ func roleFromSQL(cfg *Config, dbsu string, verbose bool) *RoleResult {
 }
 
 // roleFromDataDir checks data directory files to determine role
-func roleFromDataDir(dataDir string, verbose bool) *RoleResult {
+func roleFromDataDir(dbsu, dataDir string, verbose bool) *RoleResult {
 	result := &RoleResult{
 		Role:   RoleUnknown,
 		Alive:  false,
 		Source: "pgdata",
 	}
 
-	// Check if data directory exists
-	entries, err := os.ReadDir(dataDir)
-	if err != nil {
+	// Check if data directory exists and is initialized as dbsu
+	exists, initialized := CheckDataDirAsDBSU(dbsu, dataDir)
+	if !exists || !initialized {
 		if verbose {
-			fmt.Printf("    cannot read data directory %s: %v\n", dataDir, err)
+			fmt.Printf("    data directory %s not found or not initialized\n", dataDir)
 		}
 		return result
 	}
 
-	// Not a valid PG data directory if too few files
-	if len(entries) < 10 {
+	// List directory contents as dbsu
+	output, err := utils.DBSUCommandOutput(dbsu, []string{"ls", "-1", dataDir})
+	if err != nil {
 		if verbose {
-			fmt.Printf("    data directory has only %d files, likely not initialized\n", len(entries))
+			fmt.Printf("    cannot list data directory %s: %v\n", dataDir, err)
+		}
+		return result
+	}
+
+	files := strings.Split(strings.TrimSpace(output), "\n")
+	if len(files) < 10 {
+		if verbose {
+			fmt.Printf("    data directory has only %d files, likely not initialized\n", len(files))
 		}
 		return result
 	}
@@ -284,8 +291,11 @@ func roleFromDataDir(dataDir string, verbose bool) *RoleResult {
 	// Default to primary if it's a valid data directory
 	result.Role = RolePrimary
 
-	for _, entry := range entries {
-		name := entry.Name()
+	for _, name := range files {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
 
 		// Check for postmaster.pid (indicates potentially running)
 		if name == "postmaster.pid" {
@@ -304,7 +314,7 @@ func roleFromDataDir(dataDir string, verbose bool) *RoleResult {
 		// PostgreSQL < 12 uses recovery.conf
 		if name == "recovery.conf" {
 			// Check if it contains primary_conninfo or restore_command
-			if checkRecoveryConf(filepath.Join(dataDir, name), verbose) {
+			if checkRecoveryConfAsDBSU(dbsu, filepath.Join(dataDir, name), verbose) {
 				result.Role = RoleReplica
 				return result
 			}
@@ -313,8 +323,8 @@ func roleFromDataDir(dataDir string, verbose bool) *RoleResult {
 
 	// Also check postgresql.auto.conf for primary_conninfo (PG12+)
 	autoConfPath := filepath.Join(dataDir, "postgresql.auto.conf")
-	if _, err := os.Stat(autoConfPath); err == nil {
-		if checkAutoConfForReplication(autoConfPath, verbose) {
+	if fileExistsAsDBSU(dbsu, autoConfPath) {
+		if checkAutoConfForReplicationAsDBSU(dbsu, autoConfPath, verbose) {
 			// Has replication config, but need standby.signal to be replica
 			// If we didn't find standby.signal, this is a primary with replication slot
 			if verbose {
@@ -326,17 +336,21 @@ func roleFromDataDir(dataDir string, verbose bool) *RoleResult {
 	return result
 }
 
-// checkRecoveryConf checks if recovery.conf indicates replica mode
-func checkRecoveryConf(path string, verbose bool) bool {
-	file, err := os.Open(path)
+// fileExistsAsDBSU checks if a file exists as the database superuser
+func fileExistsAsDBSU(dbsu, path string) bool {
+	_, err := utils.DBSUCommandOutput(dbsu, []string{"test", "-f", path})
+	return err == nil
+}
+
+// checkRecoveryConfAsDBSU checks if recovery.conf indicates replica mode (as dbsu)
+func checkRecoveryConfAsDBSU(dbsu, path string, verbose bool) bool {
+	output, err := utils.DBSUCommandOutput(dbsu, []string{"cat", path})
 	if err != nil {
 		return false
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
 		// Skip comments
 		if strings.HasPrefix(line, "#") {
 			continue
@@ -354,17 +368,15 @@ func checkRecoveryConf(path string, verbose bool) bool {
 	return false
 }
 
-// checkAutoConfForReplication checks if postgresql.auto.conf has replication settings
-func checkAutoConfForReplication(path string, verbose bool) bool {
-	file, err := os.Open(path)
+// checkAutoConfForReplicationAsDBSU checks if postgresql.auto.conf has replication settings (as dbsu)
+func checkAutoConfForReplicationAsDBSU(dbsu, path string, verbose bool) bool {
+	output, err := utils.DBSUCommandOutput(dbsu, []string{"cat", path})
 	if err != nil {
 		return false
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#") {
 			continue
 		}

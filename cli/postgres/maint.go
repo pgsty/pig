@@ -8,7 +8,6 @@ package postgres
 import (
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -27,17 +26,6 @@ type MaintOptions struct {
 	Schema  string // schema name
 	Table   string // table name
 	Verbose bool   // verbose output
-}
-
-// identifierRegex validates PostgreSQL identifiers
-var maintIdentifierRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_$]*$`)
-
-// validateMaintIdentifier checks if a string is a valid PostgreSQL identifier
-func validateMaintIdentifier(s string) bool {
-	if s == "" {
-		return true
-	}
-	return maintIdentifierRegex.MatchString(s)
 }
 
 // ============================================================================
@@ -73,27 +61,83 @@ func GetAllDatabases(cfg *Config) ([]string, error) {
 	cmdArgs := []string{pg.Psql(), "-d", "postgres", "-t", "-A", "-c",
 		"SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname"}
 
-	// Use proper DBSU handling (check if current user is already dbsu)
-	var cmd *exec.Cmd
-	if utils.IsDBSU(dbsu) {
-		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	} else {
-		sudoArgs := append([]string{"-inu", dbsu, "--"}, cmdArgs...)
-		cmd = exec.Command("sudo", sudoArgs...)
-	}
-
-	output, err := cmd.Output()
+	// Use DBSUCommandOutput for proper handling of all user types (dbsu, root, sudo user)
+	output, err := utils.DBSUCommandOutput(dbsu, cmdArgs)
 	if err != nil {
 		return nil, err
 	}
 
 	var dbs []string
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		if line != "" {
 			dbs = append(dbs, line)
 		}
 	}
 	return dbs, nil
+}
+
+// ============================================================================
+// Common Maintenance Executor
+// ============================================================================
+
+// maintTask represents a maintenance task configuration
+type maintTask struct {
+	command   string // SQL command name (VACUUM, ANALYZE)
+	options   string // SQL options string (e.g., "(VERBOSE, FREEZE)")
+	taskName  string // Display name for logging
+	schema    string // Target schema (optional)
+	table     string // Target table (optional)
+}
+
+// runMaintTask executes a maintenance task on a single database
+func runMaintTask(cfg *Config, dbname string, task *maintTask) error {
+	var sql string
+	if task.table != "" {
+		// Specific table
+		table := task.table
+		if task.schema != "" {
+			table = task.schema + "." + task.table
+		}
+		sql = fmt.Sprintf("%s %s %s", task.command, task.options, table)
+	} else if task.schema != "" {
+		// All tables in schema (need to iterate via DO block)
+		sql = fmt.Sprintf(`DO $$ DECLARE r RECORD; BEGIN
+FOR r IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname = '%s'
+LOOP EXECUTE '%s %s ' || quote_ident(r.schemaname) || '.' || quote_ident(r.tablename);
+END LOOP; END $$`, task.schema, task.command, task.options)
+	} else {
+		// Entire database
+		sql = fmt.Sprintf("%s %s", task.command, task.options)
+	}
+
+	return RunPsqlMaintenance(cfg, dbname, sql)
+}
+
+// runMaintAllDatabases executes a maintenance task on all databases
+func runMaintAllDatabases(cfg *Config, task *maintTask) error {
+	dbs, err := GetAllDatabases(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to get databases: %w", err)
+	}
+	for _, db := range dbs {
+		fmt.Printf("\n%s=== %s database: %s ===%s\n", ColorCyan, task.taskName, db, ColorReset)
+		sql := fmt.Sprintf("%s %s", task.command, task.options)
+		if err := RunPsqlMaintenance(cfg, db, sql); err != nil {
+			logrus.Warnf("%s %s failed: %v", strings.ToLower(task.taskName), db, err)
+		}
+	}
+	return nil
+}
+
+// validateMaintOptions validates common maintenance options
+func validateMaintOptions(schema, table string) error {
+	if !ValidateIdentifier(schema) {
+		return fmt.Errorf("invalid schema name: %s", schema)
+	}
+	if !ValidateIdentifier(table) {
+		return fmt.Errorf("invalid table name: %s", table)
+	}
+	return nil
 }
 
 // ============================================================================
@@ -108,22 +152,25 @@ type VacuumOptions struct {
 
 // Vacuum runs VACUUM on database tables
 func Vacuum(cfg *Config, dbname string, opts *VacuumOptions) error {
-	// Validate identifiers
+	// Get effective options
+	var schema, table string
+	var all, verbose, full bool
 	if opts != nil {
-		if !validateMaintIdentifier(opts.Schema) {
-			return fmt.Errorf("invalid schema name: %s", opts.Schema)
-		}
-		if !validateMaintIdentifier(opts.Table) {
-			return fmt.Errorf("invalid table name: %s", opts.Table)
-		}
+		schema, table = opts.Schema, opts.Table
+		all, verbose, full = opts.All, opts.Verbose, opts.Full
+	}
+
+	// Validate identifiers
+	if err := validateMaintOptions(schema, table); err != nil {
+		return err
 	}
 
 	// Build VACUUM options
 	var vacOpts []string
-	if opts != nil && opts.Verbose {
+	if verbose {
 		vacOpts = append(vacOpts, "VERBOSE")
 	}
-	if opts != nil && opts.Full {
+	if full {
 		vacOpts = append(vacOpts, "FULL")
 	}
 	optStr := ""
@@ -131,46 +178,22 @@ func Vacuum(cfg *Config, dbname string, opts *VacuumOptions) error {
 		optStr = "(" + strings.Join(vacOpts, ", ") + ")"
 	}
 
-	// Determine target
-	if opts != nil && opts.All {
-		// Vacuum all databases
-		dbs, err := GetAllDatabases(cfg)
-		if err != nil {
-			return fmt.Errorf("failed to get databases: %w", err)
-		}
-		for _, db := range dbs {
-			fmt.Printf("\n%s=== Vacuuming database: %s ===%s\n", ColorCyan, db, ColorReset)
-			sql := fmt.Sprintf("VACUUM %s", optStr)
-			if err := RunPsqlMaintenance(cfg, db, sql); err != nil {
-				logrus.Warnf("vacuum %s failed: %v", db, err)
-			}
-		}
-		return nil
+	task := &maintTask{
+		command:  "VACUUM",
+		options:  optStr,
+		taskName: "Vacuuming",
+		schema:   schema,
+		table:    table,
+	}
+
+	if all {
+		return runMaintAllDatabases(cfg, task)
 	}
 
 	if dbname == "" {
 		dbname = "postgres"
 	}
-
-	var sql string
-	if opts != nil && opts.Table != "" {
-		// Vacuum specific table
-		table := opts.Table
-		if opts.Schema != "" {
-			table = opts.Schema + "." + opts.Table
-		}
-		sql = fmt.Sprintf("VACUUM %s %s", optStr, table)
-	} else if opts != nil && opts.Schema != "" {
-		// Vacuum all tables in schema (need to iterate)
-		sql = fmt.Sprintf(`DO $$ DECLARE r RECORD; BEGIN
-FOR r IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname = '%s'
-LOOP EXECUTE 'VACUUM %s ' || quote_ident(r.schemaname) || '.' || quote_ident(r.tablename);
-END LOOP; END $$`, opts.Schema, optStr)
-	} else {
-		sql = fmt.Sprintf("VACUUM %s", optStr)
-	}
-
-	return RunPsqlMaintenance(cfg, dbname, sql)
+	return runMaintTask(cfg, dbname, task)
 }
 
 // ============================================================================
@@ -179,57 +202,40 @@ END LOOP; END $$`, opts.Schema, optStr)
 
 // Analyze runs ANALYZE on database tables
 func Analyze(cfg *Config, dbname string, opts *MaintOptions) error {
-	// Validate identifiers
+	// Get effective options
+	var schema, table string
+	var all, verbose bool
 	if opts != nil {
-		if !validateMaintIdentifier(opts.Schema) {
-			return fmt.Errorf("invalid schema name: %s", opts.Schema)
-		}
-		if !validateMaintIdentifier(opts.Table) {
-			return fmt.Errorf("invalid table name: %s", opts.Table)
-		}
+		schema, table = opts.Schema, opts.Table
+		all, verbose = opts.All, opts.Verbose
+	}
+
+	// Validate identifiers
+	if err := validateMaintOptions(schema, table); err != nil {
+		return err
 	}
 
 	optStr := ""
-	if opts != nil && opts.Verbose {
+	if verbose {
 		optStr = "(VERBOSE)"
 	}
 
-	if opts != nil && opts.All {
-		dbs, err := GetAllDatabases(cfg)
-		if err != nil {
-			return fmt.Errorf("failed to get databases: %w", err)
-		}
-		for _, db := range dbs {
-			fmt.Printf("\n%s=== Analyzing database: %s ===%s\n", ColorCyan, db, ColorReset)
-			sql := fmt.Sprintf("ANALYZE %s", optStr)
-			if err := RunPsqlMaintenance(cfg, db, sql); err != nil {
-				logrus.Warnf("analyze %s failed: %v", db, err)
-			}
-		}
-		return nil
+	task := &maintTask{
+		command:  "ANALYZE",
+		options:  optStr,
+		taskName: "Analyzing",
+		schema:   schema,
+		table:    table,
+	}
+
+	if all {
+		return runMaintAllDatabases(cfg, task)
 	}
 
 	if dbname == "" {
 		dbname = "postgres"
 	}
-
-	var sql string
-	if opts != nil && opts.Table != "" {
-		table := opts.Table
-		if opts.Schema != "" {
-			table = opts.Schema + "." + opts.Table
-		}
-		sql = fmt.Sprintf("ANALYZE %s %s", optStr, table)
-	} else if opts != nil && opts.Schema != "" {
-		sql = fmt.Sprintf(`DO $$ DECLARE r RECORD; BEGIN
-FOR r IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname = '%s'
-LOOP EXECUTE 'ANALYZE %s ' || quote_ident(r.schemaname) || '.' || quote_ident(r.tablename);
-END LOOP; END $$`, opts.Schema, optStr)
-	} else {
-		sql = fmt.Sprintf("ANALYZE %s", optStr)
-	}
-
-	return RunPsqlMaintenance(cfg, dbname, sql)
+	return runMaintTask(cfg, dbname, task)
 }
 
 // ============================================================================
@@ -246,58 +252,42 @@ type FreezeOptions struct {
 
 // Freeze runs VACUUM FREEZE on database
 func Freeze(cfg *Config, dbname string, opts *FreezeOptions) error {
-	// Validate identifiers
+	// Get effective options
+	var schema, table string
+	var all, verbose bool
 	if opts != nil {
-		if !validateMaintIdentifier(opts.Schema) {
-			return fmt.Errorf("invalid schema name: %s", opts.Schema)
-		}
-		if !validateMaintIdentifier(opts.Table) {
-			return fmt.Errorf("invalid table name: %s", opts.Table)
-		}
+		schema, table = opts.Schema, opts.Table
+		all, verbose = opts.All, opts.Verbose
 	}
 
+	// Validate identifiers
+	if err := validateMaintOptions(schema, table); err != nil {
+		return err
+	}
+
+	// Build VACUUM FREEZE options
 	vacOpts := []string{"FREEZE"}
-	if opts != nil && opts.Verbose {
+	if verbose {
 		vacOpts = append(vacOpts, "VERBOSE")
 	}
 	optStr := "(" + strings.Join(vacOpts, ", ") + ")"
 
-	if opts != nil && opts.All {
-		dbs, err := GetAllDatabases(cfg)
-		if err != nil {
-			return fmt.Errorf("failed to get databases: %w", err)
-		}
-		for _, db := range dbs {
-			fmt.Printf("\n%s=== Freezing database: %s ===%s\n", ColorCyan, db, ColorReset)
-			sql := fmt.Sprintf("VACUUM %s", optStr)
-			if err := RunPsqlMaintenance(cfg, db, sql); err != nil {
-				logrus.Warnf("freeze %s failed: %v", db, err)
-			}
-		}
-		return nil
+	task := &maintTask{
+		command:  "VACUUM",
+		options:  optStr,
+		taskName: "Freezing",
+		schema:   schema,
+		table:    table,
+	}
+
+	if all {
+		return runMaintAllDatabases(cfg, task)
 	}
 
 	if dbname == "" {
 		dbname = "postgres"
 	}
-
-	var sql string
-	if opts != nil && opts.Table != "" {
-		table := opts.Table
-		if opts.Schema != "" {
-			table = opts.Schema + "." + opts.Table
-		}
-		sql = fmt.Sprintf("VACUUM %s %s", optStr, table)
-	} else if opts != nil && opts.Schema != "" {
-		sql = fmt.Sprintf(`DO $$ DECLARE r RECORD; BEGIN
-FOR r IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname = '%s'
-LOOP EXECUTE 'VACUUM %s ' || quote_ident(r.schemaname) || '.' || quote_ident(r.tablename);
-END LOOP; END $$`, opts.Schema, optStr)
-	} else {
-		sql = fmt.Sprintf("VACUUM %s", optStr)
-	}
-
-	return RunPsqlMaintenance(cfg, dbname, sql)
+	return runMaintTask(cfg, dbname, task)
 }
 
 // ============================================================================
@@ -313,14 +303,21 @@ type RepackOptions struct {
 
 // Repack runs pg_repack on database tables
 func Repack(cfg *Config, dbname string, opts *RepackOptions) error {
-	// Validate identifiers
+	// Get effective options
+	var schema, table string
+	var all bool
+	var jobs int
+	var dryRun bool
 	if opts != nil {
-		if !validateMaintIdentifier(opts.Schema) {
-			return fmt.Errorf("invalid schema name: %s", opts.Schema)
-		}
-		if !validateMaintIdentifier(opts.Table) {
-			return fmt.Errorf("invalid table name: %s", opts.Table)
-		}
+		schema, table = opts.Schema, opts.Table
+		all = opts.All
+		jobs = opts.Jobs
+		dryRun = opts.DryRun
+	}
+
+	// Validate identifiers
+	if err := validateMaintOptions(schema, table); err != nil {
+		return err
 	}
 
 	dbsu := GetDbSU(cfg)
@@ -333,14 +330,14 @@ func Repack(cfg *Config, dbname string, opts *RepackOptions) error {
 	// Build pg_repack command
 	cmdArgs := []string{"pg_repack"}
 
-	if opts != nil && opts.DryRun {
+	if dryRun {
 		cmdArgs = append(cmdArgs, "-N")
 	}
-	if opts != nil && opts.Jobs > 1 {
-		cmdArgs = append(cmdArgs, "-j", strconv.Itoa(opts.Jobs))
+	if jobs > 1 {
+		cmdArgs = append(cmdArgs, "-j", strconv.Itoa(jobs))
 	}
 
-	if opts != nil && opts.All {
+	if all {
 		cmdArgs = append(cmdArgs, "-a")
 	} else {
 		if dbname == "" {
@@ -348,14 +345,14 @@ func Repack(cfg *Config, dbname string, opts *RepackOptions) error {
 		}
 		cmdArgs = append(cmdArgs, "-d", dbname)
 
-		if opts != nil && opts.Table != "" {
-			table := opts.Table
-			if opts.Schema != "" {
-				table = opts.Schema + "." + opts.Table
+		if table != "" {
+			t := table
+			if schema != "" {
+				t = schema + "." + table
 			}
-			cmdArgs = append(cmdArgs, "-t", table)
-		} else if opts != nil && opts.Schema != "" {
-			cmdArgs = append(cmdArgs, "-c", opts.Schema)
+			cmdArgs = append(cmdArgs, "-t", t)
+		} else if schema != "" {
+			cmdArgs = append(cmdArgs, "-c", schema)
 		}
 	}
 

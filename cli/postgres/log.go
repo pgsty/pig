@@ -51,14 +51,19 @@ func getLatestLogFile(logDir string) (string, error) {
 	return filepath.Join(logDir, files[0].Name()), nil
 }
 
-// getLatestLogFileWithSudo uses sudo ls to find the latest CSV log file
+// getLatestLogFileWithSudo uses sudo/direct ls to find the latest CSV log file
 func getLatestLogFileWithSudo(logDir string) (string, error) {
 	// ls -t sorts by modification time (newest first), filter *.csv
-	cmd := exec.Command("sudo", "ls", "-t", logDir)
+	var cmd *exec.Cmd
+	if os.Geteuid() == 0 {
+		cmd = exec.Command("ls", "-t", logDir)
+	} else {
+		cmd = exec.Command("sudo", "ls", "-t", logDir)
+	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("cannot read log directory %s with sudo: %w", logDir, err)
+		return "", fmt.Errorf("cannot read log directory %s: %w", logDir, err)
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -105,11 +110,17 @@ func LogList(logDir string) error {
 	return nil
 }
 
-// logListWithSudo uses sudo ls to list log files when permission denied
+// logListWithSudo uses sudo/direct ls to list log files when permission denied
 func logListWithSudo(logDir string) error {
 	cmdArgs := []string{"ls", "-lhtr", logDir}
-	PrintHint(append([]string{"sudo"}, cmdArgs...))
-	cmd := exec.Command("sudo", cmdArgs...)
+	var cmd *exec.Cmd
+	if os.Geteuid() == 0 {
+		PrintHint(cmdArgs)
+		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
+	} else {
+		PrintHint(append([]string{"sudo"}, cmdArgs...))
+		cmd = exec.Command("sudo", cmdArgs...)
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

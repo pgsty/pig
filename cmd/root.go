@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"pig/internal/config"
+	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -95,7 +96,8 @@ func initLogger(level string, path string) error {
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		logrus.WithError(err).Error("command execution failed")
-		os.Exit(1)
+		// Preserve subprocess exit codes using ExitCode helper
+		os.Exit(utils.ExitCode(err))
 	}
 }
 

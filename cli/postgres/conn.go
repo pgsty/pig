@@ -14,16 +14,22 @@ import (
 	"pig/internal/utils"
 )
 
-// identifierRegex validates PostgreSQL identifiers (usernames, database names)
-// Allows alphanumeric, underscore, and dollar sign (PostgreSQL naming rules)
-var identifierRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_$]*$`)
+// validStateValues contains valid PostgreSQL connection states
+var validStateValues = map[string]bool{
+	"active":                 true,
+	"idle":                   true,
+	"idle in transaction":    true,
+	"idle in transaction (aborted)": true,
+	"fastpath function call": true,
+	"disabled":               true,
+}
 
-// validateIdentifier checks if a string is a valid PostgreSQL identifier
-func validateIdentifier(s string) bool {
-	if s == "" {
-		return true // empty is allowed (means no filter)
-	}
-	return identifierRegex.MatchString(s)
+// sqlLikePatternRegex validates LIKE pattern (allows alphanumeric, spaces, wildcards)
+var sqlLikePatternRegex = regexp.MustCompile(`^[a-zA-Z0-9_\s%*]+$`)
+
+// escapeSQLString escapes single quotes in a string for SQL
+func escapeSQLString(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
 }
 
 // ============================================================================
@@ -47,10 +53,10 @@ func Ps(cfg *Config, opts *PsOptions) error {
 
 	// Validate identifiers to prevent SQL injection
 	if opts != nil {
-		if !validateIdentifier(opts.User) {
+		if !ValidateIdentifier(opts.User) {
 			return fmt.Errorf("invalid username: %s", opts.User)
 		}
-		if !validateIdentifier(opts.Database) {
+		if !ValidateIdentifier(opts.Database) {
 			return fmt.Errorf("invalid database name: %s", opts.Database)
 		}
 	}
@@ -102,19 +108,21 @@ func Kill(cfg *Config, opts *KillOptions) error {
 		return fmt.Errorf("PostgreSQL not found: %w", err)
 	}
 
-	// Validate identifiers to prevent SQL injection
+	// Validate inputs to prevent SQL injection
 	if opts != nil {
-		if !validateIdentifier(opts.User) {
+		if !ValidateIdentifier(opts.User) {
 			return fmt.Errorf("invalid username: %s", opts.User)
 		}
-		if !validateIdentifier(opts.Db) {
+		if !ValidateIdentifier(opts.Db) {
 			return fmt.Errorf("invalid database name: %s", opts.Db)
 		}
-		if !validateIdentifier(opts.State) {
-			return fmt.Errorf("invalid state: %s", opts.State)
+		// State can contain spaces (e.g., "idle in transaction"), validate against known values
+		if opts.State != "" && !validStateValues[strings.ToLower(opts.State)] {
+			return fmt.Errorf("invalid state: %s (valid: active, idle, idle in transaction)", opts.State)
 		}
-		if !validateIdentifier(opts.Query) {
-			return fmt.Errorf("invalid query pattern: %s (use simple alphanumeric patterns)", opts.Query)
+		// Query pattern: allow alphanumeric, spaces, and wildcards; escape SQL special chars
+		if opts.Query != "" && !sqlLikePatternRegex.MatchString(opts.Query) {
+			return fmt.Errorf("invalid query pattern: %s (use alphanumeric characters, spaces, and wildcards)", opts.Query)
 		}
 	}
 
@@ -142,10 +150,12 @@ func Kill(cfg *Config, opts *KillOptions) error {
 				conditions = append(conditions, fmt.Sprintf("datname = '%s'", opts.Db))
 			}
 			if opts != nil && opts.State != "" {
-				conditions = append(conditions, fmt.Sprintf("state = '%s'", opts.State))
+				conditions = append(conditions, fmt.Sprintf("state = '%s'", escapeSQLString(opts.State)))
 			}
 			if opts != nil && opts.Query != "" {
-				conditions = append(conditions, fmt.Sprintf("query ILIKE '%%%s%%'", opts.Query))
+				// Escape single quotes and use ILIKE for case-insensitive matching
+				escapedQuery := escapeSQLString(opts.Query)
+				conditions = append(conditions, fmt.Sprintf("query ILIKE '%%%s%%'", escapedQuery))
 			}
 
 			whereClause := strings.Join(conditions, " AND ")
@@ -202,7 +212,7 @@ func Psql(cfg *Config, dbname string, opts *PsqlOptions) error {
 	}
 
 	// Validate database name
-	if !validateIdentifier(dbname) {
+	if !ValidateIdentifier(dbname) {
 		return fmt.Errorf("invalid database name: %s", dbname)
 	}
 

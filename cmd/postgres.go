@@ -26,6 +26,7 @@ var (
 	pgInitEncoding string
 	pgInitLocale   string
 	pgInitChecksum bool
+	pgInitForce    bool
 
 	// start flags
 	pgStartLog     string
@@ -98,7 +99,7 @@ var pgCmd = &cobra.Command{
 	GroupID: "pigsty",
 	Long: `Manage local PostgreSQL server and databases.
 
-Server Control (pg_ctl wrapper):
+Server Control (via pg_ctl):
   pig pg init     [-v ver] [-D datadir]     initialize data directory
   pig pg start    [-D datadir]              start PostgreSQL server
   pig pg stop     [-D datadir] [-m fast]    stop PostgreSQL server
@@ -107,6 +108,13 @@ Server Control (pg_ctl wrapper):
   pig pg status   [-D datadir]              show server status
   pig pg promote  [-D datadir]              promote standby to primary
   pig pg role     [-D datadir] [-V]         detect instance role (primary/replica)
+
+Service Management (via systemctl):
+  pig pg svc start                          start postgres systemd service
+  pig pg svc stop                           stop postgres systemd service
+  pig pg svc restart                        restart postgres systemd service
+  pig pg svc reload                         reload postgres systemd service
+  pig pg svc status                         show postgres service status
 
 Connection & Query:
   pig pg psql     [db] [-c cmd]             connect to database via psql
@@ -151,6 +159,7 @@ var pgInitCmd = &cobra.Command{
 			Encoding:  pgInitEncoding,
 			Locale:    pgInitLocale,
 			Checksum:  pgInitChecksum,
+			Force:     pgInitForce,
 			ExtraArgs: args,
 		}
 		return postgres.InitDB(pgConfig, opts)
@@ -169,8 +178,7 @@ var pgStartCmd = &cobra.Command{
   pig pg start -D /data/pg18       # specify data directory
   pig pg start -l /pg/log/pg.log   # redirect output to log file
   pig pg start -o "-p 5433"        # pass options to postgres
-  pig pg start -y                  # force start (skip running check)
-  pig pg start -S                  # use systemctl instead of pg_ctl`,
+  pig pg start -y                  # force start (skip running check)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := &postgres.StartOptions{
 			LogFile: pgStartLog,
@@ -193,8 +201,7 @@ var pgStopCmd = &cobra.Command{
 	Aliases: []string{"halt", "down"},
 	Example: `  pig pg stop                      # fast stop (default)
   pig pg stop -m smart             # wait for clients to disconnect
-  pig pg stop -m immediate         # immediate shutdown
-  pig pg stop -S                   # use systemctl instead of pg_ctl`,
+  pig pg stop -m immediate         # immediate shutdown`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := &postgres.StopOptions{
 			Mode:    pgStopMode,
@@ -215,8 +222,7 @@ var pgRestartCmd = &cobra.Command{
 	Aliases: []string{"reboot"},
 	Example: `  pig pg restart                   # fast restart
   pig pg restart -m immediate      # immediate restart
-  pig pg restart -o "-p 5433"      # restart with new options
-  pig pg restart -S                # use systemctl instead of pg_ctl`,
+  pig pg restart -o "-p 5433"      # restart with new options`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := &postgres.RestartOptions{
 			Mode:    pgRestartMode,
@@ -237,8 +243,7 @@ var pgReloadCmd = &cobra.Command{
 	Short:   "Reload PostgreSQL configuration",
 	Aliases: []string{"hup"},
 	Example: `  pig pg reload                    # reload config (SIGHUP)
-  pig pg reload -D /data/pg18      # specify data directory
-  pig pg reload -S                 # use systemctl instead of pg_ctl`,
+  pig pg reload -D /data/pg18      # specify data directory`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return postgres.Reload(pgConfig)
 	},
@@ -315,16 +320,18 @@ var pgLogCmd = &cobra.Command{
 }
 
 var pgLogListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List log files",
+	Use:     "list",
+	Short:   "List log files",
+	Aliases: []string{"ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return postgres.LogList(postgres.GetLogDir(pgConfig))
 	},
 }
 
 var pgLogTailCmd = &cobra.Command{
-	Use:   "tail [file]",
-	Short: "Tail log file (follow mode)",
+	Use:     "tail [file]",
+	Short:   "Tail log file (follow mode)",
+	Aliases: []string{"t", "f"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		file := ""
 		if len(args) > 0 {
@@ -335,8 +342,9 @@ var pgLogTailCmd = &cobra.Command{
 }
 
 var pgLogCatCmd = &cobra.Command{
-	Use:   "cat [file]",
-	Short: "Output log file content",
+	Use:     "cat [file]",
+	Short:   "Output log file content",
+	Aliases: []string{"c"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		file := ""
 		if len(args) > 0 {
@@ -347,8 +355,9 @@ var pgLogCatCmd = &cobra.Command{
 }
 
 var pgLogLessCmd = &cobra.Command{
-	Use:   "less [file]",
-	Short: "Open log file in less",
+	Use:     "less [file]",
+	Short:   "Open log file in less",
+	Aliases: []string{"vi", "v"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		file := ""
 		if len(args) > 0 {
@@ -359,9 +368,10 @@ var pgLogLessCmd = &cobra.Command{
 }
 
 var pgLogGrepCmd = &cobra.Command{
-	Use:   "grep <pattern> [file]",
-	Short: "Search log files",
-	Args:  cobra.MinimumNArgs(1),
+	Use:     "grep <pattern> [file]",
+	Short:   "Search log files",
+	Aliases: []string{"g", "search"},
+	Args:    cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		file := ""
 		if len(args) > 1 {
@@ -548,6 +558,73 @@ var pgRepackCmd = &cobra.Command{
 }
 
 // ============================================================================
+// Service Management Commands (via systemctl) - pig pg svc
+// ============================================================================
+
+var pgSvcCmd = &cobra.Command{
+	Use:     "service",
+	Aliases: []string{"svc", "s"},
+	Short:   "Manage postgres systemd service",
+	Long: `Manage the PostgreSQL systemd service.
+
+These commands control the postgres service via systemctl. Unlike the pg_ctl
+commands (pig pg start/stop/restart/reload), these operate through systemd.
+
+Use these commands when PostgreSQL is managed as a systemd service.
+For direct pg_ctl operations, use the parent commands instead.`,
+}
+
+var pgSvcStartCmd = &cobra.Command{
+	Use:     "start",
+	Aliases: []string{"up"},
+	Short:   "Start postgres systemd service",
+	Example: `  pig pg svc start                 # systemctl start postgres`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return postgres.RunSystemctl("start", postgres.DefaultSystemdService)
+	},
+}
+
+var pgSvcStopCmd = &cobra.Command{
+	Use:     "stop",
+	Aliases: []string{"dn", "down"},
+	Short:   "Stop postgres systemd service",
+	Example: `  pig pg svc stop                  # systemctl stop postgres`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return postgres.RunSystemctl("stop", postgres.DefaultSystemdService)
+	},
+}
+
+var pgSvcRestartCmd = &cobra.Command{
+	Use:     "restart",
+	Aliases: []string{"rt"},
+	Short:   "Restart postgres systemd service",
+	Example: `  pig pg svc restart               # systemctl restart postgres`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return postgres.RunSystemctl("restart", postgres.DefaultSystemdService)
+	},
+}
+
+var pgSvcReloadCmd = &cobra.Command{
+	Use:     "reload",
+	Aliases: []string{"rl", "hup"},
+	Short:   "Reload postgres systemd service",
+	Example: `  pig pg svc reload                # systemctl reload postgres`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return postgres.RunSystemctl("reload", postgres.DefaultSystemdService)
+	},
+}
+
+var pgSvcStatusCmd = &cobra.Command{
+	Use:     "status",
+	Aliases: []string{"st", "stat"},
+	Short:   "Show postgres systemd service status",
+	Example: `  pig pg svc status                # systemctl status postgres`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return postgres.RunSystemctl("status", postgres.DefaultSystemdService)
+	},
+}
+
+// ============================================================================
 // Command Registration
 // ============================================================================
 
@@ -555,13 +632,13 @@ func init() {
 	// Global flags for all pg subcommands
 	pgCmd.PersistentFlags().IntVarP(&pgConfig.PgVersion, "version", "v", 0, "PostgreSQL major version")
 	pgCmd.PersistentFlags().StringVarP(&pgConfig.PgData, "data", "D", "", "data directory (default: /pg/data)")
-	pgCmd.PersistentFlags().StringVar(&pgConfig.DbSU, "dbsu", "", "database superuser (default: $PIG_DBSU or postgres)")
-	pgCmd.PersistentFlags().BoolVarP(&pgConfig.Systemd, "systemd", "S", false, "use systemctl instead of pg_ctl (run as root)")
+	pgCmd.PersistentFlags().StringVarP(&pgConfig.DbSU, "dbsu", "U", "", "database superuser (default: $PIG_DBSU or postgres)")
 
 	// init subcommand flags
 	pgInitCmd.Flags().StringVarP(&pgInitEncoding, "encoding", "E", "", "database encoding (default: UTF8)")
 	pgInitCmd.Flags().StringVar(&pgInitLocale, "locale", "", "locale setting (default: C)")
 	pgInitCmd.Flags().BoolVarP(&pgInitChecksum, "data-checksum", "k", false, "enable data checksums")
+	pgInitCmd.Flags().BoolVarP(&pgInitForce, "force", "f", false, "force init, remove existing data directory (DANGEROUS)")
 
 	// start subcommand flags
 	pgStartCmd.Flags().StringVarP(&pgStartLog, "log", "l", "", "redirect stdout/stderr to log file")
@@ -666,4 +743,14 @@ func init() {
 	pgRepackCmd.Flags().IntVarP(&pgMaintJobs, "jobs", "j", 1, "number of parallel jobs")
 	pgRepackCmd.Flags().BoolVarP(&pgMaintDryRun, "dry-run", "N", false, "show what would be repacked")
 	pgCmd.AddCommand(pgRepackCmd)
+
+	// ========== Service Management Commands (systemctl) ==========
+	pgSvcCmd.AddCommand(
+		pgSvcStartCmd,
+		pgSvcStopCmd,
+		pgSvcRestartCmd,
+		pgSvcReloadCmd,
+		pgSvcStatusCmd,
+	)
+	pgCmd.AddCommand(pgSvcCmd)
 }
