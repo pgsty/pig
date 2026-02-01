@@ -226,3 +226,158 @@ func TestResultOmitEmpty(t *testing.T) {
 		t.Error("Nil Data should be omitted from JSON")
 	}
 }
+
+func TestResult_Render_YAML(t *testing.T) {
+	r := OK("test", nil)
+	data, err := r.Render("yaml")
+	if err != nil {
+		t.Fatalf("Render(yaml) returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), "success: true") {
+		t.Error("Render(yaml) should return YAML format")
+	}
+}
+
+func TestResult_Render_JSON(t *testing.T) {
+	r := OK("test", nil)
+	data, err := r.Render("json")
+	if err != nil {
+		t.Fatalf("Render(json) returned error: %v", err)
+	}
+
+	if !strings.Contains(string(data), `"success":true`) {
+		t.Error("Render(json) should return JSON format")
+	}
+}
+
+func TestResult_Render_Text(t *testing.T) {
+	r := OK("test message", nil)
+	data, err := r.Render("text")
+	if err != nil {
+		t.Fatalf("Render(text) returned error: %v", err)
+	}
+
+	if string(data) != "test message" {
+		t.Errorf("Render(text) = %v, want 'test message'", string(data))
+	}
+}
+
+func TestResult_Render_UnknownFormat(t *testing.T) {
+	r := OK("test", nil)
+	_, err := r.Render("unknown")
+	if err == nil {
+		t.Error("Render(unknown) should return error")
+	}
+
+	if !strings.Contains(err.Error(), "unknown output format") {
+		t.Errorf("Error message = %v, should contain 'unknown output format'", err.Error())
+	}
+}
+
+func TestResult_Render_JSONPretty(t *testing.T) {
+	r := OK("test", nil)
+	data, err := r.Render("json-pretty")
+	if err != nil {
+		t.Fatalf("Render(json-pretty) returned error: %v", err)
+	}
+
+	jsonStr := string(data)
+	if !strings.Contains(jsonStr, "\n") {
+		t.Error("Render(json-pretty) should return indented JSON with newlines")
+	}
+	if !strings.Contains(jsonStr, `"success": true`) {
+		t.Error("Render(json-pretty) should return valid JSON")
+	}
+}
+
+func TestResult_Render_TextWithDetail(t *testing.T) {
+	r := Fail(10101, "operation failed").WithDetail("additional info")
+	data, err := r.Render("text")
+	if err != nil {
+		t.Fatalf("Render(text) returned error: %v", err)
+	}
+
+	text := string(data)
+	if !strings.Contains(text, "operation failed") {
+		t.Error("Render(text) should contain message")
+	}
+	if !strings.Contains(text, "additional info") {
+		t.Error("Render(text) should contain detail when present")
+	}
+}
+
+func TestResult_Render_NilReceiver(t *testing.T) {
+	var r *Result = nil
+	_, err := r.Render("json")
+	if err == nil {
+		t.Error("Render() on nil receiver should return error")
+	}
+	if !strings.Contains(err.Error(), "nil") {
+		t.Errorf("Error message should mention nil, got: %v", err)
+	}
+}
+
+func TestWithDetail_NilReceiver(t *testing.T) {
+	var r *Result = nil
+	result := r.WithDetail("test")
+	if result != nil {
+		t.Error("WithDetail() on nil receiver should return nil")
+	}
+}
+
+func TestWithData_NilReceiver(t *testing.T) {
+	var r *Result = nil
+	result := r.WithData("test")
+	if result != nil {
+		t.Error("WithData() on nil receiver should return nil")
+	}
+}
+
+func TestExitCode_NilReceiver(t *testing.T) {
+	var r *Result = nil
+	exitCode := r.ExitCode()
+	if exitCode != 1 {
+		t.Errorf("ExitCode() on nil receiver should return 1, got %d", exitCode)
+	}
+}
+
+func TestResult_String(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   *Result
+		contains []string
+	}{
+		{
+			name:     "nil result",
+			result:   nil,
+			contains: []string{"nil"},
+		},
+		{
+			name:     "success result",
+			result:   OK("test message", nil),
+			contains: []string{"success=true", "code=0", `message="test message"`},
+		},
+		{
+			name:     "failure with detail",
+			result:   Fail(10101, "error").WithDetail("details here"),
+			contains: []string{"success=false", "code=10101", `detail="details here"`},
+		},
+		{
+			name:     "with data",
+			result:   OK("test", map[string]int{"count": 42}),
+			contains: []string{"data="},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			str := tt.result.String()
+			for _, substr := range tt.contains {
+				if !strings.Contains(str, substr) {
+					t.Errorf("String() = %q, should contain %q", str, substr)
+				}
+			}
+		})
+	}
+}
