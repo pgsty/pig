@@ -15,4 +15,7 @@ CLAUDE.md
 .hugo_build.lock
 public/
 bin/
-plan/
+docs/
+
+_bmad
+_bmad-output
