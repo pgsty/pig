@@ -92,8 +92,9 @@ func (r *Result) String() string {
 }
 
 // Render serializes the Result to the specified format.
-// Supported formats: "yaml", "json", "json-pretty", "text"
-// For "text" format, returns Message with Detail if present.
+// Supported formats: "yaml", "json", "json-pretty", "text", "text-color"
+// For "text" format, returns human-readable output with ✓/✗ indicators.
+// For "text-color" format, adds ANSI color codes (respects NO_COLOR and TTY detection).
 // Returns an error for unknown formats or nil receiver.
 func (r *Result) Render(format string) ([]byte, error) {
 	if r == nil {
@@ -107,10 +108,9 @@ func (r *Result) Render(format string) ([]byte, error) {
 	case "json-pretty":
 		return r.JSONPretty()
 	case "text":
-		if r.Detail != "" {
-			return []byte(r.Message + ": " + r.Detail), nil
-		}
-		return []byte(r.Message), nil
+		return []byte(r.Text()), nil
+	case "text-color":
+		return []byte(r.ColorText()), nil
 	default:
 		return nil, fmt.Errorf("unknown output format: %s", format)
 	}

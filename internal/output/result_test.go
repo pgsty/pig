@@ -258,8 +258,12 @@ func TestResult_Render_Text(t *testing.T) {
 		t.Fatalf("Render(text) returned error: %v", err)
 	}
 
-	if string(data) != "test message" {
-		t.Errorf("Render(text) = %v, want 'test message'", string(data))
+	// Text format now includes status symbol
+	if !strings.Contains(string(data), "test message") {
+		t.Errorf("Render(text) = %v, should contain 'test message'", string(data))
+	}
+	if !strings.Contains(string(data), "✓") {
+		t.Errorf("Render(text) = %v, should contain '✓' symbol", string(data))
 	}
 }
 
