@@ -103,7 +103,7 @@ type PostgresInfo struct {
 	Version      string `json:"version" yaml:"version"`
 	MajorVersion int    `json:"major_version" yaml:"major_version"`
 	BinDir       string `json:"bin_dir" yaml:"bin_dir"`
-	DataDir      string `json:"data_dir,omitempty" yaml:"data_dir,omitempty"`
+	DataDir      string `json:"data_dir,omitempty" yaml:"data_dir,omitempty"` // Reserved for future use
 	ExtensionDir string `json:"extension_dir" yaml:"extension_dir"`
 }
 

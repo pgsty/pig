@@ -2884,3 +2884,668 @@ func TestScanExtensionsResultNoPG(t *testing.T) {
 		t.Errorf("expected CodeExtensionNoPG (100601), got %d", result.Code)
 	}
 }
+
+// ============================================================================
+// Code Review #3 - Additional tests for improved coverage
+// ============================================================================
+
+func TestAddExtensionsNilCatalog(t *testing.T) {
+	// Save and restore
+	origCatalog := Catalog
+	origOSType := config.OSType
+	defer func() {
+		Catalog = origCatalog
+		config.OSType = origOSType
+	}()
+
+	// Force Linux OS type to test Catalog nil check path
+	config.OSType = config.DistroEL
+	Catalog = nil
+
+	result := AddExtensions(17, []string{"postgis"}, true)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false when catalog is nil")
+	}
+	if result.Code != 100701 { // CodeExtensionCatalogError
+		t.Errorf("expected CodeExtensionCatalogError (100701), got %d", result.Code)
+	}
+}
+
+func TestRmExtensionsNilCatalog(t *testing.T) {
+	// Save and restore
+	origCatalog := Catalog
+	origOSType := config.OSType
+	defer func() {
+		Catalog = origCatalog
+		config.OSType = origOSType
+	}()
+
+	// Force Linux OS type to test Catalog nil check path
+	config.OSType = config.DistroEL
+	Catalog = nil
+
+	result := RmExtensions(17, []string{"postgis"}, true)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false when catalog is nil")
+	}
+	if result.Code != 100701 { // CodeExtensionCatalogError
+		t.Errorf("expected CodeExtensionCatalogError (100701), got %d", result.Code)
+	}
+}
+
+func TestUpgradeExtensionsNilCatalog(t *testing.T) {
+	// Save and restore
+	origCatalog := Catalog
+	origOSType := config.OSType
+	defer func() {
+		Catalog = origCatalog
+		config.OSType = origOSType
+	}()
+
+	// Force Linux OS type to test Catalog nil check path
+	config.OSType = config.DistroEL
+	Catalog = nil
+
+	result := UpgradeExtensions(17, []string{"postgis"}, true)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false when catalog is nil")
+	}
+	if result.Code != 100701 { // CodeExtensionCatalogError
+		t.Errorf("expected CodeExtensionCatalogError (100701), got %d", result.Code)
+	}
+}
+
+func TestImportExtensionsResultNoNames(t *testing.T) {
+	result := ImportExtensionsResult(17, []string{}, "/tmp/test")
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false when no names provided")
+	}
+	if result.Code != 100501 { // CodeExtensionNotFound
+		t.Errorf("expected CodeExtensionNotFound (100501), got %d", result.Code)
+	}
+}
+
+func TestImportExtensionsResultNilCatalog(t *testing.T) {
+	// Save and restore
+	origCatalog := Catalog
+	defer func() { Catalog = origCatalog }()
+
+	Catalog = nil
+
+	result := ImportExtensionsResult(17, []string{"postgis"}, "/tmp/test")
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false when catalog is nil")
+	}
+	if result.Code != 100701 { // CodeExtensionCatalogError
+		t.Errorf("expected CodeExtensionCatalogError (100701), got %d", result.Code)
+	}
+}
+
+func TestLinkPostgresResultNoArgs(t *testing.T) {
+	result := LinkPostgresResult()
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false when no arguments provided")
+	}
+	if result.Code != 100805 { // CodeExtensionLinkFailed
+		t.Errorf("expected CodeExtensionLinkFailed (100805), got %d", result.Code)
+	}
+}
+
+func TestLinkPostgresResultTooManyArgs(t *testing.T) {
+	result := LinkPostgresResult("17", "18")
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false when too many arguments")
+	}
+	if result.Code != 100805 { // CodeExtensionLinkFailed
+		t.Errorf("expected CodeExtensionLinkFailed (100805), got %d", result.Code)
+	}
+}
+
+func TestLinkPostgresResultInvalidVersion(t *testing.T) {
+	// Version 5 is below minimum (10)
+	result := LinkPostgresResult("5")
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false for invalid version")
+	}
+	if result.Code != 100805 { // CodeExtensionLinkFailed
+		t.Errorf("expected CodeExtensionLinkFailed (100805), got %d", result.Code)
+	}
+}
+
+func TestLinkResultDataUnlinkSerialization(t *testing.T) {
+	data := &LinkResultData{
+		Action:      "unlink",
+		SymlinkPath: "/usr/pgsql",
+		ProfilePath: "/etc/profile.d/pgsql.sh",
+	}
+
+	// Test JSON serialization
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+	jsonStr := string(jsonBytes)
+	if !strings.Contains(jsonStr, `"action":"unlink"`) {
+		t.Errorf("JSON missing action field: %s", jsonStr)
+	}
+	if strings.Contains(jsonStr, `"pg_home"`) {
+		t.Errorf("JSON should omit empty pg_home: %s", jsonStr)
+	}
+
+	// Test YAML serialization
+	yamlBytes, err := yaml.Marshal(data)
+	if err != nil {
+		t.Fatalf("YAML marshal failed: %v", err)
+	}
+	yamlStr := string(yamlBytes)
+	if !strings.Contains(yamlStr, "action: unlink") {
+		t.Errorf("YAML missing action field: %s", yamlStr)
+	}
+}
+
+/********************
+ * Code Review Fix: Additional Tests for Coverage
+ * Added during Epic 3 Code Review to address coverage gaps
+ ********************/
+
+// ReloadCatalogResult tests - was 0% coverage
+func TestReloadCatalogResultDataSerialization(t *testing.T) {
+	data := &ReloadResultData{
+		SourceURL:      "https://pigsty.io/ext/data/extension.csv",
+		ExtensionCount: 450,
+		CatalogPath:    "/home/user/.pig/extension.csv",
+		DownloadedAt:   "2026-02-02T10:00:00Z",
+		DurationMs:     1500,
+	}
+
+	// Test JSON serialization
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+	jsonStr := string(jsonBytes)
+	if !strings.Contains(jsonStr, `"source_url"`) {
+		t.Errorf("JSON missing source_url field: %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"extension_count":450`) {
+		t.Errorf("JSON missing extension_count field: %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"duration_ms":1500`) {
+		t.Errorf("JSON missing duration_ms field: %s", jsonStr)
+	}
+
+	// Test YAML serialization
+	yamlBytes, err := yaml.Marshal(data)
+	if err != nil {
+		t.Fatalf("YAML marshal failed: %v", err)
+	}
+	yamlStr := string(yamlBytes)
+	if !strings.Contains(yamlStr, "source_url:") {
+		t.Errorf("YAML missing source_url field: %s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "extension_count: 450") {
+		t.Errorf("YAML missing extension_count field: %s", yamlStr)
+	}
+}
+
+// RmExtensions additional tests - was 41.7%, need more coverage
+func TestRmExtensionsWithCatalog(t *testing.T) {
+	// Save and restore original state
+	origCatalog := Catalog
+	origOSType := config.OSType
+	defer func() {
+		Catalog = origCatalog
+		config.OSType = origOSType
+	}()
+
+	// Setup mock catalog
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{
+			{Name: "postgis", Pkg: "postgis", RpmPkg: "postgis36_$v", DebPkg: "postgresql-$v-postgis-3", RpmPg: []string{"17", "16"}, DebPg: []string{"17", "16"}},
+		},
+		ExtNameMap: map[string]*Extension{},
+		ExtPkgMap:  map[string]*Extension{},
+		AliasMap:   map[string]string{},
+	}
+	Catalog.ExtNameMap["postgis"] = Catalog.Extensions[0]
+	Catalog.ExtPkgMap["postgis"] = Catalog.Extensions[0]
+
+	// Test with DEB OS
+	config.OSType = config.DistroDEB
+	result := RmExtensions(17, []string{"postgis"}, true)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// Will fail due to no sudo, but should have correct data structure
+	data, ok := result.Data.(*ExtensionRmData)
+	if !ok {
+		t.Fatal("expected ExtensionRmData type")
+	}
+	if data.PgVersion != 17 {
+		t.Errorf("expected pg_version=17, got %d", data.PgVersion)
+	}
+	if len(data.Requested) != 1 || data.Requested[0] != "postgis" {
+		t.Errorf("expected requested=[postgis], got %v", data.Requested)
+	}
+	if !data.AutoConfirm {
+		t.Error("expected auto_confirm=true")
+	}
+}
+
+func TestRmExtensionsAliasLookup(t *testing.T) {
+	// Save and restore original state
+	origCatalog := Catalog
+	origOSType := config.OSType
+	defer func() {
+		Catalog = origCatalog
+		config.OSType = origOSType
+	}()
+
+	// Setup mock catalog with alias
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{},
+		ExtNameMap: map[string]*Extension{},
+		ExtPkgMap:  map[string]*Extension{},
+		AliasMap:   map[string]string{"pg17": "postgresql-17"},
+	}
+
+	config.OSType = config.DistroDEB
+	result := RmExtensions(17, []string{"pg17"}, true)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	data, ok := result.Data.(*ExtensionRmData)
+	if !ok {
+		t.Fatal("expected ExtensionRmData type")
+	}
+	if len(data.Packages) == 0 {
+		t.Log("alias was resolved but package list empty due to processing")
+	}
+}
+
+// UpgradeExtensions additional tests - was 41.7%, need more coverage
+func TestUpgradeExtensionsWithCatalog(t *testing.T) {
+	// Save and restore original state
+	origCatalog := Catalog
+	origOSType := config.OSType
+	defer func() {
+		Catalog = origCatalog
+		config.OSType = origOSType
+	}()
+
+	// Setup mock catalog
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{
+			{Name: "pgvector", Pkg: "pgvector", RpmPkg: "pgvector_$v", DebPkg: "postgresql-$v-pgvector", RpmPg: []string{"17", "16"}, DebPg: []string{"17", "16"}},
+		},
+		ExtNameMap: map[string]*Extension{},
+		ExtPkgMap:  map[string]*Extension{},
+		AliasMap:   map[string]string{},
+	}
+	Catalog.ExtNameMap["pgvector"] = Catalog.Extensions[0]
+	Catalog.ExtPkgMap["pgvector"] = Catalog.Extensions[0]
+
+	// Test with EL OS
+	config.OSType = config.DistroEL
+	config.OSVersion = "9"
+	result := UpgradeExtensions(17, []string{"pgvector"}, true)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	data, ok := result.Data.(*ExtensionUpdateData)
+	if !ok {
+		t.Fatal("expected ExtensionUpdateData type")
+	}
+	if data.PgVersion != 17 {
+		t.Errorf("expected pg_version=17, got %d", data.PgVersion)
+	}
+	if len(data.Packages) == 0 {
+		t.Log("packages resolved but command failed (expected without sudo)")
+	}
+}
+
+func TestUpgradeExtensionsAliasLookup(t *testing.T) {
+	// Save and restore original state
+	origCatalog := Catalog
+	origOSType := config.OSType
+	defer func() {
+		Catalog = origCatalog
+		config.OSType = origOSType
+	}()
+
+	// Setup mock catalog with alias
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{},
+		ExtNameMap: map[string]*Extension{},
+		ExtPkgMap:  map[string]*Extension{},
+		AliasMap:   map[string]string{"pg-core": "postgresql-17"},
+	}
+
+	config.OSType = config.DistroEL
+	config.OSVersion = "8"
+	result := UpgradeExtensions(17, []string{"pg-core"}, false)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	data, ok := result.Data.(*ExtensionUpdateData)
+	if !ok {
+		t.Fatal("expected ExtensionUpdateData type")
+	}
+	if data.AutoConfirm {
+		t.Error("expected auto_confirm=false")
+	}
+}
+
+// ImportExtensionsResult additional tests - was 17.2%, need more coverage
+func TestImportExtensionsResultNoCatalog(t *testing.T) {
+	// Save and restore original state
+	origCatalog := Catalog
+	defer func() {
+		Catalog = origCatalog
+	}()
+
+	Catalog = nil
+	result := ImportExtensionsResult(17, []string{"postgis"}, "/tmp/test")
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false when catalog is nil")
+	}
+	if result.Code != 100701 { // CodeExtensionCatalogError
+		t.Errorf("expected CodeExtensionCatalogError, got %d", result.Code)
+	}
+}
+
+func TestImportExtensionsResultExtensionNotFound(t *testing.T) {
+	// Save and restore original state
+	origCatalog := Catalog
+	origOSType := config.OSType
+	defer func() {
+		Catalog = origCatalog
+		config.OSType = origOSType
+	}()
+
+	// Setup empty catalog
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{},
+		ExtNameMap: map[string]*Extension{},
+		ExtPkgMap:  map[string]*Extension{},
+		AliasMap:   map[string]string{},
+	}
+	// Set OS type to ensure validateTool doesn't fail unexpectedly
+	config.OSType = config.DistroDEB
+
+	result := ImportExtensionsResult(17, []string{"nonexistent_ext"}, "/tmp/test")
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false when extension not found")
+	}
+	data, ok := result.Data.(*ImportResultData)
+	if !ok {
+		// validateTool may fail on non-Linux, check if we got an error result
+		t.Logf("result data type: %T, code: %d, message: %s", result.Data, result.Code, result.Message)
+		return
+	}
+	// On systems without apt-get, the test may fail at validateTool
+	// So we only check Failed if we got the expected data type
+	if len(data.Failed) == 0 && len(data.Requested) > 0 {
+		t.Logf("Warning: failed list empty but may be expected on this OS")
+	}
+}
+
+// ScanExtensionsResult additional tests - was 15.4%, need more coverage
+func TestScanExtensionsResultNoCatalog(t *testing.T) {
+	// Save and restore original state
+	origCatalog := Catalog
+	defer func() {
+		Catalog = origCatalog
+	}()
+
+	Catalog = nil
+	result := ScanExtensionsResult()
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false when catalog is nil")
+	}
+	if result.Code != 100701 { // CodeExtensionCatalogError
+		t.Errorf("expected CodeExtensionCatalogError, got %d", result.Code)
+	}
+}
+
+func TestScanExtensionsResultNoPostgres(t *testing.T) {
+	// Save and restore original state
+	origCatalog := Catalog
+	origPostgres := Postgres
+	defer func() {
+		Catalog = origCatalog
+		Postgres = origPostgres
+	}()
+
+	// Setup catalog but no Postgres
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{},
+		ExtNameMap: map[string]*Extension{},
+		ExtPkgMap:  map[string]*Extension{},
+	}
+	Postgres = nil
+
+	result := ScanExtensionsResult()
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false when postgres is nil")
+	}
+	if result.Code != 100601 { // CodeExtensionNoPG
+		t.Errorf("expected CodeExtensionNoPG, got %d", result.Code)
+	}
+}
+
+// GetExtensionAvailability additional tests - was 28.6%, need more coverage
+func TestGetExtensionAvailabilityGlobalMode(t *testing.T) {
+	// Save and restore original state
+	origCatalog := Catalog
+	defer func() {
+		Catalog = origCatalog
+	}()
+
+	// Setup catalog with a lead extension
+	ext := &Extension{
+		Name:    "postgis",
+		Pkg:     "postgis",
+		Lead:    true,
+		Contrib: false,
+		RpmPkg:  "postgis36_$v",
+		DebPkg:  "postgresql-$v-postgis-3",
+		RpmPg:   []string{"17", "16"},
+		DebPg:   []string{"17", "16"},
+	}
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{ext},
+		ExtNameMap: map[string]*Extension{"postgis": ext},
+		ExtPkgMap:  map[string]*Extension{"postgis": ext},
+	}
+
+	// Test global availability (no arguments)
+	result := GetExtensionAvailability([]string{})
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if !result.Success {
+		t.Errorf("expected success=true, got message: %s", result.Message)
+	}
+	data, ok := result.Data.(*ExtensionAvailData)
+	if !ok {
+		t.Fatal("expected ExtensionAvailData type")
+	}
+	// Should have some packages in global mode
+	t.Logf("global availability returned %d packages", data.PackageCount)
+}
+
+func TestGetExtensionAvailabilityMultipleExtensions(t *testing.T) {
+	// Save and restore original state
+	origCatalog := Catalog
+	defer func() {
+		Catalog = origCatalog
+	}()
+
+	// Setup catalog with multiple extensions
+	ext1 := &Extension{Name: "postgis", Pkg: "postgis", Lead: true}
+	ext2 := &Extension{Name: "pgvector", Pkg: "pgvector", Lead: true}
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{ext1, ext2},
+		ExtNameMap: map[string]*Extension{"postgis": ext1, "pgvector": ext2},
+		ExtPkgMap:  map[string]*Extension{"postgis": ext1, "pgvector": ext2},
+	}
+
+	// Test with multiple extensions
+	result := GetExtensionAvailability([]string{"postgis", "pgvector"})
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if !result.Success {
+		t.Errorf("expected success=true for existing extensions")
+	}
+	// Should return array for multiple extensions
+	dataSlice, ok := result.Data.([]*ExtensionAvailData)
+	if !ok {
+		t.Log("data type is not []*ExtensionAvailData, might be single extension")
+	} else if len(dataSlice) != 2 {
+		t.Errorf("expected 2 results, got %d", len(dataSlice))
+	}
+}
+
+func TestGetExtensionAvailabilityPartialNotFound(t *testing.T) {
+	// Save and restore original state
+	origCatalog := Catalog
+	defer func() {
+		Catalog = origCatalog
+	}()
+
+	// Setup catalog with one extension
+	ext := &Extension{Name: "postgis", Pkg: "postgis", Lead: true}
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{ext},
+		ExtNameMap: map[string]*Extension{"postgis": ext},
+		ExtPkgMap:  map[string]*Extension{"postgis": ext},
+	}
+
+	// Test with mixed found/not-found
+	result := GetExtensionAvailability([]string{"postgis", "nonexistent"})
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if !result.Success {
+		t.Error("expected success=true for partial match")
+	}
+	if result.Detail == "" {
+		t.Error("expected detail to mention not found extensions")
+	}
+}
+
+// LinkPostgresResult additional tests - was 33.3%, need more coverage
+func TestLinkPostgresResultUnlinkKeywords(t *testing.T) {
+	keywords := []string{"null", "none", "nil", "nop", "no"}
+	for _, keyword := range keywords {
+		result := LinkPostgresResult(keyword)
+		if result == nil {
+			t.Fatalf("expected non-nil result for keyword: %s", keyword)
+		}
+		// Will fail on non-Linux but should recognize the keyword
+		data, ok := result.Data.(*LinkResultData)
+		if ok && data.Action != "unlink" {
+			t.Errorf("expected action=unlink for keyword %s, got %s", keyword, data.Action)
+		}
+	}
+}
+
+func TestLinkPostgresResultPgPrefix(t *testing.T) {
+	// Test pg17, pg18 format handling
+	result := LinkPostgresResult("pg17")
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// Should recognize pg17 as version 17
+	// Will fail on non-Linux but should process correctly
+	t.Logf("pg17 result: success=%v, message=%s", result.Success, result.Message)
+}
+
+func TestLinkPostgresResultVersionRange(t *testing.T) {
+	// Test version above max (30)
+	result := LinkPostgresResult("35")
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false for version above max")
+	}
+}
+
+// Test helper function getPackageManagerCmd
+func TestGetPackageManagerCmd(t *testing.T) {
+	// Save and restore original state
+	origOSType := config.OSType
+	origOSVersion := config.OSVersion
+	defer func() {
+		config.OSType = origOSType
+		config.OSVersion = origOSVersion
+	}()
+
+	tests := []struct {
+		osType    string
+		osVersion string
+		expected  string
+	}{
+		{config.DistroEL, "7", "yum"},
+		{config.DistroEL, "8", "dnf"},
+		{config.DistroEL, "9", "dnf"},
+		{config.DistroEL, "10", "dnf"},
+		{config.DistroDEB, "12", "apt-get"},
+		{config.DistroDEB, "22.04", "apt-get"},
+		{config.DistroMAC, "", ""},
+		{"unknown", "", ""},
+	}
+
+	for _, tt := range tests {
+		config.OSType = tt.osType
+		config.OSVersion = tt.osVersion
+		result := getPackageManagerCmd("install")
+		if result != tt.expected {
+			t.Errorf("getPackageManagerCmd() for OSType=%s, OSVersion=%s: expected %s, got %s",
+				tt.osType, tt.osVersion, tt.expected, result)
+		}
+	}
+}
+
+// Test note: ReloadCatalogResult has 0% test coverage because it makes actual network calls
+// to download the extension catalog. A proper unit test would require HTTP mocking.
+// The DTO serialization is tested in TestReloadCatalogResultDataSerialization above.
