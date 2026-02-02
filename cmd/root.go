@@ -6,8 +6,10 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"pig/internal/ancs"
 	"pig/internal/config"
 	"pig/internal/utils"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -15,12 +17,13 @@ import (
 
 // log level parameters
 var (
-	logLevel   string
-	logPath    string
-	inventory  string
-	pigstyHome string
-	debug      bool
-	logFile    *os.File // log file handle, kept open during program lifetime
+	logLevel     string
+	logPath      string
+	inventory    string
+	pigstyHome   string
+	debug        bool
+	logFile      *os.File // log file handle, kept open during program lifetime
+	outputFormat string   // output format: text, yaml, json
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -49,7 +52,29 @@ func initAll() error {
 		return err
 	}
 	config.InitConfig(inventory, pigstyHome)
+	initOutputFormat()
 	return nil
+}
+
+// validateOutputFormat validates and normalizes the output format.
+// Returns the normalized format (lowercase) if valid, otherwise returns "text".
+func validateOutputFormat(format string) string {
+	normalized := strings.ToLower(strings.TrimSpace(format))
+	for _, valid := range config.ValidOutputFormats {
+		if normalized == valid {
+			return normalized
+		}
+	}
+	return config.OUTPUT_TEXT
+}
+
+// initOutputFormat validates the outputFormat flag and syncs it to config.OutputFormat.
+func initOutputFormat() {
+	validated := validateOutputFormat(outputFormat)
+	if validated != strings.ToLower(outputFormat) && outputFormat != "" {
+		logrus.Warnf("invalid output format %q, using %q", outputFormat, validated)
+	}
+	config.OutputFormat = validated
 }
 
 // initLogger will init logger according to logLevel and logPath
@@ -109,6 +134,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&logPath, "log-path", "", "log file path, terminal by default")
 	rootCmd.PersistentFlags().StringVarP(&inventory, "inventory", "i", "", "config inventory path")
 	rootCmd.PersistentFlags().StringVarP(&pigstyHome, "home", "H", "", "pigsty home path")
+	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "text", "output format: text, yaml, json, json-pretty")
+
+	// Setup ANCS-aware help function for structured help output
+	ancs.SetupHelp(rootCmd)
 
 	rootCmd.AddGroup(
 		&cobra.Group{ID: "pgext", Title: "PostgreSQL Extension Manager"},
