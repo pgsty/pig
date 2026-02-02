@@ -8,10 +8,134 @@ import (
 	"os"
 	"path/filepath"
 	"pig/internal/config"
+	"pig/internal/output"
 	"time"
 
 	"github.com/sirupsen/logrus"
 )
+
+// ReloadCatalogResult returns a structured Result for the ext reload command
+func ReloadCatalogResult() *output.Result {
+	startTime := time.Now()
+
+	urls := []string{
+		config.RepoPigstyIO + "/ext/data/extension.csv",
+		config.RepoPigstyCC + "/ext/data/extension.csv",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	type downloadResult struct {
+		content   []byte
+		sourceURL string
+		err       error
+	}
+
+	resultChan := make(chan downloadResult, len(urls))
+
+	for _, url := range urls {
+		go func(url string) {
+			logrus.Debugf("Attempting to download from %s", url)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if err != nil {
+				logrus.Errorf("Failed to create request for %s: %v", url, err)
+				resultChan <- downloadResult{nil, url, err}
+				return
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				logrus.Errorf("Failed to download from %s: %v", url, err)
+				resultChan <- downloadResult{nil, url, err}
+				return
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				err := fmt.Errorf("bad status: %s", resp.Status)
+				logrus.Errorf("Failed to download from %s: %v", url, err)
+				resultChan <- downloadResult{nil, url, err}
+				return
+			}
+
+			content, err := io.ReadAll(resp.Body)
+			if err != nil {
+				logrus.Errorf("Failed to read response from %s: %v", url, err)
+				resultChan <- downloadResult{nil, url, err}
+				return
+			}
+
+			logrus.Infof("get latest extension catalog from %s", url)
+			resultChan <- downloadResult{content, url, nil}
+		}(url)
+	}
+
+	select {
+	case res := <-resultChan:
+		if res.err != nil {
+			result := output.Fail(output.CodeExtensionReloadFailed, res.err.Error())
+			result.Data = &ReloadResultData{
+				SourceURL:    res.sourceURL,
+				DurationMs:   time.Since(startTime).Milliseconds(),
+				DownloadedAt: time.Now().Format(time.RFC3339),
+			}
+			return result
+		}
+
+		ec, err := NewExtensionCatalog()
+		if err != nil {
+			result := output.Fail(output.CodeExtensionCatalogError, fmt.Sprintf("failed to create extension catalog: %v", err))
+			result.Data = &ReloadResultData{
+				SourceURL:    res.sourceURL,
+				DurationMs:   time.Since(startTime).Milliseconds(),
+				DownloadedAt: time.Now().Format(time.RFC3339),
+			}
+			return result
+		}
+		if err := ec.Load(res.content); err != nil {
+			result := output.Fail(output.CodeExtensionCatalogError, fmt.Sprintf("failed to validate extension catalog: %v", err))
+			result.Data = &ReloadResultData{
+				SourceURL:    res.sourceURL,
+				DurationMs:   time.Since(startTime).Milliseconds(),
+				DownloadedAt: time.Now().Format(time.RFC3339),
+			}
+			return result
+		}
+
+		extNum := len(ec.Extensions)
+		catalogPath := filepath.Join(config.ConfigDir, "extension.csv")
+		if err := os.WriteFile(catalogPath, res.content, 0644); err != nil {
+			result := output.Fail(output.CodeExtensionReloadFailed, fmt.Sprintf("failed to write extension catalog file: %v", err))
+			result.Data = &ReloadResultData{
+				SourceURL:      res.sourceURL,
+				ExtensionCount: extNum,
+				DurationMs:     time.Since(startTime).Milliseconds(),
+				DownloadedAt:   time.Now().Format(time.RFC3339),
+			}
+			return result
+		}
+
+		data := &ReloadResultData{
+			SourceURL:      res.sourceURL,
+			ExtensionCount: extNum,
+			CatalogPath:    catalogPath,
+			DownloadedAt:   time.Now().Format(time.RFC3339),
+			DurationMs:     time.Since(startTime).Milliseconds(),
+		}
+
+		message := fmt.Sprintf("Reloaded extension catalog: %d extensions from %s", extNum, res.sourceURL)
+		return output.OK(message, data)
+
+	case <-ctx.Done():
+		result := output.Fail(output.CodeExtensionReloadFailed, "download timed out")
+		result.Data = &ReloadResultData{
+			DurationMs:   time.Since(startTime).Milliseconds(),
+			DownloadedAt: time.Now().Format(time.RFC3339),
+		}
+		return result
+	}
+}
 
 // ReloadExtensionCatalog downloads the latest extension catalog from the fastest available source
 func ReloadExtensionCatalog() error {

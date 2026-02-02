@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"pig/internal/config"
+	"pig/internal/output"
 	"pig/internal/utils"
 	"regexp"
 	"strconv"
@@ -110,6 +111,70 @@ func generateProfile(pgHome, binDir string) []byte {
 	return buf.Bytes()
 }
 
+// LinkPostgresResult returns a structured Result for the ext link command
+func LinkPostgresResult(args ...string) *output.Result {
+	if len(args) != 1 {
+		return output.Fail(output.CodeExtensionLinkFailed, fmt.Sprintf("exactly one argument required, got %d", len(args)))
+	}
+
+	arg := args[0]
+
+	// Handle unlink case
+	if unlinkKeywords[arg] {
+		if err := UnlinkPostgres(); err != nil {
+			return output.Fail(output.CodeExtensionLinkFailed, err.Error())
+		}
+		data := &LinkResultData{
+			Action:      "unlink",
+			SymlinkPath: pgLinkPath,
+			ProfilePath: pgProfilePath,
+		}
+		return output.OK("PostgreSQL unlinked", data)
+	}
+
+	// Handle pg<version> format (e.g., pg17, pg18)
+	pgVersionPattern := regexp.MustCompile(`^pg(\d+)$`)
+	if matches := pgVersionPattern.FindStringSubmatch(arg); matches != nil {
+		arg = matches[1] // Extract the version number
+		logrus.Debugf("remove %s pg prefix and use %s as pg version", args[0], arg)
+	}
+
+	// Resolve and validate PGHOME
+	pgHome, err := resolvePGHome(arg)
+	if err != nil {
+		return output.Fail(output.CodeExtensionLinkFailed, err.Error())
+	}
+
+	if err := validatePGHome(pgHome); err != nil {
+		logrus.Warnf("postgres home validation failed: %s", err)
+	}
+
+	// Create symlink
+	if err := RemoveSymlink(pgLinkPath); err != nil {
+		return output.Fail(output.CodeExtensionLinkFailed, fmt.Sprintf("failed to remove existing symlink: %v", err))
+	}
+	if err := utils.SudoCommand([]string{"ln", "-s", pgHome, pgLinkPath}); err != nil {
+		return output.Fail(output.CodeExtensionLinkFailed, fmt.Sprintf("failed to create symlink %s -> %s: %v", pgLinkPath, pgHome, err))
+	}
+
+	// Write profile
+	binDir := filepath.Join(pgHome, "bin")
+	if err := utils.PutFile(pgProfilePath, generateProfile(pgHome, binDir)); err != nil {
+		return output.Fail(output.CodeExtensionLinkFailed, fmt.Sprintf("failed to write profile %s: %v", pgProfilePath, err))
+	}
+
+	data := &LinkResultData{
+		Action:       "link",
+		PgHome:       pgHome,
+		SymlinkPath:  pgLinkPath,
+		ProfilePath:  pgProfilePath,
+		ActivatedCmd: fmt.Sprintf(". %s", pgProfilePath),
+	}
+
+	message := fmt.Sprintf("PostgreSQL linked: %s -> %s", pgLinkPath, pgHome)
+	return output.OK(message, data)
+}
+
 // LinkPostgres links or unlinks PostgreSQL based on the given arguments.
 // Usage:
 // 1) LinkPostgres("none")             -> Unlink
@@ -130,7 +195,7 @@ func LinkPostgres(args ...string) error {
 	pgVersionPattern := regexp.MustCompile(`^pg(\d+)$`)
 	if matches := pgVersionPattern.FindStringSubmatch(arg); matches != nil {
 		arg = matches[1] // Extract the version number
-		logrus.Debugf("remove %s pg prefix and use %s as pg version: %s", args[0], arg)
+		logrus.Debugf("remove %s pg prefix and use %s as pg version", args[0], arg)
 	}
 
 	// Resolve and validate PGHOME

@@ -4,12 +4,160 @@ import (
 	"fmt"
 	"os/exec"
 	"pig/internal/config"
+	"pig/internal/output"
 	"pig/internal/utils"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
+
+// ImportExtensionsResult returns a structured Result for the ext import command
+func ImportExtensionsResult(pgVer int, names []string, importPath string) *output.Result {
+	startTime := time.Now()
+
+	if len(names) == 0 {
+		return output.Fail(output.CodeExtensionNotFound, "no extension names provided")
+	}
+
+	if pgVer == 0 {
+		logrus.Debugf("no PostgreSQL version specified, set target version to the latest major version: %d", PostgresLatestMajorVersion)
+		pgVer = PostgresLatestMajorVersion
+	}
+
+	if importPath == "" {
+		importPath = "/www/pigsty"
+	}
+
+	if err := utils.Mkdir(importPath); err != nil {
+		result := output.Fail(output.CodeExtensionImportFailed, fmt.Sprintf("failed to create import directory: %v", err))
+		result.Data = &ImportResultData{
+			PgVersion:  pgVer,
+			OSCode:     config.OSCode,
+			Arch:       config.OSArch,
+			RepoDir:    importPath,
+			Requested:  names,
+			DurationMs: time.Since(startTime).Milliseconds(),
+		}
+		return result
+	}
+
+	// Check Catalog is initialized
+	if Catalog == nil {
+		result := output.Fail(output.CodeExtensionCatalogError, "extension catalog not initialized")
+		result.Data = &ImportResultData{
+			PgVersion:  pgVer,
+			OSCode:     config.OSCode,
+			Arch:       config.OSArch,
+			RepoDir:    importPath,
+			Requested:  names,
+			DurationMs: time.Since(startTime).Milliseconds(),
+		}
+		return result
+	}
+
+	Catalog.LoadAliasMap(config.OSType)
+	if err := validateTool(); err != nil {
+		result := output.Fail(output.CodeExtensionImportFailed, err.Error())
+		result.Data = &ImportResultData{
+			PgVersion:  pgVer,
+			OSCode:     config.OSCode,
+			Arch:       config.OSArch,
+			RepoDir:    importPath,
+			Requested:  names,
+			DurationMs: time.Since(startTime).Milliseconds(),
+		}
+		return result
+	}
+
+	var pkgNames []string
+	var failed []string
+	for _, name := range names {
+		ext, ok := Catalog.ExtNameMap[name]
+		if !ok {
+			ext, ok = Catalog.ExtPkgMap[name]
+		}
+
+		if !ok {
+			// try to find in AliasMap (if it is not a postgres extension)
+			if pgPkg, ok := Catalog.AliasMap[name]; ok {
+				pkgNames = append(pkgNames, processPkgName(pgPkg, pgVer)...)
+				continue
+			} else {
+				logrus.Debugf("cannot find '%s' in extension name or alias", name)
+				failed = append(failed, name)
+				continue
+			}
+		}
+		pkgName := ext.PackageName(pgVer)
+		if pkgName == "" {
+			logrus.Warnf("no package found for extension %s", ext.Name)
+			failed = append(failed, name)
+			continue
+		}
+		logrus.Debugf("translate extension %s to package name: %s", ext.Name, pkgName)
+		pkgNames = append(pkgNames, processPkgName(pkgName, pgVer)...)
+	}
+
+	if len(pkgNames) == 0 {
+		result := output.Fail(output.CodeExtensionNoPackage, "no packages to be downloaded")
+		result.Data = &ImportResultData{
+			PgVersion:  pgVer,
+			OSCode:     config.OSCode,
+			Arch:       config.OSArch,
+			RepoDir:    importPath,
+			Requested:  names,
+			Failed:     failed,
+			DurationMs: time.Since(startTime).Milliseconds(),
+		}
+		return result
+	}
+
+	var downloadErr error
+	switch config.OSType {
+	case config.DistroEL:
+		downloadErr = DownloadRPM(pkgNames)
+	case config.DistroDEB:
+		downloadErr = DownloadDEB(pkgNames)
+	default:
+		downloadErr = fmt.Errorf("unsupported package manager: %s on %s %s", config.OSType, config.OSVendor, config.OSCode)
+	}
+
+	durationMs := time.Since(startTime).Milliseconds()
+
+	if downloadErr != nil {
+		result := output.Fail(output.CodeExtensionImportFailed, downloadErr.Error())
+		result.Data = &ImportResultData{
+			PgVersion:  pgVer,
+			OSCode:     config.OSCode,
+			Arch:       config.OSArch,
+			RepoDir:    importPath,
+			Requested:  names,
+			Packages:   pkgNames,
+			PkgCount:   len(pkgNames),
+			Failed:     failed,
+			DurationMs: durationMs,
+		}
+		return result
+	}
+
+	data := &ImportResultData{
+		PgVersion:  pgVer,
+		OSCode:     config.OSCode,
+		Arch:       config.OSArch,
+		RepoDir:    importPath,
+		Requested:  names,
+		Packages:   pkgNames,
+		PkgCount:   len(pkgNames),
+		Downloaded: pkgNames,
+		Failed:     failed,
+		DurationMs: durationMs,
+	}
+
+	message := fmt.Sprintf("Imported %d packages to %s", len(pkgNames), importPath)
+	return output.OK(message, data)
+}
 
 // ImportExtensions downloads extension packages to local repository
 func ImportExtensions(pgVer int, names []string, importPath string) error {
