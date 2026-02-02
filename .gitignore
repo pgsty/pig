@@ -12,6 +12,7 @@ dist/
 pig
 .DS_Store
 CLAUDE.md
+coverage.out
 .hugo_build.lock
 public/
 bin/
