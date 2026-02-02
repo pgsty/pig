@@ -4,8 +4,10 @@ Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"pig/cli/ext"
+	"pig/internal/config"
 	"strconv"
 
 	"github.com/sirupsen/logrus"
@@ -36,7 +38,7 @@ var extCmd = &cobra.Command{
   pig ext add pg_duckdb        # install certain postgresql extension
 	`,
 	Example: `
-  pig ext list    [query]      # list & search extension      
+  pig ext list    [query]      # list & search extension
   pig ext info    [ext...]     # get information of a specific extension
   pig ext status  [-v]         # show installed extension and pg status
   pig ext add     [ext...]     # install extension for current pg version
@@ -45,7 +47,19 @@ var extCmd = &cobra.Command{
   pig ext import  [ext...]     # download extension to local repo
   pig ext link    [ext...]     # link postgres installation to path
   pig ext reload               # reload the latest extension catalog data
-`, PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+`,
+	Annotations: map[string]string{
+		"name":       "pig ext",
+		"type":       "group",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "100",
+	},
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if err := initAll(); err != nil {
 			return err
 		}
@@ -63,15 +77,44 @@ var extListCmd = &cobra.Command{
   pig ext ls olap             # list extension of olap category
   pig ext ls gis -v 16        # list gis category for pg 16
 `,
+	Annotations: map[string]string{
+		"name":       "pig ext list",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "100",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 1 {
 			logrus.Errorf("too many arguments, only one search query allowed")
 			os.Exit(1)
 		}
 
-		results := ext.Catalog.Extensions
+		pgVer := extProbeVersion()
+		query := ""
 		if len(args) == 1 {
-			query := args[0]
+			query = args[0]
+		}
+
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := ext.ListExtensions(query, pgVer)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
+		results := ext.Catalog.Extensions
+		if query != "" {
 			results = ext.SearchExtensions(query, ext.Catalog.Extensions)
 			if len(results) == 0 {
 				logrus.Warnf("no extensions found matching '%s'", query)
@@ -81,7 +124,6 @@ var extListCmd = &cobra.Command{
 			}
 		}
 
-		pgVer := extProbeVersion()
 		if pgVer == 0 {
 			logrus.Debugf("no active PostgreSQL found, fallback to common tabulate")
 			ext.TabulteCommon(results)
@@ -89,15 +131,38 @@ var extListCmd = &cobra.Command{
 			ext.TabulteVersion(pgVer, results)
 		}
 		return nil
-
 	},
 }
 
 var extInfoCmd = &cobra.Command{
-	Use:     "info",
+	Use:     "info [ext...]",
 	Short:   "get extension information",
 	Aliases: []string{"i"},
+	Annotations: map[string]string{
+		"name":       "pig ext info",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "50",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := ext.GetExtensionInfo(args)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		pgVer := extProbeVersion()
 		logrus.Debugf("using PostgreSQL version: %d", pgVer)
 		for _, name := range args {
@@ -119,8 +184,33 @@ var extStatusCmd = &cobra.Command{
 	Use:     "status",
 	Short:   "show installed extension on active pg",
 	Aliases: []string{"s", "st", "stat"},
+	Annotations: map[string]string{
+		"name":       "pig ext status",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "200",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		extProbeVersion()
+
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := ext.GetExtStatus(extShowContrib)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		ext.ExtensionStatus(extShowContrib)
 		return nil
 	},
@@ -130,8 +220,33 @@ var extScanCmd = &cobra.Command{
 	Use:     "scan",
 	Short:   "scan installed extensions for active pg",
 	Aliases: []string{"sc"},
+	Annotations: map[string]string{
+		"name":       "pig ext scan",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "500",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgVer := extProbeVersion()
+
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := ext.ScanExtensionsResult()
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		ext.PostgresInstallSummary()
 		if pgVer == 0 || ext.Postgres == nil {
 			logrus.Debugf("no active PostgreSQL found, specify pg_config path or pg version to get more details")
@@ -146,6 +261,17 @@ var extAddCmd = &cobra.Command{
 	Use:     "add",
 	Short:   "install postgres extension",
 	Aliases: []string{"a", "install", "ins"},
+	Annotations: map[string]string{
+		"name":       "pig ext add",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "10000",
+	},
 	Example: `
 Description:
   pig ext add     pg_duckdb                  # install one extension
@@ -163,6 +289,24 @@ Description:
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgVer := extProbeVersion()
+
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := ext.AddExtensions(pgVer, args, extYes)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			// If operation failed, return error for exit code
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		if err := ext.InstallExtensions(pgVer, args, extYes); err != nil {
 			logrus.Errorf("failed to install extensions: %v", err)
 			return nil
@@ -175,8 +319,37 @@ var extRmCmd = &cobra.Command{
 	Use:     "rm",
 	Short:   "remove postgres extension",
 	Aliases: []string{"r", "remove"},
+	Annotations: map[string]string{
+		"name":       "pig ext rm",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "10000",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgVer := extProbeVersion()
+
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := ext.RmExtensions(pgVer, args, extYes)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			// If operation failed, return error for exit code
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		if err := ext.RemoveExtensions(pgVer, args, extYes); err != nil {
 			logrus.Errorf("failed to remove extensions: %v", err)
 			return nil
@@ -189,6 +362,17 @@ var extUpdateCmd = &cobra.Command{
 	Use:     "update",
 	Short:   "update installed extensions for current pg version",
 	Aliases: []string{"u", "upd"},
+	Annotations: map[string]string{
+		"name":       "pig ext update",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "10000",
+	},
 	Example: `
 Description:
   pig ext update                     # update all installed extensions
@@ -198,6 +382,24 @@ Description:
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgVer := extProbeVersion()
+
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := ext.UpgradeExtensions(pgVer, args, extYes)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			// If operation failed, return error for exit code
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		if err := ext.UpdateExtensions(pgVer, args, extYes); err != nil {
 			logrus.Errorf("failed to update extensions: %v", err)
 			return nil
@@ -211,6 +413,17 @@ var extImportCmd = &cobra.Command{
 	Short:        "import extension packages to local repo",
 	Aliases:      []string{"get"},
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig ext import",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "30000",
+	},
 	Example: `
   pig ext import postgis                # import postgis extension packages
   pig ext import timescaledb pg_cron    # import multiple extensions
@@ -220,6 +433,24 @@ var extImportCmd = &cobra.Command{
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgVer := extProbeVersion()
+
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := ext.ImportExtensionsResult(pgVer, args, extRepoDir)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			// If operation failed, return error for exit code
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		if err := ext.ImportExtensions(pgVer, args, extRepoDir); err != nil {
 			logrus.Errorf("failed to import extensions: %v", err)
 			return nil
@@ -233,6 +464,17 @@ var extLinkCmd = &cobra.Command{
 	Short:        "link postgres to active PATH",
 	Aliases:      []string{"ln"},
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig ext link",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "unsafe",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "100",
+	},
 	Example: `
   pig ext link 18                      # link pgdg postgresql 18 to /usr/pgsql
   pig ext link pg17                    # link postgresql 17 to /usr/pgsql (pg prefix stripped)
@@ -241,6 +483,23 @@ var extLinkCmd = &cobra.Command{
   pig ext link null|none|nil|nop|no    # unlink current postgres install
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := ext.LinkPostgresResult(args...)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			// If operation failed, return error for exit code
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		return ext.LinkPostgres(args...)
 	},
 }
@@ -249,8 +508,36 @@ var extReloadCmd = &cobra.Command{
 	Use:          "reload",
 	Short:        "reload extension catalog to the latest version",
 	SilenceUsage: true,
-	Aliases:      []string{"r", "re"},
+	Aliases:      []string{"rl"},
+	Annotations: map[string]string{
+		"name":       "pig ext reload",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "5000",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := ext.ReloadCatalogResult()
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			// If operation failed, return error for exit code
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		return ext.ReloadExtensionCatalog()
 	},
 }
@@ -266,7 +553,31 @@ var extAvailCmd = &cobra.Command{
   pig ext av pgvector               # show availability for pgvector
   pig ext matrix citus              # alias for avail command
 `,
+	Annotations: map[string]string{
+		"name":       "pig ext avail",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "100",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := ext.GetExtensionAvailability(args)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		if len(args) == 0 {
 			// No arguments: show global package availability matrix for current OS
 			ext.PrintGlobalAvailability()
