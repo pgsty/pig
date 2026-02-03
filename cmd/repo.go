@@ -483,12 +483,39 @@ var repoBootCmd = &cobra.Command{
 	Short:        "bootstrap repo from offline package",
 	Aliases:      []string{"b", "bt"},
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig repo boot",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "10000",
+	},
 	Example: `
   pig repo boot                    # boot repo from /tmp/pkg.tgz to /www
   pig repo boot -p /tmp/pkg.tgz    # boot repo from given package path
   pig repo boot -d /srv            # boot repo to another directory /srv
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := repo.BootWithResult(repoBootPkg, repoBootDir)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		return repo.Boot(repoBootPkg, repoBootDir)
 	},
 }
@@ -498,13 +525,24 @@ var repoCacheCmd = &cobra.Command{
 	Short:        "create offline package from local repo",
 	Aliases:      []string{"c"},
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig repo cache",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "30000",
+	},
 	Example: `
-  pig repo cache                    # create /tmp/pkg.tgz offline package from /www/pigsty 
+  pig repo cache                    # create /tmp/pkg.tgz offline package from /www/pigsty
   pig repo cache -f                 # force overwrite existing package
   pig repo cache -d /srv            # overwrite default content dir /www to /srv
   pig repo cache pigsty mssql       # create the tarball with both pigsty & mssql repo
   pig repo c -f                     # the simplest use case to make offline package
-  
+
   (Beware that system repo management require sudo/root privilege)
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -512,6 +550,23 @@ var repoCacheCmd = &cobra.Command{
 		if len(args) > 0 {
 			repos = args
 		}
+
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := repo.CacheWithResult(repoCacheDir, repoCachePkg, repos)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		return repo.Cache(repoCacheDir, repoCachePkg, repos)
 	},
 }
@@ -521,6 +576,17 @@ var repoCreateCmd = &cobra.Command{
 	Short:        "create local YUM/APT repository",
 	Aliases:      []string{"cr"},
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig repo create",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "5000",
+	},
 	Example: `
   pig repo create                    # create repo on /www/pigsty
   pig repo create /www/mssql /www/b  # create repo on multiple locations
@@ -532,6 +598,23 @@ var repoCreateCmd = &cobra.Command{
 		if len(args) > 0 {
 			repos = args
 		}
+
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := repo.CreateReposWithResult(repos)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		return repo.CreateRepos(repos...)
 	},
 }
@@ -541,7 +624,34 @@ var repoReloadCmd = &cobra.Command{
 	Short:        "reload repo catalog to the latest version",
 	SilenceUsage: true,
 	Aliases:      []string{"r", "re"},
+	Annotations: map[string]string{
+		"name":       "pig repo reload",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "3000",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := repo.ReloadRepoCatalogWithResult()
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		return repo.ReloadRepoCatalog()
 	},
 }
