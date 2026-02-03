@@ -2,8 +2,10 @@ package ancs
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -115,6 +117,12 @@ func TestBuildCapabilityMap_Basic(t *testing.T) {
 
 	if capMap.Description != "Postgres Install Guide" {
 		t.Errorf("CapabilityMap.Description = %q, want %q", capMap.Description, "Postgres Install Guide")
+	}
+	if capMap.Schema == nil {
+		t.Fatal("CapabilityMap.Schema should not be nil")
+	}
+	if capMap.Schema.Name != "pig" {
+		t.Errorf("CapabilityMap.Schema.Name = %q, want %q", capMap.Schema.Name, "pig")
 	}
 
 	if !strings.HasPrefix(capMap.Version, "v") {
@@ -510,7 +518,7 @@ func TestCapabilityMap_YAMLFieldNames(t *testing.T) {
 	output := string(data)
 
 	// Check snake_case field names
-	expectedFields := []string{"name:", "version:", "description:", "commands:", "full_name:", "short:"}
+	expectedFields := []string{"name:", "version:", "description:", "schema:", "commands:", "full_name:", "short:"}
 	for _, field := range expectedFields {
 		if !strings.Contains(output, field) {
 			t.Errorf("YAML output missing field %q", field)
@@ -535,7 +543,7 @@ func TestCapabilityMap_JSONFieldNames(t *testing.T) {
 	output := string(data)
 
 	// Check snake_case field names in JSON
-	expectedFields := []string{`"name"`, `"version"`, `"description"`, `"commands"`, `"full_name"`, `"short"`}
+	expectedFields := []string{`"name"`, `"version"`, `"description"`, `"schema"`, `"commands"`, `"full_name"`, `"short"`}
 	for _, field := range expectedFields {
 		if !strings.Contains(output, field) {
 			t.Errorf("JSON output missing field %s", field)
@@ -592,6 +600,21 @@ func TestCapabilityMap_NoEmptySubCommands(t *testing.T) {
 	}
 }
 
+func TestBuildCapabilityMap_Performance(t *testing.T) {
+	root := createLargeCommandTree(100)
+
+	start := time.Now()
+	capMap := BuildCapabilityMap(root)
+	elapsed := time.Since(start)
+
+	if capMap == nil {
+		t.Fatal("BuildCapabilityMap returned nil")
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("BuildCapabilityMap took %s, expected < 200ms", elapsed)
+	}
+}
+
 // BenchmarkBuildCapabilityMap measures the performance of building the capability map
 func BenchmarkBuildCapabilityMap(b *testing.B) {
 	root := createTestCommandTree()
@@ -600,4 +623,27 @@ func BenchmarkBuildCapabilityMap(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		BuildCapabilityMap(root)
 	}
+}
+
+func createLargeCommandTree(count int) *cobra.Command {
+	root := &cobra.Command{
+		Use:   "pig",
+		Short: "Postgres Install Guide",
+	}
+	for i := 0; i < count; i++ {
+		cmd := &cobra.Command{
+			Use:   fmt.Sprintf("cmd-%d", i),
+			Short: "Test command",
+		}
+		// Add a couple of subcommands to simulate depth
+		for j := 0; j < 3; j++ {
+			sub := &cobra.Command{
+				Use:   fmt.Sprintf("sub-%d-%d", i, j),
+				Short: "Sub command",
+			}
+			cmd.AddCommand(sub)
+		}
+		root.AddCommand(cmd)
+	}
+	return root
 }

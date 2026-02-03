@@ -465,3 +465,25 @@ func TestAgentHintHasBlankLineSeparator(t *testing.T) {
 		t.Errorf("expected blank line before agent hint, got: %s", output)
 	}
 }
+
+func TestAgentHintUsesCommandOutputWriter(t *testing.T) {
+	originalFormat := config.OutputFormat
+	defer func() { config.OutputFormat = originalFormat }()
+	config.OutputFormat = config.OUTPUT_TEXT
+
+	cmd := &cobra.Command{
+		Use:   "test",
+		Short: "Test command",
+	}
+
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	HelpFunc(cmd, nil)
+
+	output := buf.String()
+	if !strings.Contains(output, AgentHintText) {
+		t.Errorf("expected agent hint in command output writer, got: %s", output)
+	}
+}

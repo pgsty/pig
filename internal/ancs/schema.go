@@ -91,27 +91,30 @@ func FromAnnotations(annotations map[string]string) *Schema {
 
 	// Name - string, no validation needed
 	if v, ok := annotations["name"]; ok {
-		s.Name = v
+		s.Name = strings.TrimSpace(v)
 	}
 
 	// Type - enum with fallback
 	if v, ok := annotations["type"]; ok {
-		if isValidType(v) {
-			s.Type = v
+		normalized := normalizeEnum(v)
+		if isValidType(normalized) {
+			s.Type = normalized
 		}
 	}
 
 	// Volatility - enum with fallback
 	if v, ok := annotations["volatility"]; ok {
-		if isValidVolatility(v) {
-			s.Volatility = v
+		normalized := normalizeEnum(v)
+		if isValidVolatility(normalized) {
+			s.Volatility = normalized
 		}
 	}
 
 	// Parallel - enum with fallback
 	if v, ok := annotations["parallel"]; ok {
-		if isValidParallel(v) {
-			s.Parallel = v
+		normalized := normalizeEnum(v)
+		if isValidParallel(normalized) {
+			s.Parallel = normalized
 		}
 	}
 
@@ -122,22 +125,25 @@ func FromAnnotations(annotations map[string]string) *Schema {
 
 	// Risk - enum with fallback
 	if v, ok := annotations["risk"]; ok {
-		if isValidRisk(v) {
-			s.Risk = v
+		normalized := normalizeEnum(v)
+		if isValidRisk(normalized) {
+			s.Risk = normalized
 		}
 	}
 
 	// Confirm - enum with fallback
 	if v, ok := annotations["confirm"]; ok {
-		if isValidConfirm(v) {
-			s.Confirm = v
+		normalized := normalizeEnum(v)
+		if isValidConfirm(normalized) {
+			s.Confirm = normalized
 		}
 	}
 
 	// OSUser - enum with fallback
 	if v, ok := annotations["os_user"]; ok {
-		if isValidOSUser(v) {
-			s.OSUser = v
+		normalized := normalizeEnum(v)
+		if isValidOSUser(normalized) {
+			s.OSUser = normalized
 		}
 	}
 
@@ -224,6 +230,10 @@ func isValidOSUser(v string) bool {
 }
 
 func parseBool(v string) bool {
-	lower := strings.ToLower(v)
+	lower := strings.ToLower(strings.TrimSpace(v))
 	return lower == "true" || lower == "1"
+}
+
+func normalizeEnum(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
 }

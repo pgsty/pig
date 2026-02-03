@@ -16,10 +16,11 @@ import (
 // It provides a comprehensive view of all commands and their capabilities
 // for AI agents to discover and understand the CLI's functionality.
 type CapabilityMap struct {
-	Name        string         `json:"name" yaml:"name"`               // Root command name (e.g., "pig")
-	Version     string         `json:"version" yaml:"version"`         // CLI version (e.g., "v0.9.1")
-	Description string         `json:"description" yaml:"description"` // CLI description
-	Commands    []*CommandNode `json:"commands" yaml:"commands"`       // Top-level commands
+	Name        string         `json:"name" yaml:"name"`                         // Root command name (e.g., "pig")
+	Version     string         `json:"version" yaml:"version"`                   // CLI version (e.g., "v0.9.1")
+	Description string         `json:"description" yaml:"description"`           // CLI description
+	Schema      *Schema        `json:"schema,omitempty" yaml:"schema,omitempty"` // Root command ANCS metadata
+	Commands    []*CommandNode `json:"commands" yaml:"commands"`                 // Top-level commands
 }
 
 // CommandNode represents a node in the command tree.
@@ -45,6 +46,11 @@ func BuildCapabilityMap(rootCmd *cobra.Command) *CapabilityMap {
 		Version:     getVersion(),
 		Description: rootCmd.Short,
 	}
+	schema := FromAnnotations(rootCmd.Annotations)
+	if schema != nil && schema.Name == "" {
+		schema.Name = rootCmd.CommandPath()
+	}
+	capMap.Schema = schema
 
 	// Build command nodes for each top-level command
 	for _, cmd := range rootCmd.Commands() {

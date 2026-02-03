@@ -5,7 +5,9 @@ package ancs
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,15 +18,15 @@ import (
 // CommandSchema represents complete command metadata including ANCS schema,
 // arguments, flags, and subcommands for AI agent consumption.
 type CommandSchema struct {
-	Name        string    `json:"name" yaml:"name"`                                // Full command path (e.g., "pig ext add")
-	Use         string    `json:"use" yaml:"use"`                                  // Usage pattern (e.g., "add <name...>")
-	Short       string    `json:"short" yaml:"short"`                              // Brief description
-	Long        string    `json:"long,omitempty" yaml:"long,omitempty"`            // Detailed description
-	Example     string    `json:"example,omitempty" yaml:"example,omitempty"`      // Usage examples
-	Schema      *Schema   `json:"schema,omitempty" yaml:"schema,omitempty"`        // ANCS metadata
-	Args        []Argument `json:"args,omitempty" yaml:"args,omitempty"`           // Positional arguments
-	Flags       []Flag    `json:"flags,omitempty" yaml:"flags,omitempty"`          // Command flags
-	SubCommands []SubCmd  `json:"sub_commands,omitempty" yaml:"sub_commands,omitempty"` // Child commands
+	Name        string     `json:"name" yaml:"name"`                                     // Full command path (e.g., "pig ext add")
+	Use         string     `json:"use" yaml:"use"`                                       // Usage pattern (e.g., "add <name...>")
+	Short       string     `json:"short" yaml:"short"`                                   // Brief description
+	Long        string     `json:"long,omitempty" yaml:"long,omitempty"`                 // Detailed description
+	Example     string     `json:"example,omitempty" yaml:"example,omitempty"`           // Usage examples
+	Schema      *Schema    `json:"schema,omitempty" yaml:"schema,omitempty"`             // ANCS metadata
+	Args        []Argument `json:"args,omitempty" yaml:"args,omitempty"`                 // Positional arguments
+	Flags       []Flag     `json:"flags,omitempty" yaml:"flags,omitempty"`               // Command flags
+	SubCommands []SubCmd   `json:"sub_commands,omitempty" yaml:"sub_commands,omitempty"` // Child commands
 }
 
 // Argument represents a positional command argument parsed from cmd.Use.
@@ -75,11 +77,14 @@ func FromCommand(cmd *cobra.Command) *CommandSchema {
 		Args:    parseArgsFromUse(cmd.Use),
 		Flags:   extractFlags(cmd),
 	}
+	if len(cs.Args) == 0 {
+		cs.Args = inferArgsFromValidator(cmd)
+	}
 
 	// Extract subcommands
 	for _, sub := range cmd.Commands() {
 		// Skip help command
-		if sub.Name() == "help" {
+		if sub.Name() == "help" || sub.Hidden {
 			continue
 		}
 		cs.SubCommands = append(cs.SubCommands, SubCmd{
@@ -147,36 +152,84 @@ func parseArgsFromUse(use string) []Argument {
 	return args
 }
 
+// inferArgsFromValidator provides a minimal placeholder when a command defines
+// argument validation but does not include args in the Use string.
+// This avoids returning an empty args list in structured output.
+func inferArgsFromValidator(cmd *cobra.Command) []Argument {
+	if cmd == nil || cmd.Args == nil || isNoArgsValidator(cmd.Args) {
+		return nil
+	}
+	return []Argument{
+		{
+			Name:     "args",
+			Required: true,
+			Variadic: true,
+		},
+	}
+}
+
+func isNoArgsValidator(fn cobra.PositionalArgs) bool {
+	if fn == nil {
+		return true
+	}
+	fnPtr := reflect.ValueOf(fn).Pointer()
+	noArgsPtr := reflect.ValueOf(cobra.NoArgs).Pointer()
+	if fnPtr == noArgsPtr {
+		return true
+	}
+	fnName := runtime.FuncForPC(fnPtr)
+	noArgsName := runtime.FuncForPC(noArgsPtr)
+	if fnName == nil || noArgsName == nil {
+		return false
+	}
+	return fnName.Name() == noArgsName.Name()
+}
+
 // extractFlags extracts flags from a Cobra command.
 // Hidden flags are included but marked with Hidden: true.
 func extractFlags(cmd *cobra.Command) []Flag {
 	var flags []Flag
+	seen := make(map[string]struct{})
 
-	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		// Skip help flag as it's auto-added by Cobra
-		if f.Name == "help" {
+	collectFlags := func(fs *pflag.FlagSet) {
+		if fs == nil {
 			return
 		}
-
-		flag := Flag{
-			Name:     f.Name,
-			Short:    f.Shorthand,
-			Type:     f.Value.Type(),
-			Default:  f.DefValue,
-			Desc:     f.Usage,
-			Required: false, // Cobra doesn't have built-in required flag support
-			Hidden:   f.Hidden,
-		}
-
-		// Check for required annotation
-		if ann := f.Annotations; ann != nil {
-			if _, ok := ann["required"]; ok {
-				flag.Required = true
+		fs.VisitAll(func(f *pflag.Flag) {
+			// Skip help flag as it's auto-added by Cobra
+			if f.Name == "help" {
+				return
 			}
-		}
+			if _, ok := seen[f.Name]; ok {
+				return
+			}
+			seen[f.Name] = struct{}{}
 
-		flags = append(flags, flag)
-	})
+			flag := Flag{
+				Name:     f.Name,
+				Short:    f.Shorthand,
+				Type:     f.Value.Type(),
+				Default:  f.DefValue,
+				Desc:     f.Usage,
+				Required: false, // Cobra doesn't have built-in required flag support
+				Hidden:   f.Hidden,
+			}
+
+			// Check for required annotation
+			if ann := f.Annotations; ann != nil {
+				if _, ok := ann["required"]; ok {
+					flag.Required = true
+				}
+			}
+
+			flags = append(flags, flag)
+		})
+	}
+
+	// Non-inherited flags include local + persistent on this command
+	collectFlags(cmd.NonInheritedFlags())
+	// Inherited flags include persistent flags from parent commands
+	collectFlags(cmd.InheritedFlags())
 
 	return flags
 }

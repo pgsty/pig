@@ -240,7 +240,12 @@ func TestFromCommandWithSubCommands(t *testing.T) {
 		Use:   "rm",
 		Short: "Remove extensions",
 	}
-	parent.AddCommand(child1, child2)
+	hidden := &cobra.Command{
+		Use:    "hidden",
+		Short:  "Hidden command",
+		Hidden: true,
+	}
+	parent.AddCommand(child1, child2, hidden)
 
 	cs := FromCommand(parent)
 	if cs == nil {
@@ -248,6 +253,48 @@ func TestFromCommandWithSubCommands(t *testing.T) {
 	}
 	if len(cs.SubCommands) != 2 {
 		t.Errorf("expected 2 sub commands, got %d", len(cs.SubCommands))
+	}
+}
+
+func TestFromCommand_InheritedFlags(t *testing.T) {
+	root := &cobra.Command{Use: "root"}
+	root.PersistentFlags().String("output", "text", "output format")
+
+	child := &cobra.Command{Use: "child"}
+	root.AddCommand(child)
+
+	cs := FromCommand(child)
+	if cs == nil {
+		t.Fatal("expected non-nil CommandSchema")
+	}
+
+	found := false
+	for _, f := range cs.Flags {
+		if f.Name == "output" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected inherited persistent flag 'output' to be included")
+	}
+}
+
+func TestFromCommand_ArgsFallbackWhenUseMissing(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:  "test",
+		Args: cobra.ExactArgs(1),
+	}
+
+	cs := FromCommand(cmd)
+	if cs == nil {
+		t.Fatal("expected non-nil CommandSchema")
+	}
+	if len(cs.Args) != 1 {
+		t.Fatalf("expected 1 inferred arg, got %d", len(cs.Args))
+	}
+	if cs.Args[0].Name != "args" || !cs.Args[0].Required || !cs.Args[0].Variadic {
+		t.Errorf("unexpected inferred arg: %+v", cs.Args[0])
 	}
 }
 

@@ -186,6 +186,37 @@ func TestFromAnnotations_AllEnumValues(t *testing.T) {
 	}
 }
 
+func TestFromAnnotations_NormalizeEnumValues(t *testing.T) {
+	annotations := map[string]string{
+		"type":       " ACTION ",
+		"volatility": " STABLE ",
+		"parallel":   " SAFE ",
+		"risk":       " LOW ",
+		"confirm":    " NONE ",
+		"os_user":    " ROOT ",
+	}
+
+	s := FromAnnotations(annotations)
+	if s.Type != TYPE_ACTION {
+		t.Errorf("Type = %q, want %q", s.Type, TYPE_ACTION)
+	}
+	if s.Volatility != VOLATILITY_STABLE {
+		t.Errorf("Volatility = %q, want %q", s.Volatility, VOLATILITY_STABLE)
+	}
+	if s.Parallel != PARALLEL_SAFE {
+		t.Errorf("Parallel = %q, want %q", s.Parallel, PARALLEL_SAFE)
+	}
+	if s.Risk != RISK_LOW {
+		t.Errorf("Risk = %q, want %q", s.Risk, RISK_LOW)
+	}
+	if s.Confirm != CONFIRM_NONE {
+		t.Errorf("Confirm = %q, want %q", s.Confirm, CONFIRM_NONE)
+	}
+	if s.OSUser != OS_USER_ROOT {
+		t.Errorf("OSUser = %q, want %q", s.OSUser, OS_USER_ROOT)
+	}
+}
+
 // TestFromAnnotations_Idempotent tests idempotent field parsing
 func TestFromAnnotations_Idempotent(t *testing.T) {
 	tests := []struct {
@@ -421,4 +452,3 @@ func TestNilReceiverSafety(t *testing.T) {
 		t.Error("nil.JSON() should return error")
 	}
 }
-

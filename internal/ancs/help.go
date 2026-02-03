@@ -4,6 +4,7 @@ package ancs
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -12,8 +13,8 @@ import (
 	"pig/internal/config"
 )
 
-// originalHelpFunc stores the original help function for fallback
-var originalHelpFunc func(*cobra.Command, []string)
+// originalHelpFuncs stores the original help function for each command
+var originalHelpFuncs = map[*cobra.Command]func(*cobra.Command, []string){}
 
 // AgentHintText is the hint message shown at the bottom of text-mode help output.
 // It informs human users about machine-readable output options.
@@ -26,8 +27,10 @@ func SetupHelp(rootCmd *cobra.Command) {
 	if rootCmd == nil {
 		return
 	}
-	originalHelpFunc = rootCmd.HelpFunc()
-	rootCmd.SetHelpFunc(HelpFunc)
+	walkCommands(rootCmd, func(cmd *cobra.Command) {
+		originalHelpFuncs[cmd] = cmd.HelpFunc()
+		cmd.SetHelpFunc(HelpFunc)
+	})
 }
 
 // HelpFunc is the ANCS-aware help function that outputs structured data
@@ -58,36 +61,38 @@ func HelpFunc(cmd *cobra.Command, args []string) {
 // getOutputFormat retrieves the output format from the command's flags.
 // It traverses up to the root command to find the flag.
 func getOutputFormat(cmd *cobra.Command) string {
-	// First check if config.OutputFormat is already set
-	if config.OutputFormat != "" && config.OutputFormat != config.OUTPUT_TEXT {
-		return config.OutputFormat
-	}
-
 	// Otherwise, get directly from flag (help runs before PersistentPreRunE)
 	root := cmd.Root()
 	if root == nil {
+		if valid := validateOutputFormat(config.OutputFormat); valid != "" {
+			return valid
+		}
 		return config.OUTPUT_TEXT
 	}
 
 	flag := root.PersistentFlags().Lookup("output")
 	if flag == nil {
+		if valid := validateOutputFormat(config.OutputFormat); valid != "" {
+			return valid
+		}
 		return config.OUTPUT_TEXT
 	}
 
 	format := strings.ToLower(strings.TrimSpace(flag.Value.String()))
-	for _, valid := range config.ValidOutputFormats {
-		if format == valid {
-			return format
-		}
+	if valid := validateOutputFormat(format); valid != "" {
+		return valid
 	}
 
+	if valid := validateOutputFormat(config.OutputFormat); valid != "" {
+		return valid
+	}
 	return config.OUTPUT_TEXT
 }
 
 // callOriginalHelp invokes the original help function and appends the agent hint.
 // If no original function was saved, it uses the default cobra help.
 func callOriginalHelp(cmd *cobra.Command, args []string) {
-	if originalHelpFunc != nil {
+	if originalHelpFunc, ok := originalHelpFuncs[cmd]; ok && originalHelpFunc != nil {
 		originalHelpFunc(cmd, args)
 	} else {
 		// Fallback to cobra's built-in help behavior
@@ -98,14 +103,40 @@ func callOriginalHelp(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	}
 	// Append agent hint after help output (only called in text mode)
-	printAgentHint()
+	printAgentHint(cmd.OutOrStdout())
 }
 
 // printAgentHint outputs the agent hint message with proper visual separation.
 // This is only called in text mode to inform users about machine-readable options.
-func printAgentHint() {
-	fmt.Println() // Blank line for visual separation
-	fmt.Println(AgentHintText)
+func printAgentHint(w io.Writer) {
+	if w == nil {
+		w = os.Stdout
+	}
+	fmt.Fprintln(w) // Blank line for visual separation
+	fmt.Fprintln(w, AgentHintText)
+}
+
+func validateOutputFormat(format string) string {
+	normalized := strings.ToLower(strings.TrimSpace(format))
+	if normalized == "" {
+		return ""
+	}
+	for _, valid := range config.ValidOutputFormats {
+		if normalized == valid {
+			return normalized
+		}
+	}
+	return ""
+}
+
+func walkCommands(root *cobra.Command, fn func(*cobra.Command)) {
+	if root == nil || fn == nil {
+		return
+	}
+	fn(root)
+	for _, cmd := range root.Commands() {
+		walkCommands(cmd, fn)
+	}
 }
 
 // RenderHelp outputs the command schema in the specified format.
