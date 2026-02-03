@@ -61,6 +61,12 @@ var ValidOutputFormats = []string{OUTPUT_TEXT, OUTPUT_YAML, OUTPUT_JSON, OUTPUT_
 // OutputFormat is the global output format setting (default: text)
 var OutputFormat = OUTPUT_TEXT
 
+// IsStructuredOutput returns true if the current output format is structured (YAML/JSON)
+// rather than plain text. Useful for suppressing progress output in structured mode.
+func IsStructuredOutput() bool {
+	return OutputFormat == OUTPUT_YAML || OutputFormat == OUTPUT_JSON || OutputFormat == OUTPUT_JSON_PRETTY
+}
+
 // Build information. Populated at build-time via ldflags.
 // BuildDate format follows RFC3339: YYYY-MM-DDTHH:MM:SSZ (e.g., 2025-01-10T10:20:00Z)
 // This matches the format used in Makefile: date -u +'%Y-%m-%dT%H:%M:%SZ'

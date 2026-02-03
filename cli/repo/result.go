@@ -500,3 +500,128 @@ func (r *RepoUpdateData) Text() string {
 	}
 	return fmt.Sprintf("Cache update failed: %s (command: %s)", r.Error, r.Command)
 }
+
+/********************
+ * Data Transfer Objects (DTOs) for repo create command
+ ********************/
+
+// RepoCreateData is the DTO for repo create command
+type RepoCreateData struct {
+	OSEnv        *OSEnvironment     `json:"os_env" yaml:"os_env"`
+	RepoDirs     []string           `json:"repo_dirs" yaml:"repo_dirs"`
+	CreatedRepos []*CreatedRepoItem `json:"created_repos" yaml:"created_repos"`
+	FailedRepos  []*FailedRepoItem  `json:"failed_repos,omitempty" yaml:"failed_repos,omitempty"`
+	DurationMs   int64              `json:"duration_ms" yaml:"duration_ms"`
+}
+
+// CreatedRepoItem represents a successfully created repository
+type CreatedRepoItem struct {
+	Path         string `json:"path" yaml:"path"`
+	RepoType     string `json:"repo_type" yaml:"repo_type"`
+	CompleteFile string `json:"complete_file" yaml:"complete_file"`
+}
+
+// Text returns a human-readable representation of CreatedRepoItem
+func (c *CreatedRepoItem) Text() string {
+	if c == nil {
+		return ""
+	}
+	return c.Path
+}
+
+// Text returns a human-readable representation of FailedRepoItem
+func (f *FailedRepoItem) Text() string {
+	if f == nil {
+		return ""
+	}
+	if f.Module != "" {
+		return fmt.Sprintf("%s (error: %s)", f.Module, f.Error)
+	}
+	return f.Error
+}
+
+// Text returns a human-readable representation of RepoCreateData
+func (r *RepoCreateData) Text() string {
+	if r == nil {
+		return ""
+	}
+	successCount := len(r.CreatedRepos)
+	failCount := len(r.FailedRepos)
+	if failCount > 0 {
+		return fmt.Sprintf("Created %d repos, failed %d", successCount, failCount)
+	}
+	return fmt.Sprintf("Created %d repos", successCount)
+}
+
+/********************
+ * Data Transfer Objects (DTOs) for repo boot command
+ ********************/
+
+// RepoBootData is the DTO for repo boot command
+type RepoBootData struct {
+	OSEnv          *OSEnvironment `json:"os_env" yaml:"os_env"`
+	SourcePkg      string         `json:"source_pkg" yaml:"source_pkg"`
+	TargetDir      string         `json:"target_dir" yaml:"target_dir"`
+	ExtractedFiles []string       `json:"extracted_files,omitempty" yaml:"extracted_files,omitempty"`
+	LocalRepoAdded bool           `json:"local_repo_added" yaml:"local_repo_added"`
+	LocalRepoPath  string         `json:"local_repo_path,omitempty" yaml:"local_repo_path,omitempty"`
+	DurationMs     int64          `json:"duration_ms" yaml:"duration_ms"`
+}
+
+// Text returns a human-readable representation of RepoBootData
+func (r *RepoBootData) Text() string {
+	if r == nil {
+		return ""
+	}
+	if r.LocalRepoAdded {
+		return fmt.Sprintf("Bootstrapped from %s to %s, local repo added: %s", r.SourcePkg, r.TargetDir, r.LocalRepoPath)
+	}
+	return fmt.Sprintf("Bootstrapped from %s to %s", r.SourcePkg, r.TargetDir)
+}
+
+/********************
+ * Data Transfer Objects (DTOs) for repo cache command
+ ********************/
+
+// RepoCacheData is the DTO for repo cache command
+type RepoCacheData struct {
+	OSEnv         *OSEnvironment `json:"os_env" yaml:"os_env"`
+	SourceDir     string         `json:"source_dir" yaml:"source_dir"`
+	TargetPkg     string         `json:"target_pkg" yaml:"target_pkg"`
+	IncludedRepos []string       `json:"included_repos" yaml:"included_repos"`
+	PackageSize   int64          `json:"package_size" yaml:"package_size"`
+	PackageMD5    string         `json:"package_md5,omitempty" yaml:"package_md5,omitempty"`
+	DurationMs    int64          `json:"duration_ms" yaml:"duration_ms"`
+}
+
+// Text returns a human-readable representation of RepoCacheData
+func (r *RepoCacheData) Text() string {
+	if r == nil {
+		return ""
+	}
+	return fmt.Sprintf("Cached %d repos to %s (%.2f GiB)", len(r.IncludedRepos), r.TargetPkg, float64(r.PackageSize)/(1024.0*1024.0*1024.0))
+}
+
+/********************
+ * Data Transfer Objects (DTOs) for repo reload command
+ ********************/
+
+// RepoReloadData is the DTO for repo reload command
+type RepoReloadData struct {
+	SourceURL    string `json:"source_url" yaml:"source_url"`
+	RepoCount    int    `json:"repo_count" yaml:"repo_count"`
+	CatalogPath  string `json:"catalog_path,omitempty" yaml:"catalog_path,omitempty"`
+	DownloadedAt string `json:"downloaded_at,omitempty" yaml:"downloaded_at,omitempty"`
+	DurationMs   int64  `json:"duration_ms" yaml:"duration_ms"`
+}
+
+// Text returns a human-readable representation of RepoReloadData
+func (r *RepoReloadData) Text() string {
+	if r == nil {
+		return ""
+	}
+	if r.CatalogPath != "" {
+		return fmt.Sprintf("Reloaded %d repos from %s to %s", r.RepoCount, r.SourceURL, r.CatalogPath)
+	}
+	return fmt.Sprintf("Reloaded %d repos from %s", r.RepoCount, r.SourceURL)
+}

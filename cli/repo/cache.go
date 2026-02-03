@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"pig/internal/config"
+	"pig/internal/output"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -159,10 +161,12 @@ func Cache(dirPath, pkgPath string, repos []string) error {
 		}
 	}
 
-	fmt.Println()
-
-	logrus.Infof("offline package created")
-	_ = printFinalPackageInfo(pkgPath)
+	// Only print newline and package info in text mode
+	if !config.IsStructuredOutput() {
+		fmt.Println()
+		logrus.Infof("offline package created")
+		_ = printFinalPackageInfo(pkgPath)
+	}
 	return nil
 }
 
@@ -252,8 +256,13 @@ func countFiles(absBase string, repos []string) (int, int64, error) {
 
 // printProgressAndFile prints a file-based progress indicator with the current file name.
 // The terminal line is cleared on each update to avoid leftover characters.
+// In structured output mode (YAML/JSON), progress is suppressed to avoid polluting output.
 func printProgressAndFile(processed, total int, currentFile string) {
 	if total == 0 {
+		return
+	}
+	// Skip progress output in structured output mode to avoid polluting YAML/JSON
+	if config.IsStructuredOutput() {
 		return
 	}
 	percent := float64(processed) / float64(total) * 100
@@ -266,4 +275,82 @@ func printProgressAndFile(processed, total int, currentFile string) {
 // bytesToGiB converts bytes to GiB (1 GiB = 1024^3 bytes).
 func bytesToGiB(b int64) float64 {
 	return float64(b) / (1024.0 * 1024.0 * 1024.0)
+}
+
+// CacheWithResult creates an offline package from local repo and returns a structured Result
+// This function is used for YAML/JSON output modes
+func CacheWithResult(dirPath, pkgPath string, repos []string) *output.Result {
+	startTime := time.Now()
+
+	// Use defaults if not provided
+	if dirPath == "" {
+		dirPath = "/www"
+	}
+	if pkgPath == "" {
+		pkgPath = "/tmp/pkg.tgz"
+	}
+	if len(repos) == 0 {
+		repos = []string{"pigsty"}
+	}
+
+	// Build OS environment info
+	osEnv := &OSEnvironment{
+		Code:  config.OSCode,
+		Arch:  config.OSArch,
+		Type:  config.OSType,
+		Major: config.OSMajor,
+	}
+
+	// Prepare data structure
+	data := &RepoCacheData{
+		OSEnv:         osEnv,
+		SourceDir:     dirPath,
+		TargetPkg:     pkgPath,
+		IncludedRepos: repos,
+	}
+
+	// Get absolute base directory
+	absBase, err := filepath.Abs(dirPath)
+	if err != nil {
+		data.DurationMs = time.Since(startTime).Milliseconds()
+		return output.Fail(output.CodeRepoCacheFailed,
+			fmt.Sprintf("failed to determine abs path of dirPath %s: %v", dirPath, err)).WithData(data)
+	}
+
+	// Check if base dir exists
+	baseInfo, err := os.Stat(absBase)
+	if os.IsNotExist(err) || !baseInfo.IsDir() {
+		data.DurationMs = time.Since(startTime).Milliseconds()
+		return output.Fail(output.CodeRepoDirNotFound,
+			fmt.Sprintf("invalid base directory: %s", absBase)).WithData(data)
+	}
+
+	// Perform the cache operation (reuse existing Cache function logic, but capture result)
+	err = Cache(dirPath, pkgPath, repos)
+	data.DurationMs = time.Since(startTime).Milliseconds()
+
+	if err != nil {
+		return output.Fail(output.CodeRepoCacheFailed, err.Error()).WithData(data)
+	}
+
+	// Get package info
+	if pkgInfo, err := os.Stat(pkgPath); err == nil {
+		data.PackageSize = pkgInfo.Size()
+		// Get absolute path for target package
+		if absPkg, err := filepath.Abs(pkgPath); err == nil {
+			data.TargetPkg = absPkg
+		}
+
+		// Calculate MD5
+		if f, err := os.Open(pkgPath); err == nil {
+			hash := md5.New()
+			if _, err := io.Copy(hash, f); err == nil {
+				data.PackageMD5 = fmt.Sprintf("%x", hash.Sum(nil))
+			}
+			f.Close()
+		}
+	}
+
+	message := fmt.Sprintf("Created offline package %s (%.2f GiB)", data.TargetPkg, bytesToGiB(data.PackageSize))
+	return output.OK(message, data)
 }
