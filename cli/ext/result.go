@@ -40,27 +40,27 @@ type ExtensionSummary struct {
 
 // ExtensionInfoData is the DTO for ext info command
 type ExtensionInfoData struct {
-	Name        string                `json:"name" yaml:"name"`
-	Pkg         string                `json:"pkg" yaml:"pkg"`
-	LeadExt     string                `json:"lead_ext,omitempty" yaml:"lead_ext,omitempty"`
-	Category    string                `json:"category" yaml:"category"`
-	License     string                `json:"license" yaml:"license"`
-	Language    string                `json:"language" yaml:"language"`
-	Version     string                `json:"version" yaml:"version"`
-	URL         string                `json:"url,omitempty" yaml:"url,omitempty"`
-	Source      string                `json:"source,omitempty" yaml:"source,omitempty"`
-	Description string                `json:"description" yaml:"description"`
-	ZhDesc      string                `json:"zh_desc,omitempty" yaml:"zh_desc,omitempty"`
-	Properties  *ExtensionProperties  `json:"properties" yaml:"properties"`
-	Requires    []string              `json:"requires,omitempty" yaml:"requires,omitempty"`
-	RequiredBy  []string              `json:"required_by,omitempty" yaml:"required_by,omitempty"`
-	SeeAlso     []string              `json:"see_also,omitempty" yaml:"see_also,omitempty"`
-	PgVer       []string              `json:"pg_ver" yaml:"pg_ver"`
-	Schemas     []string              `json:"schemas,omitempty" yaml:"schemas,omitempty"`
-	RpmPackage  *PackageInfo          `json:"rpm_package,omitempty" yaml:"rpm_package,omitempty"`
-	DebPackage  *PackageInfo          `json:"deb_package,omitempty" yaml:"deb_package,omitempty"`
-	Operations  *ExtensionOperations  `json:"operations" yaml:"operations"`
-	Comment     string                `json:"comment,omitempty" yaml:"comment,omitempty"`
+	Name        string               `json:"name" yaml:"name"`
+	Pkg         string               `json:"pkg" yaml:"pkg"`
+	LeadExt     string               `json:"lead_ext,omitempty" yaml:"lead_ext,omitempty"`
+	Category    string               `json:"category" yaml:"category"`
+	License     string               `json:"license" yaml:"license"`
+	Language    string               `json:"language" yaml:"language"`
+	Version     string               `json:"version" yaml:"version"`
+	URL         string               `json:"url,omitempty" yaml:"url,omitempty"`
+	Source      string               `json:"source,omitempty" yaml:"source,omitempty"`
+	Description string               `json:"description" yaml:"description"`
+	ZhDesc      string               `json:"zh_desc,omitempty" yaml:"zh_desc,omitempty"`
+	Properties  *ExtensionProperties `json:"properties" yaml:"properties"`
+	Requires    []string             `json:"requires,omitempty" yaml:"requires,omitempty"`
+	RequiredBy  []string             `json:"required_by,omitempty" yaml:"required_by,omitempty"`
+	SeeAlso     []string             `json:"see_also,omitempty" yaml:"see_also,omitempty"`
+	PgVer       []string             `json:"pg_ver" yaml:"pg_ver"`
+	Schemas     []string             `json:"schemas,omitempty" yaml:"schemas,omitempty"`
+	RpmPackage  *PackageInfo         `json:"rpm_package,omitempty" yaml:"rpm_package,omitempty"`
+	DebPackage  *PackageInfo         `json:"deb_package,omitempty" yaml:"deb_package,omitempty"`
+	Operations  *ExtensionOperations `json:"operations" yaml:"operations"`
+	Comment     string               `json:"comment,omitempty" yaml:"comment,omitempty"`
 }
 
 // ExtensionProperties contains extension property flags
@@ -146,15 +146,15 @@ type MatrixEntry struct {
 
 // ExtensionAddData is the DTO for ext add command
 type ExtensionAddData struct {
-	PgVersion   int                  `json:"pg_version" yaml:"pg_version"`
-	OSCode      string               `json:"os_code" yaml:"os_code"`
-	Arch        string               `json:"arch" yaml:"arch"`
-	Requested   []string             `json:"requested" yaml:"requested"`
-	Packages    []string             `json:"packages" yaml:"packages"`
-	Installed   []*InstalledExtItem  `json:"installed" yaml:"installed"`
-	Failed      []*FailedExtItem     `json:"failed,omitempty" yaml:"failed,omitempty"`
-	DurationMs  int64                `json:"duration_ms" yaml:"duration_ms"`
-	AutoConfirm bool                 `json:"auto_confirm" yaml:"auto_confirm"`
+	PgVersion   int                 `json:"pg_version" yaml:"pg_version"`
+	OSCode      string              `json:"os_code" yaml:"os_code"`
+	Arch        string              `json:"arch" yaml:"arch"`
+	Requested   []string            `json:"requested" yaml:"requested"`
+	Packages    []string            `json:"packages" yaml:"packages"`
+	Installed   []*InstalledExtItem `json:"installed" yaml:"installed"`
+	Failed      []*FailedExtItem    `json:"failed,omitempty" yaml:"failed,omitempty"`
+	DurationMs  int64               `json:"duration_ms" yaml:"duration_ms"`
+	AutoConfirm bool                `json:"auto_confirm" yaml:"auto_confirm"`
 }
 
 // InstalledExtItem represents a successfully installed extension
@@ -214,12 +214,12 @@ type ImportResultData struct {
 
 // ScanResultData is the DTO for ext scan command
 type ScanResultData struct {
-	PgInfo        *PostgresInfo       `json:"pg_info" yaml:"pg_info"`
-	ExtCount      int                 `json:"extension_count" yaml:"extension_count"`
-	Extensions    []*ScanExtEntry     `json:"extensions" yaml:"extensions"`
-	UnmatchedLibs []string            `json:"unmatched_libs,omitempty" yaml:"unmatched_libs,omitempty"`
-	EncodingLibs  []string            `json:"encoding_libs,omitempty" yaml:"encoding_libs,omitempty"`
-	BuiltInLibs   []string            `json:"builtin_libs,omitempty" yaml:"builtin_libs,omitempty"`
+	PgInfo        *PostgresInfo   `json:"pg_info" yaml:"pg_info"`
+	ExtCount      int             `json:"extension_count" yaml:"extension_count"`
+	Extensions    []*ScanExtEntry `json:"extensions" yaml:"extensions"`
+	UnmatchedLibs []string        `json:"unmatched_libs,omitempty" yaml:"unmatched_libs,omitempty"`
+	EncodingLibs  []string        `json:"encoding_libs,omitempty" yaml:"encoding_libs,omitempty"`
+	BuiltInLibs   []string        `json:"builtin_libs,omitempty" yaml:"builtin_libs,omitempty"`
 }
 
 // ScanExtEntry represents a scanned extension entry
@@ -235,11 +235,11 @@ type ScanExtEntry struct {
 
 // LinkResultData is the DTO for ext link command
 type LinkResultData struct {
-	Action       string `json:"action" yaml:"action"`                                       // "link" or "unlink"
-	PgHome       string `json:"pg_home,omitempty" yaml:"pg_home,omitempty"`                 // PostgreSQL home directory
-	SymlinkPath  string `json:"symlink_path" yaml:"symlink_path"`                           // /usr/pgsql
-	ProfilePath  string `json:"profile_path" yaml:"profile_path"`                           // /etc/profile.d/pgsql.sh
-	ActivatedCmd string `json:"activated_cmd,omitempty" yaml:"activated_cmd,omitempty"`     // ". /etc/profile.d/pgsql.sh"
+	Action       string `json:"action" yaml:"action"`                                   // "link" or "unlink"
+	PgHome       string `json:"pg_home,omitempty" yaml:"pg_home,omitempty"`             // PostgreSQL home directory
+	SymlinkPath  string `json:"symlink_path" yaml:"symlink_path"`                       // /usr/pgsql
+	ProfilePath  string `json:"profile_path" yaml:"profile_path"`                       // /etc/profile.d/pgsql.sh
+	ActivatedCmd string `json:"activated_cmd,omitempty" yaml:"activated_cmd,omitempty"` // ". /etc/profile.d/pgsql.sh"
 }
 
 // ReloadResultData is the DTO for ext reload command
@@ -495,6 +495,7 @@ func GetExtStatus(showContrib bool) *output.Result {
 		exts = append(exts, extInfo.ToSummary(Postgres.MajorVersion))
 	}
 
+	totalInstalled := len(exts)
 	data := &ExtensionStatusData{
 		PgInfo: &PostgresInfo{
 			Version:      Postgres.Version,
@@ -503,14 +504,14 @@ func GetExtStatus(showContrib bool) *output.Result {
 			ExtensionDir: Postgres.ExtPath,
 		},
 		Summary: &ExtensionSummaryInfo{
-			TotalInstalled: len(Postgres.Extensions),
+			TotalInstalled: totalInstalled,
 			ByRepo:         repoCount,
 		},
 		Extensions: exts,
 		NotFound:   notFound,
 	}
 
-	message := fmt.Sprintf("PostgreSQL %d: %d extensions installed", Postgres.MajorVersion, len(Postgres.Extensions))
+	message := fmt.Sprintf("PostgreSQL %d: %d extensions installed", Postgres.MajorVersion, totalInstalled)
 	return output.OK(message, data)
 }
 

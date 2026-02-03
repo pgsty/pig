@@ -32,7 +32,7 @@ func UpdateExtensions(pgVer int, names []string, yes bool) error {
 			updateCmds = append(updateCmds, "-y")
 		}
 	case config.DistroDEB:
-		updateCmds = append(updateCmds, pkgMgr, "upgrade")
+		updateCmds = append(updateCmds, pkgMgr, "install", "--only-upgrade")
 		if yes {
 			updateCmds = append(updateCmds, "-y")
 		}
@@ -81,7 +81,7 @@ func UpgradeExtensions(pgVer int, names []string, yes bool) *output.Result {
 	startTime := time.Now()
 
 	if len(names) == 0 {
-		return output.Fail(output.CodeExtensionNotFound, "no extensions specified")
+		return output.Fail(output.CodeExtensionInvalidArgs, "no extensions specified")
 	}
 	if pgVer == 0 {
 		logrus.Debugf("using latest postgres version: %d by default", PostgresLatestMajorVersion)
@@ -179,7 +179,7 @@ func UpgradeExtensions(pgVer int, names []string, yes bool) *output.Result {
 			updateCmds = append(updateCmds, "-y")
 		}
 	case config.DistroDEB:
-		updateCmds = append(updateCmds, pkgMgr, "upgrade")
+		updateCmds = append(updateCmds, pkgMgr, "install", "--only-upgrade")
 		if yes {
 			updateCmds = append(updateCmds, "-y")
 		}
@@ -230,15 +230,12 @@ func UpgradeExtensions(pgVer int, names []string, yes bool) *output.Result {
 	}
 
 	// Determine overall result
-	if len(failed) > 0 && len(updated) == 0 {
-		return output.Fail(output.CodeExtensionUpdateFailed,
-			fmt.Sprintf("failed to update all %d extensions", len(failed))).WithData(data)
+	if len(failed) > 0 {
+		message := fmt.Sprintf("updated %d extensions, failed %d", len(updated), len(failed))
+		result := output.Fail(output.CodeExtensionUpdateFailed, message).WithData(data)
+		return result
 	}
 
 	message := fmt.Sprintf("Updated %d extensions", len(updated))
-	result := output.OK(message, data)
-	if len(failed) > 0 {
-		result.Detail = fmt.Sprintf("failed: %d", len(failed))
-	}
-	return result
+	return output.OK(message, data)
 }

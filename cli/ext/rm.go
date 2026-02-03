@@ -81,7 +81,7 @@ func RmExtensions(pgVer int, names []string, yes bool) *output.Result {
 	startTime := time.Now()
 
 	if len(names) == 0 {
-		return output.Fail(output.CodeExtensionNotFound, "no extensions specified")
+		return output.Fail(output.CodeExtensionInvalidArgs, "no extensions specified")
 	}
 	if pgVer == 0 {
 		logrus.Debugf("using latest postgres version: %d by default", PostgresLatestMajorVersion)
@@ -230,15 +230,12 @@ func RmExtensions(pgVer int, names []string, yes bool) *output.Result {
 	}
 
 	// Determine overall result
-	if len(failed) > 0 && len(removed) == 0 {
-		return output.Fail(output.CodeExtensionRemoveFailed,
-			fmt.Sprintf("failed to remove all %d extensions", len(failed))).WithData(data)
+	if len(failed) > 0 {
+		message := fmt.Sprintf("removed %d extensions, failed %d", len(removed), len(failed))
+		result := output.Fail(output.CodeExtensionRemoveFailed, message).WithData(data)
+		return result
 	}
 
 	message := fmt.Sprintf("Removed %d extensions", len(removed))
-	result := output.OK(message, data)
-	if len(failed) > 0 {
-		result.Detail = fmt.Sprintf("failed: %d", len(failed))
-	}
-	return result
+	return output.OK(message, data)
 }

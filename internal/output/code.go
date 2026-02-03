@@ -43,6 +43,7 @@ const (
 	CodeExtensionCatalogError  = MODULE_EXT + CAT_CONFIG + 1    // Catalog loading/parsing error
 	CodeExtensionNoPG          = MODULE_EXT + CAT_STATE + 1     // No PostgreSQL installation found
 	CodeExtensionUnsupportedOS = MODULE_EXT + CAT_STATE + 2     // Operating system not supported
+	CodeExtensionInvalidArgs   = MODULE_EXT + CAT_PARAM + 1     // Invalid or missing arguments
 	CodeExtensionInstallFailed = MODULE_EXT + CAT_OPERATION + 1 // Package manager installation failed
 	CodeExtensionRemoveFailed  = MODULE_EXT + CAT_OPERATION + 2 // Package manager removal failed
 	CodeExtensionUpdateFailed  = MODULE_EXT + CAT_OPERATION + 3 // Package manager update failed
@@ -53,15 +54,21 @@ const (
 
 // Repository module specific codes (MODULE_REPO = 110000)
 const (
-	CodeRepoNotFound           = MODULE_REPO + CAT_RESOURCE + 1  // Repository not found
-	CodeRepoModuleNotFound     = MODULE_REPO + CAT_RESOURCE + 2  // Module not found
-	CodeRepoManagerError       = MODULE_REPO + CAT_CONFIG + 1    // Repository manager initialization error
-	CodeRepoUnsupportedOS      = MODULE_REPO + CAT_STATE + 1     // Operating system not supported for repo operations
-	CodeRepoAddFailed          = MODULE_REPO + CAT_OPERATION + 1 // Add repository failed
-	CodeRepoBackupFailed       = MODULE_REPO + CAT_OPERATION + 2 // Backup repository failed
-	CodeRepoUpdateFailed       = MODULE_REPO + CAT_OPERATION + 3 // Update cache failed
-	CodeRepoRemoveFailed       = MODULE_REPO + CAT_OPERATION + 4 // Remove repository failed
-	CodeRepoCacheUpdateFailed  = MODULE_REPO + CAT_OPERATION + 5 // Cache update failed
+	CodeRepoNotFound          = MODULE_REPO + CAT_RESOURCE + 1  // Repository not found
+	CodeRepoModuleNotFound    = MODULE_REPO + CAT_RESOURCE + 2  // Module not found
+	CodeRepoPackageNotFound   = MODULE_REPO + CAT_RESOURCE + 3  // Offline package not found
+	CodeRepoDirNotFound       = MODULE_REPO + CAT_RESOURCE + 4  // Directory not found
+	CodeRepoManagerError      = MODULE_REPO + CAT_CONFIG + 1    // Repository manager initialization error
+	CodeRepoUnsupportedOS     = MODULE_REPO + CAT_STATE + 1     // Operating system not supported for repo operations
+	CodeRepoAddFailed         = MODULE_REPO + CAT_OPERATION + 1 // Add repository failed
+	CodeRepoBackupFailed      = MODULE_REPO + CAT_OPERATION + 2 // Backup repository failed
+	CodeRepoUpdateFailed      = MODULE_REPO + CAT_OPERATION + 3 // Update cache failed
+	CodeRepoRemoveFailed      = MODULE_REPO + CAT_OPERATION + 4 // Remove repository failed
+	CodeRepoCacheUpdateFailed = MODULE_REPO + CAT_OPERATION + 5 // Cache update failed
+	CodeRepoCreateFailed      = MODULE_REPO + CAT_OPERATION + 6 // Create local repository failed
+	CodeRepoBootFailed        = MODULE_REPO + CAT_OPERATION + 7 // Boot from offline package failed
+	CodeRepoCacheFailed       = MODULE_REPO + CAT_OPERATION + 8 // Cache/pack operation failed
+	CodeRepoReloadFailed      = MODULE_REPO + CAT_OPERATION + 9 // Reload catalog failed
 )
 
 // ExitCode converts a status code to a shell exit code.

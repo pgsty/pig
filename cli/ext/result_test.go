@@ -6,6 +6,7 @@ package ext
 import (
 	"encoding/json"
 	"pig/internal/config"
+	"pig/internal/output"
 	"strings"
 	"testing"
 
@@ -1290,8 +1291,8 @@ func TestAddExtensionsNoNames(t *testing.T) {
 	if result.Success {
 		t.Error("expected success=false for empty names")
 	}
-	if result.Code != 100501 { // CodeExtensionNotFound
-		t.Errorf("expected CodeExtensionNotFound (100501), got %d", result.Code)
+	if result.Code != 100101 { // CodeExtensionInvalidArgs
+		t.Errorf("expected CodeExtensionInvalidArgs (100101), got %d", result.Code)
 	}
 }
 
@@ -1418,6 +1419,12 @@ func TestAddExtensionsMixedResults(t *testing.T) {
 	result := AddExtensions(17, []string{"test_ext", "nonexistent"}, true)
 	if result == nil {
 		t.Fatal("expected non-nil result")
+	}
+	if result.Success {
+		t.Error("expected success=false for partial failure")
+	}
+	if result.Code != output.CodeExtensionInstallFailed {
+		t.Errorf("expected CodeExtensionInstallFailed, got %d", result.Code)
 	}
 
 	data, ok := result.Data.(*ExtensionAddData)
@@ -1929,8 +1936,8 @@ func TestRmExtensionsNoNames(t *testing.T) {
 	if result.Success {
 		t.Error("expected success=false for empty names")
 	}
-	if result.Code != 100501 { // CodeExtensionNotFound
-		t.Errorf("expected CodeExtensionNotFound (100501), got %d", result.Code)
+	if result.Code != 100101 { // CodeExtensionInvalidArgs
+		t.Errorf("expected CodeExtensionInvalidArgs (100101), got %d", result.Code)
 	}
 }
 
@@ -2128,8 +2135,8 @@ func TestUpgradeExtensionsNoNames(t *testing.T) {
 	if result.Success {
 		t.Error("expected success=false for empty names")
 	}
-	if result.Code != 100501 { // CodeExtensionNotFound
-		t.Errorf("expected CodeExtensionNotFound (100501), got %d", result.Code)
+	if result.Code != 100101 { // CodeExtensionInvalidArgs
+		t.Errorf("expected CodeExtensionInvalidArgs (100101), got %d", result.Code)
 	}
 }
 
@@ -2972,8 +2979,8 @@ func TestImportExtensionsResultNoNames(t *testing.T) {
 	if result.Success {
 		t.Error("expected success=false when no names provided")
 	}
-	if result.Code != 100501 { // CodeExtensionNotFound
-		t.Errorf("expected CodeExtensionNotFound (100501), got %d", result.Code)
+	if result.Code != 100101 { // CodeExtensionInvalidArgs
+		t.Errorf("expected CodeExtensionInvalidArgs (100101), got %d", result.Code)
 	}
 }
 

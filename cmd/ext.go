@@ -8,6 +8,8 @@ import (
 	"os"
 	"pig/cli/ext"
 	"pig/internal/config"
+	"pig/internal/output"
+	"pig/internal/utils"
 	"strconv"
 
 	"github.com/sirupsen/logrus"
@@ -50,7 +52,7 @@ var extCmd = &cobra.Command{
 `,
 	Annotations: map[string]string{
 		"name":       "pig ext",
-		"type":       "group",
+		"type":       "query",
 		"volatility": "stable",
 		"parallel":   "safe",
 		"idempotent": "true",
@@ -104,12 +106,7 @@ var extListCmd = &cobra.Command{
 		format := config.OutputFormat
 		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
 			result := ext.ListExtensions(query, pgVer)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			return nil
+			return handleStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -154,12 +151,7 @@ var extInfoCmd = &cobra.Command{
 		format := config.OutputFormat
 		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
 			result := ext.GetExtensionInfo(args)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			return nil
+			return handleStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -202,12 +194,7 @@ var extStatusCmd = &cobra.Command{
 		format := config.OutputFormat
 		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
 			result := ext.GetExtStatus(extShowContrib)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			return nil
+			return handleStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -238,12 +225,7 @@ var extScanCmd = &cobra.Command{
 		format := config.OutputFormat
 		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
 			result := ext.ScanExtensionsResult()
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			return nil
+			return handleStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -294,16 +276,7 @@ Description:
 		format := config.OutputFormat
 		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
 			result := ext.AddExtensions(pgVer, args, extYes)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			// If operation failed, return error for exit code
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -337,16 +310,7 @@ var extRmCmd = &cobra.Command{
 		format := config.OutputFormat
 		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
 			result := ext.RmExtensions(pgVer, args, extYes)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			// If operation failed, return error for exit code
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -387,16 +351,7 @@ Description:
 		format := config.OutputFormat
 		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
 			result := ext.UpgradeExtensions(pgVer, args, extYes)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			// If operation failed, return error for exit code
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -438,16 +393,7 @@ var extImportCmd = &cobra.Command{
 		format := config.OutputFormat
 		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
 			result := ext.ImportExtensionsResult(pgVer, args, extRepoDir)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			// If operation failed, return error for exit code
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -487,16 +433,7 @@ var extLinkCmd = &cobra.Command{
 		format := config.OutputFormat
 		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
 			result := ext.LinkPostgresResult(args...)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			// If operation failed, return error for exit code
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -525,16 +462,7 @@ var extReloadCmd = &cobra.Command{
 		format := config.OutputFormat
 		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
 			result := ext.ReloadCatalogResult()
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			// If operation failed, return error for exit code
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -569,12 +497,7 @@ var extAvailCmd = &cobra.Command{
 		format := config.OutputFormat
 		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
 			result := ext.GetExtensionAvailability(args)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			return nil
+			return handleStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -666,4 +589,17 @@ func init() {
 	extCmd.AddCommand(extLinkCmd)
 	extCmd.AddCommand(extReloadCmd)
 	extCmd.AddCommand(extAvailCmd)
+}
+
+func handleStructuredResult(result *output.Result) error {
+	if result == nil {
+		return fmt.Errorf("nil result")
+	}
+	if err := output.Print(result); err != nil {
+		return err
+	}
+	if !result.Success {
+		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf(result.Message)}
+	}
+	return nil
 }

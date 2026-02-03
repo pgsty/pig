@@ -6,7 +6,6 @@ import (
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
-	"regexp"
 	"strings"
 	"time"
 
@@ -18,7 +17,7 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 	startTime := time.Now()
 
 	if len(names) == 0 {
-		return output.Fail(output.CodeExtensionNotFound, "no extension names provided")
+		return output.Fail(output.CodeExtensionInvalidArgs, "no extension names provided")
 	}
 
 	if pgVer == 0 {
@@ -262,15 +261,7 @@ func DownloadDEB(pkgNames []string) error {
 			return fmt.Errorf("failed to run apt-cache depends for %s: %w", pkg, err)
 		}
 
-		// Split output by lines
-		depList := []string{}
-		lines := strings.Split(out, "\n")
-		re := regexp.MustCompile(`^\w`)
-		for _, line := range lines {
-			if re.MatchString(line) {
-				depList = append(depList, strings.TrimSpace(line))
-			}
-		}
+		depList := parseAptDependsOutput(out)
 		logrus.Debugf("resolve dependencies for %s: %s", pkg, strings.Join(depList, ", "))
 		dependencySet[pkg] = depList
 	}
@@ -302,6 +293,34 @@ func DownloadDEB(pkgNames []string) error {
 		logrus.Infof("consider using: pig repo create  to update repo meta")
 	}
 	return nil
+}
+
+func parseAptDependsOutput(out string) []string {
+	lines := strings.Split(out, "\n")
+	deps := make([]string, 0, len(lines))
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "|") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "|"))
+		}
+		if strings.HasPrefix(line, "<") {
+			continue
+		}
+		if idx := strings.Index(line, ":"); idx != -1 {
+			key := strings.TrimSpace(line[:idx])
+			value := strings.TrimSpace(line[idx+1:])
+			switch key {
+			case "Depends", "PreDepends", "Recommends", "Suggests", "Conflicts", "Breaks", "Replaces", "Enhances":
+				if value != "" {
+					deps = append(deps, value)
+				}
+			}
+		}
+	}
+	return deps
 }
 
 // validateTool checks if the required tools are installed

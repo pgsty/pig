@@ -71,70 +71,81 @@ func ReloadCatalogResult() *output.Result {
 		}(url)
 	}
 
-	select {
-	case res := <-resultChan:
-		if res.err != nil {
-			result := output.Fail(output.CodeExtensionReloadFailed, res.err.Error())
-			result.Data = &ReloadResultData{
-				SourceURL:    res.sourceURL,
-				DurationMs:   time.Since(startTime).Milliseconds(),
-				DownloadedAt: time.Now().Format(time.RFC3339),
+	var lastErr error
+	var lastURL string
+	for i := 0; i < len(urls); i++ {
+		select {
+		case res := <-resultChan:
+			if res.err != nil {
+				lastErr = res.err
+				lastURL = res.sourceURL
+				continue
 			}
-			return result
-		}
 
-		ec, err := NewExtensionCatalog()
-		if err != nil {
-			result := output.Fail(output.CodeExtensionCatalogError, fmt.Sprintf("failed to create extension catalog: %v", err))
-			result.Data = &ReloadResultData{
-				SourceURL:    res.sourceURL,
-				DurationMs:   time.Since(startTime).Milliseconds(),
-				DownloadedAt: time.Now().Format(time.RFC3339),
+			ec, err := NewExtensionCatalog()
+			if err != nil {
+				result := output.Fail(output.CodeExtensionCatalogError, fmt.Sprintf("failed to create extension catalog: %v", err))
+				result.Data = &ReloadResultData{
+					SourceURL:    res.sourceURL,
+					DurationMs:   time.Since(startTime).Milliseconds(),
+					DownloadedAt: time.Now().Format(time.RFC3339),
+				}
+				return result
 			}
-			return result
-		}
-		if err := ec.Load(res.content); err != nil {
-			result := output.Fail(output.CodeExtensionCatalogError, fmt.Sprintf("failed to validate extension catalog: %v", err))
-			result.Data = &ReloadResultData{
-				SourceURL:    res.sourceURL,
-				DurationMs:   time.Since(startTime).Milliseconds(),
-				DownloadedAt: time.Now().Format(time.RFC3339),
+			if err := ec.Load(res.content); err != nil {
+				result := output.Fail(output.CodeExtensionCatalogError, fmt.Sprintf("failed to validate extension catalog: %v", err))
+				result.Data = &ReloadResultData{
+					SourceURL:    res.sourceURL,
+					DurationMs:   time.Since(startTime).Milliseconds(),
+					DownloadedAt: time.Now().Format(time.RFC3339),
+				}
+				return result
 			}
-			return result
-		}
 
-		extNum := len(ec.Extensions)
-		catalogPath := filepath.Join(config.ConfigDir, "extension.csv")
-		if err := os.WriteFile(catalogPath, res.content, 0644); err != nil {
-			result := output.Fail(output.CodeExtensionReloadFailed, fmt.Sprintf("failed to write extension catalog file: %v", err))
-			result.Data = &ReloadResultData{
+			extNum := len(ec.Extensions)
+			catalogPath := filepath.Join(config.ConfigDir, "extension.csv")
+			if err := os.WriteFile(catalogPath, res.content, 0644); err != nil {
+				result := output.Fail(output.CodeExtensionReloadFailed, fmt.Sprintf("failed to write extension catalog file: %v", err))
+				result.Data = &ReloadResultData{
+					SourceURL:      res.sourceURL,
+					ExtensionCount: extNum,
+					DurationMs:     time.Since(startTime).Milliseconds(),
+					DownloadedAt:   time.Now().Format(time.RFC3339),
+				}
+				return result
+			}
+
+			data := &ReloadResultData{
 				SourceURL:      res.sourceURL,
 				ExtensionCount: extNum,
-				DurationMs:     time.Since(startTime).Milliseconds(),
+				CatalogPath:    catalogPath,
 				DownloadedAt:   time.Now().Format(time.RFC3339),
+				DurationMs:     time.Since(startTime).Milliseconds(),
+			}
+
+			message := fmt.Sprintf("Reloaded extension catalog: %d extensions from %s", extNum, res.sourceURL)
+			return output.OK(message, data)
+
+		case <-ctx.Done():
+			result := output.Fail(output.CodeExtensionReloadFailed, "download timed out")
+			result.Data = &ReloadResultData{
+				DurationMs:   time.Since(startTime).Milliseconds(),
+				DownloadedAt: time.Now().Format(time.RFC3339),
 			}
 			return result
 		}
-
-		data := &ReloadResultData{
-			SourceURL:      res.sourceURL,
-			ExtensionCount: extNum,
-			CatalogPath:    catalogPath,
-			DownloadedAt:   time.Now().Format(time.RFC3339),
-			DurationMs:     time.Since(startTime).Milliseconds(),
-		}
-
-		message := fmt.Sprintf("Reloaded extension catalog: %d extensions from %s", extNum, res.sourceURL)
-		return output.OK(message, data)
-
-	case <-ctx.Done():
-		result := output.Fail(output.CodeExtensionReloadFailed, "download timed out")
-		result.Data = &ReloadResultData{
-			DurationMs:   time.Since(startTime).Milliseconds(),
-			DownloadedAt: time.Now().Format(time.RFC3339),
-		}
-		return result
 	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("all download attempts failed")
+	}
+	result := output.Fail(output.CodeExtensionReloadFailed, lastErr.Error())
+	result.Data = &ReloadResultData{
+		SourceURL:    lastURL,
+		DurationMs:   time.Since(startTime).Milliseconds(),
+		DownloadedAt: time.Now().Format(time.RFC3339),
+	}
+	return result
 }
 
 // ReloadExtensionCatalog downloads the latest extension catalog from the fastest available source

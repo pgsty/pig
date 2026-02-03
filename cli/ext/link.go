@@ -146,7 +146,7 @@ func LinkPostgresResult(args ...string) *output.Result {
 	}
 
 	if err := validatePGHome(pgHome); err != nil {
-		logrus.Warnf("postgres home validation failed: %s", err)
+		return output.Fail(output.CodeExtensionLinkFailed, err.Error())
 	}
 
 	// Create symlink

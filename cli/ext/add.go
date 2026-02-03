@@ -145,7 +145,7 @@ func AddExtensions(pgVer int, names []string, yes bool) *output.Result {
 	startTime := time.Now()
 
 	if len(names) == 0 {
-		return output.Fail(output.CodeExtensionNotFound, "no extensions specified")
+		return output.Fail(output.CodeExtensionInvalidArgs, "no extensions specified")
 	}
 	if pgVer == 0 {
 		logrus.Debugf("using latest postgres version: %d by default", PostgresLatestMajorVersion)
@@ -325,15 +325,12 @@ func AddExtensions(pgVer int, names []string, yes bool) *output.Result {
 	}
 
 	// Determine overall result
-	if len(failed) > 0 && len(installed) == 0 {
-		return output.Fail(output.CodeExtensionInstallFailed,
-			fmt.Sprintf("failed to install all %d extensions", len(failed))).WithData(data)
+	if len(failed) > 0 {
+		message := fmt.Sprintf("installed %d extensions, failed %d", len(installed), len(failed))
+		result := output.Fail(output.CodeExtensionInstallFailed, message).WithData(data)
+		return result
 	}
 
 	message := fmt.Sprintf("Installed %d extensions", len(installed))
-	result := output.OK(message, data)
-	if len(failed) > 0 {
-		result.Detail = fmt.Sprintf("failed: %d", len(failed))
-	}
-	return result
+	return output.OK(message, data)
 }
