@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"pig/internal/output"
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
@@ -227,6 +228,86 @@ type SwitchoverOptions struct {
 	Candidate string // target candidate (optional)
 	Force     bool   // skip confirmation
 	Scheduled string // scheduled time (e.g., "2024-01-01T12:00:00")
+}
+
+// BuildSwitchoverPlan builds a structured execution plan for switchover.
+// Returns a Plan with default values if opts is nil.
+func BuildSwitchoverPlan(opts *SwitchoverOptions) *output.Plan {
+	if opts == nil {
+		opts = &SwitchoverOptions{}
+	}
+	actions := []output.Action{
+		{Step: 1, Description: "Validate switchover parameters"},
+		{Step: 2, Description: "Execute patronictl switchover"},
+		{Step: 3, Description: "Verify new leader and update replicas"},
+	}
+
+	affects := []output.Resource{
+		{Type: "cluster", Name: "patroni", Impact: "role change", Detail: "leader switchover"},
+	}
+
+	if opts != nil && opts.Leader != "" {
+		affects = append(affects, output.Resource{
+			Type:   "node",
+			Name:   opts.Leader,
+			Impact: "leader demote",
+		})
+	}
+	if opts != nil && opts.Candidate != "" {
+		affects = append(affects, output.Resource{
+			Type:   "node",
+			Name:   opts.Candidate,
+			Impact: "leader promote",
+		})
+	}
+	if opts != nil && opts.Scheduled != "" {
+		affects = append(affects, output.Resource{
+			Type:   "schedule",
+			Name:   opts.Scheduled,
+			Impact: "deferred",
+		})
+	}
+
+	expected := "Leadership transferred to target candidate; old leader becomes replica"
+	if opts != nil && opts.Candidate != "" {
+		expected = fmt.Sprintf("Leadership transferred to %s; old leader becomes replica", opts.Candidate)
+	}
+
+	risks := []string{
+		"Brief write downtime during leader transition",
+		"Clients may need to reconnect after switchover",
+	}
+	if opts != nil && opts.Force {
+		risks = append(risks, "Confirmation is skipped (--force)")
+	}
+
+	return &output.Plan{
+		Command:  buildSwitchoverCommand(opts),
+		Actions:  actions,
+		Affects:  affects,
+		Expected: expected,
+		Risks:    risks,
+	}
+}
+
+func buildSwitchoverCommand(opts *SwitchoverOptions) string {
+	args := []string{"pig", "pt", "switchover"}
+	if opts == nil {
+		return strings.Join(args, " ")
+	}
+	if opts.Leader != "" {
+		args = append(args, "--leader", opts.Leader)
+	}
+	if opts.Candidate != "" {
+		args = append(args, "--candidate", opts.Candidate)
+	}
+	if opts.Scheduled != "" {
+		args = append(args, "--scheduled", opts.Scheduled)
+	}
+	if opts.Force {
+		args = append(args, "--force")
+	}
+	return strings.Join(args, " ")
 }
 
 // Switchover performs a planned switchover via patronictl switchover

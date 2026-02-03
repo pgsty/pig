@@ -5,13 +5,17 @@ package cmd
 
 import (
 	"pig/cli/patroni"
+	"pig/internal/output"
 	"pig/internal/utils"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
 
-var patroniDBSU string
+var (
+	patroniDBSU  string
+	patroniPlan  bool
+)
 
 // patroniCmd represents the patroni command
 var patroniCmd = &cobra.Command{
@@ -160,6 +164,17 @@ The old leader becomes a replica after switchover.`,
   pig pt switchover --candidate pg-test-2    # switchover to specific member
   pig pt switchover -f                       # switchover without confirmation
   pig pt switchover --scheduled "2024-01-01T12:00:00"  # scheduled switchover`,
+	Annotations: map[string]string{
+		"name":       "pig pt switchover",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "high",
+		"confirm":    "required",
+		"os_user":    "dbsu",
+		"cost":       "300000",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		leader, _ := cmd.Flags().GetString("leader")
 		candidate, _ := cmd.Flags().GetString("candidate")
@@ -171,6 +186,10 @@ The old leader becomes a replica after switchover.`,
 			Candidate: candidate,
 			Force:     force,
 			Scheduled: scheduled,
+		}
+		if patroniPlan {
+			plan := patroni.BuildSwitchoverPlan(opts)
+			return output.RenderPlan(plan)
 		}
 		return patroni.Switchover(utils.GetDBSU(patroniDBSU), opts)
 	},
@@ -433,6 +452,7 @@ func init() {
 	patroniSwitchoverCmd.Flags().StringP("candidate", "c", "", "Candidate to promote")
 	patroniSwitchoverCmd.Flags().BoolP("force", "f", false, "Skip confirmation")
 	patroniSwitchoverCmd.Flags().StringP("scheduled", "s", "", "Scheduled time for switchover")
+	patroniSwitchoverCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
 	// failover subcommand flags
 	patroniFailoverCmd.Flags().StringP("candidate", "c", "", "Candidate to promote")
