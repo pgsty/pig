@@ -74,10 +74,10 @@ func TestResult_ColorText(t *testing.T) {
 	// Note: ColorText falls back to Text() when not running in a TTY,
 	// so we test the color logic indirectly through getColor()
 	tests := []struct {
-		name          string
-		result        *Result
-		expectColor   string
-		expectSymbol  string
+		name         string
+		result       *Result
+		expectColor  string
+		expectSymbol string
 	}{
 		{
 			name:         "nil result",
@@ -102,6 +102,12 @@ func TestResult_ColorText(t *testing.T) {
 			result:       Fail(100601, "state issue"),
 			expectColor:  colorYellow,
 			expectSymbol: "✗",
+		},
+		{
+			name:         "success with warning category uses yellow",
+			result:       &Result{Success: true, Code: 100601, Message: "state warning"},
+			expectColor:  colorYellow,
+			expectSymbol: "✓",
 		},
 		{
 			name:         "warning config category uses yellow",
@@ -394,9 +400,9 @@ func TestStringWidth(t *testing.T) {
 		expected int
 	}{
 		{"abc", 3},
-		{"中文", 4},  // CJK characters are 2 width each
+		{"中文", 4}, // CJK characters are 2 width each
 		{"", 0},
-		{"a中b", 4}, // 1 + 2 + 1
+		{"a中b", 4},     // 1 + 2 + 1
 		{"Hello世界", 9}, // 5 + 2 + 2
 	}
 

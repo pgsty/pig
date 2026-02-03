@@ -51,13 +51,13 @@ func (r *Result) ColorText() string {
 
 // getColor returns the appropriate ANSI color code for this Result.
 func (r *Result) getColor() string {
-	if r.Success {
-		return colorGreen
-	}
 	// Check for warning category (state=6, config=7)
 	category := (r.Code % 10000) / 100
 	if category == 6 || category == 7 {
 		return colorYellow
+	}
+	if r.Success {
+		return colorGreen
 	}
 	return colorRed
 }

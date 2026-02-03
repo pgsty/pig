@@ -70,7 +70,11 @@ func (r *Result) ExitCode() int {
 	if r == nil {
 		return 1
 	}
-	return ExitCode(r.Code)
+	exit := ExitCode(r.Code)
+	if !r.Success && exit == 0 {
+		return 1
+	}
+	return exit
 }
 
 // String returns a human-readable representation of the Result for debugging.

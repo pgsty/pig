@@ -124,6 +124,7 @@ func TestResultExitCode(t *testing.T) {
 		expected int
 	}{
 		{"success", 0, 0},
+		{"success category but failure", MODULE_EXT + CAT_SUCCESS, 1},
 		{"param error", MODULE_EXT + CAT_PARAM + 1, 2},
 		{"permission error", MODULE_REPO + CAT_PERM + 1, 3},
 		{"internal error", MODULE_SYSTEM + CAT_INTERNAL + 1, 1},
@@ -131,7 +132,11 @@ func TestResultExitCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewResult(tt.code == 0, tt.code, "test")
+			success := tt.code == 0
+			if tt.name == "success category but failure" {
+				success = false
+			}
+			r := NewResult(success, tt.code, "test")
 			if got := r.ExitCode(); got != tt.expected {
 				t.Errorf("ExitCode() = %v, want %v", got, tt.expected)
 			}
