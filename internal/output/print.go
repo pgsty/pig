@@ -47,3 +47,33 @@ func PrintData(data interface{}, message string) error {
 func PrintError(code int, message string) error {
 	return Print(Fail(code, message))
 }
+
+// RenderPlan outputs the Plan to stdout based on the global output format.
+// For text format, it uses plain "text" output.
+func RenderPlan(plan *Plan) error {
+	return PrintPlanTo(os.Stdout, plan)
+}
+
+// PrintPlan outputs the Plan to stdout based on the global output format.
+// For text format, it uses plain "text" output.
+func PrintPlan(plan *Plan) error {
+	return PrintPlanTo(os.Stdout, plan)
+}
+
+// PrintPlanTo outputs the Plan to the specified writer based on the global output format.
+// Returns an error if the Plan is nil or rendering fails.
+func PrintPlanTo(w io.Writer, plan *Plan) error {
+	if plan == nil {
+		return fmt.Errorf("cannot print nil Plan")
+	}
+
+	format := config.OutputFormat
+
+	data, err := plan.Render(format)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(w, string(data))
+	return nil
+}

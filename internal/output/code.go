@@ -71,6 +71,16 @@ const (
 	CodeRepoReloadFailed      = MODULE_REPO + CAT_OPERATION + 9 // Reload catalog failed
 )
 
+// PITR module specific codes (MODULE_PITR = 160000)
+const (
+	CodePITRInvalidArgs    = MODULE_PITR + CAT_PARAM + 1     // Invalid or missing arguments
+	CodePITRPrecheckFailed = MODULE_PITR + CAT_STATE + 1     // Pre-check/validation failed
+	CodePITRStopFailed     = MODULE_PITR + CAT_OPERATION + 1 // Stop services failed
+	CodePITRRestoreFailed  = MODULE_PITR + CAT_OPERATION + 2 // Restore failed
+	CodePITRStartFailed    = MODULE_PITR + CAT_OPERATION + 3 // Start PostgreSQL failed
+	CodePITRPostFailed     = MODULE_PITR + CAT_OPERATION + 4 // Post-restore steps failed
+)
+
 // ExitCode converts a status code to a shell exit code.
 // It extracts the category (CC) from the 222 structure (MMCCNN) and maps it to exit codes.
 //
