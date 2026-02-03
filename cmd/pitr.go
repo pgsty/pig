@@ -5,7 +5,11 @@ Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
 package cmd
 
 import (
+	"fmt"
 	"pig/cli/pitr"
+	"pig/internal/config"
+	"pig/internal/output"
+	"pig/internal/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -61,7 +65,8 @@ The command uses the same execution privilege strategy as other pig commands:
   pig pitr -I
 
   # Show execution plan without running
-  pig pitr -d --dry-run
+  pig pitr -d --plan
+  pig pitr -d --dry-run   # alias for --plan
 
   # Skip confirmation (for automation)
   pig pitr -d -y
@@ -80,6 +85,17 @@ The command uses the same execution privilege strategy as other pig commands:
 
   # Auto-promote after recovery
   pig pitr -d -P`,
+	Annotations: map[string]string{
+		"name":       "pig pitr",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "critical",
+		"confirm":    "required",
+		"os_user":    "root",
+		"cost":       "600000",
+	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initAll()
 	},
@@ -93,6 +109,22 @@ The command uses the same execution privilege strategy as other pig commands:
 			return cmd.Help()
 		}
 
+		// Plan mode: show plan and exit
+		if pitrOpts.Plan || pitrOpts.DryRun {
+			plan, err := pitr.Plan(pitrOpts)
+			if err != nil {
+				return err
+			}
+			return output.RenderPlan(plan)
+		}
+
+		// Structured output: return Result
+		if config.IsStructuredOutput() {
+			result := pitr.ExecuteResult(pitrOpts)
+			return handlePITRResult(result)
+		}
+
+		// Text output: keep existing behavior
 		return pitr.Execute(pitrOpts)
 	},
 }
@@ -114,6 +146,7 @@ func init() {
 	// PITR control
 	pitrCmd.Flags().BoolVarP(&pitrOpts.SkipPatroni, "skip-patroni", "S", false, "skip Patroni stop operation")
 	pitrCmd.Flags().BoolVarP(&pitrOpts.NoRestart, "no-restart", "N", false, "don't restart PostgreSQL after restore")
+	pitrCmd.Flags().BoolVar(&pitrOpts.Plan, "plan", false, "show execution plan without running")
 	pitrCmd.Flags().BoolVar(&pitrOpts.DryRun, "dry-run", false, "show execution plan without running")
 	pitrCmd.Flags().BoolVarP(&pitrOpts.Yes, "yes", "y", false, "skip confirmation countdown")
 
@@ -125,4 +158,17 @@ func init() {
 	pitrCmd.Flags().StringVarP(&pitrOpts.DataDir, "data", "D", "", "target data directory")
 	pitrCmd.Flags().BoolVarP(&pitrOpts.Exclusive, "exclusive", "X", false, "stop before target (exclusive)")
 	pitrCmd.Flags().BoolVarP(&pitrOpts.Promote, "promote", "P", false, "auto-promote after recovery")
+}
+
+func handlePITRResult(result *output.Result) error {
+	if result == nil {
+		return fmt.Errorf("nil result")
+	}
+	if err := output.Print(result); err != nil {
+		return err
+	}
+	if !result.Success {
+		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message)}
+	}
+	return nil
 }

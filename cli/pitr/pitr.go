@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"pig/cli/patroni"
 	"pig/cli/pgbackrest"
 	"pig/cli/postgres"
+	"pig/internal/output"
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
@@ -40,6 +42,7 @@ type Options struct {
 	// PITR control
 	SkipPatroni bool // Skip Patroni operations
 	NoRestart   bool // Don't restart PostgreSQL after restore
+	Plan        bool // Show plan only, don't execute
 	DryRun      bool // Show plan only, don't execute
 	Yes         bool // Skip confirmations
 
@@ -92,14 +95,8 @@ func Execute(opts *Options) error {
 		return err
 	}
 
-	// Build and show execution plan
+	// Build and show execution plan (text only)
 	printExecutionPlan(state, opts)
-
-	// Dry-run mode: exit here
-	if opts.DryRun {
-		fmt.Fprintf(os.Stderr, "\n%s[Dry-run mode] No changes made.%s\n", utils.ColorYellow, utils.ColorReset)
-		return nil
-	}
 
 	// Confirm with countdown (unless --yes)
 	if !opts.Yes {
@@ -138,6 +135,56 @@ func Execute(opts *Options) error {
 	printPostRestoreGuidance(opts, patroniWasStopped)
 
 	return nil
+}
+
+// ExecuteResult performs the PITR workflow and returns a structured Result.
+func ExecuteResult(opts *Options) *output.Result {
+	startTime := time.Now()
+
+	state, err := preCheck(opts)
+	if err != nil {
+		return output.Fail(output.CodePITRPrecheckFailed, "pitr pre-check failed").WithDetail(err.Error())
+	}
+
+	// Build and show execution plan (text only)
+	printExecutionPlan(state, opts)
+
+	// Confirm with countdown (unless --yes)
+	if !opts.Yes {
+		if err := pgbackrest.ConfirmWithCountdown("This will overwrite the current database!", "PITR"); err != nil {
+			return output.Fail(output.CodePITRStopFailed, "pitr confirmation failed").WithDetail(err.Error())
+		}
+	}
+
+	patroniWasStopped := false
+	if state.PatroniActive && !opts.SkipPatroni {
+		if err := stopPatroni(); err != nil {
+			return output.Fail(output.CodePITRStopFailed, "failed to stop patroni").WithDetail(err.Error())
+		}
+		patroniWasStopped = true
+	}
+
+	if err := ensurePostgresStopped(state, patroniWasStopped); err != nil {
+		return output.Fail(output.CodePITRStopFailed, "failed to stop postgresql").WithDetail(err.Error())
+	}
+
+	if err := executeRestore(state, opts); err != nil {
+		return output.Fail(output.CodePITRRestoreFailed, "pgbackrest restore failed").WithDetail(err.Error())
+	}
+
+	postgresStarted := false
+	if !opts.NoRestart {
+		if err := startPostgres(state, opts); err != nil {
+			return output.Fail(output.CodePITRStartFailed, "failed to start postgresql").WithDetail(err.Error())
+		}
+		postgresStarted = true
+	}
+
+	printPostRestoreGuidance(opts, patroniWasStopped)
+
+	endTime := time.Now()
+	data := newPITRResultData(state, opts, patroniWasStopped, postgresStarted, startTime, endTime)
+	return output.OK("pitr completed", data)
 }
 
 // ============================================================================
@@ -301,6 +348,210 @@ func getTargetDescription(opts *Options) string {
 		return fmt.Sprintf("XID: %s", opts.XID)
 	}
 	return "Unknown"
+}
+
+func isPlanMode(opts *Options) bool {
+	if opts == nil {
+		return false
+	}
+	return opts.Plan || opts.DryRun
+}
+
+// Plan builds a plan with pre-check validation for CLI plan mode.
+func Plan(opts *Options) (*output.Plan, error) {
+	state, err := preCheck(opts)
+	if err != nil {
+		return nil, err
+	}
+	return BuildPlan(state, opts), nil
+}
+
+// BuildPlan constructs a structured execution plan for PITR.
+// The plan content must remain consistent with actual execution steps (NFR9).
+func BuildPlan(state *SystemState, opts *Options) *output.Plan {
+	actions := buildActions(state, opts)
+	affects := buildAffects(state, opts)
+	expected := buildExpected(state, opts)
+	risks := buildRisks(state, opts)
+
+	return &output.Plan{
+		Command:  buildCommand(opts),
+		Actions:  actions,
+		Affects:  affects,
+		Expected: expected,
+		Risks:    risks,
+	}
+}
+
+func buildActions(state *SystemState, opts *Options) []output.Action {
+	if state == nil || opts == nil {
+		return nil
+	}
+	actions := []output.Action{}
+	step := 1
+
+	if state.PatroniActive && !opts.SkipPatroni {
+		actions = append(actions, output.Action{Step: step, Description: "Stop Patroni service"})
+		step++
+	}
+
+	if state.PGRunning || state.PatroniActive {
+		actions = append(actions, output.Action{Step: step, Description: "Ensure PostgreSQL is stopped"})
+		step++
+	}
+
+	actions = append(actions, output.Action{Step: step, Description: "Execute pgBackRest restore"})
+	step++
+
+	if !opts.NoRestart {
+		actions = append(actions, output.Action{Step: step, Description: "Start PostgreSQL"})
+		step++
+	}
+
+	actions = append(actions, output.Action{Step: step, Description: "Print post-restore guidance"})
+
+	return actions
+}
+
+func buildAffects(state *SystemState, opts *Options) []output.Resource {
+	if state == nil || opts == nil {
+		return nil
+	}
+	affects := []output.Resource{}
+
+	if state.PatroniActive && !opts.SkipPatroni {
+		affects = append(affects, output.Resource{
+			Type:   "service",
+			Name:   "patroni",
+			Impact: "stop",
+			Detail: "cluster management paused",
+		})
+	}
+
+	if state.PGRunning || state.PatroniActive {
+		affects = append(affects, output.Resource{
+			Type:   "service",
+			Name:   "postgresql",
+			Impact: "stop",
+		})
+	}
+
+	backupSet := "latest"
+	if opts.Set != "" {
+		backupSet = opts.Set
+	}
+	affects = append(affects, output.Resource{
+		Type:   "backup",
+		Name:   backupSet,
+		Impact: "restore",
+		Detail: "pgBackRest",
+	})
+
+	target := getTargetDescription(opts)
+	if target != "" {
+		affects = append(affects, output.Resource{
+			Type:   "target",
+			Name:   target,
+			Impact: "recovery",
+		})
+	}
+
+	affects = append(affects, output.Resource{
+		Type:   "data",
+		Name:   state.DataDir,
+		Impact: "overwrite",
+		Detail: "data directory restored",
+	})
+
+	return affects
+}
+
+func buildExpected(state *SystemState, opts *Options) string {
+	if state == nil || opts == nil {
+		return ""
+	}
+	target := getTargetDescription(opts)
+	expected := fmt.Sprintf("PostgreSQL restored to %s (data dir: %s)", target, state.DataDir)
+	if opts.NoRestart {
+		expected = expected + "; PostgreSQL remains stopped"
+	}
+	if opts.Promote {
+		expected = expected + "; auto-promote enabled"
+	}
+	return expected
+}
+
+func buildRisks(state *SystemState, opts *Options) []string {
+	if state == nil || opts == nil {
+		return nil
+	}
+	risks := []string{
+		"Current data directory will be overwritten",
+	}
+
+	if state.PatroniActive && !opts.SkipPatroni {
+		risks = append(risks, "Patroni will be stopped; HA management suspended")
+	}
+	if opts.SkipPatroni {
+		risks = append(risks, "Patroni is not stopped; ensure cluster safety before restoring")
+	}
+	if opts.NoRestart {
+		risks = append(risks, "PostgreSQL will remain stopped after restore")
+	}
+	if opts.Exclusive {
+		risks = append(risks, "Exclusive recovery stops before target; data beyond target not applied")
+	}
+	return risks
+}
+
+func buildCommand(opts *Options) string {
+	if opts == nil {
+		return "pig pitr"
+	}
+	args := []string{"pig", "pitr"}
+
+	switch {
+	case opts.Default:
+		args = append(args, "-d")
+	case opts.Immediate:
+		args = append(args, "-I")
+	case opts.Time != "":
+		args = append(args, "-t", quoteIfNeeded(opts.Time))
+	case opts.Name != "":
+		args = append(args, "-n", opts.Name)
+	case opts.LSN != "":
+		args = append(args, "-l", opts.LSN)
+	case opts.XID != "":
+		args = append(args, "-x", opts.XID)
+	}
+
+	if opts.Set != "" {
+		args = append(args, "-b", opts.Set)
+	}
+	if opts.SkipPatroni {
+		args = append(args, "--skip-patroni")
+	}
+	if opts.NoRestart {
+		args = append(args, "--no-restart")
+	}
+	if opts.Exclusive {
+		args = append(args, "-X")
+	}
+	if opts.Promote {
+		args = append(args, "-P")
+	}
+	if opts.Plan || opts.DryRun {
+		args = append(args, "--plan")
+	}
+
+	return strings.Join(args, " ")
+}
+
+func quoteIfNeeded(value string) string {
+	if strings.ContainsAny(value, " \t") {
+		return fmt.Sprintf("%q", value)
+	}
+	return value
 }
 
 // ============================================================================
