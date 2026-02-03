@@ -3,7 +3,9 @@
 .code/
 .idea/
 .claude/
+.codex/
 cli/sty/assets/*.tgz
+
 
 bin/dist
 bin/dist2
