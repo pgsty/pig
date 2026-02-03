@@ -426,3 +426,77 @@ func (b *BackupInfo) IsEmpty() bool {
 	}
 	return len(b.BackedUpFiles) == 0
 }
+
+/********************
+ * Data Transfer Objects (DTOs) for repo rm command
+ ********************/
+
+// RepoRmData is the DTO for repo rm command
+type RepoRmData struct {
+	OSEnv            *OSEnvironment     `json:"os_env" yaml:"os_env"`
+	RequestedModules []string           `json:"requested_modules" yaml:"requested_modules"`
+	RemovedRepos     []*RemovedRepoItem `json:"removed_repos" yaml:"removed_repos"`
+	BackupInfo       *BackupInfo        `json:"backup_info,omitempty" yaml:"backup_info,omitempty"`
+	UpdateResult     *UpdateCacheResult `json:"update_result,omitempty" yaml:"update_result,omitempty"`
+	DurationMs       int64              `json:"duration_ms" yaml:"duration_ms"`
+}
+
+// RemovedRepoItem represents a successfully removed repository file
+type RemovedRepoItem struct {
+	Module   string `json:"module" yaml:"module"`
+	FilePath string `json:"file_path" yaml:"file_path"`
+	Success  bool   `json:"success" yaml:"success"`
+	Error    string `json:"error,omitempty" yaml:"error,omitempty"`
+}
+
+// Text returns a human-readable representation of RemovedRepoItem
+func (r *RemovedRepoItem) Text() string {
+	if r == nil {
+		return ""
+	}
+	if r.Success {
+		return r.FilePath
+	}
+	return fmt.Sprintf("%s (error: %s)", r.FilePath, r.Error)
+}
+
+/********************
+ * Data Transfer Objects (DTOs) for repo update command
+ ********************/
+
+// RepoUpdateData is the DTO for repo update command
+type RepoUpdateData struct {
+	OSEnv      *OSEnvironment `json:"os_env" yaml:"os_env"`
+	Command    string         `json:"command" yaml:"command"`
+	Success    bool           `json:"success" yaml:"success"`
+	Error      string         `json:"error,omitempty" yaml:"error,omitempty"`
+	DurationMs int64          `json:"duration_ms" yaml:"duration_ms"`
+}
+
+// Text returns a human-readable representation of RepoRmData
+func (r *RepoRmData) Text() string {
+	if r == nil {
+		return ""
+	}
+	if r.BackupInfo != nil && len(r.BackupInfo.BackedUpFiles) > 0 {
+		return fmt.Sprintf("Backed up %d files to %s", len(r.BackupInfo.BackedUpFiles), r.BackupInfo.BackupDir)
+	}
+	successCount := 0
+	for _, item := range r.RemovedRepos {
+		if item != nil && item.Success {
+			successCount++
+		}
+	}
+	return fmt.Sprintf("Removed %d module(s)", successCount)
+}
+
+// Text returns a human-readable representation of RepoUpdateData
+func (r *RepoUpdateData) Text() string {
+	if r == nil {
+		return ""
+	}
+	if r.Success {
+		return fmt.Sprintf("Cache updated successfully (command: %s)", r.Command)
+	}
+	return fmt.Sprintf("Cache update failed: %s (command: %s)", r.Error, r.Command)
+}

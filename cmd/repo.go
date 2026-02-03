@@ -303,6 +303,17 @@ var repoRmCmd = &cobra.Command{
 	Short:        "remove repository",
 	Aliases:      []string{"remove"},
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig repo rm",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "2000",
+	},
 	Example: `
   pig repo rm                      # remove (backup) all existing repo to backup dir
   pig repo rm all --update         # remove module 'all' and update repo cache
@@ -310,6 +321,33 @@ var repoRmCmd = &cobra.Command{
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		modules := repo.ExpandModuleArgs(args)
+
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
+				result := output.Fail(output.CodeRepoUnsupportedOS,
+					fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
+				bytes, err := result.Render(format)
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(bytes))
+				return fmt.Errorf("%s", result.Message)
+			}
+			result := repo.RmRepos(modules, repoUpdate)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		manager, err := repo.NewManager()
 		if err != nil {
 			logrus.Errorf("failed to get repo manager: %v", err)
@@ -347,10 +385,47 @@ var repoUpdateCmd = &cobra.Command{
 	Short:        "update repo cache",
 	Aliases:      []string{"u"},
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig repo update",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "10000",
+	},
 	Example: `
   pig repo update                  # yum makecache or apt update
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
+				result := output.Fail(output.CodeRepoUnsupportedOS,
+					fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
+				bytes, err := result.Render(format)
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(bytes))
+				return fmt.Errorf("%s", result.Message)
+			}
+			result := repo.UpdateCache()
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		manager, err := repo.NewManager()
 		if err != nil {
 			logrus.Errorf("failed to get repo manager: %v", err)

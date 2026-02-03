@@ -834,6 +834,470 @@ func TestUpdateCacheResultSerialization(t *testing.T) {
 	}
 }
 
+/********************
+ * Tests for repo rm/update DTOs (Story 4.3)
+ ********************/
+
+func TestRepoRmDataSerialization(t *testing.T) {
+	data := &RepoRmData{
+		OSEnv: &OSEnvironment{
+			Code:  "el9",
+			Arch:  "x86_64",
+			Type:  "rpm",
+			Major: 9,
+		},
+		RequestedModules: []string{"pigsty", "pgdg"},
+		RemovedRepos: []*RemovedRepoItem{
+			{
+				Module:   "pigsty",
+				FilePath: "/etc/yum.repos.d/pigsty.repo",
+				Success:  true,
+			},
+			{
+				Module:   "pgdg",
+				FilePath: "/etc/yum.repos.d/pgdg.repo",
+				Success:  true,
+			},
+		},
+		BackupInfo: nil,
+		UpdateResult: &UpdateCacheResult{
+			Command: "dnf makecache",
+			Success: true,
+		},
+		DurationMs: 567,
+	}
+
+	// Test JSON serialization
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	var jsonRmData RepoRmData
+	if err := json.Unmarshal(jsonData, &jsonRmData); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	if len(jsonRmData.RequestedModules) != 2 {
+		t.Errorf("Expected 2 requested modules, got %d", len(jsonRmData.RequestedModules))
+	}
+	if len(jsonRmData.RemovedRepos) != 2 {
+		t.Errorf("Expected 2 removed repos, got %d", len(jsonRmData.RemovedRepos))
+	}
+	if jsonRmData.DurationMs != 567 {
+		t.Errorf("Expected duration_ms 567, got %d", jsonRmData.DurationMs)
+	}
+
+	// Test YAML serialization
+	yamlData, err := yaml.Marshal(data)
+	if err != nil {
+		t.Fatalf("YAML marshal failed: %v", err)
+	}
+
+	var yamlRmData RepoRmData
+	if err := yaml.Unmarshal(yamlData, &yamlRmData); err != nil {
+		t.Fatalf("YAML unmarshal failed: %v", err)
+	}
+
+	if yamlRmData.UpdateResult == nil {
+		t.Error("Expected UpdateResult to be present")
+	} else if !yamlRmData.UpdateResult.Success {
+		t.Error("Expected UpdateResult.Success to be true")
+	}
+}
+
+func TestRepoRmDataWithBackup(t *testing.T) {
+	// Test case when backup is performed (no modules specified)
+	data := &RepoRmData{
+		OSEnv: &OSEnvironment{
+			Code:  "el9",
+			Arch:  "x86_64",
+			Type:  "rpm",
+			Major: 9,
+		},
+		RequestedModules: []string{},
+		RemovedRepos:     []*RemovedRepoItem{},
+		BackupInfo: &BackupInfo{
+			BackupDir:     "/etc/yum.repos.d/backup",
+			BackedUpFiles: []string{"/etc/yum.repos.d/epel.repo", "/etc/yum.repos.d/pgdg.repo"},
+		},
+		DurationMs: 234,
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	if !strings.Contains(jsonStr, `"backup_info"`) {
+		t.Error("JSON should contain 'backup_info' field")
+	}
+	if !strings.Contains(jsonStr, `"backup_dir"`) {
+		t.Error("JSON should contain 'backup_dir' field")
+	}
+
+	var jsonRmData RepoRmData
+	if err := json.Unmarshal(jsonData, &jsonRmData); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	if jsonRmData.BackupInfo == nil {
+		t.Fatal("BackupInfo should not be nil")
+	}
+	if len(jsonRmData.BackupInfo.BackedUpFiles) != 2 {
+		t.Errorf("Expected 2 backed up files, got %d", len(jsonRmData.BackupInfo.BackedUpFiles))
+	}
+}
+
+func TestRemovedRepoItemSerialization(t *testing.T) {
+	// Test successful removal
+	item := &RemovedRepoItem{
+		Module:   "pigsty",
+		FilePath: "/etc/yum.repos.d/pigsty.repo",
+		Success:  true,
+	}
+
+	jsonData, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	if !strings.Contains(jsonStr, `"module"`) {
+		t.Error("JSON should contain 'module' field")
+	}
+	if !strings.Contains(jsonStr, `"file_path"`) {
+		t.Error("JSON should contain 'file_path' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"success"`) {
+		t.Error("JSON should contain 'success' field")
+	}
+	// Error should not be present when empty (omitempty)
+	if strings.Contains(jsonStr, `"error"`) {
+		t.Error("JSON should not contain 'error' field when empty")
+	}
+
+	var jsonItem RemovedRepoItem
+	if err := json.Unmarshal(jsonData, &jsonItem); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	if jsonItem.Module != "pigsty" {
+		t.Errorf("Expected module 'pigsty', got '%s'", jsonItem.Module)
+	}
+	if !jsonItem.Success {
+		t.Error("Expected Success to be true")
+	}
+
+	// Test failed removal
+	failedItem := &RemovedRepoItem{
+		Module:   "nonexistent",
+		FilePath: "/etc/yum.repos.d/nonexistent.repo",
+		Success:  false,
+		Error:    "failed to determine module path",
+	}
+
+	jsonData2, _ := json.Marshal(failedItem)
+	jsonStr2 := string(jsonData2)
+	if !strings.Contains(jsonStr2, `"error"`) {
+		t.Error("JSON should contain 'error' field when present")
+	}
+
+	// Test YAML serialization
+	yamlData, err := yaml.Marshal(failedItem)
+	if err != nil {
+		t.Fatalf("YAML marshal failed: %v", err)
+	}
+
+	var yamlItem RemovedRepoItem
+	if err := yaml.Unmarshal(yamlData, &yamlItem); err != nil {
+		t.Fatalf("YAML unmarshal failed: %v", err)
+	}
+
+	if yamlItem.Success {
+		t.Error("Expected Success to be false")
+	}
+	if yamlItem.Error != "failed to determine module path" {
+		t.Errorf("Unexpected error: %s", yamlItem.Error)
+	}
+}
+
+func TestRemovedRepoItemText(t *testing.T) {
+	// Test nil receiver
+	var nilItem *RemovedRepoItem
+	if nilItem.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test successful item
+	successItem := &RemovedRepoItem{
+		Module:   "pigsty",
+		FilePath: "/etc/yum.repos.d/pigsty.repo",
+		Success:  true,
+	}
+	if successItem.Text() != "/etc/yum.repos.d/pigsty.repo" {
+		t.Errorf("Expected file path, got '%s'", successItem.Text())
+	}
+
+	// Test failed item
+	failedItem := &RemovedRepoItem{
+		Module:   "pigsty",
+		FilePath: "/etc/yum.repos.d/pigsty.repo",
+		Success:  false,
+		Error:    "permission denied",
+	}
+	text := failedItem.Text()
+	if !strings.Contains(text, "permission denied") {
+		t.Errorf("Expected error in text, got '%s'", text)
+	}
+}
+
+func TestRepoUpdateDataSerialization(t *testing.T) {
+	// Test successful update
+	data := &RepoUpdateData{
+		OSEnv: &OSEnvironment{
+			Code:  "el9",
+			Arch:  "x86_64",
+			Type:  "rpm",
+			Major: 9,
+		},
+		Command:    "dnf makecache",
+		Success:    true,
+		DurationMs: 5000,
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	if !strings.Contains(jsonStr, `"os_env"`) {
+		t.Error("JSON should contain 'os_env' field")
+	}
+	if !strings.Contains(jsonStr, `"command"`) {
+		t.Error("JSON should contain 'command' field")
+	}
+	if !strings.Contains(jsonStr, `"success"`) {
+		t.Error("JSON should contain 'success' field")
+	}
+	if !strings.Contains(jsonStr, `"duration_ms"`) {
+		t.Error("JSON should contain 'duration_ms' field")
+	}
+	// Error should not be present when empty (omitempty)
+	if strings.Contains(jsonStr, `"error"`) {
+		t.Error("JSON should not contain 'error' field when empty")
+	}
+
+	var jsonData2 RepoUpdateData
+	if err := json.Unmarshal(jsonData, &jsonData2); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	if !jsonData2.Success {
+		t.Error("Expected Success to be true")
+	}
+	if jsonData2.Command != "dnf makecache" {
+		t.Errorf("Expected command 'dnf makecache', got '%s'", jsonData2.Command)
+	}
+
+	// Test failed update
+	failedData := &RepoUpdateData{
+		OSEnv: &OSEnvironment{
+			Code:  "u24",
+			Arch:  "amd64",
+			Type:  "deb",
+			Major: 24,
+		},
+		Command:    "apt-get update",
+		Success:    false,
+		Error:      "network timeout",
+		DurationMs: 30000,
+	}
+
+	jsonData3, _ := json.Marshal(failedData)
+	jsonStr3 := string(jsonData3)
+	if !strings.Contains(jsonStr3, `"error"`) {
+		t.Error("JSON should contain 'error' field when present")
+	}
+
+	// Test YAML serialization
+	yamlData, err := yaml.Marshal(failedData)
+	if err != nil {
+		t.Fatalf("YAML marshal failed: %v", err)
+	}
+
+	var yamlData2 RepoUpdateData
+	if err := yaml.Unmarshal(yamlData, &yamlData2); err != nil {
+		t.Fatalf("YAML unmarshal failed: %v", err)
+	}
+
+	if yamlData2.Success {
+		t.Error("Expected Success to be false")
+	}
+	if yamlData2.Error != "network timeout" {
+		t.Errorf("Unexpected error: %s", yamlData2.Error)
+	}
+}
+
+func TestRepoUpdateDataText(t *testing.T) {
+	// Test nil receiver
+	var nilData *RepoUpdateData
+	if nilData.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test successful update
+	successData := &RepoUpdateData{
+		Command: "dnf makecache",
+		Success: true,
+	}
+	text := successData.Text()
+	if !strings.Contains(text, "successfully") {
+		t.Errorf("Expected success message, got '%s'", text)
+	}
+	if !strings.Contains(text, "dnf makecache") {
+		t.Errorf("Expected command in text, got '%s'", text)
+	}
+
+	// Test failed update
+	failedData := &RepoUpdateData{
+		Command: "apt-get update",
+		Success: false,
+		Error:   "network timeout",
+	}
+	text2 := failedData.Text()
+	if !strings.Contains(text2, "failed") {
+		t.Errorf("Expected failure message, got '%s'", text2)
+	}
+	if !strings.Contains(text2, "network timeout") {
+		t.Errorf("Expected error in text, got '%s'", text2)
+	}
+}
+
+func TestRepoRmDataText(t *testing.T) {
+	// Test nil receiver
+	var nilData *RepoRmData
+	if nilData.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test with backup info
+	dataWithBackup := &RepoRmData{
+		BackupInfo: &BackupInfo{
+			BackupDir:     "/etc/yum.repos.d/backup",
+			BackedUpFiles: []string{"/etc/yum.repos.d/epel.repo", "/etc/yum.repos.d/pgdg.repo"},
+		},
+	}
+	text := dataWithBackup.Text()
+	if !strings.Contains(text, "2 files") {
+		t.Errorf("Expected '2 files' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "/etc/yum.repos.d/backup") {
+		t.Errorf("Expected backup dir in text, got '%s'", text)
+	}
+
+	// Test with removed repos
+	dataWithRemoved := &RepoRmData{
+		RemovedRepos: []*RemovedRepoItem{
+			{Module: "pigsty", FilePath: "/etc/yum.repos.d/pigsty.repo", Success: true},
+			{Module: "pgdg", FilePath: "/etc/yum.repos.d/pgdg.repo", Success: true},
+			{Module: "failed", FilePath: "/etc/yum.repos.d/failed.repo", Success: false},
+		},
+	}
+	text2 := dataWithRemoved.Text()
+	if !strings.Contains(text2, "2 module") {
+		t.Errorf("Expected '2 module' in text, got '%s'", text2)
+	}
+}
+
+func TestRepoRmDataOmitempty(t *testing.T) {
+	// Test that optional fields are omitted when nil/empty
+	data := &RepoRmData{
+		OSEnv: &OSEnvironment{
+			Code:  "el9",
+			Arch:  "x86_64",
+			Type:  "rpm",
+			Major: 9,
+		},
+		RequestedModules: []string{"pigsty"},
+		RemovedRepos: []*RemovedRepoItem{
+			{Module: "pigsty", FilePath: "/etc/yum.repos.d/pigsty.repo", Success: true},
+		},
+		BackupInfo:   nil, // Should be omitted
+		UpdateResult: nil, // Should be omitted
+		DurationMs:   100,
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+
+	// These fields should NOT appear when nil
+	if strings.Contains(jsonStr, `"backup_info"`) {
+		t.Error("JSON should not contain 'backup_info' field when nil")
+	}
+	if strings.Contains(jsonStr, `"update_result"`) {
+		t.Error("JSON should not contain 'update_result' field when nil")
+	}
+
+	// These required fields SHOULD appear
+	if !strings.Contains(jsonStr, `"os_env"`) {
+		t.Error("JSON should contain 'os_env' field")
+	}
+	if !strings.Contains(jsonStr, `"requested_modules"`) {
+		t.Error("JSON should contain 'requested_modules' field")
+	}
+	if !strings.Contains(jsonStr, `"removed_repos"`) {
+		t.Error("JSON should contain 'removed_repos' field")
+	}
+	if !strings.Contains(jsonStr, `"duration_ms"`) {
+		t.Error("JSON should contain 'duration_ms' field")
+	}
+}
+
+func TestRmReposUnsupportedOS(t *testing.T) {
+	// On macOS, this should return unsupported OS error
+	result := RmRepos([]string{"pigsty"}, false)
+	if result == nil {
+		t.Fatal("RmRepos should not return nil")
+	}
+
+	// On non-Linux systems, expect unsupported OS error
+	if !result.Success {
+		if result.Code == output.CodeRepoUnsupportedOS {
+			t.Log("RmRepos correctly returns unsupported OS error on non-Linux")
+		} else if result.Code == output.CodeRepoManagerError {
+			t.Log("RmRepos returned manager error (expected on some systems)")
+		} else {
+			t.Logf("RmRepos returned unexpected error code: %d - %s", result.Code, result.Message)
+		}
+	}
+}
+
+func TestUpdateCacheUnsupportedOS(t *testing.T) {
+	// On macOS, this should return unsupported OS error
+	result := UpdateCache()
+	if result == nil {
+		t.Fatal("UpdateCache should not return nil")
+	}
+
+	// On non-Linux systems, expect unsupported OS error
+	if !result.Success {
+		if result.Code == output.CodeRepoUnsupportedOS {
+			t.Log("UpdateCache correctly returns unsupported OS error on non-Linux")
+		} else if result.Code == output.CodeRepoManagerError {
+			t.Log("UpdateCache returned manager error (expected on some systems)")
+		} else {
+			t.Logf("UpdateCache returned unexpected error code: %d - %s", result.Code, result.Message)
+		}
+	}
+}
+
 func TestRepoAddDataOmitempty(t *testing.T) {
 	// Test that optional fields are omitted when nil/empty
 	data := &RepoAddData{
