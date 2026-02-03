@@ -1357,3 +1357,714 @@ func TestRepoAddDataOmitempty(t *testing.T) {
 		t.Error("JSON should contain 'duration_ms' field")
 	}
 }
+
+/********************
+ * Tests for repo create/boot/cache/reload DTOs (Story 4.4)
+ ********************/
+
+func TestRepoCreateDataSerialization(t *testing.T) {
+	data := &RepoCreateData{
+		OSEnv: &OSEnvironment{
+			Code:  "el9",
+			Arch:  "x86_64",
+			Type:  "rpm",
+			Major: 9,
+		},
+		RepoDirs: []string{"/www/pigsty", "/www/mssql"},
+		CreatedRepos: []*CreatedRepoItem{
+			{
+				Path:         "/www/pigsty",
+				RepoType:     "yum",
+				CompleteFile: "/www/pigsty/repo_complete",
+			},
+			{
+				Path:         "/www/mssql",
+				RepoType:     "yum",
+				CompleteFile: "/www/mssql/repo_complete",
+			},
+		},
+		FailedRepos: nil,
+		DurationMs:  3456,
+	}
+
+	// Test JSON serialization
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	if !strings.Contains(jsonStr, `"os_env"`) {
+		t.Error("JSON should contain 'os_env' field")
+	}
+	if !strings.Contains(jsonStr, `"repo_dirs"`) {
+		t.Error("JSON should contain 'repo_dirs' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"created_repos"`) {
+		t.Error("JSON should contain 'created_repos' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"duration_ms"`) {
+		t.Error("JSON should contain 'duration_ms' field (snake_case)")
+	}
+	// failed_repos should not be present when nil (omitempty)
+	if strings.Contains(jsonStr, `"failed_repos"`) {
+		t.Error("JSON should not contain 'failed_repos' field when nil")
+	}
+
+	var jsonCreateData RepoCreateData
+	if err := json.Unmarshal(jsonData, &jsonCreateData); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	if len(jsonCreateData.RepoDirs) != 2 {
+		t.Errorf("Expected 2 repo_dirs, got %d", len(jsonCreateData.RepoDirs))
+	}
+	if len(jsonCreateData.CreatedRepos) != 2 {
+		t.Errorf("Expected 2 created_repos, got %d", len(jsonCreateData.CreatedRepos))
+	}
+	if jsonCreateData.DurationMs != 3456 {
+		t.Errorf("Expected duration_ms 3456, got %d", jsonCreateData.DurationMs)
+	}
+
+	// Test YAML serialization
+	yamlData, err := yaml.Marshal(data)
+	if err != nil {
+		t.Fatalf("YAML marshal failed: %v", err)
+	}
+
+	var yamlCreateData RepoCreateData
+	if err := yaml.Unmarshal(yamlData, &yamlCreateData); err != nil {
+		t.Fatalf("YAML unmarshal failed: %v", err)
+	}
+
+	if yamlCreateData.CreatedRepos[0].Path != "/www/pigsty" {
+		t.Errorf("Unexpected path: %s", yamlCreateData.CreatedRepos[0].Path)
+	}
+	if yamlCreateData.CreatedRepos[0].RepoType != "yum" {
+		t.Errorf("Unexpected repo_type: %s", yamlCreateData.CreatedRepos[0].RepoType)
+	}
+}
+
+func TestCreatedRepoItemSerialization(t *testing.T) {
+	item := &CreatedRepoItem{
+		Path:         "/www/pigsty",
+		RepoType:     "yum",
+		CompleteFile: "/www/pigsty/repo_complete",
+	}
+
+	// Test JSON serialization
+	jsonData, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	if !strings.Contains(jsonStr, `"path"`) {
+		t.Error("JSON should contain 'path' field")
+	}
+	if !strings.Contains(jsonStr, `"repo_type"`) {
+		t.Error("JSON should contain 'repo_type' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"complete_file"`) {
+		t.Error("JSON should contain 'complete_file' field (snake_case)")
+	}
+
+	var jsonItem CreatedRepoItem
+	if err := json.Unmarshal(jsonData, &jsonItem); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	if jsonItem.Path != "/www/pigsty" {
+		t.Errorf("Expected path '/www/pigsty', got '%s'", jsonItem.Path)
+	}
+	if jsonItem.RepoType != "yum" {
+		t.Errorf("Expected repo_type 'yum', got '%s'", jsonItem.RepoType)
+	}
+
+	// Test YAML serialization
+	yamlData, err := yaml.Marshal(item)
+	if err != nil {
+		t.Fatalf("YAML marshal failed: %v", err)
+	}
+
+	var yamlItem CreatedRepoItem
+	if err := yaml.Unmarshal(yamlData, &yamlItem); err != nil {
+		t.Fatalf("YAML unmarshal failed: %v", err)
+	}
+
+	if yamlItem.CompleteFile != "/www/pigsty/repo_complete" {
+		t.Errorf("Unexpected complete_file: %s", yamlItem.CompleteFile)
+	}
+}
+
+func TestCreatedRepoItemText(t *testing.T) {
+	// Test nil receiver
+	var nilItem *CreatedRepoItem
+	if nilItem.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test normal item
+	item := &CreatedRepoItem{
+		Path:         "/www/pigsty",
+		RepoType:     "yum",
+		CompleteFile: "/www/pigsty/repo_complete",
+	}
+	if item.Text() != "/www/pigsty" {
+		t.Errorf("Expected '/www/pigsty', got '%s'", item.Text())
+	}
+}
+
+func TestFailedRepoItemTextForCreate(t *testing.T) {
+	// Test nil receiver
+	var nilItem *FailedRepoItem
+	if nilItem.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test with module
+	itemWithModule := &FailedRepoItem{
+		Module: "/www/pigsty",
+		Error:  "permission denied",
+		Code:   output.CodeRepoCreateFailed,
+	}
+	text := itemWithModule.Text()
+	if !strings.Contains(text, "/www/pigsty") {
+		t.Errorf("Expected module in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "permission denied") {
+		t.Errorf("Expected error in text, got '%s'", text)
+	}
+
+	// Test without module
+	itemWithoutModule := &FailedRepoItem{
+		Error: "generic error",
+		Code:  output.CodeRepoCreateFailed,
+	}
+	if itemWithoutModule.Text() != "generic error" {
+		t.Errorf("Expected just error, got '%s'", itemWithoutModule.Text())
+	}
+}
+
+func TestRepoCreateDataText(t *testing.T) {
+	// Test nil receiver
+	var nilData *RepoCreateData
+	if nilData.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test successful creation
+	data := &RepoCreateData{
+		CreatedRepos: []*CreatedRepoItem{
+			{Path: "/www/pigsty"},
+			{Path: "/www/mssql"},
+		},
+	}
+	text := data.Text()
+	if !strings.Contains(text, "2 repos") {
+		t.Errorf("Expected '2 repos' in text, got '%s'", text)
+	}
+
+	// Test with failures
+	dataWithFail := &RepoCreateData{
+		CreatedRepos: []*CreatedRepoItem{
+			{Path: "/www/pigsty"},
+		},
+		FailedRepos: []*FailedRepoItem{
+			{Module: "/www/mssql", Error: "error"},
+		},
+	}
+	textFail := dataWithFail.Text()
+	if !strings.Contains(textFail, "1 repos") {
+		t.Errorf("Expected '1 repos' in text, got '%s'", textFail)
+	}
+	if !strings.Contains(textFail, "failed 1") {
+		t.Errorf("Expected 'failed 1' in text, got '%s'", textFail)
+	}
+}
+
+func TestRepoBootDataSerialization(t *testing.T) {
+	data := &RepoBootData{
+		OSEnv: &OSEnvironment{
+			Code:  "el9",
+			Arch:  "x86_64",
+			Type:  "rpm",
+			Major: 9,
+		},
+		SourcePkg:      "/tmp/pkg.tgz",
+		TargetDir:      "/www",
+		ExtractedFiles: []string{"pigsty", "mssql"},
+		LocalRepoAdded: true,
+		LocalRepoPath:  "/etc/yum.repos.d/local.repo",
+		DurationMs:     5678,
+	}
+
+	// Test JSON serialization
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	if !strings.Contains(jsonStr, `"os_env"`) {
+		t.Error("JSON should contain 'os_env' field")
+	}
+	if !strings.Contains(jsonStr, `"source_pkg"`) {
+		t.Error("JSON should contain 'source_pkg' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"target_dir"`) {
+		t.Error("JSON should contain 'target_dir' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"extracted_files"`) {
+		t.Error("JSON should contain 'extracted_files' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"local_repo_added"`) {
+		t.Error("JSON should contain 'local_repo_added' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"local_repo_path"`) {
+		t.Error("JSON should contain 'local_repo_path' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"duration_ms"`) {
+		t.Error("JSON should contain 'duration_ms' field (snake_case)")
+	}
+
+	var jsonBootData RepoBootData
+	if err := json.Unmarshal(jsonData, &jsonBootData); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	if jsonBootData.SourcePkg != "/tmp/pkg.tgz" {
+		t.Errorf("Expected source_pkg '/tmp/pkg.tgz', got '%s'", jsonBootData.SourcePkg)
+	}
+	if jsonBootData.TargetDir != "/www" {
+		t.Errorf("Expected target_dir '/www', got '%s'", jsonBootData.TargetDir)
+	}
+	if !jsonBootData.LocalRepoAdded {
+		t.Error("Expected local_repo_added to be true")
+	}
+	if len(jsonBootData.ExtractedFiles) != 2 {
+		t.Errorf("Expected 2 extracted_files, got %d", len(jsonBootData.ExtractedFiles))
+	}
+
+	// Test YAML serialization
+	yamlData, err := yaml.Marshal(data)
+	if err != nil {
+		t.Fatalf("YAML marshal failed: %v", err)
+	}
+
+	var yamlBootData RepoBootData
+	if err := yaml.Unmarshal(yamlData, &yamlBootData); err != nil {
+		t.Fatalf("YAML unmarshal failed: %v", err)
+	}
+
+	if yamlBootData.LocalRepoPath != "/etc/yum.repos.d/local.repo" {
+		t.Errorf("Unexpected local_repo_path: %s", yamlBootData.LocalRepoPath)
+	}
+}
+
+func TestRepoBootDataText(t *testing.T) {
+	// Test nil receiver
+	var nilData *RepoBootData
+	if nilData.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test without local repo
+	dataNoLocal := &RepoBootData{
+		SourcePkg:      "/tmp/pkg.tgz",
+		TargetDir:      "/www",
+		LocalRepoAdded: false,
+	}
+	text := dataNoLocal.Text()
+	if !strings.Contains(text, "/tmp/pkg.tgz") {
+		t.Errorf("Expected source_pkg in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "/www") {
+		t.Errorf("Expected target_dir in text, got '%s'", text)
+	}
+
+	// Test with local repo
+	dataWithLocal := &RepoBootData{
+		SourcePkg:      "/tmp/pkg.tgz",
+		TargetDir:      "/www",
+		LocalRepoAdded: true,
+		LocalRepoPath:  "/etc/yum.repos.d/local.repo",
+	}
+	textLocal := dataWithLocal.Text()
+	if !strings.Contains(textLocal, "local repo added") {
+		t.Errorf("Expected 'local repo added' in text, got '%s'", textLocal)
+	}
+	if !strings.Contains(textLocal, "/etc/yum.repos.d/local.repo") {
+		t.Errorf("Expected local_repo_path in text, got '%s'", textLocal)
+	}
+}
+
+func TestRepoCacheDataSerialization(t *testing.T) {
+	data := &RepoCacheData{
+		OSEnv: &OSEnvironment{
+			Code:  "el9",
+			Arch:  "x86_64",
+			Type:  "rpm",
+			Major: 9,
+		},
+		SourceDir:     "/www",
+		TargetPkg:     "/tmp/pkg.tgz",
+		IncludedRepos: []string{"pigsty", "mssql"},
+		PackageSize:   1073741824, // 1 GiB
+		PackageMD5:    "d41d8cd98f00b204e9800998ecf8427e",
+		DurationMs:    60000,
+	}
+
+	// Test JSON serialization
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	if !strings.Contains(jsonStr, `"os_env"`) {
+		t.Error("JSON should contain 'os_env' field")
+	}
+	if !strings.Contains(jsonStr, `"source_dir"`) {
+		t.Error("JSON should contain 'source_dir' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"target_pkg"`) {
+		t.Error("JSON should contain 'target_pkg' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"included_repos"`) {
+		t.Error("JSON should contain 'included_repos' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"package_size"`) {
+		t.Error("JSON should contain 'package_size' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"package_md5"`) {
+		t.Error("JSON should contain 'package_md5' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"duration_ms"`) {
+		t.Error("JSON should contain 'duration_ms' field (snake_case)")
+	}
+
+	var jsonCacheData RepoCacheData
+	if err := json.Unmarshal(jsonData, &jsonCacheData); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	if jsonCacheData.SourceDir != "/www" {
+		t.Errorf("Expected source_dir '/www', got '%s'", jsonCacheData.SourceDir)
+	}
+	if len(jsonCacheData.IncludedRepos) != 2 {
+		t.Errorf("Expected 2 included_repos, got %d", len(jsonCacheData.IncludedRepos))
+	}
+	if jsonCacheData.PackageSize != 1073741824 {
+		t.Errorf("Expected package_size 1073741824, got %d", jsonCacheData.PackageSize)
+	}
+
+	// Test YAML serialization
+	yamlData, err := yaml.Marshal(data)
+	if err != nil {
+		t.Fatalf("YAML marshal failed: %v", err)
+	}
+
+	var yamlCacheData RepoCacheData
+	if err := yaml.Unmarshal(yamlData, &yamlCacheData); err != nil {
+		t.Fatalf("YAML unmarshal failed: %v", err)
+	}
+
+	if yamlCacheData.PackageMD5 != "d41d8cd98f00b204e9800998ecf8427e" {
+		t.Errorf("Unexpected package_md5: %s", yamlCacheData.PackageMD5)
+	}
+}
+
+func TestRepoCacheDataText(t *testing.T) {
+	// Test nil receiver
+	var nilData *RepoCacheData
+	if nilData.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test normal case
+	data := &RepoCacheData{
+		TargetPkg:     "/tmp/pkg.tgz",
+		IncludedRepos: []string{"pigsty", "mssql"},
+		PackageSize:   1073741824, // 1 GiB
+	}
+	text := data.Text()
+	if !strings.Contains(text, "2 repos") {
+		t.Errorf("Expected '2 repos' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "/tmp/pkg.tgz") {
+		t.Errorf("Expected target_pkg in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "GiB") {
+		t.Errorf("Expected 'GiB' in text, got '%s'", text)
+	}
+}
+
+func TestRepoReloadDataSerialization(t *testing.T) {
+	data := &RepoReloadData{
+		SourceURL:    "https://repo.pigsty.io/ext/data/repo.yml",
+		RepoCount:    25,
+		CatalogPath:  "/root/.pig/repo.yml",
+		DownloadedAt: "2026-02-03T10:00:00Z",
+		DurationMs:   1234,
+	}
+
+	// Test JSON serialization
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	if !strings.Contains(jsonStr, `"source_url"`) {
+		t.Error("JSON should contain 'source_url' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"repo_count"`) {
+		t.Error("JSON should contain 'repo_count' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"catalog_path"`) {
+		t.Error("JSON should contain 'catalog_path' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"downloaded_at"`) {
+		t.Error("JSON should contain 'downloaded_at' field (snake_case)")
+	}
+	if !strings.Contains(jsonStr, `"duration_ms"`) {
+		t.Error("JSON should contain 'duration_ms' field (snake_case)")
+	}
+
+	var jsonReloadData RepoReloadData
+	if err := json.Unmarshal(jsonData, &jsonReloadData); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	if jsonReloadData.SourceURL != "https://repo.pigsty.io/ext/data/repo.yml" {
+		t.Errorf("Expected source_url 'https://repo.pigsty.io/ext/data/repo.yml', got '%s'", jsonReloadData.SourceURL)
+	}
+	if jsonReloadData.RepoCount != 25 {
+		t.Errorf("Expected repo_count 25, got %d", jsonReloadData.RepoCount)
+	}
+
+	// Test YAML serialization
+	yamlData, err := yaml.Marshal(data)
+	if err != nil {
+		t.Fatalf("YAML marshal failed: %v", err)
+	}
+
+	var yamlReloadData RepoReloadData
+	if err := yaml.Unmarshal(yamlData, &yamlReloadData); err != nil {
+		t.Fatalf("YAML unmarshal failed: %v", err)
+	}
+
+	if yamlReloadData.CatalogPath != "/root/.pig/repo.yml" {
+		t.Errorf("Unexpected catalog_path: %s", yamlReloadData.CatalogPath)
+	}
+	if yamlReloadData.DownloadedAt != "2026-02-03T10:00:00Z" {
+		t.Errorf("Unexpected downloaded_at: %s", yamlReloadData.DownloadedAt)
+	}
+}
+
+func TestRepoReloadDataText(t *testing.T) {
+	// Test nil receiver
+	var nilData *RepoReloadData
+	if nilData.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test with catalog path
+	dataWithPath := &RepoReloadData{
+		SourceURL:   "https://repo.pigsty.io/ext/data/repo.yml",
+		RepoCount:   25,
+		CatalogPath: "/root/.pig/repo.yml",
+	}
+	text := dataWithPath.Text()
+	if !strings.Contains(text, "25 repos") {
+		t.Errorf("Expected '25 repos' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "repo.pigsty.io") {
+		t.Errorf("Expected source_url in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "/root/.pig/repo.yml") {
+		t.Errorf("Expected catalog_path in text, got '%s'", text)
+	}
+
+	// Test without catalog path
+	dataNoPath := &RepoReloadData{
+		SourceURL: "https://repo.pigsty.io/ext/data/repo.yml",
+		RepoCount: 25,
+	}
+	textNoPath := dataNoPath.Text()
+	if !strings.Contains(textNoPath, "25 repos") {
+		t.Errorf("Expected '25 repos' in text, got '%s'", textNoPath)
+	}
+	if strings.Contains(textNoPath, " to ") {
+		t.Errorf("Should not contain ' to ' without catalog path, got '%s'", textNoPath)
+	}
+}
+
+func TestCreateReposWithResultUnsupportedOS(t *testing.T) {
+	// On macOS, this should return unsupported OS error
+	result := CreateReposWithResult([]string{"/www/pigsty"})
+	if result == nil {
+		t.Fatal("CreateReposWithResult should not return nil")
+	}
+
+	// On non-Linux systems, expect unsupported OS error
+	if !result.Success {
+		if result.Code == output.CodeRepoUnsupportedOS {
+			t.Log("CreateReposWithResult correctly returns unsupported OS error on non-Linux")
+		} else {
+			t.Logf("CreateReposWithResult returned unexpected error code: %d - %s", result.Code, result.Message)
+		}
+	}
+}
+
+func TestRepoReloadDataOmitempty(t *testing.T) {
+	// Test that optional fields are omitted when empty
+	data := &RepoReloadData{
+		SourceURL:  "https://repo.pigsty.io/ext/data/repo.yml",
+		RepoCount:  25,
+		DurationMs: 1234,
+		// CatalogPath and DownloadedAt are empty/omitted
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+
+	// These fields should NOT appear when empty (omitempty)
+	if strings.Contains(jsonStr, `"catalog_path"`) {
+		t.Error("JSON should not contain 'catalog_path' field when empty")
+	}
+	if strings.Contains(jsonStr, `"downloaded_at"`) {
+		t.Error("JSON should not contain 'downloaded_at' field when empty")
+	}
+
+	// These required fields SHOULD appear
+	if !strings.Contains(jsonStr, `"source_url"`) {
+		t.Error("JSON should contain 'source_url' field")
+	}
+	if !strings.Contains(jsonStr, `"repo_count"`) {
+		t.Error("JSON should contain 'repo_count' field")
+	}
+	if !strings.Contains(jsonStr, `"duration_ms"`) {
+		t.Error("JSON should contain 'duration_ms' field")
+	}
+}
+
+func TestBootWithResultPackageNotFound(t *testing.T) {
+	// Test BootWithResult with non-existent package
+	result := BootWithResult("/nonexistent/package.tgz", "/tmp/test-boot")
+	if result == nil {
+		t.Fatal("BootWithResult should not return nil")
+	}
+
+	// Should fail with package not found error
+	if result.Success {
+		t.Error("BootWithResult should fail for non-existent package")
+	}
+
+	if result.Code != output.CodeRepoPackageNotFound {
+		t.Errorf("Expected code %d (CodeRepoPackageNotFound), got %d", output.CodeRepoPackageNotFound, result.Code)
+	}
+
+	// Verify data is attached even on failure
+	if result.Data == nil {
+		t.Error("Result.Data should not be nil even on failure")
+	}
+
+	bootData, ok := result.Data.(*RepoBootData)
+	if !ok {
+		t.Fatalf("Result.Data should be *RepoBootData, got %T", result.Data)
+	}
+
+	if bootData.SourcePkg != "/nonexistent/package.tgz" {
+		t.Errorf("Expected source_pkg '/nonexistent/package.tgz', got '%s'", bootData.SourcePkg)
+	}
+	if bootData.DurationMs < 0 {
+		t.Error("DurationMs should be non-negative")
+	}
+}
+
+func TestCacheWithResultDirNotFound(t *testing.T) {
+	// Test CacheWithResult with non-existent directory
+	result := CacheWithResult("/nonexistent/dir", "/tmp/test-cache.tgz", []string{"pigsty"})
+	if result == nil {
+		t.Fatal("CacheWithResult should not return nil")
+	}
+
+	// Should fail with directory not found error
+	if result.Success {
+		t.Error("CacheWithResult should fail for non-existent directory")
+	}
+
+	if result.Code != output.CodeRepoDirNotFound {
+		t.Errorf("Expected code %d (CodeRepoDirNotFound), got %d", output.CodeRepoDirNotFound, result.Code)
+	}
+
+	// Verify data is attached even on failure
+	if result.Data == nil {
+		t.Error("Result.Data should not be nil even on failure")
+	}
+
+	cacheData, ok := result.Data.(*RepoCacheData)
+	if !ok {
+		t.Fatalf("Result.Data should be *RepoCacheData, got %T", result.Data)
+	}
+
+	if cacheData.SourceDir != "/nonexistent/dir" {
+		t.Errorf("Expected source_dir '/nonexistent/dir', got '%s'", cacheData.SourceDir)
+	}
+	if cacheData.DurationMs < 0 {
+		t.Error("DurationMs should be non-negative")
+	}
+}
+
+func TestBootWithResultDefaults(t *testing.T) {
+	// Test that BootWithResult uses default values when empty strings are passed
+	result := BootWithResult("", "")
+	if result == nil {
+		t.Fatal("BootWithResult should not return nil")
+	}
+
+	// Should fail (package doesn't exist) but with correct defaults
+	bootData, ok := result.Data.(*RepoBootData)
+	if !ok {
+		t.Fatalf("Result.Data should be *RepoBootData, got %T", result.Data)
+	}
+
+	// Check defaults are applied
+	if bootData.SourcePkg != "/tmp/pkg.tgz" {
+		t.Errorf("Expected default source_pkg '/tmp/pkg.tgz', got '%s'", bootData.SourcePkg)
+	}
+	if bootData.TargetDir != "/www" {
+		t.Errorf("Expected default target_dir '/www', got '%s'", bootData.TargetDir)
+	}
+}
+
+func TestCacheWithResultDefaults(t *testing.T) {
+	// Test that CacheWithResult uses default values when empty/nil are passed
+	result := CacheWithResult("", "", nil)
+	if result == nil {
+		t.Fatal("CacheWithResult should not return nil")
+	}
+
+	// Should fail (directory doesn't exist) but with correct defaults
+	cacheData, ok := result.Data.(*RepoCacheData)
+	if !ok {
+		t.Fatalf("Result.Data should be *RepoCacheData, got %T", result.Data)
+	}
+
+	// Check defaults are applied
+	if cacheData.SourceDir != "/www" {
+		t.Errorf("Expected default source_dir '/www', got '%s'", cacheData.SourceDir)
+	}
+	if cacheData.TargetPkg != "/tmp/pkg.tgz" {
+		t.Errorf("Expected default target_pkg '/tmp/pkg.tgz', got '%s'", cacheData.TargetPkg)
+	}
+	if len(cacheData.IncludedRepos) != 1 || cacheData.IncludedRepos[0] != "pigsty" {
+		t.Errorf("Expected default included_repos ['pigsty'], got %v", cacheData.IncludedRepos)
+	}
+}
