@@ -51,6 +51,17 @@ const (
 	CodeExtensionReloadFailed  = MODULE_EXT + CAT_OPERATION + 6 // Catalog reload failed
 )
 
+// Repository module specific codes (MODULE_REPO = 110000)
+const (
+	CodeRepoNotFound       = MODULE_REPO + CAT_RESOURCE + 1 // Repository not found
+	CodeRepoModuleNotFound = MODULE_REPO + CAT_RESOURCE + 2 // Module not found
+	CodeRepoManagerError   = MODULE_REPO + CAT_CONFIG + 1   // Repository manager initialization error
+	CodeRepoUnsupportedOS  = MODULE_REPO + CAT_STATE + 1    // Operating system not supported for repo operations
+	CodeRepoAddFailed      = MODULE_REPO + CAT_OPERATION + 1 // Add repository failed
+	CodeRepoBackupFailed   = MODULE_REPO + CAT_OPERATION + 2 // Backup repository failed
+	CodeRepoUpdateFailed   = MODULE_REPO + CAT_OPERATION + 3 // Update cache failed
+)
+
 // ExitCode converts a status code to a shell exit code.
 // It extracts the category (CC) from the 222 structure (MMCCNN) and maps it to exit codes.
 //

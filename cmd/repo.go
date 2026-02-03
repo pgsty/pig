@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"pig/cli/repo"
 	"pig/internal/config"
+	"pig/internal/output"
 	"pig/internal/utils"
 	"strings"
 
@@ -29,6 +30,17 @@ var repoCmd = &cobra.Command{
 	Short:   "Manage Linux Software Repo (apt/dnf)",
 	Aliases: []string{"r"},
 	GroupID: "pgext",
+	Annotations: map[string]string{
+		"name":       "pig repo",
+		"type":       "group",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "100",
+	},
 	Long: `pig repo - Manage Linux APT/YUM Repo
 
   pig repo list                    # available repo list             (info)
@@ -60,11 +72,37 @@ var repoListCmd = &cobra.Command{
 	Short:        "print available repo list",
 	Aliases:      []string{"l", "ls"},
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig repo list",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "100",
+	},
 	Example: `
   pig repo list                # list available repos on current system
   pig repo list all            # list all unfiltered repo raw data
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		showAll := len(args) > 0 && args[0] == "all"
+
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := repo.ListRepos(showAll)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		if len(args) == 0 {
 			return repo.List()
 		} else if args[0] == "all" {
@@ -79,7 +117,35 @@ var repoInfoCmd = &cobra.Command{
 	Short:        "get repo detailed information",
 	Aliases:      []string{"i"},
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig repo info",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "50",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := repo.GetRepoInfo(args)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			// If operation failed, return error for exit code
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		if len(args) == 0 {
 			logrus.Errorf("repo or module name is required, check available repo list:")
 			_ = repo.ListAll()
@@ -94,6 +160,17 @@ var repoAddCmd = &cobra.Command{
 	Short:        "add new repository",
 	Aliases:      []string{"a", "append"},
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig repo add",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "2000",
+	},
 	Example: `
   pig repo add                      # = pig repo add all
   pig repo add all                  # add node,pgsql,infra repo (recommended)
@@ -115,6 +192,36 @@ var repoAddCmd = &cobra.Command{
   # check available repo & modules with pig repo list
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
+				result := output.Fail(output.CodeRepoUnsupportedOS,
+					fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
+				bytes, err := result.Render(format)
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(bytes))
+				return fmt.Errorf("%s", result.Message)
+			}
+			if len(args) == 0 {
+				args = []string{"all"}
+			}
+			modules := repo.ExpandModuleArgs(args)
+			result := repo.AddRepos(modules, repoRegion, repoRemove, repoUpdate)
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
 			return fmt.Errorf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull)
 		}
@@ -160,9 +267,21 @@ var repoAddCmd = &cobra.Command{
 }
 
 var repoSetCmd = &cobra.Command{
-	Use:     "set",
-	Short:   "wipe, overwrite, and update repository",
-	Aliases: []string{"overwrite"},
+	Use:          "set",
+	Short:        "wipe, overwrite, and update repository",
+	Aliases:      []string{"overwrite"},
+	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig repo set",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "5000",
+	},
 	Example: `
   pig repo set                      # set repo to node,pgsql,infra (= pig repo add all -ru)
   pig repo set node,pgsql           # use pgdg + pigsty repo
@@ -251,7 +370,35 @@ var repoStatusCmd = &cobra.Command{
 	Short:        "show current repo status",
 	Aliases:      []string{"s", "st"},
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		"name":       "pig repo status",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "500",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Structured output mode (YAML/JSON)
+		format := config.OutputFormat
+		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+			result := repo.GetRepoStatus()
+			bytes, err := result.Render(format)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(bytes))
+			// If operation failed, return error for exit code
+			if !result.Success {
+				return fmt.Errorf("%s", result.Message)
+			}
+			return nil
+		}
+
+		// Text mode: preserve existing behavior
 		return repo.Status()
 	},
 }
