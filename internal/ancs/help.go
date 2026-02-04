@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -27,8 +28,14 @@ func SetupHelp(rootCmd *cobra.Command) {
 	if rootCmd == nil {
 		return
 	}
+	// First pass: capture original help funcs before any mutation.
 	walkCommands(rootCmd, func(cmd *cobra.Command) {
-		originalHelpFuncs[cmd] = cmd.HelpFunc()
+		if _, ok := originalHelpFuncs[cmd]; !ok {
+			originalHelpFuncs[cmd] = cmd.HelpFunc()
+		}
+	})
+	// Second pass: set custom help func for all commands.
+	walkCommands(rootCmd, func(cmd *cobra.Command) {
 		cmd.SetHelpFunc(HelpFunc)
 	})
 }
@@ -44,17 +51,17 @@ func HelpFunc(cmd *cobra.Command, args []string) {
 		if err := RenderHelp(cmd, format); err != nil {
 			fmt.Fprintf(os.Stderr, "Error rendering help: %v\n", err)
 			// Fall back to original help on error
-			callOriginalHelp(cmd, args)
+			callOriginalHelp(cmd, args, false)
 		}
 	case config.OUTPUT_JSON, config.OUTPUT_JSON_PRETTY:
 		if err := RenderHelp(cmd, format); err != nil {
 			fmt.Fprintf(os.Stderr, "Error rendering help: %v\n", err)
 			// Fall back to original help on error
-			callOriginalHelp(cmd, args)
+			callOriginalHelp(cmd, args, false)
 		}
 	default:
 		// For text format, use original help
-		callOriginalHelp(cmd, args)
+		callOriginalHelp(cmd, args, true)
 	}
 }
 
@@ -91,19 +98,31 @@ func getOutputFormat(cmd *cobra.Command) string {
 
 // callOriginalHelp invokes the original help function and appends the agent hint.
 // If no original function was saved, it uses the default cobra help.
-func callOriginalHelp(cmd *cobra.Command, args []string) {
+func callOriginalHelp(cmd *cobra.Command, args []string, withHint bool) {
 	if originalHelpFunc, ok := originalHelpFuncs[cmd]; ok && originalHelpFunc != nil {
-		originalHelpFunc(cmd, args)
+		// Guard against recursive help func (e.g., if originalHelpFunc == HelpFunc)
+		if sameHelpFunc(originalHelpFunc, HelpFunc) {
+			defaultHelp := (&cobra.Command{}).HelpFunc()
+			defaultHelp(cmd, args)
+		} else {
+			originalHelpFunc(cmd, args)
+		}
 	} else {
-		// Fallback to cobra's built-in help behavior
-		// Temporarily set HelpFunc to nil to avoid recursion
-		// Use defer to ensure restoration even if Help() panics
-		cmd.SetHelpFunc(nil)
-		defer cmd.SetHelpFunc(HelpFunc)
-		cmd.Help()
+		// Fallback to cobra's default help behavior (avoid recursion)
+		defaultHelp := (&cobra.Command{}).HelpFunc()
+		defaultHelp(cmd, args)
 	}
-	// Append agent hint after help output (only called in text mode)
-	printAgentHint(cmd.OutOrStdout())
+	// Append agent hint after help output (text mode only)
+	if withHint {
+		printAgentHint(cmd.OutOrStdout())
+	}
+}
+
+func sameHelpFunc(a, b func(*cobra.Command, []string)) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
 }
 
 // printAgentHint outputs the agent hint message with proper visual separation.

@@ -22,6 +22,19 @@ var (
 	TrySudo = false
 )
 
+// configureCmdIO sets stdin/stdout/stderr for external commands.
+// In structured output mode, redirect stdout to stderr to keep stdout clean.
+func configureCmdIO(cmd *exec.Cmd) {
+	cmd.Stdin = os.Stdin
+	if config.IsStructuredOutput() {
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		return
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+}
+
 // Command runs a command with current user
 func Command(args []string) error {
 	if len(args) == 0 {
@@ -29,9 +42,7 @@ func Command(args []string) error {
 	}
 	logrus.Debugf("executing command: %v", args)
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	configureCmdIO(cmd)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("command failed: %w", err)
 	}
@@ -48,9 +59,7 @@ func ShellCommand(args []string) error {
 	}
 	logrus.Debugf("executing shell command: %v", args)
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	configureCmdIO(cmd)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("shell command failed: %w", err)
 	}
@@ -98,9 +107,7 @@ func SudoCommand(args []string) error {
 
 	// Execute the command
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	configureCmdIO(cmd)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("command failed: %w", err)
 	}

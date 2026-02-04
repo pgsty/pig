@@ -76,9 +76,7 @@ func DBSUCommand(dbsu string, args []string) error {
 	}
 
 	cmd := buildDBSUCmd(dbsu, args)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	configureCmdIO(cmd)
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {

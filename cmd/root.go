@@ -119,6 +119,8 @@ func initLogger(level string, path string) error {
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
+	// Setup ANCS-aware help after all commands are registered to avoid recursion.
+	ancs.SetupHelp(rootCmd)
 	if err := rootCmd.Execute(); err != nil {
 		logrus.WithError(err).Error("command execution failed")
 		// Preserve subprocess exit codes using ExitCode helper
@@ -135,9 +137,6 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&inventory, "inventory", "i", "", "config inventory path")
 	rootCmd.PersistentFlags().StringVarP(&pigstyHome, "home", "H", "", "pigsty home path")
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "text", "output format: text, yaml, json, json-pretty")
-
-	// Setup ANCS-aware help function for structured help output
-	ancs.SetupHelp(rootCmd)
 
 	rootCmd.AddGroup(
 		&cobra.Group{ID: "pgext", Title: "PostgreSQL Extension Manager"},

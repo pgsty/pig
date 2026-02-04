@@ -24,9 +24,7 @@ func RunSystemctl(action, service string) error {
 		cmd = exec.Command("sudo", cmdArgs...)
 	}
 
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	configureCmdIO(cmd)
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -49,9 +47,7 @@ func RunSystemctlQuiet(action, service string) error {
 		cmd = exec.Command("sudo", cmdArgs...)
 	}
 
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	configureCmdIO(cmd)
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {

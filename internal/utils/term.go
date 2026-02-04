@@ -17,9 +17,9 @@ const (
 	ColorBold   = "\033[1m"
 )
 
-// PrintHint prints a command hint to stdout in blue.
+// PrintHint prints a command hint to stderr in blue.
 func PrintHint(cmdArgs []string) {
-	fmt.Printf("%s$ %s%s\n", ColorBlue, strings.Join(cmdArgs, " "), ColorReset)
+	fmt.Fprintf(os.Stderr, "%s$ %s%s\n", ColorBlue, strings.Join(cmdArgs, " "), ColorReset)
 }
 
 // PrintWarn prints a warning message to stderr in yellow.

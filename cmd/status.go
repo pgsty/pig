@@ -5,6 +5,7 @@ import (
 	"pig/cli/ext"
 	"pig/cli/get"
 	"pig/cli/license"
+	statuscli "pig/cli/status"
 	"pig/internal/config"
 	"pig/internal/utils"
 
@@ -21,7 +22,12 @@ var statusCmd = &cobra.Command{
 	- PG Environment
     - Network Conditions
 `,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if config.IsStructuredOutput() {
+			result := statuscli.GetStatusResult()
+			return handleAuxResult(result)
+		}
+
 		logPathStr := "stderr"
 		if logPath != "" {
 			logPathStr = logPath
@@ -65,5 +71,6 @@ var statusCmd = &cobra.Command{
 		fmt.Println("\n" + utils.PadHeader("Network Conditions", padding))
 		get.Details = true
 		get.NetworkCondition()
+		return nil
 	},
 }
