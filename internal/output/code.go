@@ -43,6 +43,7 @@ const (
 	CodeExtensionCatalogError  = MODULE_EXT + CAT_CONFIG + 1    // Catalog loading/parsing error
 	CodeExtensionNoPG          = MODULE_EXT + CAT_STATE + 1     // No PostgreSQL installation found
 	CodeExtensionUnsupportedOS = MODULE_EXT + CAT_STATE + 2     // Operating system not supported
+	CodeExtensionPgConfigError = MODULE_EXT + CAT_STATE + 3     // pg_config detection/validation error
 	CodeExtensionInvalidArgs   = MODULE_EXT + CAT_PARAM + 1     // Invalid or missing arguments
 	CodeExtensionInstallFailed = MODULE_EXT + CAT_OPERATION + 1 // Package manager installation failed
 	CodeExtensionRemoveFailed  = MODULE_EXT + CAT_OPERATION + 2 // Package manager removal failed
@@ -54,6 +55,7 @@ const (
 
 // Repository module specific codes (MODULE_REPO = 110000)
 const (
+	CodeRepoInvalidArgs       = MODULE_REPO + CAT_PARAM + 1     // Invalid or missing arguments
 	CodeRepoNotFound          = MODULE_REPO + CAT_RESOURCE + 1  // Repository not found
 	CodeRepoModuleNotFound    = MODULE_REPO + CAT_RESOURCE + 2  // Module not found
 	CodeRepoPackageNotFound   = MODULE_REPO + CAT_RESOURCE + 3  // Offline package not found

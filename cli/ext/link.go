@@ -26,6 +26,33 @@ var (
 	systemPaths    = map[string]bool{"/": true, "/usr": true, "/usr/local": true}
 )
 
+// LinkError represents an error with an associated semantic code for link operations.
+type LinkError struct {
+	Code int
+	Err  error
+}
+
+func (e *LinkError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return "link error"
+}
+
+func (e *LinkError) Unwrap() error {
+	return e.Err
+}
+
+func linkErrorCode(err error) int {
+	if err == nil {
+		return output.CodeExtensionLinkFailed
+	}
+	if le, ok := err.(*LinkError); ok {
+		return le.Code
+	}
+	return output.CodeExtensionLinkFailed
+}
+
 // UnlinkPostgres unlinks the current PostgreSQL:
 // 1. Removes the /usr/pgsql symbolic link
 // 2. Removes the /etc/profile.d/pgsql.sh file
@@ -64,8 +91,10 @@ func resolvePGHome(arg string) (string, error) {
 	// Check if it's a version number
 	if ver, err := strconv.Atoi(arg); err == nil {
 		if ver < minPGVersion || ver > maxPGVersion {
-			return "", fmt.Errorf("invalid PostgreSQL version: %d (must be between %d and %d)",
-				ver, minPGVersion, maxPGVersion)
+			return "", &LinkError{
+				Code: output.CodeExtensionInvalidArgs,
+				Err:  fmt.Errorf("invalid PostgreSQL version: %d (must be between %d and %d)", ver, minPGVersion, maxPGVersion),
+			}
 		}
 
 		switch config.OSType {
@@ -74,7 +103,10 @@ func resolvePGHome(arg string) (string, error) {
 		case config.DistroDEB:
 			return fmt.Sprintf("/usr/lib/postgresql/%d", ver), nil
 		default:
-			return "", fmt.Errorf("unsupported OS distribution: %s", config.OSType)
+			return "", &LinkError{
+				Code: output.CodeExtensionUnsupportedOS,
+				Err:  fmt.Errorf("unsupported OS distribution: %s", config.OSType),
+			}
 		}
 	}
 
@@ -85,18 +117,27 @@ func resolvePGHome(arg string) (string, error) {
 // validatePGHome checks if the given path is a valid PostgreSQL installation
 func validatePGHome(pgHome string) error {
 	if systemPaths[pgHome] {
-		return fmt.Errorf("cannot use system path %s as PostgreSQL home", pgHome)
+		return &LinkError{
+			Code: output.CodeExtensionInvalidArgs,
+			Err:  fmt.Errorf("cannot use system path %s as PostgreSQL home", pgHome),
+		}
 	}
 
 	info, err := os.Stat(pgHome)
 	if err != nil || !info.IsDir() {
-		return fmt.Errorf("PGHOME directory %s is not valid: %s", pgHome, err)
+		return &LinkError{
+			Code: output.CodeExtensionInvalidArgs,
+			Err:  fmt.Errorf("PGHOME directory %s is not valid: %s", pgHome, err),
+		}
 	}
 
 	binDir := filepath.Join(pgHome, "bin")
 	binInfo, err := os.Stat(binDir)
 	if err != nil || !binInfo.IsDir() {
-		return fmt.Errorf("bin directory %s is not valid: %s", binDir, err)
+		return &LinkError{
+			Code: output.CodeExtensionInvalidArgs,
+			Err:  fmt.Errorf("bin directory %s is not valid: %s", binDir, err),
+		}
 	}
 
 	return nil
@@ -114,7 +155,7 @@ func generateProfile(pgHome, binDir string) []byte {
 // LinkPostgresResult returns a structured Result for the ext link command
 func LinkPostgresResult(args ...string) *output.Result {
 	if len(args) != 1 {
-		return output.Fail(output.CodeExtensionLinkFailed, fmt.Sprintf("exactly one argument required, got %d", len(args)))
+		return output.Fail(output.CodeExtensionInvalidArgs, fmt.Sprintf("exactly one argument required, got %d", len(args)))
 	}
 
 	arg := args[0]
@@ -142,11 +183,11 @@ func LinkPostgresResult(args ...string) *output.Result {
 	// Resolve and validate PGHOME
 	pgHome, err := resolvePGHome(arg)
 	if err != nil {
-		return output.Fail(output.CodeExtensionLinkFailed, err.Error())
+		return output.Fail(linkErrorCode(err), err.Error())
 	}
 
 	if err := validatePGHome(pgHome); err != nil {
-		return output.Fail(output.CodeExtensionLinkFailed, err.Error())
+		return output.Fail(linkErrorCode(err), err.Error())
 	}
 
 	// Create symlink

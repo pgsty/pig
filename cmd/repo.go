@@ -12,6 +12,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// handleRepoStructuredResult handles structured output for repo commands.
+// It uses output.Print for consistent output rendering and returns proper exit codes.
+func handleRepoStructuredResult(result *output.Result) error {
+	if result == nil {
+		return fmt.Errorf("nil result")
+	}
+	if err := output.Print(result); err != nil {
+		return err
+	}
+	if !result.Success {
+		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message)}
+	}
+	return nil
+}
+
 var (
 	repoRegion string
 	repoUpdate bool
@@ -91,15 +106,9 @@ var repoListCmd = &cobra.Command{
 		showAll := len(args) > 0 && args[0] == "all"
 
 		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+		if config.IsStructuredOutput() {
 			result := repo.ListRepos(showAll)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			return nil
+			return handleRepoStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -130,19 +139,9 @@ var repoInfoCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+		if config.IsStructuredOutput() {
 			result := repo.GetRepoInfo(args)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			// If operation failed, return error for exit code
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleRepoStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -193,32 +192,18 @@ var repoAddCmd = &cobra.Command{
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+		if config.IsStructuredOutput() {
 			if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
 				result := output.Fail(output.CodeRepoUnsupportedOS,
 					fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-				bytes, err := result.Render(format)
-				if err != nil {
-					return err
-				}
-				fmt.Println(string(bytes))
-				return fmt.Errorf("%s", result.Message)
+				return handleRepoStructuredResult(result)
 			}
 			if len(args) == 0 {
 				args = []string{"all"}
 			}
 			modules := repo.ExpandModuleArgs(args)
 			result := repo.AddRepos(modules, repoRegion, repoRemove, repoUpdate)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleRepoStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -323,28 +308,14 @@ var repoRmCmd = &cobra.Command{
 		modules := repo.ExpandModuleArgs(args)
 
 		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+		if config.IsStructuredOutput() {
 			if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
 				result := output.Fail(output.CodeRepoUnsupportedOS,
 					fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-				bytes, err := result.Render(format)
-				if err != nil {
-					return err
-				}
-				fmt.Println(string(bytes))
-				return fmt.Errorf("%s", result.Message)
+				return handleRepoStructuredResult(result)
 			}
 			result := repo.RmRepos(modules, repoUpdate)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleRepoStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -401,28 +372,14 @@ var repoUpdateCmd = &cobra.Command{
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+		if config.IsStructuredOutput() {
 			if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
 				result := output.Fail(output.CodeRepoUnsupportedOS,
 					fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-				bytes, err := result.Render(format)
-				if err != nil {
-					return err
-				}
-				fmt.Println(string(bytes))
-				return fmt.Errorf("%s", result.Message)
+				return handleRepoStructuredResult(result)
 			}
 			result := repo.UpdateCache()
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleRepoStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -458,19 +415,9 @@ var repoStatusCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+		if config.IsStructuredOutput() {
 			result := repo.GetRepoStatus()
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			// If operation failed, return error for exit code
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleRepoStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -501,18 +448,9 @@ var repoBootCmd = &cobra.Command{
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+		if config.IsStructuredOutput() {
 			result := repo.BootWithResult(repoBootPkg, repoBootDir)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleRepoStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -552,18 +490,9 @@ var repoCacheCmd = &cobra.Command{
 		}
 
 		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+		if config.IsStructuredOutput() {
 			result := repo.CacheWithResult(repoCacheDir, repoCachePkg, repos)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleRepoStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -600,18 +529,9 @@ var repoCreateCmd = &cobra.Command{
 		}
 
 		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+		if config.IsStructuredOutput() {
 			result := repo.CreateReposWithResult(repos)
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleRepoStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -637,18 +557,9 @@ var repoReloadCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
+		if config.IsStructuredOutput() {
 			result := repo.ReloadRepoCatalogWithResult()
-			bytes, err := result.Render(format)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(bytes))
-			if !result.Success {
-				return fmt.Errorf("%s", result.Message)
-			}
-			return nil
+			return handleRepoStructuredResult(result)
 		}
 
 		// Text mode: preserve existing behavior

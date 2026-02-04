@@ -391,8 +391,8 @@ func TestGetRepoInfoEmptyArgs(t *testing.T) {
 		t.Error("GetRepoInfo with empty args should fail")
 	}
 
-	if result.Code != output.CodeRepoNotFound {
-		t.Errorf("Expected code %d (CodeRepoNotFound), got %d", output.CodeRepoNotFound, result.Code)
+	if result.Code != output.CodeRepoInvalidArgs {
+		t.Errorf("Expected code %d (CodeRepoInvalidArgs), got %d", output.CodeRepoInvalidArgs, result.Code)
 	}
 }
 

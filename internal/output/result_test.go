@@ -177,6 +177,32 @@ func TestResultJSONSerialization(t *testing.T) {
 	}
 }
 
+func TestResultJSONTags(t *testing.T) {
+	r := &Result{
+		Success: true,
+		Code:    0,
+		Message: "ok",
+		Detail:  "detail",
+		Data:    map[string]int{"count": 1},
+	}
+
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("Failed to marshal Result to JSON: %v", err)
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal Result JSON: %v", err)
+	}
+
+	for _, key := range []string{"success", "code", "message", "detail", "data"} {
+		if _, ok := decoded[key]; !ok {
+			t.Errorf("JSON output missing key %q", key)
+		}
+	}
+}
+
 func TestResultYAMLSerialization(t *testing.T) {
 	r := &Result{
 		Success: true,
@@ -207,6 +233,32 @@ func TestResultYAMLSerialization(t *testing.T) {
 	}
 	if decoded.Detail != r.Detail {
 		t.Errorf("Detail = %v, want %v", decoded.Detail, r.Detail)
+	}
+}
+
+func TestResultYAMLTags(t *testing.T) {
+	r := &Result{
+		Success: true,
+		Code:    0,
+		Message: "ok",
+		Detail:  "detail",
+		Data:    map[string]int{"count": 1},
+	}
+
+	data, err := yaml.Marshal(r)
+	if err != nil {
+		t.Fatalf("Failed to marshal Result to YAML: %v", err)
+	}
+
+	var decoded map[string]interface{}
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal Result YAML: %v", err)
+	}
+
+	for _, key := range []string{"success", "code", "message", "detail", "data"} {
+		if _, ok := decoded[key]; !ok {
+			t.Errorf("YAML output missing key %q", key)
+		}
 	}
 }
 

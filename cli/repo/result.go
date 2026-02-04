@@ -39,10 +39,10 @@ type RepoSummary struct {
 
 // RepoListData is the DTO for repo list command
 type RepoListData struct {
-	OSEnv     *OSEnvironment     `json:"os_env" yaml:"os_env"`
-	ShowAll   bool               `json:"show_all,omitempty" yaml:"show_all,omitempty"`
-	RepoCount int                `json:"repo_count" yaml:"repo_count"`
-	Repos     []*RepoSummary     `json:"repos" yaml:"repos"`
+	OSEnv     *OSEnvironment      `json:"os_env" yaml:"os_env"`
+	ShowAll   bool                `json:"show_all,omitempty" yaml:"show_all,omitempty"`
+	RepoCount int                 `json:"repo_count" yaml:"repo_count"`
+	Repos     []*RepoSummary      `json:"repos" yaml:"repos"`
 	Modules   map[string][]string `json:"modules" yaml:"modules"`
 }
 
@@ -175,7 +175,7 @@ func ListRepos(showAll bool) *output.Result {
 // GetRepoInfo returns a structured Result for the repo info command
 func GetRepoInfo(args []string) *output.Result {
 	if len(args) == 0 {
-		return output.Fail(output.CodeRepoNotFound, "repo or module name is required")
+		return output.Fail(output.CodeRepoInvalidArgs, "repo or module name is required")
 	}
 
 	rm, err := NewManager()

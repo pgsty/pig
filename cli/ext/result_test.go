@@ -476,6 +476,9 @@ func TestGetExtensionInfoNoNames(t *testing.T) {
 	if result.Success {
 		t.Error("expected success=false for empty names")
 	}
+	if result.Code != output.CodeExtensionInvalidArgs {
+		t.Errorf("expected CodeExtensionInvalidArgs (%d), got %d", output.CodeExtensionInvalidArgs, result.Code)
+	}
 }
 
 func TestGetExtensionInfoNilCatalog(t *testing.T) {
@@ -2784,10 +2787,10 @@ func TestExtensionInstallToScanEntryNil(t *testing.T) {
 
 func TestExtensionInstallToScanEntry(t *testing.T) {
 	ext := &Extension{
-		Name:     "postgis",
-		Pkg:      "postgis",
-		Version:  "3.5.0",
-		EnDesc:   "PostGIS geometry extension",
+		Name:    "postgis",
+		Pkg:     "postgis",
+		Version: "3.5.0",
+		EnDesc:  "PostGIS geometry extension",
 	}
 
 	ei := &ExtensionInstall{
@@ -3011,8 +3014,8 @@ func TestLinkPostgresResultNoArgs(t *testing.T) {
 	if result.Success {
 		t.Error("expected success=false when no arguments provided")
 	}
-	if result.Code != 100805 { // CodeExtensionLinkFailed
-		t.Errorf("expected CodeExtensionLinkFailed (100805), got %d", result.Code)
+	if result.Code != output.CodeExtensionInvalidArgs {
+		t.Errorf("expected CodeExtensionInvalidArgs (%d), got %d", output.CodeExtensionInvalidArgs, result.Code)
 	}
 }
 
@@ -3024,8 +3027,8 @@ func TestLinkPostgresResultTooManyArgs(t *testing.T) {
 	if result.Success {
 		t.Error("expected success=false when too many arguments")
 	}
-	if result.Code != 100805 { // CodeExtensionLinkFailed
-		t.Errorf("expected CodeExtensionLinkFailed (100805), got %d", result.Code)
+	if result.Code != output.CodeExtensionInvalidArgs {
+		t.Errorf("expected CodeExtensionInvalidArgs (%d), got %d", output.CodeExtensionInvalidArgs, result.Code)
 	}
 }
 
@@ -3038,8 +3041,8 @@ func TestLinkPostgresResultInvalidVersion(t *testing.T) {
 	if result.Success {
 		t.Error("expected success=false for invalid version")
 	}
-	if result.Code != 100805 { // CodeExtensionLinkFailed
-		t.Errorf("expected CodeExtensionLinkFailed (100805), got %d", result.Code)
+	if result.Code != output.CodeExtensionInvalidArgs {
+		t.Errorf("expected CodeExtensionInvalidArgs (%d), got %d", output.CodeExtensionInvalidArgs, result.Code)
 	}
 }
 

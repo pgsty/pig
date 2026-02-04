@@ -92,11 +92,18 @@ var extListCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 1 {
-			logrus.Errorf("too many arguments, only one search query allowed")
-			os.Exit(1)
+			message := "too many arguments, only one search query allowed"
+			if config.IsStructuredOutput() {
+				return handleStructuredResult(output.Fail(output.CodeExtensionInvalidArgs, message))
+			}
+			logrus.Error(message)
+			os.Exit(output.ExitCode(output.CodeExtensionInvalidArgs))
 		}
 
-		pgVer := extProbeVersion()
+		pgVer, err := extProbeVersion()
+		if err != nil {
+			return handleExtProbeError(err)
+		}
 		query := ""
 		if len(args) == 1 {
 			query = args[0]
@@ -155,7 +162,10 @@ var extInfoCmd = &cobra.Command{
 		}
 
 		// Text mode: preserve existing behavior
-		pgVer := extProbeVersion()
+		pgVer, err := extProbeVersion()
+		if err != nil {
+			return handleExtProbeError(err)
+		}
 		logrus.Debugf("using PostgreSQL version: %d", pgVer)
 		for _, name := range args {
 			e, ok := ext.Catalog.ExtNameMap[name]
@@ -188,7 +198,9 @@ var extStatusCmd = &cobra.Command{
 		"cost":       "200",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		extProbeVersion()
+		if _, err := extProbeVersion(); err != nil {
+			return handleExtProbeError(err)
+		}
 
 		// Structured output mode (YAML/JSON)
 		format := config.OutputFormat
@@ -219,7 +231,10 @@ var extScanCmd = &cobra.Command{
 		"cost":       "500",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pgVer := extProbeVersion()
+		pgVer, err := extProbeVersion()
+		if err != nil {
+			return handleExtProbeError(err)
+		}
 
 		// Structured output mode (YAML/JSON)
 		format := config.OutputFormat
@@ -270,7 +285,10 @@ Description:
   pig ext install pgsql-common               # install common utils such as patroni pgbouncer pgbackrest,...
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pgVer := extProbeVersion()
+		pgVer, err := extProbeVersion()
+		if err != nil {
+			return handleExtProbeError(err)
+		}
 
 		// Structured output mode (YAML/JSON)
 		format := config.OutputFormat
@@ -304,7 +322,10 @@ var extRmCmd = &cobra.Command{
 		"cost":       "10000",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pgVer := extProbeVersion()
+		pgVer, err := extProbeVersion()
+		if err != nil {
+			return handleExtProbeError(err)
+		}
 
 		// Structured output mode (YAML/JSON)
 		format := config.OutputFormat
@@ -345,7 +366,10 @@ Description:
   pig ext up pg_vector -y            # update with auto-confirm
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pgVer := extProbeVersion()
+		pgVer, err := extProbeVersion()
+		if err != nil {
+			return handleExtProbeError(err)
+		}
 
 		// Structured output mode (YAML/JSON)
 		format := config.OutputFormat
@@ -387,7 +411,10 @@ var extImportCmd = &cobra.Command{
   pig ext import -d /www/pigsty postgis # import to specific path
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pgVer := extProbeVersion()
+		pgVer, err := extProbeVersion()
+		if err != nil {
+			return handleExtProbeError(err)
+		}
 
 		// Structured output mode (YAML/JSON)
 		format := config.OutputFormat
@@ -521,12 +548,40 @@ var extAvailCmd = &cobra.Command{
 	},
 }
 
+type extProbeError struct {
+	Code int
+	Err  error
+}
+
+func (e *extProbeError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return "failed to probe PostgreSQL"
+}
+
+func (e *extProbeError) Unwrap() error {
+	return e.Err
+}
+
+func extProbeErrorCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	if pe, ok := err.(*extProbeError); ok {
+		return pe.Code
+	}
+	return output.CodeExtensionInvalidArgs
+}
+
 // extProbeVersion returns the PostgreSQL version to use
-func extProbeVersion() int {
+func extProbeVersion() (int, error) {
 	// check args
 	if extPgVer != 0 && extPgConfig != "" {
-		logrus.Errorf("both pg version and pg_config path are specified, please specify only one")
-		os.Exit(1)
+		return 0, &extProbeError{
+			Code: output.CodeExtensionInvalidArgs,
+			Err:  fmt.Errorf("both pg version and pg_config path are specified, please specify only one"),
+		}
 	}
 
 	// detect postgres installation, but don't fail if not found
@@ -542,29 +597,30 @@ func extProbeVersion() int {
 			logrus.Debugf("PostgreSQL installation %d not found: %v , but it's ok", extPgVer, err)
 			// if version is explicitly given, we can fallback without any installation
 		}
-		return extPgVer
+		return extPgVer, nil
 	}
 
 	// if pg_config is specified, we must find the actual installation, to get the major version
 	if extPgConfig != "" {
 		_, err := ext.GetPostgres(extPgConfig)
 		if err != nil {
-			logrus.Errorf("failed to get PostgreSQL by pg_config path %s: %v", extPgConfig, err)
-			os.Exit(3)
-		} else {
-			return ext.Postgres.MajorVersion
+			return 0, &extProbeError{
+				Code: output.CodeExtensionPgConfigError,
+				Err:  fmt.Errorf("failed to get PostgreSQL by pg_config path %s: %v", extPgConfig, err),
+			}
 		}
+		return ext.Postgres.MajorVersion, nil
 	}
 
 	// if none given, we can fall back to active installation, or if we can't infer the version, we can fallback to no version tabulate
 	if ext.Active != nil {
 		logrus.Debugf("fallback to active PostgreSQL: %d", ext.Active.MajorVersion)
 		ext.Postgres = ext.Active
-		return ext.Active.MajorVersion
-	} else {
-		logrus.Debugf("no active PostgreSQL found, but it's ok")
-		return 0
+		return ext.Active.MajorVersion, nil
 	}
+
+	logrus.Debugf("no active PostgreSQL found, but it's ok")
+	return 0, nil
 }
 
 func init() {
@@ -591,6 +647,19 @@ func init() {
 	extCmd.AddCommand(extAvailCmd)
 }
 
+func handleExtProbeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	code := extProbeErrorCode(err)
+	if config.IsStructuredOutput() {
+		return handleStructuredResult(output.Fail(code, err.Error()))
+	}
+	logrus.Error(err)
+	os.Exit(output.ExitCode(code))
+	return nil
+}
+
 func handleStructuredResult(result *output.Result) error {
 	if result == nil {
 		return fmt.Errorf("nil result")
@@ -599,7 +668,7 @@ func handleStructuredResult(result *output.Result) error {
 		return err
 	}
 	if !result.Success {
-		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf(result.Message)}
+		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message)}
 	}
 	return nil
 }

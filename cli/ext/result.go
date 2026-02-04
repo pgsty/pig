@@ -416,7 +416,7 @@ func ListExtensions(query string, pgVer int) *output.Result {
 // GetExtensionInfo returns a structured Result for the ext info command
 func GetExtensionInfo(names []string) *output.Result {
 	if len(names) == 0 {
-		return output.Fail(output.CodeExtensionNotFound, "no extension name provided")
+		return output.Fail(output.CodeExtensionInvalidArgs, "no extension name provided")
 	}
 
 	if Catalog == nil {

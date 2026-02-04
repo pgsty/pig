@@ -83,6 +83,23 @@ const (
 	pgStopCheckCount = 6 // Check 6 times (total 30 seconds)
 )
 
+// PITRError represents a typed error with a semantic PITR error code.
+type PITRError struct {
+	Code int
+	Err  error
+}
+
+func (e *PITRError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return "pitr error"
+}
+
+func (e *PITRError) Unwrap() error {
+	return e.Err
+}
+
 // ============================================================================
 // Main Entry Point
 // ============================================================================
@@ -143,11 +160,11 @@ func ExecuteResult(opts *Options) *output.Result {
 
 	state, err := preCheck(opts)
 	if err != nil {
-		return output.Fail(output.CodePITRPrecheckFailed, "pitr pre-check failed").WithDetail(err.Error())
+		if pe, ok := err.(*PITRError); ok {
+			return output.Fail(pe.Code, pe.Error())
+		}
+		return output.Fail(output.CodePITRPrecheckFailed, err.Error())
 	}
-
-	// Build and show execution plan (text only)
-	printExecutionPlan(state, opts)
 
 	// Confirm with countdown (unless --yes)
 	if !opts.Yes {
@@ -180,8 +197,6 @@ func ExecuteResult(opts *Options) *output.Result {
 		postgresStarted = true
 	}
 
-	printPostRestoreGuidance(opts, patroniWasStopped)
-
 	endTime := time.Now()
 	data := newPITRResultData(state, opts, patroniWasStopped, postgresStarted, startTime, endTime)
 	return output.OK("pitr completed", data)
@@ -194,7 +209,7 @@ func ExecuteResult(opts *Options) *output.Result {
 func preCheck(opts *Options) (*SystemState, error) {
 	// Validate recovery target
 	if err := validateRecoveryTarget(opts); err != nil {
-		return nil, err
+		return nil, &PITRError{Code: output.CodePITRInvalidArgs, Err: err}
 	}
 
 	// Determine DBSU and data directory
@@ -207,10 +222,10 @@ func preCheck(opts *Options) (*SystemState, error) {
 	// Check data directory exists and is initialized
 	exists, initialized := postgres.CheckDataDirAsDBSU(dbsu, dataDir)
 	if !exists {
-		return nil, fmt.Errorf("data directory %s does not exist", dataDir)
+		return nil, &PITRError{Code: output.CodePITRPrecheckFailed, Err: fmt.Errorf("data directory %s does not exist", dataDir)}
 	}
 	if !initialized {
-		return nil, fmt.Errorf("data directory %s is not initialized (no PG_VERSION)", dataDir)
+		return nil, &PITRError{Code: output.CodePITRPrecheckFailed, Err: fmt.Errorf("data directory %s is not initialized (no PG_VERSION)", dataDir)}
 	}
 
 	// Check current state
