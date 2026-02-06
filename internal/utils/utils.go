@@ -264,23 +264,6 @@ func PadHeader(str string, length int) string {
 	return buf.String()
 }
 
-// SudoRunShellScript will run a shell script with sudo
-func SudoRunShellScript(script string) error {
-	// generate tmp file name with timestamp
-	tmpFile := fmt.Sprintf("script-%s.sh", time.Now().Format("20240101120000"))
-	scriptPath := filepath.Join(os.TempDir(), tmpFile)
-	logrus.Debugf("creating temporary script: %s", scriptPath)
-
-	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
-		return fmt.Errorf("failed to create temporary script %s: %w", scriptPath, err)
-	}
-
-	if err := SudoCommand([]string{"bash", scriptPath}); err != nil {
-		return fmt.Errorf("failed to execute script: %w", err)
-	}
-	return nil
-}
-
 func DownloadFile(srcURL, dstPath string) error {
 	// Check remote file size first
 	resp, err := http.Head(srcURL)

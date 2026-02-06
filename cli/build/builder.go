@@ -895,25 +895,3 @@ func (b *ExtensionBuilder) printSummary() {
 		}
 	}
 }
-
-// GetSuccessCount returns the number of successful builds
-func (b *ExtensionBuilder) GetSuccessCount() int {
-	count := 0
-	for _, task := range b.Builds {
-		if task.Success {
-			count++
-		}
-	}
-	return count
-}
-
-// GetFailedVersions returns the PG versions that failed to build
-func (b *ExtensionBuilder) GetFailedVersions() []int {
-	var failed []int
-	for pgVer, task := range b.Builds {
-		if !task.Success {
-			failed = append(failed, pgVer)
-		}
-	}
-	return failed
-}

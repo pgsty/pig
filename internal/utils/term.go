@@ -27,19 +27,9 @@ func PrintWarn(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "%sWARNING: %s%s\n", ColorYellow, fmt.Sprintf(format, args...), ColorReset)
 }
 
-// PrintError prints an error message to stderr in red.
-func PrintError(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "%sERROR: %s%s\n", ColorRed, fmt.Sprintf(format, args...), ColorReset)
-}
-
 // PrintInfo prints an info message to stderr in cyan.
 func PrintInfo(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "%s%s%s\n", ColorCyan, fmt.Sprintf(format, args...), ColorReset)
-}
-
-// PrintSuccess prints a success message to stderr in green.
-func PrintSuccess(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "%s%s%s\n", ColorGreen, fmt.Sprintf(format, args...), ColorReset)
 }
 
 // PrintSection prints a section header to stderr.

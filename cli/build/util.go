@@ -57,22 +57,6 @@ func parsePgVersions(pgVersions string) ([]int, error) {
 	return versions, nil
 }
 
-// ParsePGVersions is the exported wrapper used by tests and external callers.
-func ParsePGVersions(pgVersions string) ([]int, error) {
-	return parsePgVersions(pgVersions)
-}
-
-// formatSize formats byte size to human-readable format
-func formatSize(size int64) string {
-	if size < 1024 {
-		return fmt.Sprintf("%dB", size)
-	} else if size < 1024*1024 {
-		return fmt.Sprintf("%dKB", size/1024)
-	} else {
-		return fmt.Sprintf("%dMB", size/(1024*1024))
-	}
-}
-
 // getElArch returns the system architecture alias used by EL
 func getElArch() string {
 	switch strings.ToLower(config.OSArch) {
