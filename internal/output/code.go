@@ -16,6 +16,7 @@ const (
 	MODULE_PT     = 150000 // Patroni (MM=15)
 	MODULE_PITR   = 160000 // PITR recovery (MM=16)
 	MODULE_PE     = 170000 // pg_exporter (MM=17)
+	MODULE_CTX    = 180000 // Context (MM=18)
 	MODULE_STY    = 200000 // Pigsty management (MM=20)
 	MODULE_DO     = 210000 // Task orchestration (MM=21)
 	MODULE_CONFIG = 900000 // Configuration system (MM=90)
@@ -73,14 +74,130 @@ const (
 	CodeRepoReloadFailed      = MODULE_REPO + CAT_OPERATION + 9 // Reload catalog failed
 )
 
+// PostgreSQL module specific codes (MODULE_PG = 130000)
+const (
+	// Status command codes (13_06_xx - State category)
+	CodePgStatusNotRunning       = MODULE_PG + CAT_STATE + 1    // PostgreSQL is not running
+	CodePgStatusNotInitialized   = MODULE_PG + CAT_STATE + 2    // Data directory not initialized
+	CodePgStatusDataDirNotFound  = MODULE_PG + CAT_RESOURCE + 1 // Data directory not found
+	CodePgInitDirExists          = MODULE_PG + CAT_RESOURCE + 2 // Data directory already initialized
+	CodePgStatusPermissionDenied = MODULE_PG + CAT_PERM + 1     // Permission denied reading status
+
+	// Control operation state errors (13_06_xx - State category)
+	CodePgAlreadyRunning      = MODULE_PG + CAT_STATE + 3 // PostgreSQL is already running (start failed)
+	CodePgAlreadyStopped      = MODULE_PG + CAT_STATE + 4 // PostgreSQL is already stopped (stop failed)
+	CodePgNotRunning          = MODULE_PG + CAT_STATE + 5 // PostgreSQL not running (reload/restart failed)
+	CodePgInitRunningConflict = MODULE_PG + CAT_STATE + 6 // PostgreSQL running, cannot init with --force
+
+	// Control operation errors (13_08_xx - Operation category)
+	CodePgStartFailed   = MODULE_PG + CAT_OPERATION + 1 // pg_ctl start failed
+	CodePgStopFailed    = MODULE_PG + CAT_OPERATION + 2 // pg_ctl stop failed
+	CodePgRestartFailed = MODULE_PG + CAT_OPERATION + 3 // pg_ctl restart failed
+	CodePgReloadFailed  = MODULE_PG + CAT_OPERATION + 4 // pg_ctl reload failed
+	CodePgTimeout       = MODULE_PG + CAT_OPERATION + 5 // Operation timed out
+	CodePgInitFailed    = MODULE_PG + CAT_OPERATION + 6 // initdb failed
+	CodePgPromoteFailed = MODULE_PG + CAT_OPERATION + 7 // pg_ctl promote failed
+
+	// Permission errors (13_02_xx - Permission category)
+	CodePgPermissionDenied = MODULE_PG + CAT_PERM + 2 // Permission denied executing pg_ctl
+
+	// Dependency errors (13_03_xx - Dependency category)
+	CodePgNotFound = MODULE_PG + CAT_DEPEND + 1 // PostgreSQL installation not found
+
+	// Promote-specific state errors (13_06_xx - State category)
+	CodePgAlreadyPrimary           = MODULE_PG + CAT_STATE + 7  // Instance is already primary (promote unnecessary)
+	CodePgReplicationNotConfigured = MODULE_PG + CAT_CONFIG + 1 // Replication not configured (cannot determine role)
+)
+
+// pgBackRest module specific codes (MODULE_PB = 140000)
+const (
+	// Parameter errors (14_01_xx - Param category)
+	CodePbInvalidBackupType         = MODULE_PB + CAT_PARAM + 1 // Invalid backup type specified
+	CodePbInvalidRestoreParams      = MODULE_PB + CAT_PARAM + 2 // Invalid restore parameters
+	CodePbStanzaDeleteRequiresForce = MODULE_PB + CAT_PARAM + 3 // Stanza delete requires --force
+	CodePbInvalidInfoParams         = MODULE_PB + CAT_PARAM + 4 // Invalid info command parameters
+
+	// Permission errors (14_02_xx - Permission category)
+	CodePbPermissionDenied = MODULE_PB + CAT_PERM + 1 // Permission denied accessing pgBackRest
+
+	// Dependency errors (14_03_xx - Depend category)
+	CodePbNoBaseBackup = MODULE_PB + CAT_DEPEND + 1 // No base backup exists for incremental backup
+
+	// Resource errors (14_05_xx - Resource category)
+	CodePbStanzaNotFound = MODULE_PB + CAT_RESOURCE + 1 // Stanza not found or not configured
+	CodePbBackupNotFound = MODULE_PB + CAT_RESOURCE + 2 // Specified backup not found
+
+	// State errors (14_06_xx - State category)
+	CodePbNotPrimary   = MODULE_PB + CAT_STATE + 1 // Instance is not primary, backup requires primary
+	CodePbPgNotRunning = MODULE_PB + CAT_STATE + 2 // PostgreSQL is not running
+	CodePbPgRunning    = MODULE_PB + CAT_STATE + 3 // PostgreSQL is running (cannot restore)
+	CodePbStanzaExists = MODULE_PB + CAT_STATE + 4 // Stanza already exists (use --force)
+
+	// Configuration errors (14_07_xx - Config category)
+	CodePbConfigNotFound = MODULE_PB + CAT_CONFIG + 1 // pgBackRest configuration file not found
+
+	// Operation errors (14_08_xx - Operation category)
+	CodePbInfoFailed          = MODULE_PB + CAT_OPERATION + 1 // Info command execution failed
+	CodePbBackupFailed        = MODULE_PB + CAT_OPERATION + 2 // Backup command execution failed
+	CodePbRestoreFailed       = MODULE_PB + CAT_OPERATION + 3 // Restore command execution failed
+	CodePbStanzaCreateFailed  = MODULE_PB + CAT_OPERATION + 4 // Stanza create failed
+	CodePbStanzaUpgradeFailed = MODULE_PB + CAT_OPERATION + 5 // Stanza upgrade failed
+	CodePbStanzaDeleteFailed  = MODULE_PB + CAT_OPERATION + 6 // Stanza delete failed
+)
+
+// Patroni module specific codes (MODULE_PT = 150000)
+const (
+	// Dependency errors (15_03_xx - Depend category)
+	CodePtNotFound = MODULE_PT + CAT_DEPEND + 1 // patronictl not found in PATH
+
+	// Permission errors (15_02_xx - Permission category)
+	CodePtPermDenied = MODULE_PT + CAT_PERM + 1 // Permission denied accessing patronictl
+
+	// State errors (15_06_xx - State category)
+	CodePtNotRunning = MODULE_PT + CAT_STATE + 1 // Patroni is not running
+
+	// Configuration errors (15_07_xx - Config category)
+	CodePtConfigNotFound = MODULE_PT + CAT_CONFIG + 1 // Patroni config file not found
+
+	// Parameter errors (15_01_xx - Param category)
+	CodePtSwitchoverNeedForce = MODULE_PT + CAT_PARAM + 1 // switchover requires --force in structured output mode
+
+	// Operation errors (15_08_xx - Operation category)
+	CodePtListFailed       = MODULE_PT + CAT_OPERATION + 1 // patronictl list execution failed
+	CodePtParseFailed      = MODULE_PT + CAT_OPERATION + 2 // patronictl output parse failed
+	CodePtStatusFailed     = MODULE_PT + CAT_OPERATION + 3 // patronictl status command failed
+	CodePtConfigShowFailed = MODULE_PT + CAT_OPERATION + 4 // patronictl show-config execution failed
+	CodePtSwitchoverFailed = MODULE_PT + CAT_OPERATION + 5 // patronictl switchover execution failed
+	CodePtFailoverFailed   = MODULE_PT + CAT_OPERATION + 6 // patronictl failover execution failed
+
+	// Parameter errors (15_01_xx - Param category)
+	CodePtFailoverNeedForce   = MODULE_PT + CAT_PARAM + 2 // failover requires --force in structured output mode
+	CodePtInvalidConfigAction = MODULE_PT + CAT_PARAM + 3 // invalid pt config action
+)
+
 // PITR module specific codes (MODULE_PITR = 160000)
 const (
-	CodePITRInvalidArgs    = MODULE_PITR + CAT_PARAM + 1     // Invalid or missing arguments
-	CodePITRPrecheckFailed = MODULE_PITR + CAT_STATE + 1     // Pre-check/validation failed
-	CodePITRStopFailed     = MODULE_PITR + CAT_OPERATION + 1 // Stop services failed
-	CodePITRRestoreFailed  = MODULE_PITR + CAT_OPERATION + 2 // Restore failed
-	CodePITRStartFailed    = MODULE_PITR + CAT_OPERATION + 3 // Start PostgreSQL failed
-	CodePITRPostFailed     = MODULE_PITR + CAT_OPERATION + 4 // Post-restore steps failed
+	CodePITRInvalidArgs    = MODULE_PITR + CAT_PARAM + 1     // Invalid or missing arguments (160101)
+	CodePITRNoBackup       = MODULE_PITR + CAT_DEPEND + 1    // Backup not found or unavailable (160301)
+	CodePITRPrecheckFailed = MODULE_PITR + CAT_STATE + 1     // Pre-check/validation failed (160601)
+	CodePITRPgRunning      = MODULE_PITR + CAT_STATE + 2     // PostgreSQL cannot be stopped (160602)
+	CodePITRStopFailed     = MODULE_PITR + CAT_OPERATION + 1 // Stop services failed (160801)
+	CodePITRRestoreFailed  = MODULE_PITR + CAT_OPERATION + 2 // Restore failed (160802)
+	CodePITRStartFailed    = MODULE_PITR + CAT_OPERATION + 3 // Start PostgreSQL failed (160803)
+	CodePITRPostFailed     = MODULE_PITR + CAT_OPERATION + 4 // Post-restore steps failed (160804)
+)
+
+// Context module specific codes (MODULE_CTX = 180000)
+const (
+	CodeCtxInvalidModule    = MODULE_CTX + CAT_PARAM + 1     // Invalid module name
+	CodeCtxPermissionDenied = MODULE_CTX + CAT_PERM + 1      // Permission denied accessing resources
+	CodeCtxCollectionFailed = MODULE_CTX + CAT_OPERATION + 1 // Information collection failed
+)
+
+// System module specific codes (MODULE_SYSTEM = 990000)
+const (
+	CodeSystemInvalidArgs   = MODULE_SYSTEM + CAT_PARAM + 1     // Invalid command/flag/arguments
+	CodeSystemCommandFailed = MODULE_SYSTEM + CAT_OPERATION + 1 // Unclassified command execution failure
 )
 
 // ExitCode converts a status code to a shell exit code.

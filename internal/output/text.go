@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+// Texter is an interface for data objects that can render themselves as text.
+// When Result.Data implements this interface, formatText will append the data's
+// text representation after the message line.
+type Texter interface {
+	Text() string
+}
+
 // ANSI color codes for terminal output
 const (
 	colorReset  = "\033[0m"
@@ -80,6 +87,16 @@ func (r *Result) formatText(colorStart, colorEnd string) string {
 		sb.WriteString(" ")
 	}
 	sb.WriteString(r.Message)
+
+	// Optional data text - if Data implements Texter, append its text output
+	if r.Data != nil {
+		if texter, ok := r.Data.(Texter); ok {
+			if dataText := texter.Text(); dataText != "" {
+				sb.WriteString("\n")
+				sb.WriteString(dataText)
+			}
+		}
+	}
 
 	// Optional detail
 	if r.Detail != "" {

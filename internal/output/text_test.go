@@ -541,3 +541,67 @@ func TestResult_ColorText_NilReceiver(t *testing.T) {
 		t.Errorf("nil Result.ColorText() = %q, want empty string", got)
 	}
 }
+
+// mockTexter implements the Texter interface for testing
+type mockTexter struct {
+	text string
+}
+
+func (m *mockTexter) Text() string {
+	return m.text
+}
+
+func TestResult_Text_WithTexter(t *testing.T) {
+	// Test that Data.Text() is included when Data implements Texter
+	data := &mockTexter{text: "detailed data output\nsecond line"}
+	r := OK("summary message", data)
+	got := r.Text()
+	if !strings.Contains(got, "summary message") {
+		t.Errorf("Text() should contain message, got %q", got)
+	}
+	if !strings.Contains(got, "detailed data output") {
+		t.Errorf("Text() should contain data text, got %q", got)
+	}
+	if !strings.Contains(got, "second line") {
+		t.Errorf("Text() should contain data text second line, got %q", got)
+	}
+
+	// Test that data with empty Text() doesn't add extra newline
+	emptyData := &mockTexter{text: ""}
+	r2 := OK("message only", emptyData)
+	got2 := r2.Text()
+	if got2 != "✓ message only" {
+		t.Errorf("Text() with empty Texter = %q, want %q", got2, "✓ message only")
+	}
+
+	// Test with nil data - should not call Text()
+	r3 := OK("no data", nil)
+	got3 := r3.Text()
+	if got3 != "✓ no data" {
+		t.Errorf("Text() with nil data = %q, want %q", got3, "✓ no data")
+	}
+
+	// Test that non-Texter data is ignored
+	r4 := OK("plain data", map[string]string{"key": "value"})
+	got4 := r4.Text()
+	if got4 != "✓ plain data" {
+		t.Errorf("Text() with non-Texter data = %q, want %q", got4, "✓ plain data")
+	}
+}
+
+func TestResult_Text_TexterWithDetail(t *testing.T) {
+	// Test that data text appears before detail
+	data := &mockTexter{text: "data output"}
+	r := OK("message", data).WithDetail("some detail")
+	got := r.Text()
+
+	// Data text should come before detail
+	dataIdx := strings.Index(got, "data output")
+	detailIdx := strings.Index(got, "some detail")
+	if dataIdx == -1 || detailIdx == -1 {
+		t.Errorf("Text() should contain both data text and detail, got %q", got)
+	}
+	if dataIdx > detailIdx {
+		t.Errorf("Data text should appear before detail in Text(), got %q", got)
+	}
+}

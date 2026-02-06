@@ -554,3 +554,483 @@ func TestFromCommandHiddenFlagExtraction(t *testing.T) {
 		t.Error("expected 'hidden' flag to have Hidden=true")
 	}
 }
+
+// =============================================================================
+// Story 6.2: Flag Choices Tests
+// =============================================================================
+
+func TestSplitChoices(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{"normal", "smart,fast,immediate", []string{"smart", "fast", "immediate"}},
+		{"single", "text", []string{"text"}},
+		{"with spaces", "smart, fast, immediate", []string{"smart", "fast", "immediate"}},
+		{"trailing comma", "smart,fast,", []string{"smart", "fast"}},
+		{"leading comma", ",smart,fast", []string{"smart", "fast"}},
+		{"empty string", "", nil},
+		{"only commas", ",,,", nil},
+		{"spaces only", " , , ", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := splitChoices(tt.input)
+			if len(result) != len(tt.expected) {
+				t.Errorf("expected %d choices, got %d: %v", len(tt.expected), len(result), result)
+				return
+			}
+			for i, v := range result {
+				if v != tt.expected[i] {
+					t.Errorf("choice[%d]: expected %q, got %q", i, tt.expected[i], v)
+				}
+			}
+		})
+	}
+}
+
+func TestFlagChoicesFromAnnotations(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:   "stop",
+		Short: "Stop server",
+		Annotations: map[string]string{
+			"flags.mode.choices": "smart,fast,immediate",
+		},
+	}
+	cmd.Flags().StringP("mode", "m", "fast", "shutdown mode")
+	cmd.Flags().BoolP("wait", "w", false, "wait for completion")
+
+	cs := FromCommand(cmd)
+	if cs == nil {
+		t.Fatal("expected non-nil CommandSchema")
+	}
+
+	var modeFlag, waitFlag *Flag
+	for i := range cs.Flags {
+		if cs.Flags[i].Name == "mode" {
+			modeFlag = &cs.Flags[i]
+		}
+		if cs.Flags[i].Name == "wait" {
+			waitFlag = &cs.Flags[i]
+		}
+	}
+
+	if modeFlag == nil {
+		t.Fatal("expected 'mode' flag")
+	}
+	if len(modeFlag.Choices) != 3 {
+		t.Fatalf("expected 3 choices for mode, got %d: %v", len(modeFlag.Choices), modeFlag.Choices)
+	}
+	expectedChoices := []string{"smart", "fast", "immediate"}
+	for i, c := range modeFlag.Choices {
+		if c != expectedChoices[i] {
+			t.Errorf("choice[%d]: expected %q, got %q", i, expectedChoices[i], c)
+		}
+	}
+
+	if waitFlag == nil {
+		t.Fatal("expected 'wait' flag")
+	}
+	if len(waitFlag.Choices) != 0 {
+		t.Errorf("expected no choices for wait flag, got %v", waitFlag.Choices)
+	}
+}
+
+func TestFlagChoicesOmitEmptyJSON(t *testing.T) {
+	// Flag without choices should not have "choices" in JSON output
+	flag := Flag{
+		Name:     "mode",
+		Type:     "string",
+		Default:  "fast",
+		Desc:     "shutdown mode",
+		Required: false,
+	}
+
+	data, err := json.Marshal(flag)
+	if err != nil {
+		t.Fatalf("failed to marshal Flag: %v", err)
+	}
+	if strings.Contains(string(data), `"choices"`) {
+		t.Errorf("expected no 'choices' key in JSON when empty, got: %s", string(data))
+	}
+
+	// Flag with choices should have "choices" in JSON output
+	flagWithChoices := Flag{
+		Name:     "mode",
+		Type:     "string",
+		Default:  "fast",
+		Desc:     "shutdown mode",
+		Required: false,
+		Choices:  []string{"smart", "fast", "immediate"},
+	}
+
+	data2, err := json.Marshal(flagWithChoices)
+	if err != nil {
+		t.Fatalf("failed to marshal Flag: %v", err)
+	}
+	if !strings.Contains(string(data2), `"choices"`) {
+		t.Errorf("expected 'choices' key in JSON when set, got: %s", string(data2))
+	}
+}
+
+func TestFlagChoicesOmitEmptyYAML(t *testing.T) {
+	// Flag without choices should not have "choices" in YAML output
+	flag := Flag{
+		Name:     "mode",
+		Type:     "string",
+		Default:  "fast",
+		Desc:     "shutdown mode",
+		Required: false,
+	}
+
+	data, err := yaml.Marshal(flag)
+	if err != nil {
+		t.Fatalf("failed to marshal Flag: %v", err)
+	}
+	if strings.Contains(string(data), "choices") {
+		t.Errorf("expected no 'choices' in YAML when empty, got: %s", string(data))
+	}
+}
+
+// =============================================================================
+// Story 6.2: Argument Desc/Type Tests
+// =============================================================================
+
+func TestArgumentDescTypeFromAnnotations(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:   "add <name...>",
+		Short: "Add extensions",
+		Annotations: map[string]string{
+			"args.name.desc": "extension name(s) to install",
+			"args.name.type": "string",
+		},
+	}
+
+	cs := FromCommand(cmd)
+	if cs == nil {
+		t.Fatal("expected non-nil CommandSchema")
+	}
+	if len(cs.Args) != 1 {
+		t.Fatalf("expected 1 arg, got %d", len(cs.Args))
+	}
+	if cs.Args[0].Desc != "extension name(s) to install" {
+		t.Errorf("expected Desc 'extension name(s) to install', got %q", cs.Args[0].Desc)
+	}
+	if cs.Args[0].Type != "string" {
+		t.Errorf("expected Type 'string', got %q", cs.Args[0].Type)
+	}
+}
+
+func TestArgumentDescTypeOmitEmpty(t *testing.T) {
+	// Argument without desc/type should not show those fields
+	arg := Argument{
+		Name:     "name",
+		Required: true,
+		Variadic: false,
+	}
+
+	data, err := json.Marshal(arg)
+	if err != nil {
+		t.Fatalf("failed to marshal Argument: %v", err)
+	}
+	jsonStr := string(data)
+	if strings.Contains(jsonStr, `"desc"`) {
+		t.Errorf("expected no 'desc' in JSON when empty, got: %s", jsonStr)
+	}
+	if strings.Contains(jsonStr, `"type"`) {
+		t.Errorf("expected no 'type' in JSON when empty, got: %s", jsonStr)
+	}
+}
+
+func TestArgumentDescTypeInYAML(t *testing.T) {
+	arg := Argument{
+		Name:     "name",
+		Required: true,
+		Variadic: false,
+		Desc:     "extension name",
+		Type:     "string",
+	}
+
+	data, err := yaml.Marshal(arg)
+	if err != nil {
+		t.Fatalf("failed to marshal Argument: %v", err)
+	}
+	yamlStr := string(data)
+	if !strings.Contains(yamlStr, "desc:") {
+		t.Errorf("expected 'desc:' in YAML output, got: %s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "type:") {
+		t.Errorf("expected 'type:' in YAML output, got: %s", yamlStr)
+	}
+}
+
+// =============================================================================
+// Story 6.2: Backward Compatibility Tests
+// =============================================================================
+
+func TestBackwardCompatNoAnnotations(t *testing.T) {
+	// Command without any parameter annotations should produce same output as before
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show status",
+		Annotations: map[string]string{
+			"name":       "pig postgres status",
+			"type":       "query",
+			"volatility": "volatile",
+			"parallel":   "safe",
+			"idempotent": "true",
+			"risk":       "safe",
+			"confirm":    "none",
+			"os_user":    "dbsu",
+			"cost":       "500",
+		},
+	}
+	cmd.Flags().StringP("mode", "m", "fast", "shutdown mode")
+
+	cs := FromCommand(cmd)
+	if cs == nil {
+		t.Fatal("expected non-nil CommandSchema")
+	}
+
+	// mode flag should NOT have choices since no annotation was set
+	for _, f := range cs.Flags {
+		if f.Name == "mode" {
+			if len(f.Choices) != 0 {
+				t.Errorf("expected no choices when no annotation, got %v", f.Choices)
+			}
+			break
+		}
+	}
+
+	// Args should not have desc/type
+	for _, a := range cs.Args {
+		if a.Desc != "" {
+			t.Errorf("expected empty Desc without annotation, got %q", a.Desc)
+		}
+		if a.Type != "" {
+			t.Errorf("expected empty Type without annotation, got %q", a.Type)
+		}
+	}
+}
+
+func TestMultipleArgsWithAnnotations(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:   "cmd <src> <dst>",
+		Short: "Copy something",
+		Annotations: map[string]string{
+			"args.src.desc": "source path",
+			"args.src.type": "path",
+			"args.dst.desc": "destination path",
+			"args.dst.type": "path",
+		},
+	}
+
+	cs := FromCommand(cmd)
+	if cs == nil {
+		t.Fatal("expected non-nil CommandSchema")
+	}
+	if len(cs.Args) != 2 {
+		t.Fatalf("expected 2 args, got %d", len(cs.Args))
+	}
+
+	if cs.Args[0].Name != "src" || cs.Args[0].Desc != "source path" || cs.Args[0].Type != "path" {
+		t.Errorf("unexpected first arg: %+v", cs.Args[0])
+	}
+	if cs.Args[1].Name != "dst" || cs.Args[1].Desc != "destination path" || cs.Args[1].Type != "path" {
+		t.Errorf("unexpected second arg: %+v", cs.Args[1])
+	}
+}
+
+func TestMultipleFlagsWithChoices(t *testing.T) {
+	cmd := &cobra.Command{
+		Use:   "test",
+		Short: "Test",
+		Annotations: map[string]string{
+			"flags.mode.choices":   "smart,fast,immediate",
+			"flags.format.choices": "text,yaml,json,json-pretty",
+		},
+	}
+	cmd.Flags().StringP("mode", "m", "fast", "mode")
+	cmd.Flags().StringP("format", "o", "text", "output format")
+	cmd.Flags().BoolP("verbose", "v", false, "verbose")
+
+	cs := FromCommand(cmd)
+	if cs == nil {
+		t.Fatal("expected non-nil CommandSchema")
+	}
+
+	flagMap := make(map[string]*Flag)
+	for i := range cs.Flags {
+		flagMap[cs.Flags[i].Name] = &cs.Flags[i]
+	}
+
+	if f, ok := flagMap["mode"]; ok {
+		if len(f.Choices) != 3 {
+			t.Errorf("expected 3 choices for mode, got %d", len(f.Choices))
+		}
+	} else {
+		t.Error("expected 'mode' flag")
+	}
+
+	if f, ok := flagMap["format"]; ok {
+		if len(f.Choices) != 4 {
+			t.Errorf("expected 4 choices for format, got %d", len(f.Choices))
+		}
+	} else {
+		t.Error("expected 'format' flag")
+	}
+
+	if f, ok := flagMap["verbose"]; ok {
+		if len(f.Choices) != 0 {
+			t.Errorf("expected no choices for verbose, got %v", f.Choices)
+		}
+	} else {
+		t.Error("expected 'verbose' flag")
+	}
+}
+
+func TestCommandSchemaSerializationWithNewFields(t *testing.T) {
+	cs := &CommandSchema{
+		Name:  "pig postgres stop",
+		Use:   "stop",
+		Short: "Stop server",
+		Args: []Argument{
+			{Name: "target", Required: false, Variadic: false, Desc: "target server", Type: "string"},
+		},
+		Flags: []Flag{
+			{
+				Name:    "mode",
+				Short:   "m",
+				Type:    "string",
+				Default: "fast",
+				Desc:    "shutdown mode",
+				Choices: []string{"smart", "fast", "immediate"},
+			},
+		},
+	}
+
+	// Test YAML serialization
+	yamlData, err := cs.YAML()
+	if err != nil {
+		t.Fatalf("YAML() error: %v", err)
+	}
+	yamlStr := string(yamlData)
+	if !strings.Contains(yamlStr, "choices:") {
+		t.Errorf("expected 'choices:' in YAML, got: %s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "- smart") {
+		t.Errorf("expected '- smart' in YAML, got: %s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "desc: target server") {
+		t.Errorf("expected 'desc: target server' in YAML, got: %s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "type: string") {
+		t.Errorf("expected 'type: string' in YAML for arg, got: %s", yamlStr)
+	}
+
+	// Test JSON serialization
+	jsonData, err := cs.JSON()
+	if err != nil {
+		t.Fatalf("JSON() error: %v", err)
+	}
+	jsonStr := string(jsonData)
+	if !strings.Contains(jsonStr, `"choices"`) {
+		t.Errorf("expected 'choices' in JSON, got: %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"desc":"target server"`) {
+		t.Errorf("expected arg desc in JSON, got: %s", jsonStr)
+	}
+}
+
+func TestInheritedFlagChoices(t *testing.T) {
+	root := &cobra.Command{
+		Use: "root",
+		Annotations: map[string]string{
+			"flags.output.choices": "text,yaml,json,json-pretty",
+		},
+	}
+	root.PersistentFlags().StringP("output", "o", "text", "output format")
+
+	child := &cobra.Command{
+		Use:   "child",
+		Short: "Child command",
+		Annotations: map[string]string{
+			"flags.mode.choices": "smart,fast",
+		},
+	}
+	child.Flags().StringP("mode", "m", "smart", "mode")
+	root.AddCommand(child)
+
+	cs := FromCommand(child)
+	if cs == nil {
+		t.Fatal("expected non-nil CommandSchema")
+	}
+
+	flagMap := make(map[string]*Flag)
+	for i := range cs.Flags {
+		flagMap[cs.Flags[i].Name] = &cs.Flags[i]
+	}
+
+	// Child's own flag should have choices from child annotations
+	if f, ok := flagMap["mode"]; ok {
+		if len(f.Choices) != 2 {
+			t.Errorf("expected 2 choices for mode, got %d: %v", len(f.Choices), f.Choices)
+		}
+	} else {
+		t.Error("expected 'mode' flag")
+	}
+
+	// Inherited flag 'output' should pick up choices from root annotations
+	if f, ok := flagMap["output"]; ok {
+		expected := []string{"text", "yaml", "json", "json-pretty"}
+		if len(f.Choices) != len(expected) {
+			t.Fatalf("expected %d choices for output, got %d: %v", len(expected), len(f.Choices), f.Choices)
+		}
+		for i, c := range expected {
+			if f.Choices[i] != c {
+				t.Errorf("output choice[%d]: expected %q, got %q", i, c, f.Choices[i])
+			}
+		}
+	} else {
+		t.Error("expected 'output' flag")
+	}
+}
+
+func TestLocalFlagDoesNotInheritParentChoices(t *testing.T) {
+	root := &cobra.Command{
+		Use: "root",
+		Annotations: map[string]string{
+			"flags.output.choices": "text,yaml,json,json-pretty",
+		},
+	}
+	root.PersistentFlags().StringP("output", "o", "text", "output format")
+
+	child := &cobra.Command{
+		Use:   "child",
+		Short: "Child command with local output flag",
+	}
+	// Shadow inherited output flag with a local flag of different semantics.
+	child.Flags().StringP("output", "o", "", "output file path")
+	root.AddCommand(child)
+
+	cs := FromCommand(child)
+	if cs == nil {
+		t.Fatal("expected non-nil CommandSchema")
+	}
+
+	var outputFlag *Flag
+	for i := range cs.Flags {
+		if cs.Flags[i].Name == "output" {
+			outputFlag = &cs.Flags[i]
+			break
+		}
+	}
+	if outputFlag == nil {
+		t.Fatal("expected local 'output' flag")
+	}
+	if len(outputFlag.Choices) != 0 {
+		t.Fatalf("expected no inherited choices for local output flag, got %v", outputFlag.Choices)
+	}
+}

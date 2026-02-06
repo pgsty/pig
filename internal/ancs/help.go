@@ -211,6 +211,6 @@ func RenderHelp(cmd *cobra.Command, format string) error {
 		return fmt.Errorf("failed to serialize: %w", err)
 	}
 
-	fmt.Println(string(data))
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
 	return nil
 }

@@ -31,20 +31,23 @@ type CommandSchema struct {
 
 // Argument represents a positional command argument parsed from cmd.Use.
 type Argument struct {
-	Name     string `json:"name" yaml:"name"`         // Argument name
-	Required bool   `json:"required" yaml:"required"` // true if <arg>, false if [arg]
-	Variadic bool   `json:"variadic" yaml:"variadic"` // true if arg... (accepts multiple values)
+	Name     string `json:"name" yaml:"name"`                     // Argument name
+	Required bool   `json:"required" yaml:"required"`             // true if <arg>, false if [arg]
+	Variadic bool   `json:"variadic" yaml:"variadic"`             // true if arg... (accepts multiple values)
+	Desc     string `json:"desc,omitempty" yaml:"desc,omitempty"` // Description (from Annotations)
+	Type     string `json:"type,omitempty" yaml:"type,omitempty"` // Type hint (from Annotations)
 }
 
 // Flag represents a command flag with its metadata.
 type Flag struct {
-	Name     string `json:"name" yaml:"name"`                           // Flag name (long form)
-	Short    string `json:"short,omitempty" yaml:"short,omitempty"`     // Short form (single char)
-	Type     string `json:"type" yaml:"type"`                           // Value type (string, int, bool, etc.)
-	Default  string `json:"default,omitempty" yaml:"default,omitempty"` // Default value
-	Desc     string `json:"desc" yaml:"desc"`                           // Description
-	Required bool   `json:"required" yaml:"required"`                   // Whether flag is required
-	Hidden   bool   `json:"hidden,omitempty" yaml:"hidden,omitempty"`   // Whether flag is hidden from help
+	Name     string   `json:"name" yaml:"name"`                           // Flag name (long form)
+	Short    string   `json:"short,omitempty" yaml:"short,omitempty"`     // Short form (single char)
+	Type     string   `json:"type" yaml:"type"`                           // Value type (string, int, bool, etc.)
+	Default  string   `json:"default,omitempty" yaml:"default,omitempty"` // Default value
+	Desc     string   `json:"desc" yaml:"desc"`                           // Description
+	Required bool     `json:"required" yaml:"required"`                   // Whether flag is required
+	Hidden   bool     `json:"hidden,omitempty" yaml:"hidden,omitempty"`   // Whether flag is hidden from help
+	Choices  []string `json:"choices,omitempty" yaml:"choices,omitempty"` // Valid values (from Annotations)
 }
 
 // SubCmd represents a subcommand with minimal info for listing.
@@ -79,6 +82,18 @@ func FromCommand(cmd *cobra.Command) *CommandSchema {
 	}
 	if len(cs.Args) == 0 {
 		cs.Args = inferArgsFromValidator(cmd)
+	}
+
+	// Enrich arguments with desc and type from Annotations
+	if cmd.Annotations != nil {
+		for i := range cs.Args {
+			if desc, ok := cmd.Annotations["args."+cs.Args[i].Name+".desc"]; ok {
+				cs.Args[i].Desc = desc
+			}
+			if argType, ok := cmd.Annotations["args."+cs.Args[i].Name+".type"]; ok {
+				cs.Args[i].Type = argType
+			}
+		}
 	}
 
 	// Extract subcommands
@@ -190,8 +205,9 @@ func isNoArgsValidator(fn cobra.PositionalArgs) bool {
 func extractFlags(cmd *cobra.Command) []Flag {
 	var flags []Flag
 	seen := make(map[string]struct{})
+	flagInherited := make(map[string]bool)
 
-	collectFlags := func(fs *pflag.FlagSet) {
+	collectFlags := func(fs *pflag.FlagSet, inherited bool) {
 		if fs == nil {
 			return
 		}
@@ -204,6 +220,7 @@ func extractFlags(cmd *cobra.Command) []Flag {
 				return
 			}
 			seen[f.Name] = struct{}{}
+			flagInherited[f.Name] = inherited
 
 			flag := Flag{
 				Name:     f.Name,
@@ -227,11 +244,67 @@ func extractFlags(cmd *cobra.Command) []Flag {
 	}
 
 	// Non-inherited flags include local + persistent on this command
-	collectFlags(cmd.NonInheritedFlags())
+	collectFlags(cmd.NonInheritedFlags(), false)
 	// Inherited flags include persistent flags from parent commands
-	collectFlags(cmd.InheritedFlags())
+	collectFlags(cmd.InheritedFlags(), true)
+
+	// Enrich flags with choices from Annotations.
+	// Parent annotations only apply to inherited flags; local flags must opt-in.
+	for i := range flags {
+		if choices, ok := findFlagChoices(cmd, flags[i].Name, flagInherited[flags[i].Name]); ok {
+			if choices != "" {
+				flags[i].Choices = splitChoices(choices)
+			}
+		}
+	}
 
 	return flags
+}
+
+// findFlagChoices resolves choices for a flag.
+// It always checks the current command first; parent annotations are only
+// consulted when the flag is inherited (not redefined locally).
+func findFlagChoices(cmd *cobra.Command, flagName string, inherited bool) (string, bool) {
+	if cmd == nil {
+		return "", false
+	}
+	key := "flags." + flagName + ".choices"
+
+	if cmd.Annotations != nil {
+		if v, ok := cmd.Annotations[key]; ok {
+			return v, true
+		}
+	}
+
+	if !inherited {
+		return "", false
+	}
+
+	for c := cmd.Parent(); c != nil; c = c.Parent() {
+		if c.Annotations == nil {
+			continue
+		}
+		if v, ok := c.Annotations[key]; ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// splitChoices splits a comma-separated string into a slice of trimmed, non-empty values.
+func splitChoices(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 // YAML serializes the CommandSchema to YAML format.
