@@ -5,7 +5,13 @@ Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
 package cmd
 
 import (
+	"fmt"
+	"strings"
+
 	"pig/cli/pgbackrest"
+	"pig/internal/config"
+	"pig/internal/output"
+	"pig/internal/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -23,6 +29,17 @@ var pbCmd = &cobra.Command{
 	Short:   "Manage pgBackRest backup & restore",
 	Aliases: []string{"pb"},
 	GroupID: "pigsty",
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "100",
+	},
 	Long: `Manage pgBackRest backup and point-in-time recovery.
 
 This command wraps pgbackrest to provide simplified backup management,
@@ -85,7 +102,11 @@ Control:
   pig pb expire --set 20250101-*   # delete specific backup
   pig pb expire --dry-run          # dry-run mode`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return initAll()
+		if err := initAll(); err != nil {
+			return err
+		}
+		applyStructuredOutputSilence(cmd)
+		return nil
 	},
 }
 
@@ -93,7 +114,7 @@ Control:
 // Info Commands
 // ============================================================================
 
-var pbInfoOutput string
+var pbInfoRawOutput string
 var pbInfoSet string
 var pbInfoRaw bool
 
@@ -101,6 +122,17 @@ var pbInfoCmd = &cobra.Command{
 	Use:     "info",
 	Aliases: []string{"i"},
 	Short:   "Show backup repository info",
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest info",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "5000",
+	},
 	Long: `Display detailed information about the backup repository including
 all backup sets, recovery window, WAL archive status, and backup list.
 
@@ -110,17 +142,52 @@ By default, displays a parsed and formatted view of backup information including
   - LSN range
   - Backup list with type, duration, size, and WAL range
 
-Use --raw/-R for original pgbackrest output format.`,
+Use --raw/-R for original pgbackrest output format.
+Use --raw-output/-O to control raw output format (text/json).
+Use -o json/yaml for structured output (agent-friendly format).`,
 	Example: `
   pig pb info                      # detailed formatted output
+  pig pb info -o json              # structured JSON output
+  pig pb info -o yaml              # structured YAML output
   pig pb info -R                   # raw pgbackrest text output
-  pig pb info --raw -o json        # raw JSON output
+  pig pb info --raw --raw-output json  # raw JSON output (pgbackrest native)
   pig pb info --set 20250101-*     # show specific backup set`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// raw-output only applies in --raw mode
+		if !pbInfoRaw && strings.TrimSpace(pbInfoRawOutput) != "" {
+			if config.IsStructuredOutput() {
+				return handlePbStructuredResult(
+					output.Fail(output.CodePbInvalidInfoParams, "--raw-output can only be used with --raw"),
+				)
+			}
+			return fmt.Errorf("--raw-output can only be used with --raw")
+		}
+
+		// Raw mode: pass through to pgbackrest directly
+		if pbInfoRaw {
+			rawOutput, err := resolvePbInfoRawOutput()
+			if err != nil {
+				return err
+			}
+			return pgbackrest.Info(pbConfig, &pgbackrest.InfoOptions{
+				Output: rawOutput,
+				Set:    pbInfoSet,
+				Raw:    true,
+			})
+		}
+
+		// Structured output mode: use InfoResult
+		if config.IsStructuredOutput() {
+			result := pgbackrest.InfoResult(pbConfig, &pgbackrest.InfoOptions{
+				Set: pbInfoSet,
+			})
+			return handlePbStructuredResult(result)
+		}
+
+		// Text mode: use original Info function
 		return pgbackrest.Info(pbConfig, &pgbackrest.InfoOptions{
-			Output: pbInfoOutput,
-			Set:    pbInfoSet,
-			Raw:    pbInfoRaw,
+			Set: pbInfoSet,
+			Raw: false,
 		})
 	},
 }
@@ -129,6 +196,20 @@ var pbLsCmd = &cobra.Command{
 	Use:     "ls [type]",
 	Aliases: []string{"l", "list"},
 	Short:   "List backups, repositories, or stanzas",
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest ls",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "5000",
+		// Parameter constraints
+		"args.type.desc": "resource type to list",
+		"args.type.type": "enum",
+	},
 	Long: `List resources in the backup repository.
 
 Types:
@@ -162,6 +243,20 @@ var pbBackupCmd = &cobra.Command{
 	Use:     "backup [type]",
 	Aliases: []string{"bk", "b"},
 	Short:   "Create a backup",
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest backup",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "300000",
+		// Parameter constraints
+		"args.type.desc": "backup type (auto-detected if omitted)",
+		"args.type.type": "enum",
+	},
 	Long: `Create a physical backup. Backup can only run on the primary instance.
 
 Types:
@@ -176,16 +271,26 @@ executing. Use --force to skip this check.`,
   pig pb backup                    # auto-detect type
   pig pb backup full               # full backup
   pig pb backup diff               # differential backup
-  pig pb backup incr               # incremental backup`,
+  pig pb backup incr               # incremental backup
+  pig pb backup -o json            # structured output mode`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		backupType := ""
 		if len(args) > 0 {
 			backupType = args[0]
 		}
-		return pgbackrest.Backup(pbConfig, &pgbackrest.BackupOptions{
+		opts := &pgbackrest.BackupOptions{
 			Type:  backupType,
 			Force: pbBackupForce,
-		})
+		}
+
+		// Structured output mode: use BackupResult
+		if config.IsStructuredOutput() {
+			result := pgbackrest.BackupResult(pbConfig, opts)
+			return handlePbStructuredResult(result)
+		}
+
+		// Text mode: use original Backup function
+		return pgbackrest.Backup(pbConfig, opts)
 	},
 }
 
@@ -196,6 +301,17 @@ var pbExpireCmd = &cobra.Command{
 	Use:     "expire",
 	Aliases: []string{"ex", "e"},
 	Short:   "Cleanup expired backups",
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest expire",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "dbsu",
+		"cost":       "30000",
+	},
 	Long: `Clean up expired backups and WAL archives according to retention policy.
 
 The retention policy is configured in pgbackrest.conf:
@@ -236,6 +352,17 @@ var pbRestoreCmd = &cobra.Command{
 	Use:     "restore",
 	Aliases: []string{"rt", "r", "pitr"},
 	Short:   "Restore from backup (PITR)",
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest restore",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "critical",
+		"confirm":    "required",
+		"os_user":    "dbsu",
+		"cost":       "600000",
+	},
 	Long: `Restore from backup with point-in-time recovery (PITR) support.
 
 IMPORTANT: You must specify a recovery target. Running without arguments
@@ -286,12 +413,18 @@ IMPORTANT: PostgreSQL must be stopped before restore.`,
 			pbRestoreTime != "" || pbRestoreName != "" ||
 			pbRestoreLSN != "" || pbRestoreXID != ""
 
-		// If no target specified, show help instead of running restore
+		// If no target specified, structured mode returns machine-readable error.
 		if !hasTarget {
+			if config.IsStructuredOutput() {
+				return handlePbStructuredResult(
+					output.Fail(output.CodePbInvalidRestoreParams, "invalid restore parameters").
+						WithDetail("no recovery target specified, choose one of: --default, --immediate, --time, --name, --lsn, --xid"),
+				)
+			}
 			return cmd.Help()
 		}
 
-		return pgbackrest.Restore(pbConfig, &pgbackrest.RestoreOptions{
+		opts := &pgbackrest.RestoreOptions{
 			Default:   pbRestoreDefault,
 			Immediate: pbRestoreImmediate,
 			Time:      pbRestoreTime,
@@ -303,7 +436,18 @@ IMPORTANT: PostgreSQL must be stopped before restore.`,
 			Exclusive: pbRestoreExclusive,
 			Promote:   pbRestorePromote,
 			Yes:       pbRestoreYes,
-		})
+		}
+
+		// Structured output mode: use RestoreResult
+		if config.IsStructuredOutput() {
+			// Structured mode implicitly skips confirmation (equivalent to --yes)
+			opts.Yes = true
+			result := pgbackrest.RestoreResult(pbConfig, opts)
+			return handlePbStructuredResult(result)
+		}
+
+		// Text mode: use original Restore function
+		return pgbackrest.Restore(pbConfig, opts)
 	},
 }
 
@@ -318,12 +462,30 @@ var pbCreateCmd = &cobra.Command{
 	Use:     "create",
 	Aliases: []string{"cr"},
 	Short:   "Create stanza (stanza-create)",
-	Long:    `Initialize a new stanza. Must be run before the first backup.`,
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest create",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "unsafe",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "5000",
+	},
+	Long: `Initialize a new stanza. Must be run before the first backup.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return pgbackrest.Create(pbConfig, &pgbackrest.CreateOptions{
+		opts := &pgbackrest.CreateOptions{
 			NoOnline: pbCreateNoOnline,
 			Force:    pbCreateForce,
-		})
+		}
+
+		if config.IsStructuredOutput() {
+			result := pgbackrest.CreateResult(pbConfig, opts)
+			return handlePbStructuredResult(result)
+		}
+
+		return pgbackrest.Create(pbConfig, opts)
 	},
 }
 
@@ -333,11 +495,29 @@ var pbUpgradeCmd = &cobra.Command{
 	Use:     "upgrade",
 	Aliases: []string{"up"},
 	Short:   "Upgrade stanza (stanza-upgrade)",
-	Long:    `Update stanza after PostgreSQL major version upgrade.`,
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest upgrade",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "unsafe",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "5000",
+	},
+	Long: `Update stanza after PostgreSQL major version upgrade.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return pgbackrest.Upgrade(pbConfig, &pgbackrest.UpgradeOptions{
+		opts := &pgbackrest.UpgradeOptions{
 			NoOnline: pbUpgradeNoOnline,
-		})
+		}
+
+		if config.IsStructuredOutput() {
+			result := pgbackrest.UpgradeResult(pbConfig, opts)
+			return handlePbStructuredResult(result)
+		}
+
+		return pgbackrest.Upgrade(pbConfig, opts)
 	},
 }
 
@@ -348,17 +528,37 @@ var pbDeleteCmd = &cobra.Command{
 	Use:     "delete",
 	Aliases: []string{"del", "rm"},
 	Short:   "Delete stanza (stanza-delete)",
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest delete",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "critical",
+		"confirm":    "required",
+		"os_user":    "dbsu",
+		"cost":       "5000",
+	},
 	Long: `Delete a stanza and all its backups.
 
 WARNING: This is a DESTRUCTIVE and IRREVERSIBLE operation!
 All backups for the stanza will be permanently deleted.
 
-Requires --force flag to confirm the operation.`,
+	Requires --force flag to confirm the operation.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return pgbackrest.Delete(pbConfig, &pgbackrest.DeleteOptions{
+		opts := &pgbackrest.DeleteOptions{
 			Force: pbDeleteForce,
 			Yes:   pbDeleteYes,
-		})
+		}
+
+		if config.IsStructuredOutput() {
+			// Structured mode implicitly skips confirmation (equivalent to --yes)
+			opts.Yes = true
+			result := pgbackrest.DeleteResult(pbConfig, opts)
+			return handlePbStructuredResult(result)
+		}
+
+		return pgbackrest.Delete(pbConfig, opts)
 	},
 }
 
@@ -370,7 +570,18 @@ var pbCheckCmd = &cobra.Command{
 	Use:     "check",
 	Aliases: []string{"ck"},
 	Short:   "Verify backup repository",
-	Long:    `Verify the backup repository integrity and configuration.`,
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest check",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "10000",
+	},
+	Long: `Verify the backup repository integrity and configuration.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return pgbackrest.Check(pbConfig)
 	},
@@ -380,7 +591,18 @@ var pbStartCmd = &cobra.Command{
 	Use:     "start",
 	Aliases: []string{"on"},
 	Short:   "Enable pgBackRest operations",
-	Long:    `Allow pgBackRest to perform operations on the stanza.`,
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest start",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "1000",
+	},
+	Long: `Allow pgBackRest to perform operations on the stanza.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return pgbackrest.Start(pbConfig)
 	},
@@ -392,7 +614,18 @@ var pbStopCmd = &cobra.Command{
 	Use:     "stop",
 	Aliases: []string{"off"},
 	Short:   "Disable pgBackRest operations",
-	Long:    `Prevent pgBackRest from performing operations on the stanza (for maintenance).`,
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest stop",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "dbsu",
+		"cost":       "1000",
+	},
+	Long: `Prevent pgBackRest from performing operations on the stanza (for maintenance).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return pgbackrest.Stop(pbConfig, &pgbackrest.StopOptions{
 			Force: pbStopForce,
@@ -410,6 +643,17 @@ var pbLogCmd = &cobra.Command{
 	Use:     "log [list|tail|cat]",
 	Aliases: []string{"l", "lg"},
 	Short:   "View pgBackRest logs",
+	Annotations: map[string]string{
+		"name":       "pig pgbackrest log",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "500",
+	},
 	Long: `View pgBackRest log files from /pg/log/pgbackrest/.
 
 Subcommands:
@@ -447,6 +691,46 @@ Subcommands:
 }
 
 // ============================================================================
+// Structured Output Helper
+// ============================================================================
+
+func handlePbStructuredResult(result *output.Result) error {
+	if result == nil {
+		return fmt.Errorf("nil result")
+	}
+	if err := output.Print(result); err != nil {
+		return err
+	}
+	if !result.Success {
+		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message)}
+	}
+	return nil
+}
+
+func resolvePbInfoRawOutput() (string, error) {
+	if out := strings.ToLower(strings.TrimSpace(pbInfoRawOutput)); out != "" {
+		switch out {
+		case "text", "json":
+			return out, nil
+		default:
+			return "", fmt.Errorf("invalid --raw-output value %q, must be text or json", pbInfoRawOutput)
+		}
+	}
+
+	if !config.IsStructuredOutput() {
+		return "", nil
+	}
+	switch config.OutputFormat {
+	case config.OUTPUT_JSON, config.OUTPUT_JSON_PRETTY:
+		return "json", nil
+	case config.OUTPUT_YAML:
+		return "", fmt.Errorf("raw mode does not support YAML output, use JSON or text")
+	default:
+		return "", nil
+	}
+}
+
+// ============================================================================
 // Initialization
 // ============================================================================
 
@@ -461,7 +745,7 @@ func init() {
 	pbCmd.PersistentFlags().StringVarP(&pbConfig.DbSU, "dbsu", "U", "", "database superuser (default: $PIG_DBSU or postgres)")
 
 	// Info command flags
-	pbInfoCmd.Flags().StringVarP(&pbInfoOutput, "output", "o", "", "output format: text, json (only with --raw)")
+	pbInfoCmd.Flags().StringVarP(&pbInfoRawOutput, "raw-output", "O", "", "raw output format: text, json (only with --raw)")
 	pbInfoCmd.Flags().StringVar(&pbInfoSet, "set", "", "show specific backup set")
 	pbInfoCmd.Flags().BoolVarP(&pbInfoRaw, "raw", "R", false, "raw output mode (pass through pgbackrest output)")
 

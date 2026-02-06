@@ -237,6 +237,19 @@ func RunPgBackRest(cfg *Config, command string, extraArgs []string, hint bool) e
 	return utils.DBSUCommand(cfg.DbSU, args)
 }
 
+// RunPgBackRestRaw executes a pgbackrest command as DBSU while preserving stdout.
+// This is used by raw passthrough modes where callers expect native stdout output.
+func RunPgBackRestRaw(cfg *Config, command string, extraArgs []string, hint bool) error {
+	args, err := buildPgBackRestArgs(cfg, command, extraArgs)
+	if err != nil {
+		return err
+	}
+	if hint {
+		utils.PrintHint(args)
+	}
+	return utils.DBSUCommandPreserveStdout(cfg.DbSU, args)
+}
+
 // RunPgBackRestOutput executes pgbackrest and captures output.
 func RunPgBackRestOutput(cfg *Config, command string, extraArgs []string) (string, error) {
 	args, err := buildPgBackRestArgs(cfg, command, extraArgs)

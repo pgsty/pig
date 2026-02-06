@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -71,20 +72,50 @@ func IsDBSU(dbsu string) bool {
 // Returns ExitCodeError if the command exits with non-zero status.
 // Callers can use ExitCode(err) to get the exit code if needed.
 func DBSUCommand(dbsu string, args []string) error {
+	return runDBSUCommand(dbsu, args, false)
+}
+
+// DBSUCommandPreserveStdout executes a command as DBSU while keeping stdout
+// on stdout even in structured output mode. Use this for raw passthrough flows.
+func DBSUCommandPreserveStdout(dbsu string, args []string) error {
+	return runDBSUCommand(dbsu, args, true)
+}
+
+func runDBSUCommand(dbsu string, args []string, preserveStdout bool) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no command specified")
 	}
 
 	cmd := buildDBSUCmd(dbsu, args)
-	configureCmdIO(cmd)
+	var out bytes.Buffer
+	var stdout io.Writer
+	var stderr io.Writer
+	cmd.Stdin = os.Stdin
+	stdout, stderr = commandWriters(config.IsStructuredOutput(), preserveStdout)
+	cmd.Stdout = io.MultiWriter(stdout, &out)
+	cmd.Stderr = io.MultiWriter(stderr, &out)
 
 	if err := cmd.Run(); err != nil {
+		outStr := strings.TrimSpace(out.String())
 		if exitErr, ok := err.(*exec.ExitError); ok {
+			if outStr != "" {
+				err = fmt.Errorf("%w: %s", err, outStr)
+			}
 			return &ExitCodeError{Code: exitErr.ExitCode(), Err: err}
+		}
+		if outStr != "" {
+			return fmt.Errorf("command failed: %w: %s", err, outStr)
 		}
 		return fmt.Errorf("command failed: %w", err)
 	}
 	return nil
+}
+
+func commandWriters(structuredOutput bool, preserveStdout bool) (io.Writer, io.Writer) {
+	if structuredOutput && !preserveStdout {
+		return os.Stderr, os.Stderr
+	}
+	return os.Stdout, os.Stderr
 }
 
 // DBSUCommandOutput executes a command as the database superuser and captures output.
@@ -118,7 +149,11 @@ func buildDBSUCmd(dbsu string, args []string) *exec.Cmd {
 		return exec.Command("su", "-", dbsu, "-c", cmdStr)
 	}
 
-	sudoArgs := append([]string{"-inu", dbsu, "--"}, args...)
+	sudoArgs := []string{"-inu", dbsu, "--"}
+	if os.Getenv("PIG_NON_INTERACTIVE") != "" {
+		sudoArgs = []string{"-n", "-inu", dbsu, "--"}
+	}
+	sudoArgs = append(sudoArgs, args...)
 	logrus.Debugf("executing via sudo: sudo %v", sudoArgs)
 	return exec.Command("sudo", sudoArgs...)
 }

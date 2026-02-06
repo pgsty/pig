@@ -160,11 +160,12 @@ func Info(cfg *Config, opts *InfoOptions) error {
 		if opts.Set != "" {
 			args = append(args, "--set="+opts.Set)
 		}
-		return RunPgBackRest(effCfg, "info", args, true)
+		return RunPgBackRestRaw(effCfg, "info", args, true)
 	}
 
 	// Detailed mode: fetch JSON and parse
-	args := []string{"--output=json"}
+	// Suppress console logs to keep JSON output clean.
+	args := []string{"--output=json", "--log-level-console=error"}
 	if opts.Set != "" {
 		args = append(args, "--set="+opts.Set)
 	}

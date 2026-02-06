@@ -109,6 +109,9 @@ func validateRestoreOptions(opts *RestoreOptions) error {
 	if targets > 1 {
 		return fmt.Errorf("multiple recovery targets specified, choose only one of: --default, --immediate, --time, --name, --lsn, --xid")
 	}
+	if targets == 0 {
+		return fmt.Errorf("no recovery target specified, choose one of: --default, --immediate, --time, --name, --lsn, --xid")
+	}
 
 	if opts.LSN != "" && !lsnRegex.MatchString(opts.LSN) {
 		return fmt.Errorf("invalid LSN format: %s (use: X/X, e.g., 0/7C82CB8)", opts.LSN)
