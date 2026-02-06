@@ -27,7 +27,7 @@ import (
 type PgStatusResultData struct {
 	Running       bool   `json:"running" yaml:"running"`
 	PID           int    `json:"pid,omitempty" yaml:"pid,omitempty"`
-	Version       string `json:"version,omitempty" yaml:"version,omitempty"`
+	Version       int    `json:"version,omitempty" yaml:"version,omitempty"`
 	DataDir       string `json:"data_dir" yaml:"data_dir"`
 	Port          int    `json:"port,omitempty" yaml:"port,omitempty"`
 	UptimeSeconds int64  `json:"uptime_seconds,omitempty" yaml:"uptime_seconds,omitempty"`
@@ -80,7 +80,7 @@ func StatusResult(cfg *Config) *output.Result {
 
 	// Get PostgreSQL version from PG_VERSION file
 	if ver, err := ReadPgVersionAsDBSU(dbsu, dataDir); err == nil {
-		statusData.Version = strconv.Itoa(ver)
+		statusData.Version = ver
 	} else {
 		logrus.Debugf("failed to read PG_VERSION: %v", err)
 	}

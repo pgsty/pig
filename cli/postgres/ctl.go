@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"pig/cli/ext"
+	"pig/internal/config"
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
@@ -146,13 +147,25 @@ func Start(cfg *Config, opts *StartOptions) error {
 	// Check if PostgreSQL is already running as dbsu
 	running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
 	if running {
-		fmt.Printf("%sWARNING: PostgreSQL is already running (PID: %d) in %s%s\n",
-			utils.ColorYellow, pid, dataDir, utils.ColorReset)
+		if config.IsStructuredOutput() {
+			utils.PrintWarn("PostgreSQL is already running (PID: %d) in %s", pid, dataDir)
+		} else {
+			fmt.Printf("%sWARNING: PostgreSQL is already running (PID: %d) in %s%s\n",
+				utils.ColorYellow, pid, dataDir, utils.ColorReset)
+		}
 		if opts == nil || !opts.Force {
-			fmt.Printf("%sUse -y to force start anyway%s\n", utils.ColorYellow, utils.ColorReset)
+			if config.IsStructuredOutput() {
+				utils.PrintWarn("Use -y to force start anyway")
+			} else {
+				fmt.Printf("%sUse -y to force start anyway%s\n", utils.ColorYellow, utils.ColorReset)
+			}
 			return fmt.Errorf("postgresql already running, use -y to force")
 		}
-		fmt.Printf("%sForcing start as requested (-y)%s\n", utils.ColorYellow, utils.ColorReset)
+		if config.IsStructuredOutput() {
+			utils.PrintInfo("Forcing start as requested (-y)")
+		} else {
+			fmt.Printf("%sForcing start as requested (-y)%s\n", utils.ColorYellow, utils.ColorReset)
+		}
 	}
 
 	// Find PostgreSQL

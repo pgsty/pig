@@ -28,7 +28,7 @@ func TestPgStatusResultData_JSON(t *testing.T) {
 			data: &PgStatusResultData{
 				Running:       true,
 				PID:           12345,
-				Version:       "17",
+				Version:       17,
 				DataDir:       "/pg/data",
 				Port:          5432,
 				UptimeSeconds: 3600,
@@ -48,7 +48,7 @@ func TestPgStatusResultData_JSON(t *testing.T) {
 			data: &PgStatusResultData{
 				Running: false,
 				DataDir: "/pg/data",
-				Version: "16",
+				Version: 16,
 			},
 			wantKeys: []string{"running", "data_dir", "version"},
 		},
@@ -98,7 +98,7 @@ func TestPgStatusResultData_YAML(t *testing.T) {
 			data: &PgStatusResultData{
 				Running:       true,
 				PID:           12345,
-				Version:       "17",
+				Version:       17,
 				DataDir:       "/pg/data",
 				Port:          5432,
 				UptimeSeconds: 3600,
@@ -305,7 +305,7 @@ func TestPgStatusResultData_RoundTrip(t *testing.T) {
 	original := &PgStatusResultData{
 		Running:       true,
 		PID:           12345,
-		Version:       "17",
+		Version:       17,
 		DataDir:       "/pg/data",
 		Port:          5432,
 		UptimeSeconds: 3600,
@@ -331,7 +331,7 @@ func TestPgStatusResultData_RoundTrip(t *testing.T) {
 		t.Errorf("PID = %d, want %d", restored.PID, original.PID)
 	}
 	if restored.Version != original.Version {
-		t.Errorf("Version = %q, want %q", restored.Version, original.Version)
+		t.Errorf("Version = %d, want %d", restored.Version, original.Version)
 	}
 	if restored.DataDir != original.DataDir {
 		t.Errorf("DataDir = %q, want %q", restored.DataDir, original.DataDir)
@@ -349,7 +349,7 @@ func TestResultWithPgStatusData(t *testing.T) {
 	statusData := &PgStatusResultData{
 		Running:       true,
 		PID:           12345,
-		Version:       "17",
+		Version:       17,
 		DataDir:       "/pg/data",
 		Port:          5432,
 		UptimeSeconds: 3600,
