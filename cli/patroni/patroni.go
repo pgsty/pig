@@ -338,6 +338,67 @@ type FailoverOptions struct {
 	Force     bool   // skip confirmation
 }
 
+// BuildFailoverPlan builds a structured execution plan for failover.
+// Returns a Plan with default values if opts is nil.
+func BuildFailoverPlan(opts *FailoverOptions) *output.Plan {
+	if opts == nil {
+		opts = &FailoverOptions{}
+	}
+	actions := []output.Action{
+		{Step: 1, Description: "Validate failover parameters and candidate availability"},
+		{Step: 2, Description: "Execute patronictl failover to promote candidate"},
+		{Step: 3, Description: "Verify new leader is operational and replicas reconnect"},
+	}
+
+	affects := []output.Resource{
+		{Type: "cluster", Name: "patroni", Impact: "emergency leader change", Detail: "failover to new leader"},
+	}
+	if opts.Candidate != "" {
+		affects = append(affects, output.Resource{
+			Type:   "node",
+			Name:   opts.Candidate,
+			Impact: "leader promote",
+		})
+	}
+
+	expected := "New leader elected; remaining members become replicas"
+	if opts.Candidate != "" {
+		expected = fmt.Sprintf("Leadership transferred to %s; remaining members become replicas", opts.Candidate)
+	}
+
+	risks := []string{
+		"DATA LOSS POSSIBLE: Unreplicated transactions may be lost",
+		"Current leader may have committed transactions not yet replicated",
+		"Clients will experience downtime during failover",
+		"All connections will be reset after failover",
+	}
+	if opts.Force {
+		risks = append(risks, "Confirmation is skipped (--force)")
+	}
+
+	return &output.Plan{
+		Command:  buildFailoverCommand(opts),
+		Actions:  actions,
+		Affects:  affects,
+		Expected: expected,
+		Risks:    risks,
+	}
+}
+
+func buildFailoverCommand(opts *FailoverOptions) string {
+	args := []string{"pig", "pt", "failover"}
+	if opts == nil {
+		return strings.Join(args, " ")
+	}
+	if opts.Candidate != "" {
+		args = append(args, "--candidate", opts.Candidate)
+	}
+	if opts.Force {
+		args = append(args, "--force")
+	}
+	return strings.Join(args, " ")
+}
+
 // Failover performs an unplanned failover via patronictl failover
 func Failover(dbsu string, opts *FailoverOptions) error {
 	args := []string{"failover"}

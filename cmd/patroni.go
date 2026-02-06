@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"pig/cli/patroni"
+	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
 	"strings"
@@ -13,8 +14,8 @@ import (
 )
 
 var (
-	patroniDBSU  string
-	patroniPlan  bool
+	patroniDBSU string
+	patroniPlan bool
 )
 
 // patroniCmd represents the patroni command
@@ -23,6 +24,17 @@ var patroniCmd = &cobra.Command{
 	Short:   "Manage patroni cluster with patronictl",
 	Aliases: []string{"pt"},
 	GroupID: "pigsty",
+	Annotations: map[string]string{
+		"name":       "pig patroni",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "100",
+	},
 	Long: `Manage Patroni cluster using patronictl commands.
 
 Cluster Operations (via patronictl):
@@ -62,13 +74,39 @@ var patroniListCmd = &cobra.Command{
 	Long:    `List Patroni cluster members using patronictl list with -e -t flags.`,
 	Example: `
   pig pt list              # List cluster members
+  pig pt list -o json      # Structured JSON output
   pig pt list -W           # Watch mode
   pig pt list -w 5         # Watch with 5s interval
   pig pt list -w 0.5       # Watch with 0.5s interval`,
+	Annotations: map[string]string{
+		"name":       "pig patroni list",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "2000",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		watch, _ := cmd.Flags().GetBool("watch")
 		interval, _ := cmd.Flags().GetFloat64("interval")
-		return patroni.List(utils.GetDBSU(patroniDBSU), watch, interval)
+		dbsu := utils.GetDBSU(patroniDBSU)
+
+		// Watch mode always uses passthrough (incompatible with structured output)
+		if watch || interval > 0 {
+			return patroni.List(dbsu, watch, interval)
+		}
+
+		// Structured output
+		if config.IsStructuredOutput() {
+			result := patroni.ListResult(dbsu)
+			return handleAuxResult(result)
+		}
+
+		// Default passthrough
+		return patroni.List(dbsu, false, 0)
 	},
 }
 
@@ -77,6 +115,19 @@ var patroniRestartCmd = &cobra.Command{
 	Use:     "restart [member]",
 	Aliases: []string{"reboot", "rt"},
 	Short:   "Restart PostgreSQL instance(s) via Patroni",
+	Annotations: map[string]string{
+		"name":       "pig patroni restart",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "high",
+		"confirm":    "recommended",
+		"os_user":    "dbsu",
+		"cost":       "30000",
+		// Parameter constraints
+		"flags.role.choices": "leader,replica,any",
+	},
 	Long: `Restart PostgreSQL instance(s) managed by Patroni.
 
 This command uses patronictl restart to perform a rolling restart of
@@ -113,6 +164,17 @@ var patroniReloadCmd = &cobra.Command{
 	Use:     "reload",
 	Aliases: []string{"rl", "hup"},
 	Short:   "Reload PostgreSQL configuration via Patroni",
+	Annotations: map[string]string{
+		"name":       "pig patroni reload",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "5000",
+	},
 	Long: `Reload PostgreSQL configuration for all cluster members.
 
 This triggers a configuration reload (similar to pg_reload_conf()) on all
@@ -127,6 +189,17 @@ var patroniReinitCmd = &cobra.Command{
 	Use:     "reinit <member>",
 	Aliases: []string{"ri"},
 	Short:   "Reinitialize a cluster member",
+	Annotations: map[string]string{
+		"name":       "pig patroni reinit",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "critical",
+		"confirm":    "required",
+		"os_user":    "dbsu",
+		"cost":       "300000",
+	},
 	Long: `Reinitialize a cluster member by rebuilding it from the leader.
 
 WARNING: This will DELETE all data on the target member and rebuild it
@@ -165,7 +238,7 @@ The old leader becomes a replica after switchover.`,
   pig pt switchover -f                       # switchover without confirmation
   pig pt switchover --scheduled "2024-01-01T12:00:00"  # scheduled switchover`,
 	Annotations: map[string]string{
-		"name":       "pig pt switchover",
+		"name":       "pig patroni switchover",
 		"type":       "action",
 		"volatility": "volatile",
 		"parallel":   "unsafe",
@@ -187,10 +260,20 @@ The old leader becomes a replica after switchover.`,
 			Force:     force,
 			Scheduled: scheduled,
 		}
+
+		// Plan mode (highest priority)
 		if patroniPlan {
 			plan := patroni.BuildSwitchoverPlan(opts)
 			return output.RenderPlan(plan)
 		}
+
+		// Structured output mode
+		if config.IsStructuredOutput() {
+			result := patroni.SwitchoverResult(utils.GetDBSU(patroniDBSU), opts)
+			return handleAuxResult(result)
+		}
+
+		// Default passthrough
 		return patroni.Switchover(utils.GetDBSU(patroniDBSU), opts)
 	},
 }
@@ -211,7 +294,20 @@ the leader is truly unavailable.`,
 	Example: `
   pig pt failover                          # interactive failover
   pig pt failover --candidate pg-test-2    # failover to specific member
-  pig pt failover -f                       # failover without confirmation`,
+  pig pt failover -f                       # failover without confirmation
+  pig pt failover -f -o json               # structured JSON output
+  pig pt failover --plan                   # show execution plan`,
+	Annotations: map[string]string{
+		"name":       "pig patroni failover",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "critical",
+		"confirm":    "required",
+		"os_user":    "dbsu",
+		"cost":       "300000",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		candidate, _ := cmd.Flags().GetString("candidate")
 		force, _ := cmd.Flags().GetBool("force")
@@ -220,6 +316,20 @@ the leader is truly unavailable.`,
 			Candidate: candidate,
 			Force:     force,
 		}
+
+		// Plan mode (highest priority)
+		if patroniPlan {
+			plan := patroni.BuildFailoverPlan(opts)
+			return output.RenderPlan(plan)
+		}
+
+		// Structured output mode
+		if config.IsStructuredOutput() {
+			result := patroni.FailoverResult(utils.GetDBSU(patroniDBSU), opts)
+			return handleAuxResult(result)
+		}
+
+		// Default passthrough
 		return patroni.Failover(utils.GetDBSU(patroniDBSU), opts)
 	},
 }
@@ -229,7 +339,18 @@ var patroniPauseCmd = &cobra.Command{
 	Use:     "pause",
 	Aliases: []string{"p"},
 	Short:   "Pause automatic failover",
-	Long:    `Pause automatic failover for the Patroni cluster.`,
+	Annotations: map[string]string{
+		"name":       "pig patroni pause",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "dbsu",
+		"cost":       "5000",
+	},
+	Long: `Pause automatic failover for the Patroni cluster.`,
 	Example: `
   pig pt pause              # Pause automatic failover
   pig pt pause --wait       # Wait for all members to confirm`,
@@ -244,7 +365,18 @@ var patroniResumeCmd = &cobra.Command{
 	Use:     "resume",
 	Aliases: []string{"r"},
 	Short:   "Resume automatic failover",
-	Long:    `Resume automatic failover for the Patroni cluster.`,
+	Annotations: map[string]string{
+		"name":       "pig patroni resume",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "5000",
+	},
+	Long: `Resume automatic failover for the Patroni cluster.`,
 	Example: `
   pig pt resume              # Resume automatic failover
   pig pt resume --wait       # Wait for all members to confirm`,
@@ -269,12 +401,34 @@ Actions:
 	Example: `
   pig pt config edit                      # Interactive edit
   pig pt config show                      # Show current config
+  pig pt config show -o json              # Show config as structured JSON
   pig pt config set ttl=60                # Set Patroni config
   pig pt config set ttl=60 loop_wait=15   # Set multiple values
   pig pt config pg max_connections=200    # Set PostgreSQL config
   pig pt config pg shared_buffers=4GB work_mem=256MB`,
+	Annotations: map[string]string{
+		"name":       "pig patroni config",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "restricted",
+		"idempotent": "false",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "dbsu",
+		"cost":       "3000",
+		// Parameter constraints
+		"args.action.desc": "config action to perform",
+		"args.action.type": "enum",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		dbsu := utils.GetDBSU(patroniDBSU)
+
 		if len(args) == 0 {
+			// No args: structured output defaults to show, text mode shows help
+			if config.IsStructuredOutput() {
+				result := patroni.ConfigShowResult(dbsu)
+				return handleAuxResult(result)
+			}
 			return cmd.Help()
 		}
 
@@ -289,17 +443,26 @@ Actions:
 			}
 		}
 
-		dbsu := utils.GetDBSU(patroniDBSU)
 		switch action {
+		case "show":
+			if config.IsStructuredOutput() {
+				result := patroni.ConfigShowResult(dbsu)
+				return handleAuxResult(result)
+			}
+			return patroni.ConfigShow(dbsu)
 		case "edit":
 			return patroni.ConfigEdit(dbsu)
-		case "show":
-			return patroni.ConfigShow(dbsu)
 		case "set":
 			return patroni.ConfigSet(dbsu, filteredKV)
 		case "pg":
 			return patroni.ConfigPG(dbsu, filteredKV)
 		default:
+			if config.IsStructuredOutput() {
+				return handleAuxResult(
+					output.Fail(output.CodePtInvalidConfigAction, "invalid config action").
+						WithDetail("unknown action: " + action + " (valid: show, edit, set, pg)"),
+				)
+			}
 			return cmd.Help()
 		}
 	},
@@ -310,7 +473,18 @@ var patroniLogCmd = &cobra.Command{
 	Use:     "log",
 	Aliases: []string{"l", "lg"},
 	Short:   "View patroni logs",
-	Long:    `View patroni service logs using journalctl.`,
+	Annotations: map[string]string{
+		"name":       "pig patroni log",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "500",
+	},
+	Long: `View patroni service logs using journalctl.`,
 	Example: `
   pig pt log          # View recent logs
   pig pt log -f       # Follow logs
@@ -332,10 +506,31 @@ var patroniStatusCmd = &cobra.Command{
   2. Patroni processes (ps aux | grep patroni)
   3. Patroni cluster status (patronictl list)`,
 	Example: `
-  pig pt status       # Show comprehensive status
-  pig pt st           # Same as above (shortcut)`,
+  pig pt status          # Show comprehensive status
+  pig pt status -o json  # Structured JSON output
+  pig pt st              # Same as above (shortcut)`,
+	Annotations: map[string]string{
+		"name":       "pig patroni status",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "dbsu",
+		"cost":       "3000",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return patroni.Status(utils.GetDBSU(patroniDBSU))
+		dbsu := utils.GetDBSU(patroniDBSU)
+
+		// Structured output
+		if config.IsStructuredOutput() {
+			result := patroni.StatusResult(dbsu)
+			return handleAuxResult(result)
+		}
+
+		// Default passthrough
+		return patroni.Status(dbsu)
 	},
 }
 
@@ -348,7 +543,18 @@ var patroniStartCmd = &cobra.Command{
 	Use:     "start",
 	Aliases: []string{"boot", "up"},
 	Short:   "Start patroni service (shortcut for 'svc start')",
-	Long:    `Start the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc start'.`,
+	Annotations: map[string]string{
+		"name":       "pig patroni start",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "10000",
+	},
+	Long: `Start the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc start'.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return patroni.Systemctl("start")
 	},
@@ -359,7 +565,18 @@ var patroniStopCmd = &cobra.Command{
 	Use:     "stop",
 	Aliases: []string{"halt", "dn", "down"},
 	Short:   "Stop patroni service (shortcut for 'svc stop')",
-	Long:    `Stop the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc stop'.`,
+	Annotations: map[string]string{
+		"name":       "pig patroni stop",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "true",
+		"risk":       "high",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "10000",
+	},
+	Long: `Stop the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc stop'.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return patroni.Systemctl("stop")
 	},
@@ -373,6 +590,17 @@ var patroniSvcCmd = &cobra.Command{
 	Use:     "service",
 	Aliases: []string{"svc", "s"},
 	Short:   "Manage patroni daemon service",
+	Annotations: map[string]string{
+		"name":       "pig patroni service",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "100",
+	},
 	Long: `Manage the Patroni daemon service using systemctl.
 
 These commands control the Patroni process itself, not the PostgreSQL
@@ -385,6 +613,17 @@ var patroniSvcStartCmd = &cobra.Command{
 	Use:     "start",
 	Aliases: []string{"boot", "up"},
 	Short:   "Start patroni service",
+	Annotations: map[string]string{
+		"name":       "pig patroni service start",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "10000",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return patroni.Systemctl("start")
 	},
@@ -394,6 +633,17 @@ var patroniSvcStopCmd = &cobra.Command{
 	Use:     "stop",
 	Aliases: []string{"halt", "dn", "down"},
 	Short:   "Stop patroni service",
+	Annotations: map[string]string{
+		"name":       "pig patroni service stop",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "true",
+		"risk":       "high",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "10000",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return patroni.Systemctl("stop")
 	},
@@ -403,6 +653,17 @@ var patroniSvcRestartCmd = &cobra.Command{
 	Use:     "restart",
 	Aliases: []string{"reboot", "rt"},
 	Short:   "Restart patroni service",
+	Annotations: map[string]string{
+		"name":       "pig patroni service restart",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "high",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "30000",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return patroni.Systemctl("restart")
 	},
@@ -412,6 +673,17 @@ var patroniSvcReloadCmd = &cobra.Command{
 	Use:     "reload",
 	Aliases: []string{"rl", "hup"},
 	Short:   "Reload patroni service",
+	Annotations: map[string]string{
+		"name":       "pig patroni service reload",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "1000",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return patroni.Systemctl("reload")
 	},
@@ -421,6 +693,17 @@ var patroniSvcStatusCmd = &cobra.Command{
 	Use:     "status",
 	Aliases: []string{"st", "stat"},
 	Short:   "Show patroni service status",
+	Annotations: map[string]string{
+		"name":       "pig patroni service status",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "500",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return patroni.Systemctl("status")
 	},
@@ -457,6 +740,7 @@ func init() {
 	// failover subcommand flags
 	patroniFailoverCmd.Flags().StringP("candidate", "c", "", "Candidate to promote")
 	patroniFailoverCmd.Flags().BoolP("force", "f", false, "Skip confirmation")
+	patroniFailoverCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
 	// pause/resume subcommand flags
 	patroniPauseCmd.Flags().BoolP("wait", "w", false, "Wait for all members to confirm")
