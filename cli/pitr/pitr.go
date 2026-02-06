@@ -109,6 +109,9 @@ func Execute(opts *Options) error {
 	// Phase 1: Pre-check and validation
 	state, err := preCheck(opts)
 	if err != nil {
+		if pe, ok := err.(*PITRError); ok {
+			return &utils.ExitCodeError{Code: output.ExitCode(pe.Code), Err: pe}
+		}
 		return err
 	}
 
@@ -118,38 +121,40 @@ func Execute(opts *Options) error {
 	// Confirm with countdown (unless --yes)
 	if !opts.Yes {
 		if err := pgbackrest.ConfirmWithCountdown("This will overwrite the current database!", "PITR"); err != nil {
-			return err
+			return &utils.ExitCodeError{Code: output.ExitCode(output.CodePITRInvalidArgs), Err: &PITRError{Code: output.CodePITRInvalidArgs, Err: err}}
 		}
 	}
 
 	// Phase 2: Stop Patroni (if active)
 	patroniWasStopped := false
 	if state.PatroniActive && !opts.SkipPatroni {
-		if err := stopPatroni(); err != nil {
-			return err
+		if pitrErr := stopPatroni(); pitrErr != nil {
+			return &utils.ExitCodeError{Code: output.ExitCode(pitrErr.Code), Err: pitrErr}
 		}
 		patroniWasStopped = true
 	}
 
 	// Phase 3: Ensure PostgreSQL is stopped
-	if err := ensurePostgresStopped(state, patroniWasStopped); err != nil {
-		return err
+	if pitrErr := ensurePostgresStopped(state, patroniWasStopped); pitrErr != nil {
+		return &utils.ExitCodeError{Code: output.ExitCode(pitrErr.Code), Err: pitrErr}
 	}
 
 	// Phase 4: Execute pgBackRest restore
-	if err := executeRestore(state, opts); err != nil {
-		return err
+	if pitrErr := executeRestore(state, opts); pitrErr != nil {
+		return &utils.ExitCodeError{Code: output.ExitCode(pitrErr.Code), Err: pitrErr}
 	}
 
 	// Phase 5: Start PostgreSQL (unless --no-restart)
 	if !opts.NoRestart {
-		if err := startPostgres(state, opts); err != nil {
-			return err
+		if pitrErr := startPostgres(state, opts); pitrErr != nil {
+			return &utils.ExitCodeError{Code: output.ExitCode(pitrErr.Code), Err: pitrErr}
 		}
 	}
 
-	// Phase 6: Print post-restore guidance
-	printPostRestoreGuidance(opts, patroniWasStopped)
+	// Phase 6: Post-restore guidance
+	if pitrErr := postRestore(opts, patroniWasStopped); pitrErr != nil {
+		return &utils.ExitCodeError{Code: output.ExitCode(pitrErr.Code), Err: pitrErr}
+	}
 
 	return nil
 }
@@ -169,32 +174,37 @@ func ExecuteResult(opts *Options) *output.Result {
 	// Confirm with countdown (unless --yes)
 	if !opts.Yes {
 		if err := pgbackrest.ConfirmWithCountdown("This will overwrite the current database!", "PITR"); err != nil {
-			return output.Fail(output.CodePITRStopFailed, "pitr confirmation failed").WithDetail(err.Error())
+			return output.Fail(output.CodePITRInvalidArgs, "pitr confirmation cancelled").WithDetail(err.Error())
 		}
 	}
 
 	patroniWasStopped := false
 	if state.PatroniActive && !opts.SkipPatroni {
-		if err := stopPatroni(); err != nil {
-			return output.Fail(output.CodePITRStopFailed, "failed to stop patroni").WithDetail(err.Error())
+		if pitrErr := stopPatroni(); pitrErr != nil {
+			return output.Fail(pitrErr.Code, pitrErr.Error())
 		}
 		patroniWasStopped = true
 	}
 
-	if err := ensurePostgresStopped(state, patroniWasStopped); err != nil {
-		return output.Fail(output.CodePITRStopFailed, "failed to stop postgresql").WithDetail(err.Error())
+	if pitrErr := ensurePostgresStopped(state, patroniWasStopped); pitrErr != nil {
+		return output.Fail(pitrErr.Code, pitrErr.Error())
 	}
 
-	if err := executeRestore(state, opts); err != nil {
-		return output.Fail(output.CodePITRRestoreFailed, "pgbackrest restore failed").WithDetail(err.Error())
+	if pitrErr := executeRestore(state, opts); pitrErr != nil {
+		return output.Fail(pitrErr.Code, pitrErr.Error())
 	}
 
 	postgresStarted := false
 	if !opts.NoRestart {
-		if err := startPostgres(state, opts); err != nil {
-			return output.Fail(output.CodePITRStartFailed, "failed to start postgresql").WithDetail(err.Error())
+		if pitrErr := startPostgres(state, opts); pitrErr != nil {
+			return output.Fail(pitrErr.Code, pitrErr.Error())
 		}
 		postgresStarted = true
+	}
+
+	// Post-restore steps
+	if pitrErr := postRestore(opts, patroniWasStopped); pitrErr != nil {
+		return output.Fail(pitrErr.Code, pitrErr.Error())
 	}
 
 	endTime := time.Now()
@@ -573,11 +583,11 @@ func quoteIfNeeded(value string) string {
 // Phase 2: Stop Patroni
 // ============================================================================
 
-func stopPatroni() error {
+func stopPatroni() *PITRError {
 	fmt.Fprintf(os.Stderr, "\n%s=== Stopping Patroni Service ===%s\n", utils.ColorBold, utils.ColorReset)
 
 	if err := patroni.Systemctl("stop"); err != nil {
-		return fmt.Errorf("failed to stop patroni service: %w", err)
+		return &PITRError{Code: output.CodePITRStopFailed, Err: fmt.Errorf("failed to stop patroni service: %w", err)}
 	}
 
 	fmt.Fprintf(os.Stderr, "%sPatroni service stopped.%s\n", utils.ColorGreen, utils.ColorReset)
@@ -588,7 +598,7 @@ func stopPatroni() error {
 // Phase 3: Ensure PostgreSQL Stopped
 // ============================================================================
 
-func ensurePostgresStopped(state *SystemState, patroniWasStopped bool) error {
+func ensurePostgresStopped(state *SystemState, patroniWasStopped bool) *PITRError {
 	fmt.Fprintf(os.Stderr, "\n%s=== Ensuring PostgreSQL is Stopped ===%s\n", utils.ColorBold, utils.ColorReset)
 
 	// If Patroni was actually stopped, wait a bit for PG to stop automatically
@@ -665,14 +675,14 @@ func ensurePostgresStopped(state *SystemState, patroniWasStopped bool) error {
 	running, pid = postgres.CheckPostgresRunningAsDBSU(state.DbSU, state.DataDir)
 	if running && pid > 0 {
 		if err := killProcess(state.DbSU, pid); err != nil {
-			return fmt.Errorf("failed to kill PostgreSQL process (PID: %d): %w", pid, err)
+			return &PITRError{Code: output.CodePITRStopFailed, Err: fmt.Errorf("failed to kill PostgreSQL process (PID: %d): %w", pid, err)}
 		}
 
 		// Wait a moment and verify
 		time.Sleep(2 * time.Second)
 		running, _ = postgres.CheckPostgresRunningAsDBSU(state.DbSU, state.DataDir)
 		if running {
-			return fmt.Errorf("postgresql still running after kill -9, manual intervention required")
+			return &PITRError{Code: output.CodePITRPgRunning, Err: fmt.Errorf("postgresql still running after kill -9, manual intervention required")}
 		}
 		fmt.Fprintf(os.Stderr, "%sPostgreSQL killed (SIGKILL).%s\n", utils.ColorYellow, utils.ColorReset)
 	}
@@ -691,7 +701,7 @@ func killProcess(dbsu string, pid int) error {
 // Phase 4: Execute Restore
 // ============================================================================
 
-func executeRestore(state *SystemState, opts *Options) error {
+func executeRestore(state *SystemState, opts *Options) *PITRError {
 	fmt.Fprintf(os.Stderr, "\n%s=== Executing pgBackRest Restore ===%s\n", utils.ColorBold, utils.ColorReset)
 
 	// Build pgbackrest config
@@ -728,18 +738,56 @@ func executeRestore(state *SystemState, opts *Options) error {
 		fmt.Fprintf(os.Stderr, "\nCheck pgBackRest logs:\n")
 		fmt.Fprintf(os.Stderr, "  pig pb log cat\n")
 		fmt.Fprintf(os.Stderr, "  tail -100 /var/log/pgbackrest/*.log\n")
-		return err
+		code := classifyRestoreError(err)
+		if code == output.CodePITRNoBackup {
+			return &PITRError{Code: code, Err: fmt.Errorf("backup not found: %w", err)}
+		}
+		return &PITRError{Code: code, Err: fmt.Errorf("pgbackrest restore failed: %w", err)}
 	}
 
 	fmt.Fprintf(os.Stderr, "%spgBackRest restore completed successfully.%s\n", utils.ColorGreen, utils.ColorReset)
 	return nil
 }
 
+func classifyRestoreError(err error) int {
+	if err == nil {
+		return output.CodePITRRestoreFailed
+	}
+	if isNoBackupError(err.Error()) {
+		return output.CodePITRNoBackup
+	}
+	return output.CodePITRRestoreFailed
+}
+
+func isNoBackupError(message string) bool {
+	msg := strings.ToLower(message)
+
+	if strings.Contains(msg, "no prior backup exists") {
+		return true
+	}
+	if strings.Contains(msg, "unable to find backup") {
+		return true
+	}
+	if strings.Contains(msg, "no backup set") {
+		return true
+	}
+	if strings.Contains(msg, "backup set") &&
+		(strings.Contains(msg, "not found") || strings.Contains(msg, "does not exist")) {
+		return true
+	}
+	if strings.Contains(msg, "backup") &&
+		(strings.Contains(msg, "not found") || strings.Contains(msg, "does not exist")) {
+		return true
+	}
+
+	return false
+}
+
 // ============================================================================
 // Phase 5: Start PostgreSQL
 // ============================================================================
 
-func startPostgres(state *SystemState, opts *Options) error {
+func startPostgres(state *SystemState, opts *Options) *PITRError {
 	fmt.Fprintf(os.Stderr, "\n%s=== Starting PostgreSQL ===%s\n", utils.ColorBold, utils.ColorReset)
 
 	pgConfig := &postgres.Config{
@@ -756,13 +804,13 @@ func startPostgres(state *SystemState, opts *Options) error {
 		fmt.Fprintf(os.Stderr, "\nCheck PostgreSQL logs:\n")
 		fmt.Fprintf(os.Stderr, "  pig pg log cat\n")
 		fmt.Fprintf(os.Stderr, "  tail -100 /pg/log/postgres/*.csv\n")
-		return err
+		return &PITRError{Code: output.CodePITRStartFailed, Err: fmt.Errorf("failed to start postgresql: %w", err)}
 	}
 
 	// Verify running
 	running, pid := postgres.CheckPostgresRunningAsDBSU(state.DbSU, state.DataDir)
 	if !running {
-		return fmt.Errorf("postgresql failed to start after restore")
+		return &PITRError{Code: output.CodePITRStartFailed, Err: fmt.Errorf("postgresql failed to start after restore")}
 	}
 
 	fmt.Fprintf(os.Stderr, "%sPostgreSQL started successfully (PID: %d).%s\n", utils.ColorGreen, pid, utils.ColorReset)
@@ -773,7 +821,22 @@ func startPostgres(state *SystemState, opts *Options) error {
 // Phase 6: Post-Restore Guidance
 // ============================================================================
 
-func printPostRestoreGuidance(opts *Options, patroniWasStopped bool) {
+// postRestore performs post-restore steps and returns *PITRError on failure.
+// Currently the post-restore phase only prints guidance, but this wrapper
+// ensures CodePITRPostFailed is properly used if any step fails.
+func postRestore(opts *Options, patroniWasStopped bool) *PITRError {
+	if err := printPostRestoreGuidance(opts, patroniWasStopped); err != nil {
+		return &PITRError{Code: output.CodePITRPostFailed, Err: fmt.Errorf("failed to write post-restore guidance: %w", err)}
+	}
+	return nil
+}
+
+func printPostRestoreGuidance(opts *Options, patroniWasStopped bool) error {
+	// Fail fast if stderr is unavailable so post-restore errors can be surfaced.
+	if _, err := fmt.Fprint(os.Stderr, ""); err != nil {
+		return err
+	}
+
 	fmt.Fprintf(os.Stderr, "\n%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
 	fmt.Fprintf(os.Stderr, "%s PITR Complete%s\n", utils.ColorBold, utils.ColorReset)
 	fmt.Fprintf(os.Stderr, "%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
@@ -810,4 +873,5 @@ func printPostRestoreGuidance(opts *Options, patroniWasStopped bool) {
 	fmt.Fprintf(os.Stderr, "   pig pb create\n")
 
 	fmt.Fprintf(os.Stderr, "\n%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
+	return nil
 }

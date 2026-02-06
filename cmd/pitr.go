@@ -97,7 +97,11 @@ The command uses the same execution privilege strategy as other pig commands:
 		"cost":       "600000",
 	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return initAll()
+		if err := initAll(); err != nil {
+			return err
+		}
+		applyStructuredOutputSilence(cmd)
+		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check if any target specified
@@ -106,6 +110,12 @@ The command uses the same execution privilege strategy as other pig commands:
 			pitrOpts.LSN != "" || pitrOpts.XID != ""
 
 		if !hasTarget {
+			if config.IsStructuredOutput() {
+				return handlePITRResult(
+					output.Fail(output.CodePITRInvalidArgs, "invalid or missing recovery target").
+						WithDetail("choose one of: --default, --immediate, --time, --name, --lsn, --xid"),
+				)
+			}
 			return cmd.Help()
 		}
 
