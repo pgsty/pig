@@ -16,6 +16,17 @@ var statusCmd = &cobra.Command{
 	Use:     "status",
 	Aliases: []string{"st", "info"},
 	Short:   "Show Environment Status",
+	Annotations: map[string]string{
+		"name":       "pig status",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "1000",
+	},
 	Long: `Display current pigsty status info, including:
     - Configuration
     - OS Environment

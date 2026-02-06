@@ -35,6 +35,17 @@ var (
 var licenseCmd = &cobra.Command{
 	Use:     "license",
 	Short:   "Manage Pigsty Licenses",
+	Annotations: map[string]string{
+		"name":       "pig license",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "100",
+	},
 	Aliases: []string{"lic", "l"},
 	Hidden:  true,
 	Long: `Description:
@@ -49,6 +60,17 @@ var licenseCmd = &cobra.Command{
 var licenseStatusCmd = &cobra.Command{
 	Use:     "status",
 	Short:   "Show pigsty license status",
+	Annotations: map[string]string{
+		"name":       "pig license status",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "500",
+	},
 	Aliases: []string{"st", "s"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lic := viper.GetString("license")
@@ -71,6 +93,17 @@ var licenseStatusCmd = &cobra.Command{
 var licenseIssueCmd = &cobra.Command{
 	Use:     "issue <name>",
 	Short:   "Issue a new pigsty license",
+	Annotations: map[string]string{
+		"name":       "pig license issue",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "false",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "1000",
+	},
 	Aliases: []string{"i", "iss"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logrus.Debug("Starting license issuance process")
@@ -141,6 +174,17 @@ var licenseIssueCmd = &cobra.Command{
 var licenseVerifyCmd = &cobra.Command{
 	Use:     "verify <string|path>",
 	Short:   "Verify a pigsty license",
+	Annotations: map[string]string{
+		"name":       "pig license verify",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "500",
+	},
 	Aliases: []string{"v"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logrus.Debug("Starting license verification process")
@@ -170,6 +214,17 @@ var licenseVerifyCmd = &cobra.Command{
 var licenseListCmd = &cobra.Command{
 	Use:     "list",
 	Short:   "List of license issue",
+	Annotations: map[string]string{
+		"name":       "pig license list",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "500",
+	},
 	Aliases: []string{"l", "ls"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println(license.Manager.LicenseType())
@@ -183,6 +238,17 @@ var licenseListCmd = &cobra.Command{
 var licenseAddCmd = &cobra.Command{
 	Use:     "add <license>",
 	Short:   "Add license to pigsty configuration",
+	Annotations: map[string]string{
+		"name":       "pig license add",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "500",
+	},
 	Aliases: []string{"a"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logrus.Debug("Starting license add process")

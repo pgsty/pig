@@ -17,6 +17,17 @@ var (
 var doCmd = &cobra.Command{
 	Use:     "do",
 	Short:   "run admin tasks",
+	Annotations: map[string]string{
+		"name":       "pig do",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "100",
+	},
 	Aliases: []string{"d"},
 	GroupID: "pigsty",
 	Long:    `pig do - perform admin tasks with ansible playbook`,
@@ -45,6 +56,17 @@ var doCmd = &cobra.Command{
 var doPgsqlAddCmd = &cobra.Command{
 	Use:     "pgsql-add",
 	Short:   "add instances to cluster",
+	Annotations: map[string]string{
+		"name":       "pig do pgsql-add",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "300000",
+	},
 	Aliases: []string{"pg-add", "pa", "pgsql"},
 	Long:    `pig do pgsql-add <selector> [ins...]`,
 	Example: `
@@ -66,6 +88,17 @@ var doPgsqlAddCmd = &cobra.Command{
 var doPgsqlRmCmd = &cobra.Command{
 	Use:     "pgsql-rm",
 	Short:   "remove instances from cluster",
+	Annotations: map[string]string{
+		"name":       "pig do pgsql-rm",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "high",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "300000",
+	},
 	Aliases: []string{"pg-rm", "pr"},
 	Long:    `pig do pgsql-rm <selector> [ins...]`,
 	Example: `
@@ -89,6 +122,17 @@ var doPgsqlRmCmd = &cobra.Command{
 var doPgsqlUserCmd = &cobra.Command{
 	Use:     "pgsql-user",
 	Short:   "create/update pgsql user",
+	Annotations: map[string]string{
+		"name":       "pig do pgsql-user",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "low",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "60000",
+	},
 	Aliases: []string{"pg-user", "pu"},
 	Long:    `pig do pgsql-user <cls> <username>`,
 	Example: `
@@ -109,6 +153,17 @@ var doPgsqlUserCmd = &cobra.Command{
 var doPgsqlDbCmd = &cobra.Command{
 	Use:     "pgsql-db",
 	Short:   "create/update pgsql database",
+	Annotations: map[string]string{
+		"name":       "pig do pgsql-db",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "low",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "60000",
+	},
 	Aliases: []string{"pg-db", "pd"},
 	Long:    `pig do pgsql-db <cls> <dbname>`,
 	Example: `
@@ -128,6 +183,17 @@ var doPgsqlDbCmd = &cobra.Command{
 var doPgsqlExtCmd = &cobra.Command{
 	Use:     "pgsql-ext",
 	Short:   "install pgsql extensions",
+	Annotations: map[string]string{
+		"name":       "pig do pgsql-ext",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "low",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "60000",
+	},
 	Aliases: []string{"pg-ext", "pe"},
 	Long:    `pig do pgsql-ext <cls>`,
 	Example: `
@@ -152,6 +218,17 @@ var doPgsqlExtCmd = &cobra.Command{
 var doPgsqlHbaCmd = &cobra.Command{
 	Use:     "pgsql-hba",
 	Short:   "refresh pgsql hba",
+	Annotations: map[string]string{
+		"name":       "pig do pgsql-hba",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "60000",
+	},
 	Aliases: []string{"pg-hba", "ph"},
 	Long:    `pig do pgsql-hba <cls>`,
 	Example: `
@@ -171,6 +248,17 @@ var doPgsqlHbaCmd = &cobra.Command{
 var doPgsqlSvcCmd = &cobra.Command{
 	Use:     "pgsql-svc",
 	Short:   "refresh pgsql service",
+	Annotations: map[string]string{
+		"name":       "pig do pgsql-svc",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "60000",
+	},
 	Aliases: []string{"pg-svc", "ps"},
 	Long:    `pig do pgsql-svc <cls>`,
 	Example: `
@@ -190,6 +278,17 @@ var doPgsqlSvcCmd = &cobra.Command{
 var doPgmonAddCmd = &cobra.Command{
 	Use:     "pgmon-add",
 	Short:   "add remote pg monitor target",
+	Annotations: map[string]string{
+		"name":       "pig do pgmon-add",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "low",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "60000",
+	},
 	Aliases: []string{"mon-add", "ma"},
 	Long:    `pig do pgmon-add <cls>`,
 	Example: `
@@ -209,6 +308,17 @@ var doPgmonAddCmd = &cobra.Command{
 var doPgmonRmCmd = &cobra.Command{
 	Use:     "pgmon-rm",
 	Short:   "remove remote pg monitor target",
+	Annotations: map[string]string{
+		"name":       "pig do pgmon-rm",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "60000",
+	},
 	Aliases: []string{"mon-rm", "mr"},
 	Long:    `pig do pgmon-rm <cls>`,
 	Example: `
@@ -229,6 +339,17 @@ var doPgmonRmCmd = &cobra.Command{
 var doNodeAddCmd = &cobra.Command{
 	Use:     "node-add",
 	Short:   "add node to pigsty",
+	Annotations: map[string]string{
+		"name":       "pig do node-add",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "300000",
+	},
 	Aliases: []string{"node", "node-a", "nadd", "na"},
 	Long:    `pig do node-add <sel>`,
 	Example: `
@@ -248,6 +369,17 @@ var doNodeAddCmd = &cobra.Command{
 var doNodeRmCmd = &cobra.Command{
 	Use:     "node-rm",
 	Short:   "remove node from pigsty",
+	Annotations: map[string]string{
+		"name":       "pig do node-rm",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "high",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "300000",
+	},
 	Aliases: []string{"node-r", "nrm"},
 	Long:    `pig do node-rm <sel>`,
 	Example: `
@@ -267,6 +399,17 @@ var doNodeRmCmd = &cobra.Command{
 var doNodeRepoCmd = &cobra.Command{
 	Use:     "node-repo",
 	Short:   "update node repo",
+	Annotations: map[string]string{
+		"name":       "pig do node-repo",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "low",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "60000",
+	},
 	Aliases: []string{"node-rp", "nrp"},
 	Long:    `pig do node-repo <sel> [module]`,
 	Example: `
@@ -302,6 +445,17 @@ var doNodeRepoCmd = &cobra.Command{
 var doNodePkgCmd = &cobra.Command{
 	Use:     "node-pkg",
 	Short:   "update node package",
+	Annotations: map[string]string{
+		"name":       "pig do node-pkg",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "low",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "60000",
+	},
 	Aliases: []string{"node-p", "np"},
 	Long:    `pig do node-pkg <sel> [module]`,
 	Example: `
@@ -328,6 +482,17 @@ var doNodePkgCmd = &cobra.Command{
 var doRepoBuildCmd = &cobra.Command{
 	Use:     "repo-build",
 	Short:   "rebuild infra repo",
+	Annotations: map[string]string{
+		"name":       "pig do repo-build",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "low",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "60000",
+	},
 	Aliases: []string{"repo-b", "rb"},
 	Long:    `pig do repo-build`,
 	Example: `
@@ -343,6 +508,17 @@ var doRepoBuildCmd = &cobra.Command{
 var doRedisAddCmd = &cobra.Command{
 	Use:     "redis-add",
 	Short:   "add redis to pigsty",
+	Annotations: map[string]string{
+		"name":       "pig do redis-add",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "300000",
+	},
 	Aliases: []string{"redis", "re-add", "ra"},
 	Long:    `pig do redis-add <sel> [port...]`,
 	Example: `
@@ -372,6 +548,17 @@ var doRedisAddCmd = &cobra.Command{
 var doRedisRmCmd = &cobra.Command{
 	Use:     "redis-rm",
 	Short:   "remove redis from pigsty",
+	Annotations: map[string]string{
+		"name":       "pig do redis-rm",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "high",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "300000",
+	},
 	Aliases: []string{"re-rm", "rr"},
 	Long:    `pig do redis-rm <sel> [port...]`,
 	Example: `

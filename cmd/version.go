@@ -11,6 +11,17 @@ import (
 var versionCmd = &cobra.Command{
 	Use:     "version",
 	Short:   "Show pig version info",
+	Annotations: map[string]string{
+		"name":       "pig version",
+		"type":       "query",
+		"volatility": "immutable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "100",
+	},
 	Aliases: []string{"v"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if config.IsStructuredOutput() {

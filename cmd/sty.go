@@ -42,6 +42,17 @@ var (
 var styCmd = &cobra.Command{
 	Use:     "sty",
 	Short:   "Manage Pigsty Installation",
+	Annotations: map[string]string{
+		"name":       "pig sty",
+		"type":       "query",
+		"volatility": "stable",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "100",
+	},
 	Aliases: []string{"s", "pigsty"},
 	GroupID: "pigsty",
 	Long: `pig sty -Init (Download), Bootstrap, Configure, and Deploy Pigsty
@@ -64,6 +75,17 @@ var styCmd = &cobra.Command{
 var pigstyInitCmd = &cobra.Command{
 	Use:     "init",
 	Short:   "Install Pigsty",
+	Annotations: map[string]string{
+		"name":       "pig sty init",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "30000",
+	},
 	Aliases: []string{"i"},
 	Long: `
 pig sty init
@@ -151,6 +173,17 @@ pig sty init
 var pigstyBootCmd = &cobra.Command{
 	Use:     "boot",
 	Short:   "Bootstrap Pigsty",
+	Annotations: map[string]string{
+		"name":       "pig sty boot",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "60000",
+	},
 	Aliases: []string{"b", "bootstrap"},
 	Long: `Bootstrap pigsty with ./bootstrap script
 
@@ -201,6 +234,17 @@ Check https://pigsty.io/docs/setup/offline/#bootstrap for details
 var pigstyConfCmd = &cobra.Command{
 	Use:     "conf",
 	Short:   "Configure Pigsty",
+	Annotations: map[string]string{
+		"name":       "pig sty conf",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "10000",
+	},
 	Aliases: []string{"c", "configure"},
 	Long: `Configure pigsty with ./configure
 
@@ -286,6 +330,17 @@ Check https://pigsty.io/docs/setup/install/#configure for details
 var pigstyListcmd = &cobra.Command{
 	Use:     "list",
 	Short:   "list pigsty available versions",
+	Annotations: map[string]string{
+		"name":       "pig sty list",
+		"type":       "query",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "safe",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "5000",
+	},
 	Aliases: []string{"l", "ls"},
 	Long: `List available pigsty versions
 
@@ -338,6 +393,17 @@ var pigstyListcmd = &cobra.Command{
 var pigstyGetcmd = &cobra.Command{
 	Use:     "get",
 	Short:   "download pigsty available versions",
+	Annotations: map[string]string{
+		"name":       "pig sty get",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "safe",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "current",
+		"cost":       "30000",
+	},
 	Aliases: []string{"g", "download"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		get.NetworkCondition()
@@ -381,6 +447,17 @@ var pigstyGetcmd = &cobra.Command{
 var pigstyDeployCmd = &cobra.Command{
 	Use:     "deploy",
 	Short:   "run pigsty deploy.yml playbook",
+	Annotations: map[string]string{
+		"name":       "pig sty deploy",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "false",
+		"risk":       "high",
+		"confirm":    "required",
+		"os_user":    "root",
+		"cost":       "600000",
+	},
 	Aliases: []string{"d", "de", "install", "ins"},
 	Long: `Deploy Pigsty using the deploy.yml playbook
 

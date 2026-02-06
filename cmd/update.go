@@ -17,6 +17,17 @@ var updateRegion string
 var updateCmd = &cobra.Command{
 	Use:          "update",
 	Short:        "Upgrade pig itself",
+	Annotations: map[string]string{
+		"name":       "pig update",
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"idempotent": "true",
+		"risk":       "medium",
+		"confirm":    "recommended",
+		"os_user":    "root",
+		"cost":       "30000",
+	},
 	Aliases:      []string{"upd", "u"},
 	SilenceUsage: true,
 	Example: `

@@ -24,6 +24,17 @@ var (
 var installCmd = &cobra.Command{
 	Use:     "install",
 	Short:   "Install packages using native package manager",
+	Annotations: map[string]string{
+		"name":       "pig install",
+		"type":       "action",
+		"volatility": "stable",
+		"parallel":   "restricted",
+		"idempotent": "true",
+		"risk":       "low",
+		"confirm":    "none",
+		"os_user":    "root",
+		"cost":       "30000",
+	},
 	Aliases: []string{"i", "ins"},
 	Long: `pig install - Install packages using native package manager with alias translation
 
