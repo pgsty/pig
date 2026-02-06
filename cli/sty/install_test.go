@@ -1,7 +1,9 @@
 package sty
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"testing"
@@ -106,7 +108,8 @@ func TestInstallPigsty(t *testing.T) {
 			}
 
 			// Run installation
-			err := InstallPigsty(nil, tt.targetDir, tt.overwrite)
+			srcTarball := createTestPigstyTarball(t)
+			err := InstallPigsty(srcTarball, tt.targetDir, tt.overwrite)
 
 			// Check error expectation
 			if (err != nil) != tt.wantErr {
@@ -146,4 +149,53 @@ func TestInstallPigsty(t *testing.T) {
 			}
 		})
 	}
+}
+
+func createTestPigstyTarball(t *testing.T) []byte {
+	t.Helper()
+
+	buf := new(bytes.Buffer)
+	gw := gzip.NewWriter(buf)
+	tw := tar.NewWriter(gw)
+
+	addDir := func(name string) {
+		hdr := &tar.Header{
+			Name:     name,
+			Mode:     0755,
+			Typeflag: tar.TypeDir,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("failed to write dir header %s: %v", name, err)
+		}
+	}
+
+	addFile := func(name string, data []byte, mode int64) {
+		hdr := &tar.Header{
+			Name:     name,
+			Mode:     mode,
+			Size:     int64(len(data)),
+			Typeflag: tar.TypeReg,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("failed to write file header %s: %v", name, err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			t.Fatalf("failed to write file body %s: %v", name, err)
+		}
+	}
+
+	addDir("pigsty")
+	addDir("pigsty/files")
+	addDir("pigsty/files/pki")
+	addFile("pigsty/pigsty.yml", []byte("all:\n  children:\n    pg-meta:\n"), 0644)
+	addFile("pigsty/files/pki/ca.key", []byte("new-key"), 0600)
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("failed to close tar writer: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("failed to close gzip writer: %v", err)
+	}
+
+	return buf.Bytes()
 }

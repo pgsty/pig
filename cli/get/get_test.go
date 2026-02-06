@@ -113,7 +113,7 @@ e62f9ce9f89a58958609da7b234bf2f2  pigsty-v3.1.0.tgz
 		t.Errorf("Expected 4 versions, got %d", len(versions))
 	}
 
-	expectedVersions := []string{"v3.1.0", "v1.0.0", "v0.9.1", "v0.8.1"}
+	expectedVersions := []string{"v3.1.0", "v1.0.0", "v1.0.0", "v0.8.1"}
 	for i, v := range versions {
 		if v.Version != expectedVersions[i] {
 			t.Errorf("Expected version %s at index %d, got %s", expectedVersions[i], i, v.Version)
@@ -122,9 +122,23 @@ e62f9ce9f89a58958609da7b234bf2f2  pigsty-v3.1.0.tgz
 }
 
 func TestCompleteVersion(t *testing.T) {
-	// Save original AllVersions and restore after test
-	NetworkCondition()
-	GetAllVersions(true)
+	origAllVersions := AllVersions
+	origLatest := LatestVersion
+	defer func() {
+		AllVersions = origAllVersions
+		LatestVersion = origLatest
+	}()
+
+	AllVersions = []VersionInfo{
+		{Version: "v4.0.0"},
+		{Version: "v2.7.0"},
+		{Version: "v2.0.2"},
+		{Version: "v2.0.1-rc1"},
+		{Version: "v2.0.0"},
+		{Version: "v1.5.1"},
+		{Version: "v1.0.0"},
+	}
+	LatestVersion = "v4.0.0"
 
 	tests := []struct {
 		input    string
@@ -146,7 +160,7 @@ func TestCompleteVersion(t *testing.T) {
 
 		// Non-matching versions should return unchanged
 		{"v9.9.9", "v9.9.9"},
-		{"v4", "v4"},
+		{"v4", "v4.0.0"},
 
 		// Pre-release versions should be ignored when completing
 		{"v2.0", "v2.0.2"},

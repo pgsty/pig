@@ -57,6 +57,11 @@ func parsePgVersions(pgVersions string) ([]int, error) {
 	return versions, nil
 }
 
+// ParsePGVersions is the exported wrapper used by tests and external callers.
+func ParsePGVersions(pgVersions string) ([]int, error) {
+	return parsePgVersions(pgVersions)
+}
+
 // formatSize formats byte size to human-readable format
 func formatSize(size int64) string {
 	if size < 1024 {
