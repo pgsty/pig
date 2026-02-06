@@ -13,31 +13,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Create will create a local YUM/APT repository in the specified directory
-func Create(dirPath string) error {
-	if dirPath == "" {
-		dirPath = "/www/pigsty"
-	}
-	// check if source directory exists
-	if _, err := os.Stat(dirPath); err != nil {
-		if os.IsNotExist(err) {
-			if err = utils.SudoCommand([]string{"mkdir", "-p", dirPath}); err != nil {
-				return fmt.Errorf("failed to create repo dir %s: %v", dirPath, err)
-			}
-		} else {
-			return fmt.Errorf("failed to check repo dir %s: %v", dirPath, err)
-		}
-	}
-
-	switch config.OSType {
-	case config.DistroEL:
-		return CreateRepoEL(dirPath)
-	case config.DistroDEB:
-		return CreateRepoDEB(dirPath)
-	}
-	return fmt.Errorf("unsupported OS type: %s", config.OSType)
-}
-
 // CreateRepoEL will create a local YUM repository in the specified directory
 func CreateRepoEL(dir string) error {
 	logrus.Infof("create %s %s repo in %s", config.OSVendor, config.OSCode, dir)

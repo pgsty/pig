@@ -140,11 +140,6 @@ func (ec *ExtensionCatalog) Load(data []byte) error {
 	return nil
 }
 
-// GetDependency returns the dependent extension with the given extensino name
-func GetDependency(name string) []string {
-	return Catalog.Dependency[name]
-}
-
 // ArchAliasOverride contains package name overrides for specific OS+arch combinations
 // Key format: "el9.arm64", value is a map of alias -> package names
 var ArchAliasOverride = map[string]map[string]string{

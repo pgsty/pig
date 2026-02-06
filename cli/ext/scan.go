@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"pig/internal/config"
-	"sort"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -82,10 +80,6 @@ type ExtensionInstall struct {
 	Libraries      map[string]bool   // Associated shared library
 }
 
-func (e *ExtensionInstall) Found() bool {
-	return e.Extension != nil
-}
-
 // ExtName returns the name of the extension
 func (e *ExtensionInstall) ExtName() string {
 	if e.Extension != nil {
@@ -112,30 +106,6 @@ func (e *ExtensionInstall) VersionString() string {
 		return e.Extension.Version
 	}
 	return ""
-}
-
-// SharedLibraries returns the shared libraries list of the extension
-func (e *ExtensionInstall) SharedLibraries() []string {
-	var libs []string
-	switch config.OSType {
-	case config.DistroEL, config.DistroDEB:
-		for lib := range e.Libraries {
-			libs = append(libs, lib+".so")
-		}
-	case config.DistroMAC:
-		for lib := range e.Libraries {
-			libs = append(libs, lib+".dylib")
-		}
-	}
-	return libs
-}
-
-// ActiveVersion returns the active version of the extension (fallback to the catalog version)
-func (e *ExtensionInstall) ActiveVersion() string {
-	if e.InstallVersion != "" {
-		return e.InstallVersion
-	}
-	return e.Version
 }
 
 // ControlPath returns the path to the control file of the extension
@@ -281,35 +251,6 @@ func (p *PostgresInstall) ScanExtensions() error {
 	p.ExtensionMap = extMap
 	p.SharedLibs = shareLibs
 	return nil
-}
-
-func PrintInstalledPostgres() string {
-	if Installs == nil {
-		return ""
-	}
-	var pgVerList []int
-	for v := range Installs {
-		pgVerList = append(pgVerList, v)
-	}
-
-	// sort in reverse
-	sort.Sort(sort.Reverse(sort.IntSlice(pgVerList)))
-	if len(pgVerList) == 0 {
-		return "no installation found"
-	}
-	if len(pgVerList) == 1 {
-		return fmt.Sprintf("%d (active)", pgVerList[0])
-	}
-	var pgVerStrList []string
-	for _, v := range pgVerList {
-		if Active != nil && v == Active.MajorVersion {
-			pgVerStrList = append(pgVerStrList, fmt.Sprintf("%d (active)", v))
-		} else {
-			pgVerStrList = append(pgVerStrList, fmt.Sprintf("%d", v))
-		}
-	}
-
-	return strings.Join(pgVerStrList, ", ")
 }
 
 func isEncodingLib(libname string) bool {

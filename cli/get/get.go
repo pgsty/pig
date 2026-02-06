@@ -205,40 +205,6 @@ DONE:
 	return Source
 }
 
-// GetAllVersions fetches and displays all available versions from the active repository
-func GetAllVersions(print bool) error {
-	baseURL := map[string]string{
-		ViaIO: config.RepoPigstyIO,
-		ViaCC: config.RepoPigstyCC,
-	}[Source]
-
-	if baseURL == "" {
-		return fmt.Errorf("network unavailable")
-	}
-
-	if AllVersions == nil {
-		// If not populated yet, fetch now
-		versions, err := FetchChecksums(baseURL + "/src/checksums")
-		if err != nil {
-			return fmt.Errorf("failed to fetch versions: %w", err)
-		}
-		AllVersions = versions
-	}
-
-	if print {
-		const format = "%-10s\t%-36s\t%s\n"
-		fmt.Printf(format, "VERSION", "CHECKSUM", "DOWNLOAD URL")
-		fmt.Println(strings.Repeat("-", 90))
-		for _, v := range AllVersions {
-			if CompareVersions(v.Version, "v3.0.0") >= 0 {
-				fmt.Printf(format, v.Version, v.Checksum, v.DownloadURL)
-			}
-		}
-	}
-
-	return nil
-}
-
 func PirntAllVersions(since string) {
 	if since == "" {
 		since = "v3.0.0"
@@ -398,7 +364,7 @@ func IsValidVersion(version string) *VersionInfo {
 	if len(version) > 0 && version[0] >= '0' && version[0] <= '9' {
 		version = "v" + version
 	}
-	
+
 	// Check if version matches expected format
 	re := regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-(?:a|b|c|alpha|beta|rc)\d+)?$`)
 	if !re.MatchString(version) {
@@ -413,7 +379,7 @@ func IsValidVersion(version string) *VersionInfo {
 			}
 		}
 	}
-	
+
 	// If not in cache, create VersionInfo based on region
 	// Choose repository based on Source/Region (default to io)
 	var baseURL string
@@ -422,7 +388,7 @@ func IsValidVersion(version string) *VersionInfo {
 	} else {
 		baseURL = config.RepoPigstyIO
 	}
-	
+
 	filename := fmt.Sprintf("pigsty-%s.tgz", version)
 	return &VersionInfo{
 		Version:     version,
@@ -430,17 +396,6 @@ func IsValidVersion(version string) *VersionInfo {
 		// Checksum will be empty for versions not in cache
 		Checksum: "",
 	}
-}
-
-// FetchChecksums retrieves and parses the checksums file from the specified URL
-func FetchChecksums(url string) ([]VersionInfo, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch checksums: %w", err)
-	}
-	defer resp.Body.Close()
-
-	return ParseChecksums(resp.Body, Source)
 }
 
 // ParseChecksums parses checksum file content into VersionInfo structs

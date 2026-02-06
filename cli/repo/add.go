@@ -8,34 +8,11 @@ import (
 	"pig/internal/output"
 	"pig/internal/utils"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
 )
-
-// AddModules adds multiple modules to the system
-func (m *Manager) AddModules(modules ...string) error {
-	modules = m.normalizeModules(modules...)
-
-	// check module availability
-	for _, module := range modules {
-		if _, ok := m.Module[module]; !ok {
-			logrus.Warnf("available modules: %v", strings.Join(m.GetModuleList(), ", "))
-			return fmt.Errorf("module not found: %s", module)
-		}
-	}
-
-	logrus.Infof("adding repo modules for %s.%s (region=%s)", config.OSCode, config.OSArch, m.Region)
-	for _, module := range modules {
-		if err := m.AddModule(module); err != nil {
-			return fmt.Errorf("failed to add module %s: %w", module, err)
-		}
-		logrus.Infof("repo module added: %s", module)
-	}
-	return nil
-}
 
 // AddModule handles adding a single module to the system
 func (m *Manager) AddModule(module string) error {
@@ -97,16 +74,6 @@ func (m *Manager) normalizeModules(modules ...string) []string {
 	}
 	modules = slices.Compact(modules)
 	slices.Sort(modules)
-	return modules
-}
-
-// GetModuleList returns a sorted list of available modules
-func (m *Manager) GetModuleList() []string {
-	modules := make([]string, 0, len(m.Module))
-	for module := range m.Module {
-		modules = append(modules, module)
-	}
-	sort.Strings(modules)
 	return modules
 }
 

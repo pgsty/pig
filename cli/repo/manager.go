@@ -1,20 +1,15 @@
 package repo
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"pig/cli/get"
 	"pig/internal/config"
-	"pig/internal/utils"
 	"slices"
 	"sort"
 	"strings"
-
-	"golang.org/x/crypto/openpgp/armor"
 
 	"github.com/sirupsen/logrus"
 
@@ -23,9 +18,6 @@ import (
 
 //go:embed assets/repo.yml
 var embedRepoData []byte
-
-//go:embed assets/key.gpg
-var embedGPGKey []byte
 
 // Manager represents a package repository manager
 type Manager struct {
@@ -268,30 +260,5 @@ func (m *Manager) DetectRegion(region string) {
 	} else {
 		m.Region = get.Region
 		logrus.Debugf("detected region: %s", m.Region)
-	}
-}
-
-// AddPigstyGPG adds the Pigsty GPG key to the os key ring
-func (m *Manager) AddPigstyGPG() error {
-	switch m.OsType {
-	case config.DistroEL:
-		if err := utils.PutFile("/etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty", embedGPGKey); err != nil {
-			return fmt.Errorf("failed to install dnf GPG key: %w", err)
-		}
-		logrus.Debugf("GPG key installed: /etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty")
-		return nil
-	case config.DistroDEB:
-		block, _ := armor.Decode(bytes.NewReader(embedGPGKey))
-		keyBytes, err := io.ReadAll(block.Body)
-		if err != nil {
-			return fmt.Errorf("failed to decode GPG key: %w", err)
-		}
-		if err := utils.PutFile("/etc/apt/keyrings/pigsty.gpg", keyBytes); err != nil {
-			return fmt.Errorf("failed to install apt GPG key: %w", err)
-		}
-		logrus.Debugf("GPG key installed: /etc/apt/keyrings/pigsty.gpg")
-		return nil
-	default:
-		return fmt.Errorf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull)
 	}
 }

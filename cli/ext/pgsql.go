@@ -115,24 +115,6 @@ func (p *PostgresInstall) ScanMeta() error {
 	return nil
 }
 
-// String returns a string representation of the PostgreSQL installation
-func (p *PostgresInstall) String() string {
-	return fmt.Sprintf("PostgreSQL %d.%d: %s",
-		p.MajorVersion,
-		p.MinorVersion,
-		p.PgConfig,
-	)
-}
-
-// Summary prints a summary of the PostgreSQL installation
-func (pg *PostgresInstall) Summary() {
-	utils.PadKV("PostgreSQL "+fmt.Sprintf("%d.%d", pg.MajorVersion, pg.MinorVersion), pg.Version)
-	utils.PadKV("Binary Path", pg.BinPath)
-	utils.PadKV("Library Path", pg.LibPath)
-	utils.PadKV("PgConfig Path", pg.PgConfig)
-	utils.PadKV("Extension Path", pg.ExtPath)
-}
-
 // GetActivePgConfig returns the active pg_config path
 func GetActivePgConfig() (string, error) {
 	pgConfig, err := exec.LookPath("pg_config")
@@ -144,15 +126,6 @@ func GetActivePgConfig() (string, error) {
 		return "", fmt.Errorf("failed to get absolute path of pg_config: %v", err)
 	}
 	return absPgConfigPath, nil
-}
-
-// GetActivePostgresInstall returns the active PostgreSQL installation
-func GetActivePostgresInstall() (*PostgresInstall, error) {
-	pgConfigPath, err := GetActivePgConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active pg_config: %v", err)
-	}
-	return NewPostgresInstall(pgConfigPath)
 }
 
 // DetectPostgres detects all installed PostgreSQL versions on the system

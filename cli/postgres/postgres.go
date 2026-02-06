@@ -146,32 +146,6 @@ func ReadPgVersionAsDBSU(dbsu, dataDir string) (int, error) {
 	return strconv.Atoi(strings.TrimSpace(output))
 }
 
-// ReadPgVersion reads major version from PG_VERSION file
-// Note: This runs as current user, may fail due to permission issues.
-// Use ReadPgVersionAsDBSU for reliable reads when running as non-dbsu user.
-func ReadPgVersion(dataDir string) (int, error) {
-	data, err := os.ReadFile(filepath.Join(dataDir, "PG_VERSION"))
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(strings.TrimSpace(string(data)))
-}
-
-// CheckDataDir checks if data directory exists and is initialized
-// Note: This runs as current user, may fail due to permission issues.
-// Use CheckDataDirAsDBSU for reliable checks when running as non-dbsu user.
-func CheckDataDir(dataDir string) (exists, initialized bool) {
-	info, err := os.Stat(dataDir)
-	if os.IsNotExist(err) {
-		return false, false
-	}
-	if err != nil || !info.IsDir() {
-		return false, false
-	}
-	_, err = os.Stat(filepath.Join(dataDir, "PG_VERSION"))
-	return true, err == nil
-}
-
 // CheckDataDirAsDBSU checks data directory state as the database superuser.
 // This is necessary when the current user may not have permission to read the data directory.
 // Returns (exists, initialized bool) where:
@@ -273,56 +247,6 @@ func buildTestCmd(dbsu string, flag, path string) *exec.Cmd {
 
 	sudoArgs := append([]string{"-inu", dbsu, "--"}, args...)
 	return exec.Command("sudo", sudoArgs...)
-}
-
-// CheckPostgresRunning checks if PostgreSQL is running in the data directory.
-// Returns (running bool, pid int, err error) where:
-//   - running=false, pid=0, err=nil: definitely not running (no pid file)
-//   - running=false, pid>0, err=nil: pid file exists but process is dead (stale)
-//   - running=true, pid>0, err=nil: PostgreSQL is running
-//   - running=false, pid=0, err!=nil: cannot determine status (permission denied, etc.)
-//
-// IMPORTANT: When err != nil, callers should NOT assume PostgreSQL is stopped.
-func CheckPostgresRunning(dataDir string) (bool, int, error) {
-	pidFile := filepath.Join(dataDir, "postmaster.pid")
-	data, err := os.ReadFile(pidFile)
-	if os.IsNotExist(err) {
-		return false, 0, nil // No pid file, definitely not running
-	}
-	if os.IsPermission(err) {
-		// Permission denied - we cannot determine the status
-		// Return error so caller doesn't assume PostgreSQL is stopped
-		return false, 0, fmt.Errorf("cannot read %s: permission denied (run as postgres user or root)", pidFile)
-	}
-	if err != nil {
-		// Other errors - also cannot determine status
-		return false, 0, fmt.Errorf("cannot read %s: %w", pidFile, err)
-	}
-
-	// First line of postmaster.pid is the PID
-	lines := strings.Split(string(data), "\n")
-	if len(lines) == 0 {
-		return false, 0, nil // Empty file, treat as not running
-	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(lines[0]))
-	if err != nil {
-		return false, 0, nil // Invalid PID format, treat as stale
-	}
-
-	// Check if process exists
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false, pid, nil // Can't find process, stale pid file
-	}
-
-	// On Unix, FindProcess always succeeds. Send signal 0 to check if process exists
-	err = process.Signal(syscall.Signal(0))
-	if err != nil {
-		return false, pid, nil // Process doesn't exist (stale pid file)
-	}
-
-	return true, pid, nil
 }
 
 // ============================================================================
