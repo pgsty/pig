@@ -1,12 +1,8 @@
 package ext
 
 import (
-	"fmt"
-	"os"
-	"pig/internal/config"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/sirupsen/logrus"
 )
@@ -37,79 +33,6 @@ var CategoryMap = map[string]string{
 type SearchResult struct {
 	Extension *Extension
 	Score     float64
-}
-
-// TabulteVersion prints a tabulated list of extensions available to given version
-func TabulteVersion(pgVer int, data []*Extension) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	if ShowPkg {
-		fmt.Fprintln(w, "Pkg\tStatus\tVersion\tCate\tFlags\tLicense\tRepo\tPGVer\tPackage\tDescription")
-	} else {
-		fmt.Fprintln(w, "Name\tStatus\tVersion\tCate\tFlags\tLicense\tRepo\tPGVer\tPackage\tDescription")
-	}
-	fmt.Fprintln(w, "----\t------\t-------\t----\t------\t-------\t------\t-----\t------------\t---------------------")
-
-	// Get current OS/arch for matrix lookup
-	osCode := config.OSCode
-	arch := config.OSArch
-	if Postgres != nil {
-		pgVer = Postgres.MajorVersion
-	}
-
-	count := 0
-	for _, ext := range data {
-		if ext == nil || (ShowPkg && !ext.Lead) {
-			continue
-		}
-		desc := ext.EnDesc
-		if len(desc) > 64 {
-			desc = desc[:64]
-		}
-		pkgStr := ext.PackageName(pgVer)
-		if strings.Contains(pkgStr, "$v") {
-			pkgStr = fmt.Sprintf("[%s]", pkgStr)
-		}
-		firstCol := ext.Name
-		if ShowPkg {
-			firstCol = ext.Pkg
-		}
-		status := GetExtensionStatus(ext, pgVer, osCode, arch)
-
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			firstCol, status, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RepoName(), ext.Availability(config.OSCode), pkgStr, desc)
-		count++
-	}
-	w.Flush()
-	fmt.Printf("\n(%d Rows) (Status: \033[32minstalled\033[0m, \033[33mavailable\033[0m, \033[31mnot avail\033[0m | Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", count)
-}
-
-func TabulteCommon(data []*Extension) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	if ShowPkg {
-		fmt.Fprintln(w, "Pkg\tVersion\tCate\tFlags\tLicense\tRPM\tDEB\tPG Ver\tDescription")
-	} else {
-		fmt.Fprintln(w, "Name\tVersion\tCate\tFlags\tLicense\tRPM\tDEB\tPG Ver\tDescription")
-	}
-	fmt.Fprintln(w, "----\t-------\t----\t------\t-------\t------\t------\t------\t---------------------")
-	count := 0
-	for _, ext := range data {
-		if ext == nil || (ShowPkg && !ext.Lead) {
-			continue
-		}
-		desc := ext.EnDesc
-		if len(desc) > 64 {
-			desc = desc[:64] + "..."
-		}
-		firstCol := ext.Name
-		if ShowPkg {
-			firstCol = ext.Pkg
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			firstCol, ext.Version, ext.Category, ext.GetFlag(), ext.License, ext.RpmRepo, ext.DebRepo, CompactVersion(ext.PgVer), desc)
-		count++
-	}
-	w.Flush()
-	fmt.Printf("\n(%d Rows) (Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)\n\n", count)
 }
 
 // SearchExtensions performs fuzzy search on extensions

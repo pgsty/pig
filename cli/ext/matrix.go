@@ -2,7 +2,6 @@ package ext
 
 import (
 	"fmt"
-	"pig/internal/config"
 	"sort"
 	"strconv"
 	"strings"
@@ -518,92 +517,6 @@ func colorLegend() string {
 		colorGreen, "green", colorReset, colorBlue, "blue", colorReset)
 }
 
-// PrintAvailability prints the availability matrix for an extension
-func PrintAvailability(e *Extension) {
-	if e == nil {
-		return
-	}
-
-	fmt.Printf("\n%s (%s) - %s\n", e.Name, e.Pkg, e.EnDesc)
-
-	// Get lead extension for matrix data
-	leadExt := getLeadExtension(e)
-	if leadExt != e {
-		fmt.Printf("(Matrix data from lead extension: %s)\n", leadExt.Name)
-	}
-
-	matrix := leadExt.GetPkgMatrix()
-	if len(matrix) == 0 {
-		fmt.Println("No availability matrix data available")
-		return
-	}
-
-	// Build info line: "Latest: x.y.z | N/M avail, PG18, PG17, ..."
-	var info strings.Builder
-	if ver := matrix.LatestVersion(); ver != "" {
-		info.WriteString("Latest: " + ver + " | ")
-	}
-	info.WriteString(matrix.Summary())
-	if pgVers := leadExt.GetPGVersions(); len(pgVers) > 0 {
-		pgStrs := make([]string, len(pgVers))
-		for i, pg := range pgVers {
-			pgStrs[i] = fmt.Sprintf("PG%d", pg)
-		}
-		info.WriteString(", " + strings.Join(pgStrs, ", "))
-	}
-	fmt.Println(info.String())
-
-	fmt.Printf("Details: https://pgext.cloud/e/%s  %s\n\n", e.Name, colorLegend())
-	fmt.Print(matrix.TabulateAvailability())
-}
-
-// PrintGlobalAvailability prints package availability matrix on current OS
-func PrintGlobalAvailability() {
-	PrintGlobalAvailabilityFor("", "")
-}
-
-// PrintGlobalAvailabilityFor prints package availability for specified OS/arch
-func PrintGlobalAvailabilityFor(osCode, arch string) {
-	if Catalog == nil || len(Catalog.Extensions) == 0 {
-		fmt.Println("No extension catalog available")
-		return
-	}
-
-	if osCode == "" {
-		osCode = config.OSCode
-	}
-	if arch == "" {
-		arch = config.OSArch
-	}
-
-	if !validOSCodes[osCode] {
-		fmt.Printf("\nNote: Current OS '%s' is not a supported Linux distribution.\n", osCode)
-		fmt.Println("Supported OS: el8, el9, el10, d12, d13, u22, u24")
-		fmt.Println("Showing matrix for el9.x86_64 as example:")
-		osCode, arch = "el9", "amd64"
-	}
-
-	// Count totals and collect lead packages
-	var packages []*Extension
-	for _, ext := range Catalog.Extensions {
-		if ext.Contrib {
-			continue
-		}
-		if ext.Lead {
-			packages = append(packages, ext)
-		}
-	}
-
-	osName := osFullName(osCode, arch)
-	fmt.Printf("\nExtension Availability on %s : https://pgext.cloud/os/%s\n", osName, osName)
-	fmt.Printf("Showing %d packages with %d extensions  %s\n\n", len(packages), len(Catalog.Extensions), colorLegend())
-
-	sort.Slice(packages, func(i, j int) bool {
-		return packages[i].ID < packages[j].ID
-	})
-
-	fmt.Print(tabulateGlobalMatrix(packages, osCode, arch, []int{18, 17, 16, 15, 14, 13}))
-}
 
 func tabulateGlobalMatrix(packages []*Extension, osCode, arch string, pgVersions []int) string {
 	if len(packages) == 0 {

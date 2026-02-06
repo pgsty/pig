@@ -5,11 +5,6 @@ import (
 	"strings"
 )
 
-// PrintInfo prints extension information in a formatted table
-func (e *Extension) PrintInfo() {
-	fmt.Println(e.FormatInfo())
-}
-
 // FormatInfo returns a formatted string of extension information
 func (e *Extension) FormatInfo() string {
 	var sb strings.Builder

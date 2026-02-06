@@ -3559,3 +3559,481 @@ func TestGetPackageManagerCmd(t *testing.T) {
 // Test note: ReloadCatalogResult has 0% test coverage because it makes actual network calls
 // to download the extension catalog. A proper unit test would require HTTP mocking.
 // The DTO serialization is tested in TestReloadCatalogResultDataSerialization above.
+
+/********************
+ * Text() Method Tests
+ * Verify output.Texter interface implementation and nil receiver safety
+ ********************/
+
+func TestExtensionListDataTextNil(t *testing.T) {
+	var d *ExtensionListData
+	if d.Text() != "" {
+		t.Error("nil ExtensionListData.Text() should return empty string")
+	}
+}
+
+func TestExtensionListDataTextVersionMode(t *testing.T) {
+	d := &ExtensionListData{
+		PgVersion: 17,
+		Extensions: []*ExtensionSummary{
+			{Name: "postgis", Version: "3.5.0", Category: "GIS", License: "GPLv2", Repo: "PGDG", PackageName: "postgis34_17", Description: "PostGIS geometry and geography spatial types and functions", PgVer: []string{"17", "16", "15"}},
+			{Name: "pg_stat_statements", Version: "1.10", Category: "STAT", License: "PostgreSQL", Repo: "CONTRIB", PackageName: "", Description: "Track planning and execution statistics"},
+		},
+	}
+	text := d.Text()
+	if text == "" {
+		t.Error("ExtensionListData.Text() returned empty string for valid data")
+	}
+	if !strings.Contains(text, "postgis") {
+		t.Error("expected 'postgis' in output")
+	}
+	if !strings.Contains(text, "pg_stat_statements") {
+		t.Error("expected 'pg_stat_statements' in output")
+	}
+	if !strings.Contains(text, "(2 Rows)") {
+		t.Error("expected row count in output")
+	}
+}
+
+func TestExtensionListDataTextCommonMode(t *testing.T) {
+	d := &ExtensionListData{
+		PgVersion: 0, // Common mode
+		Extensions: []*ExtensionSummary{
+			{Name: "postgis", Version: "3.5.0", Category: "GIS", License: "GPLv2", PgVer: []string{"17", "16"}},
+		},
+	}
+	text := d.Text()
+	if text == "" {
+		t.Error("ExtensionListData.Text() returned empty string for valid data")
+	}
+	if !strings.Contains(text, "postgis") {
+		t.Error("expected 'postgis' in output")
+	}
+	if !strings.Contains(text, "(1 Rows)") {
+		t.Error("expected row count in output")
+	}
+}
+
+func TestExtensionListDataTextEmpty(t *testing.T) {
+	d := &ExtensionListData{
+		PgVersion:  17,
+		Extensions: []*ExtensionSummary{},
+	}
+	text := d.Text()
+	if !strings.Contains(text, "(0 Rows)") {
+		t.Error("expected (0 Rows) in output for empty extensions")
+	}
+}
+
+func TestExtensionInfoDataTextNil(t *testing.T) {
+	var d *ExtensionInfoData
+	if d.Text() != "" {
+		t.Error("nil ExtensionInfoData.Text() should return empty string")
+	}
+}
+
+func TestExtensionInfoDataTextFallback(t *testing.T) {
+	// No catalog loaded - uses fallback rendering
+	origCatalog := Catalog
+	Catalog = nil
+	defer func() { Catalog = origCatalog }()
+
+	d := &ExtensionInfoData{
+		Name:        "postgis",
+		Pkg:         "postgis",
+		Category:    "GIS",
+		License:     "GPLv2",
+		Language:    "C",
+		Version:     "3.5.0",
+		PgVer:       []string{"17", "16", "15"},
+		Description: "PostGIS geometry and geography spatial types and functions",
+		URL:         "https://postgis.net",
+		Operations: &ExtensionOperations{
+			Install: "pig ext add postgis",
+			Config:  "shared_preload_libraries = 'postgis'",
+			Create:  "CREATE EXTENSION postgis;",
+		},
+	}
+	text := d.Text()
+	if text == "" {
+		t.Error("ExtensionInfoData.Text() returned empty string for valid data")
+	}
+	if !strings.Contains(text, "postgis") {
+		t.Error("expected 'postgis' in output")
+	}
+	if !strings.Contains(text, "GIS") {
+		t.Error("expected 'GIS' in output")
+	}
+	if !strings.Contains(text, "https://postgis.net") {
+		t.Error("expected URL in output")
+	}
+	if !strings.Contains(text, "pig ext add postgis") {
+		t.Error("expected install command in output")
+	}
+}
+
+func TestExtensionStatusDataTextNil(t *testing.T) {
+	var d *ExtensionStatusData
+	if d.Text() != "" {
+		t.Error("nil ExtensionStatusData.Text() should return empty string")
+	}
+}
+
+func TestExtensionStatusDataTextWithData(t *testing.T) {
+	d := &ExtensionStatusData{
+		PgInfo: &PostgresInfo{
+			MajorVersion: 17,
+			Version:      "17.2",
+			BinDir:       "/usr/pgsql-17/bin",
+			ExtensionDir: "/usr/pgsql-17/share/extension",
+		},
+		Summary: &ExtensionSummaryInfo{
+			TotalInstalled: 75,
+			ByRepo:         map[string]int{"PIGSTY": 10, "PGDG": 15, "CONTRIB": 50},
+		},
+		Extensions: []*ExtensionSummary{
+			{Name: "postgis", Version: "3.5.0", Category: "GIS", License: "GPLv2", Repo: "PIGSTY", PackageName: "postgis34_17", Description: "PostGIS"},
+		},
+	}
+	text := d.Text()
+	if !strings.Contains(text, "PostgreSQL 17") {
+		t.Error("expected PostgreSQL version in output")
+	}
+	if !strings.Contains(text, "/usr/pgsql-17/bin") {
+		t.Error("expected bin dir in output")
+	}
+	if !strings.Contains(text, "Extension Stat") {
+		t.Error("expected extension stat in output")
+	}
+	if !strings.Contains(text, "postgis") {
+		t.Error("expected postgis in output")
+	}
+	if !strings.Contains(text, "(1 Rows)") {
+		t.Error("expected row count in output")
+	}
+}
+
+func TestExtensionStatusDataTextNotFound(t *testing.T) {
+	d := &ExtensionStatusData{
+		NotFound: []string{"foo", "bar"},
+	}
+	text := d.Text()
+	if !strings.Contains(text, "Not found in catalog: foo, bar") {
+		t.Error("expected not found list in output")
+	}
+}
+
+func TestScanResultDataTextNil(t *testing.T) {
+	var d *ScanResultData
+	if d.Text() != "" {
+		t.Error("nil ScanResultData.Text() should return empty string")
+	}
+}
+
+func TestScanResultDataTextWithData(t *testing.T) {
+	d := &ScanResultData{
+		PgInfo: &PostgresInfo{
+			MajorVersion: 17,
+			Version:      "17.2",
+			BinDir:       "/usr/pgsql-17/bin",
+			ExtensionDir: "/usr/pgsql-17/share/extension",
+		},
+		Extensions: []*ScanExtEntry{
+			{Name: "plpgsql", Version: "1.0", Description: "PL/pgSQL procedural language", ControlMeta: map[string]string{"module_pathname": "$libdir/plpgsql"}, Libraries: []string{"plpgsql"}},
+		},
+		EncodingLibs:  []string{"utf8_and_euc_cn"},
+		BuiltInLibs:   []string{"libpq"},
+		UnmatchedLibs: []string{"unknown_lib"},
+	}
+	text := d.Text()
+	if !strings.Contains(text, "PostgreSQL 17") {
+		t.Error("expected PostgreSQL version in output")
+	}
+	if !strings.Contains(text, "plpgsql") {
+		t.Error("expected plpgsql in output")
+	}
+	if !strings.Contains(text, "Encoding Libs") {
+		t.Error("expected encoding libs in output")
+	}
+	if !strings.Contains(text, "Built-in Libs") {
+		t.Error("expected built-in libs in output")
+	}
+	if !strings.Contains(text, "Unmatched Shared Libraries") {
+		t.Error("expected unmatched libs in output")
+	}
+}
+
+func TestExtensionAvailDataTextNil(t *testing.T) {
+	var d *ExtensionAvailData
+	if d.Text() != "" {
+		t.Error("nil ExtensionAvailData.Text() should return empty string")
+	}
+}
+
+func TestExtensionAvailDataTextSingleFallback(t *testing.T) {
+	// No catalog loaded - uses fallback rendering
+	origCatalog := Catalog
+	Catalog = nil
+	defer func() { Catalog = origCatalog }()
+
+	d := &ExtensionAvailData{
+		Extension: "postgis",
+		LatestVer: "3.5.0",
+		Summary:   "84/84 avail",
+		Matrix: []*MatrixEntry{
+			{OS: "el9", Arch: "amd64", PG: 17, State: "A", Version: "3.5.0", Org: "P"},
+		},
+	}
+	text := d.Text()
+	if !strings.Contains(text, "postgis") {
+		t.Error("expected extension name in output")
+	}
+	if !strings.Contains(text, "3.5.0") {
+		t.Error("expected version in output")
+	}
+}
+
+func TestExtensionAvailDataTextGlobalFallback(t *testing.T) {
+	// No catalog loaded - uses fallback rendering
+	origCatalog := Catalog
+	Catalog = nil
+	defer func() { Catalog = origCatalog }()
+
+	d := &ExtensionAvailData{
+		OSCode:       "el9",
+		Arch:         "amd64",
+		PackageCount: 200,
+		Packages: []*PackageAvailability{
+			{Pkg: "postgis", Versions: map[string]string{"17": "3.5.0", "16": "3.4.0"}},
+		},
+	}
+	text := d.Text()
+	if !strings.Contains(text, "el9") {
+		t.Error("expected OS code in output")
+	}
+	if !strings.Contains(text, "200") {
+		t.Error("expected package count in output")
+	}
+}
+
+func TestExtensionAddDataTextNil(t *testing.T) {
+	var d *ExtensionAddData
+	if d.Text() != "" {
+		t.Error("nil ExtensionAddData.Text() should return empty string")
+	}
+}
+
+func TestExtensionAddDataTextWithData(t *testing.T) {
+	d := &ExtensionAddData{
+		PgVersion:  17,
+		DurationMs: 1234,
+		Installed: []*InstalledExtItem{
+			{Name: "postgis", Package: "postgis34_17"},
+		},
+		Failed: []*FailedExtItem{
+			{Name: "foo", Error: "not found"},
+		},
+	}
+	text := d.Text()
+	if !strings.Contains(text, "Installed 1 package(s)") {
+		t.Error("expected installed count in output")
+	}
+	if !strings.Contains(text, "postgis") {
+		t.Error("expected package name in output")
+	}
+	if !strings.Contains(text, "Failed 1 package(s)") {
+		t.Error("expected failed count in output")
+	}
+	if !strings.Contains(text, "1234ms") {
+		t.Error("expected duration in output")
+	}
+}
+
+func TestExtensionRmDataTextNil(t *testing.T) {
+	var d *ExtensionRmData
+	if d.Text() != "" {
+		t.Error("nil ExtensionRmData.Text() should return empty string")
+	}
+}
+
+func TestExtensionRmDataTextWithData(t *testing.T) {
+	d := &ExtensionRmData{
+		PgVersion:  17,
+		DurationMs: 567,
+		Removed:    []string{"postgis", "pg_trgm"},
+		Failed: []*FailedExtItem{
+			{Name: "bar", Error: "permission denied"},
+		},
+	}
+	text := d.Text()
+	if !strings.Contains(text, "Removed 2 package(s)") {
+		t.Error("expected removed count in output")
+	}
+	if !strings.Contains(text, "postgis") {
+		t.Error("expected package name in output")
+	}
+	if !strings.Contains(text, "Failed 1 package(s)") {
+		t.Error("expected failed count in output")
+	}
+	if !strings.Contains(text, "567ms") {
+		t.Error("expected duration in output")
+	}
+}
+
+func TestExtensionUpdateDataTextNil(t *testing.T) {
+	var d *ExtensionUpdateData
+	if d.Text() != "" {
+		t.Error("nil ExtensionUpdateData.Text() should return empty string")
+	}
+}
+
+func TestExtensionUpdateDataTextWithData(t *testing.T) {
+	d := &ExtensionUpdateData{
+		PgVersion:  17,
+		DurationMs: 890,
+		Updated:    []string{"postgis"},
+	}
+	text := d.Text()
+	if !strings.Contains(text, "Updated 1 package(s)") {
+		t.Error("expected updated count in output")
+	}
+	if !strings.Contains(text, "postgis") {
+		t.Error("expected package name in output")
+	}
+	if !strings.Contains(text, "890ms") {
+		t.Error("expected duration in output")
+	}
+}
+
+func TestImportResultDataTextNil(t *testing.T) {
+	var d *ImportResultData
+	if d.Text() != "" {
+		t.Error("nil ImportResultData.Text() should return empty string")
+	}
+}
+
+func TestImportResultDataTextWithData(t *testing.T) {
+	d := &ImportResultData{
+		PgVersion:  17,
+		RepoDir:    "/www/pigsty",
+		DurationMs: 5000,
+		Downloaded: []string{"postgis34_17", "pg_trgm_17"},
+		Failed:     []string{"bad_pkg"},
+	}
+	text := d.Text()
+	if !strings.Contains(text, "/www/pigsty") {
+		t.Error("expected repo dir in output")
+	}
+	if !strings.Contains(text, "Downloaded 2 package(s)") {
+		t.Error("expected downloaded count in output")
+	}
+	if !strings.Contains(text, "Failed 1 package(s)") {
+		t.Error("expected failed count in output")
+	}
+	if !strings.Contains(text, "5000ms") {
+		t.Error("expected duration in output")
+	}
+}
+
+func TestLinkResultDataTextNil(t *testing.T) {
+	var d *LinkResultData
+	if d.Text() != "" {
+		t.Error("nil LinkResultData.Text() should return empty string")
+	}
+}
+
+func TestLinkResultDataTextLink(t *testing.T) {
+	d := &LinkResultData{
+		Action:       "link",
+		PgHome:       "/usr/pgsql-17",
+		SymlinkPath:  "/usr/pgsql",
+		ProfilePath:  "/etc/profile.d/pgsql.sh",
+		ActivatedCmd: ". /etc/profile.d/pgsql.sh",
+	}
+	text := d.Text()
+	if !strings.Contains(text, "Linked /usr/pgsql -> /usr/pgsql-17") {
+		t.Error("expected link message in output")
+	}
+	if !strings.Contains(text, "Activate: . /etc/profile.d/pgsql.sh") {
+		t.Error("expected activate command in output")
+	}
+}
+
+func TestLinkResultDataTextUnlink(t *testing.T) {
+	d := &LinkResultData{
+		Action:      "unlink",
+		SymlinkPath: "/usr/pgsql",
+		ProfilePath: "/etc/profile.d/pgsql.sh",
+	}
+	text := d.Text()
+	if !strings.Contains(text, "Unlinked PostgreSQL from /usr/pgsql") {
+		t.Error("expected unlink message in output")
+	}
+}
+
+func TestReloadResultDataTextNil(t *testing.T) {
+	var d *ReloadResultData
+	if d.Text() != "" {
+		t.Error("nil ReloadResultData.Text() should return empty string")
+	}
+}
+
+func TestReloadResultDataTextWithData(t *testing.T) {
+	d := &ReloadResultData{
+		SourceURL:      "https://pigsty.io/ext/data/extension.csv",
+		ExtensionCount: 444,
+		CatalogPath:    "/root/.pig/extension.csv",
+		DurationMs:     350,
+	}
+	text := d.Text()
+	if !strings.Contains(text, "pigsty.io") {
+		t.Error("expected source URL in output")
+	}
+	if !strings.Contains(text, "444") {
+		t.Error("expected extension count in output")
+	}
+	if !strings.Contains(text, "/root/.pig/extension.csv") {
+		t.Error("expected catalog path in output")
+	}
+	if !strings.Contains(text, "350ms") {
+		t.Error("expected duration in output")
+	}
+}
+
+func TestFlagsFromSummaryNil(t *testing.T) {
+	if flagsFromSummary(nil) != "" {
+		t.Error("flagsFromSummary(nil) should return empty string")
+	}
+}
+
+func TestFlagsFromSummaryNoCatalog(t *testing.T) {
+	origCatalog := Catalog
+	Catalog = nil
+	defer func() { Catalog = origCatalog }()
+
+	s := &ExtensionSummary{Name: "postgis"}
+	if flagsFromSummary(s) != "" {
+		t.Error("flagsFromSummary with nil catalog should return empty string")
+	}
+}
+
+// TestTextMethodImplementsTexter verifies the Texter interface is satisfied at compile time.
+// The output.Texter interface is: type Texter interface { Text() string }
+func TestTextMethodImplementsTexter(t *testing.T) {
+	type Texter interface {
+		Text() string
+	}
+
+	// Each of these should compile, proving they implement Texter
+	var _ Texter = (*ExtensionListData)(nil)
+	var _ Texter = (*ExtensionInfoData)(nil)
+	var _ Texter = (*ExtensionStatusData)(nil)
+	var _ Texter = (*ScanResultData)(nil)
+	var _ Texter = (*ExtensionAvailData)(nil)
+	var _ Texter = (*ExtensionAddData)(nil)
+	var _ Texter = (*ExtensionRmData)(nil)
+	var _ Texter = (*ExtensionUpdateData)(nil)
+	var _ Texter = (*ImportResultData)(nil)
+	var _ Texter = (*LinkResultData)(nil)
+	var _ Texter = (*ReloadResultData)(nil)
+}

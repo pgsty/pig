@@ -158,69 +158,6 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 	return output.OK(message, data)
 }
 
-// ImportExtensions downloads extension packages to local repository
-func ImportExtensions(pgVer int, names []string, importPath string) error {
-	logrus.Debugf("importing extensions: pgVer=%d, names=%s, path=%s", pgVer, strings.Join(names, ", "), importPath)
-	if len(names) == 0 {
-		return fmt.Errorf("no extension names provided")
-	}
-	if pgVer == 0 {
-		logrus.Debugf("no PostgreSQL version specified, set target version to the latest major version: %d", PostgresLatestMajorVersion)
-		pgVer = PostgresLatestMajorVersion
-	}
-	if importPath == "" {
-		importPath = "/www/pigsty"
-	}
-	if err := utils.Mkdir(importPath); err != nil {
-		return fmt.Errorf("failed to create import directory: %v", err)
-	}
-
-	var downloadPkgs []string
-	Catalog.LoadAliasMap(config.OSType)
-	if err := validateTool(); err != nil {
-		return err
-	}
-
-	var pkgNames []string
-	for _, name := range names {
-		ext, ok := Catalog.ExtNameMap[name]
-		if !ok {
-			ext, ok = Catalog.ExtPkgMap[name]
-		}
-
-		if !ok {
-			// try to find in AliasMap (if it is not a postgres extension)
-			if pgPkg, ok := Catalog.AliasMap[name]; ok {
-				pkgNames = append(pkgNames, processPkgName(pgPkg, pgVer)...)
-				continue
-			} else {
-				logrus.Debugf("cannot find '%s' in extension name or alias", name)
-				continue
-			}
-		}
-		pkgName := ext.PackageName(pgVer)
-		if pkgName == "" {
-			logrus.Warnf("no package found for extension %s", ext.Name)
-			continue
-		}
-		logrus.Debugf("translate extension %s to package name: %s", ext.Name, pkgName)
-		pkgNames = append(pkgNames, processPkgName(pkgName, pgVer)...)
-	}
-
-	if len(pkgNames) == 0 {
-		return fmt.Errorf("no packages to be downloaded")
-	}
-	downloadPkgs = append(downloadPkgs, pkgNames...)
-	switch config.OSType {
-	case config.DistroEL:
-		return DownloadRPM(downloadPkgs)
-	case config.DistroDEB:
-		return DownloadDEB(downloadPkgs)
-	default:
-		return fmt.Errorf("unsupported package manager: %s on %s %s", config.OSType, config.OSVendor, config.OSCode)
-	}
-}
-
 // DownloadRPM downloads RPM packages with repotrack
 func DownloadRPM(pkgNames []string) error {
 	osarch := config.OSArch

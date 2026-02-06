@@ -8,7 +8,6 @@ import (
 	"pig/internal/config"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/sirupsen/logrus"
 )
@@ -282,80 +281,6 @@ func (p *PostgresInstall) ScanExtensions() error {
 	p.ExtensionMap = extMap
 	p.SharedLibs = shareLibs
 	return nil
-}
-
-// ExtensionInstallSummary prints a summary of the PostgreSQL installation and its extensions & shared libraries
-func (pg *PostgresInstall) ExtensionInstallSummary() {
-	// Sort extensions by ID for consistent output
-	extensions := pg.Extensions
-	sort.Slice(extensions, func(i, j int) bool {
-		// Sort by extension ID if available, otherwise by name
-		if extensions[i].Extension != nil && extensions[j].Extension != nil {
-			return extensions[i].Extension.ID < extensions[j].Extension.ID
-		}
-		return extensions[i].ExtName() < extensions[j].ExtName()
-	})
-
-	// Print extension details including shared libraries in a tabulated format
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Name\tVersion\tSharedLibs\tDescription\tMeta")
-	fmt.Fprintln(w, "----\t-------\t----------\t---------------------\t------")
-
-	for _, ext := range extensions {
-		if !ext.Found() {
-			logrus.Warnf("extension %s not found in catalog", ext.ExtName())
-		}
-		extDescHead := ext.Description()
-		if len(extDescHead) > 64 {
-			extDescHead = extDescHead[:64] + "..."
-		}
-		meta := ""
-		for k, v := range ext.ControlMeta {
-			meta += fmt.Sprintf("%s=%s ", k, v)
-		}
-		if len(ext.SharedLibraries()) > 0 {
-			meta += fmt.Sprintf("lib=%s", strings.Join(ext.SharedLibraries(), ", "))
-		}
-		meta = strings.TrimSpace(meta)
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			ext.ExtName(),
-			ext.VersionString(),
-			extDescHead,
-			meta,
-		)
-
-	}
-	w.Flush()
-
-	w = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	var unmatchedLibs []string
-	var encodingLibs []string
-	var builtInLibs []string
-	for libName, matched := range pg.SharedLibs {
-		if isEncodingLib(libName) {
-			encodingLibs = append(encodingLibs, libName)
-			continue
-		}
-		if isBuiltInLib(libName) {
-			builtInLibs = append(builtInLibs, libName)
-			continue
-		}
-		if !matched {
-			unmatchedLibs = append(unmatchedLibs, libName)
-		}
-	}
-	sort.Strings(encodingLibs)
-	sort.Strings(builtInLibs)
-	sort.Strings(unmatchedLibs)
-	fmt.Printf("\nEncoding Libs: %s\n", strings.Join(encodingLibs, ", "))
-	fmt.Printf("\nBuilt-in Libs: %s\n", strings.Join(builtInLibs, ", "))
-	if len(unmatchedLibs) > 0 {
-		fmt.Printf("\nUnmatched Shared Libraries: %s\n", strings.Join(unmatchedLibs, ", "))
-		for _, libName := range unmatchedLibs {
-			fmt.Fprintf(w, "%s\n", libName)
-		}
-	}
-	w.Flush()
 }
 
 func PrintInstalledPostgres() string {

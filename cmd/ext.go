@@ -5,7 +5,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"pig/cli/ext"
 	"pig/internal/config"
 	"pig/internal/output"
@@ -22,6 +21,8 @@ var (
 	extShowContrib bool
 	extYes         bool
 	extRepoDir     string
+	extAddPlan     bool
+	extRmPlan      bool
 )
 
 // extCmd represents the installation command
@@ -65,6 +66,7 @@ var extCmd = &cobra.Command{
 		if err := initAll(); err != nil {
 			return err
 		}
+		applyStructuredOutputSilence(cmd)
 		return ext.ReloadCatalog()
 	},
 }
@@ -92,12 +94,7 @@ var extListCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 1 {
-			message := "too many arguments, only one search query allowed"
-			if config.IsStructuredOutput() {
-				return handleStructuredResult(output.Fail(output.CodeExtensionInvalidArgs, message))
-			}
-			logrus.Error(message)
-			os.Exit(output.ExitCode(output.CodeExtensionInvalidArgs))
+			return handleStructuredResult(output.Fail(output.CodeExtensionInvalidArgs, "too many arguments, only one search query allowed"))
 		}
 
 		pgVer, err := extProbeVersion()
@@ -109,32 +106,8 @@ var extListCmd = &cobra.Command{
 			query = args[0]
 		}
 
-		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
-			result := ext.ListExtensions(query, pgVer)
-			return handleStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		results := ext.Catalog.Extensions
-		if query != "" {
-			results = ext.SearchExtensions(query, ext.Catalog.Extensions)
-			if len(results) == 0 {
-				logrus.Warnf("no extensions found matching '%s'", query)
-				return nil
-			} else {
-				logrus.Infof("found %d extensions matching '%s':", len(results), query)
-			}
-		}
-
-		if pgVer == 0 {
-			logrus.Debugf("no active PostgreSQL found, fallback to common tabulate")
-			ext.TabulteCommon(results)
-		} else {
-			ext.TabulteVersion(pgVer, results)
-		}
-		return nil
+		result := ext.ListExtensions(query, pgVer)
+		return handleStructuredResult(result)
 	},
 }
 
@@ -154,31 +127,8 @@ var extInfoCmd = &cobra.Command{
 		"cost":       "50",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
-			result := ext.GetExtensionInfo(args)
-			return handleStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		pgVer, err := extProbeVersion()
-		if err != nil {
-			return handleExtProbeError(err)
-		}
-		logrus.Debugf("using PostgreSQL version: %d", pgVer)
-		for _, name := range args {
-			e, ok := ext.Catalog.ExtNameMap[name]
-			if !ok {
-				e, ok = ext.Catalog.ExtPkgMap[name]
-				if !ok {
-					logrus.Errorf("extension '%s' not found", name)
-					continue
-				}
-			}
-			e.PrintInfo()
-		}
-		return nil
+		result := ext.GetExtensionInfo(args)
+		return handleStructuredResult(result)
 	},
 }
 
@@ -201,17 +151,8 @@ var extStatusCmd = &cobra.Command{
 		if _, err := extProbeVersion(); err != nil {
 			return handleExtProbeError(err)
 		}
-
-		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
-			result := ext.GetExtStatus(extShowContrib)
-			return handleStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		ext.ExtensionStatus(extShowContrib)
-		return nil
+		result := ext.GetExtStatus(extShowContrib)
+		return handleStructuredResult(result)
 	},
 }
 
@@ -231,26 +172,11 @@ var extScanCmd = &cobra.Command{
 		"cost":       "500",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pgVer, err := extProbeVersion()
-		if err != nil {
+		if _, err := extProbeVersion(); err != nil {
 			return handleExtProbeError(err)
 		}
-
-		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
-			result := ext.ScanExtensionsResult()
-			return handleStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		ext.PostgresInstallSummary()
-		if pgVer == 0 || ext.Postgres == nil {
-			logrus.Debugf("no active PostgreSQL found, specify pg_config path or pg version to get more details")
-			os.Exit(1)
-		}
-		ext.Postgres.ExtensionInstallSummary()
-		return nil
+		result := ext.ScanExtensionsResult()
+		return handleStructuredResult(result)
 	},
 }
 
@@ -283,6 +209,8 @@ Description:
   pig ext install pg13-devel --yes           # install pg 13 devel packages (auto-confirm)
   pig ext install pg12-mini                  # install postgresql 12 minimal packages
   pig ext install pgsql-common               # install common utils such as patroni pgbouncer pgbackrest,...
+  pig ext add postgis --plan                 # preview install plan without executing
+  pig ext add postgis -o json --plan         # plan output in JSON format
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgVer, err := extProbeVersion()
@@ -290,19 +218,14 @@ Description:
 			return handleExtProbeError(err)
 		}
 
-		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
-			result := ext.AddExtensions(pgVer, args, extYes)
-			return handleStructuredResult(result)
+		// Plan mode: show plan without executing
+		if extAddPlan {
+			plan := ext.BuildAddPlan(pgVer, args)
+			return handleExtPlanOutput(plan)
 		}
 
-		// Text mode: preserve existing behavior
-		if err := ext.InstallExtensions(pgVer, args, extYes); err != nil {
-			logrus.Errorf("failed to install extensions: %v", err)
-			return nil
-		}
-		return nil
+		result := ext.AddExtensions(pgVer, args, extYes)
+		return handleStructuredResult(result)
 	},
 }
 
@@ -315,7 +238,7 @@ var extRmCmd = &cobra.Command{
 		"type":       "action",
 		"volatility": "stable",
 		"parallel":   "restricted",
-		"idempotent": "true",
+		"idempotent": "false",
 		"risk":       "medium",
 		"confirm":    "recommended",
 		"os_user":    "root",
@@ -327,19 +250,14 @@ var extRmCmd = &cobra.Command{
 			return handleExtProbeError(err)
 		}
 
-		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
-			result := ext.RmExtensions(pgVer, args, extYes)
-			return handleStructuredResult(result)
+		// Plan mode: show plan without executing
+		if extRmPlan {
+			plan := ext.BuildRmPlan(pgVer, args)
+			return handleExtPlanOutput(plan)
 		}
 
-		// Text mode: preserve existing behavior
-		if err := ext.RemoveExtensions(pgVer, args, extYes); err != nil {
-			logrus.Errorf("failed to remove extensions: %v", err)
-			return nil
-		}
-		return nil
+		result := ext.RmExtensions(pgVer, args, extYes)
+		return handleStructuredResult(result)
 	},
 }
 
@@ -370,20 +288,8 @@ Description:
 		if err != nil {
 			return handleExtProbeError(err)
 		}
-
-		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
-			result := ext.UpgradeExtensions(pgVer, args, extYes)
-			return handleStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		if err := ext.UpdateExtensions(pgVer, args, extYes); err != nil {
-			logrus.Errorf("failed to update extensions: %v", err)
-			return nil
-		}
-		return nil
+		result := ext.UpgradeExtensions(pgVer, args, extYes)
+		return handleStructuredResult(result)
 	},
 }
 
@@ -415,20 +321,8 @@ var extImportCmd = &cobra.Command{
 		if err != nil {
 			return handleExtProbeError(err)
 		}
-
-		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
-			result := ext.ImportExtensionsResult(pgVer, args, extRepoDir)
-			return handleStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		if err := ext.ImportExtensions(pgVer, args, extRepoDir); err != nil {
-			logrus.Errorf("failed to import extensions: %v", err)
-			return nil
-		}
-		return nil
+		result := ext.ImportExtensionsResult(pgVer, args, extRepoDir)
+		return handleStructuredResult(result)
 	},
 }
 
@@ -456,15 +350,8 @@ var extLinkCmd = &cobra.Command{
   pig ext link null|none|nil|nop|no    # unlink current postgres install
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
-			result := ext.LinkPostgresResult(args...)
-			return handleStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		return ext.LinkPostgres(args...)
+		result := ext.LinkPostgresResult(args...)
+		return handleStructuredResult(result)
 	},
 }
 
@@ -485,15 +372,8 @@ var extReloadCmd = &cobra.Command{
 		"cost":       "5000",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
-			result := ext.ReloadCatalogResult()
-			return handleStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		return ext.ReloadExtensionCatalog()
+		result := ext.ReloadCatalogResult()
+		return handleStructuredResult(result)
 	},
 }
 
@@ -520,31 +400,8 @@ var extAvailCmd = &cobra.Command{
 		"cost":       "100",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Structured output mode (YAML/JSON)
-		format := config.OutputFormat
-		if format == config.OUTPUT_YAML || format == config.OUTPUT_JSON || format == config.OUTPUT_JSON_PRETTY {
-			result := ext.GetExtensionAvailability(args)
-			return handleStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		if len(args) == 0 {
-			// No arguments: show global package availability matrix for current OS
-			ext.PrintGlobalAvailability()
-			return nil
-		}
-		for _, name := range args {
-			e, ok := ext.Catalog.ExtNameMap[name]
-			if !ok {
-				e, ok = ext.Catalog.ExtPkgMap[name]
-				if !ok {
-					logrus.Errorf("extension '%s' not found", name)
-					continue
-				}
-			}
-			ext.PrintAvailability(e)
-		}
-		return nil
+		result := ext.GetExtensionAvailability(args)
+		return handleStructuredResult(result)
 	},
 }
 
@@ -630,7 +487,9 @@ func init() {
 
 	extStatusCmd.Flags().BoolVarP(&extShowContrib, "contrib", "c", false, "show contrib extensions too")
 	extAddCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm install")
+	extAddCmd.Flags().BoolVar(&extAddPlan, "plan", false, "preview install plan without executing")
 	extRmCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm removal")
+	extRmCmd.Flags().BoolVar(&extRmPlan, "plan", false, "preview remove plan without executing")
 	extUpdateCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm update")
 	extImportCmd.Flags().StringVarP(&extRepoDir, "repo", "d", "/www/pigsty", "specify repo dir")
 
@@ -652,11 +511,21 @@ func handleExtProbeError(err error) error {
 		return nil
 	}
 	code := extProbeErrorCode(err)
-	if config.IsStructuredOutput() {
-		return handleStructuredResult(output.Fail(code, err.Error()))
+	return handleStructuredResult(output.Fail(code, err.Error()))
+}
+
+// handleExtPlanOutput handles plan output for ext commands.
+// It renders the plan according to the global output format (-o flag).
+func handleExtPlanOutput(plan *output.Plan) error {
+	if plan == nil {
+		return fmt.Errorf("nil plan")
 	}
-	logrus.Error(err)
-	os.Exit(output.ExitCode(code))
+	format := config.OutputFormat
+	data, err := plan.Render(format)
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
 	return nil
 }
 

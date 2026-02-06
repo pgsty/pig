@@ -360,6 +360,11 @@ func (p *PostgresInstall) Psql() string {
 	return filepath.Join(p.BinPath, "psql")
 }
 
+// PgControldata returns the full path to pg_controldata
+func (p *PostgresInstall) PgControldata() string {
+	return filepath.Join(p.BinPath, "pg_controldata")
+}
+
 // FindPostgres finds a PostgreSQL installation by version or uses Active/default
 // Priority: specified version > Active (in PATH) > /usr/pgsql > latest installed
 func FindPostgres(pgVersion int) (*PostgresInstall, error) {
