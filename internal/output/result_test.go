@@ -8,7 +8,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestNewResult(t *testing.T) {
+func newResultForTest(success bool, code int, message string) *Result {
+	return &Result{
+		Success: success,
+		Code:    code,
+		Message: message,
+	}
+}
+
+func TestResultConstruction(t *testing.T) {
 	tests := []struct {
 		name    string
 		success bool
@@ -22,7 +30,7 @@ func TestNewResult(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewResult(tt.success, tt.code, tt.message)
+			r := newResultForTest(tt.success, tt.code, tt.message)
 			if r.Success != tt.success {
 				t.Errorf("Success = %v, want %v", r.Success, tt.success)
 			}
@@ -80,7 +88,7 @@ func TestFail(t *testing.T) {
 }
 
 func TestWithDetail(t *testing.T) {
-	r := NewResult(false, 10101, "error").WithDetail("additional details")
+	r := newResultForTest(false, 10101, "error").WithDetail("additional details")
 
 	if r.Detail != "additional details" {
 		t.Errorf("Detail = %v, want 'additional details'", r.Detail)
@@ -89,7 +97,7 @@ func TestWithDetail(t *testing.T) {
 
 func TestWithData(t *testing.T) {
 	data := []string{"item1", "item2"}
-	r := NewResult(true, 0, "success").WithData(data)
+	r := newResultForTest(true, 0, "success").WithData(data)
 
 	if r.Data == nil {
 		t.Error("Data should not be nil")
@@ -105,7 +113,7 @@ func TestWithData(t *testing.T) {
 }
 
 func TestChaining(t *testing.T) {
-	r := NewResult(true, 0, "success").
+	r := newResultForTest(true, 0, "success").
 		WithDetail("some detail").
 		WithData(map[string]int{"count": 42})
 
@@ -136,7 +144,7 @@ func TestResultExitCode(t *testing.T) {
 			if tt.name == "success category but failure" {
 				success = false
 			}
-			r := NewResult(success, tt.code, "test")
+			r := newResultForTest(success, tt.code, "test")
 			if got := r.ExitCode(); got != tt.expected {
 				t.Errorf("ExitCode() = %v, want %v", got, tt.expected)
 			}

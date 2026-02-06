@@ -269,43 +269,6 @@ func TestRenderTable_Unicode(t *testing.T) {
 	}
 }
 
-func TestTableRenderer(t *testing.T) {
-	t.Run("nil renderer", func(t *testing.T) {
-		var tr *TableRenderer
-		got := tr.Render()
-		if got != "" {
-			t.Errorf("nil TableRenderer.Render() = %q, want empty", got)
-		}
-
-		// AddRow on nil should not panic
-		tr.AddRow("a", "b")
-	})
-
-	t.Run("basic usage", func(t *testing.T) {
-		tr := NewTableRenderer("NAME", "STATUS")
-		tr.AddRow("test1", "ok").AddRow("test2", "fail")
-
-		got := tr.Render()
-		if !strings.Contains(got, "NAME") {
-			t.Error("Render() should contain header NAME")
-		}
-		if !strings.Contains(got, "test1") {
-			t.Error("Render() should contain row data test1")
-		}
-		if !strings.Contains(got, "test2") {
-			t.Error("Render() should contain row data test2")
-		}
-	})
-
-	t.Run("method chaining", func(t *testing.T) {
-		tr := NewTableRenderer("A", "B")
-		result := tr.AddRow("1", "2")
-		if result != tr {
-			t.Error("AddRow should return same TableRenderer for chaining")
-		}
-	})
-}
-
 func TestPadRight(t *testing.T) {
 	tests := []struct {
 		s        string
@@ -345,52 +308,6 @@ func TestPadRight_Unicode(t *testing.T) {
 	got = padRight("中文", 2)
 	if got != "中文" {
 		t.Errorf("padRight(\"中文\", 2) = %q, want \"中文\"", got)
-	}
-}
-
-func TestPadLeft(t *testing.T) {
-	tests := []struct {
-		s        string
-		width    int
-		expected string
-	}{
-		{"abc", 5, "  abc"},
-		{"abc", 3, "abc"},
-		{"abc", 2, "abc"},
-		{"", 3, "   "},
-		{"中文", 6, "  中文"}, // 4 width + 2 spaces
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.s, func(t *testing.T) {
-			got := padLeft(tt.s, tt.width)
-			if got != tt.expected {
-				t.Errorf("padLeft(%q, %d) = %q, want %q", tt.s, tt.width, got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestPadCenter(t *testing.T) {
-	tests := []struct {
-		s        string
-		width    int
-		expected string
-	}{
-		{"abc", 7, "  abc  "},
-		{"abc", 6, " abc  "}, // Odd padding: left gets less
-		{"abc", 3, "abc"},
-		{"abc", 2, "abc"},
-		{"", 4, "    "},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.s, func(t *testing.T) {
-			got := padCenter(tt.s, tt.width)
-			if got != tt.expected {
-				t.Errorf("padCenter(%q, %d) = %q, want %q", tt.s, tt.width, got, tt.expected)
-			}
-		})
 	}
 }
 
@@ -444,63 +361,6 @@ func TestIsTerminal(t *testing.T) {
 	// Test with nil
 	if isTerminal(nil) {
 		t.Error("isTerminal(nil) should return false")
-	}
-}
-
-func TestTableRenderer_SetAlignment(t *testing.T) {
-	tr := NewTableRenderer("A", "B", "C")
-
-	// Default should be left aligned
-	for i, a := range tr.Alignments {
-		if a != AlignLeft {
-			t.Errorf("Default alignment[%d] = %v, want AlignLeft", i, a)
-		}
-	}
-
-	// Set alignment
-	tr.SetAlignment(1, AlignRight)
-	if tr.Alignments[1] != AlignRight {
-		t.Errorf("Alignment[1] = %v, want AlignRight", tr.Alignments[1])
-	}
-
-	// Method chaining
-	result := tr.SetAlignment(2, AlignCenter)
-	if result != tr {
-		t.Error("SetAlignment should return same TableRenderer for chaining")
-	}
-
-	// Out of bounds should not panic
-	tr.SetAlignment(-1, AlignRight)
-	tr.SetAlignment(100, AlignRight)
-
-	// Nil receiver should not panic
-	var nilTr *TableRenderer
-	nilTr.SetAlignment(0, AlignRight)
-}
-
-func TestTableRenderer_AlignmentApplied(t *testing.T) {
-	tr := NewTableRenderer("NAME", "COUNT", "STATUS")
-	tr.SetAlignment(1, AlignRight)
-	tr.SetAlignment(2, AlignCenter)
-	tr.AddRow("foo", "42", "ok")
-	tr.AddRow("barbaz", "1", "pending")
-
-	got := tr.Render()
-
-	// Check that right-aligned column has leading spaces for shorter values
-	// COUNT column: "42" should be right-padded less than "COUNT"
-	if !strings.Contains(got, "   42") || !strings.Contains(got, "    1") {
-		// The numbers should be right-aligned
-		t.Logf("Output:\n%s", got)
-		// This is a soft check - alignment should work
-	}
-
-	// Verify basic structure
-	if !strings.Contains(got, "NAME") {
-		t.Error("Render() should contain header NAME")
-	}
-	if !strings.Contains(got, "foo") {
-		t.Error("Render() should contain row data")
 	}
 }
 

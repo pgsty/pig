@@ -36,27 +36,9 @@ func PrintTo(w io.Writer, r *Result) error {
 	return nil
 }
 
-// PrintData is a convenience function that creates a successful Result with the given
-// data and message, then prints it according to the global output format.
-func PrintData(data interface{}, message string) error {
-	return Print(OK(message, data))
-}
-
-// PrintError is a convenience function that creates a failed Result with the given
-// code and message, then prints it according to the global output format.
-func PrintError(code int, message string) error {
-	return Print(Fail(code, message))
-}
-
 // RenderPlan outputs the Plan to stdout based on the global output format.
 // For text format, it uses plain "text" output.
 func RenderPlan(plan *Plan) error {
-	return PrintPlanTo(os.Stdout, plan)
-}
-
-// PrintPlan outputs the Plan to stdout based on the global output format.
-// For text format, it uses plain "text" output.
-func PrintPlan(plan *Plan) error {
 	return PrintPlanTo(os.Stdout, plan)
 }
 

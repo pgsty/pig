@@ -15,15 +15,6 @@ type Result struct {
 	Data    interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 }
 
-// NewResult creates a new Result with the specified success status, code, and message.
-func NewResult(success bool, code int, message string) *Result {
-	return &Result{
-		Success: success,
-		Code:    code,
-		Message: message,
-	}
-}
-
 // OK creates a successful Result with the given message and optional data.
 func OK(message string, data interface{}) *Result {
 	return &Result{

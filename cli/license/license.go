@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -144,11 +143,6 @@ func (lm *LicenseManager) AddPublicKey(pubKey string) error {
 	return nil
 }
 
-// IssueLicenseFast provides a simplified interface for issuing licenses
-func (lm *LicenseManager) IssueLicenseFast(name string) (string, error) {
-	return lm.IssueLicense(DefaultIssuer, name, time.Now(), 0, DefaultMode, DefaultNode)
-}
-
 // IssueLicense issues a new license with full parameter control
 func (lm *LicenseManager) IssueLicense(iss, name string, start time.Time, month int, ltype string, node int) (string, error) {
 	if lm.privateKey == nil {
@@ -280,33 +274,7 @@ func (lm *LicenseManager) Register(license string) error {
 	return nil
 }
 
-// GetClaims returns the claims of active license or nil
-func (lm *LicenseManager) GetClaims() jwt.MapClaims {
-	if !lm.Valid {
-		return nil
-	}
-	return lm.Active.Claims.(jwt.MapClaims)
-}
-
-// NodeCount returns the node count from license claim sub
-func (lm *LicenseManager) NodeCount() int {
-	if !lm.Valid {
-		return -1
-	}
-	sub, err := lm.Active.Claims.GetSubject()
-	if err != nil {
-		return -1
-	}
-	re := regexp.MustCompile(`node=(\d+)`)
-	matches := re.FindStringSubmatch(sub)
-	if len(matches) > 1 {
-		i, _ := strconv.Atoi(matches[1])
-		return i
-	}
-	return -1
-}
-
-// NodeCount returns the node count from license claim sub
+// LicenseType returns the license type from claim subject.
 func (lm *LicenseManager) LicenseType() string {
 	if !lm.Valid {
 		return ""
@@ -426,16 +394,6 @@ func IsValidPath(path string) bool {
 func IssueJWT(privateKey *ecdsa.PrivateKey, claims jwt.MapClaims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	return token.SignedString(privateKey)
-}
-
-// ValidateJWT verifies a JWT token with the given public key
-func ValidateJWT(tokenString string, publicKey *ecdsa.PublicKey) (*jwt.Token, error) {
-	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return publicKey, nil
-	})
 }
 
 // LoadECDSAPrivateKey loads a private key from string or file

@@ -80,7 +80,7 @@ func TestPrintNil(t *testing.T) {
 	}
 }
 
-func TestPrintData(t *testing.T) {
+func TestPrintWithData(t *testing.T) {
 	// Save original values
 	origFormat := config.OutputFormat
 	origStdout := os.Stdout
@@ -120,7 +120,7 @@ func TestPrintData(t *testing.T) {
 			r, w, _ := os.Pipe()
 			os.Stdout = w
 
-			err := PrintData(tt.data, tt.message)
+			err := Print(OK(tt.message, tt.data))
 			w.Close()
 
 			var buf bytes.Buffer
@@ -130,12 +130,12 @@ func TestPrintData(t *testing.T) {
 			os.Stdout = origStdout
 
 			if err != nil {
-				t.Errorf("PrintData() error = %v", err)
+				t.Errorf("Print(OK(...)) error = %v", err)
 			}
 
 			for _, want := range tt.contains {
 				if !strings.Contains(output, want) {
-					t.Errorf("PrintData() output = %q, want to contain %q", output, want)
+					t.Errorf("Print(OK(...)) output = %q, want to contain %q", output, want)
 				}
 			}
 		})
@@ -212,7 +212,7 @@ func TestPrintFormatsCorrectly(t *testing.T) {
 	}
 }
 
-func TestPrintError(t *testing.T) {
+func TestPrintFailResult(t *testing.T) {
 	// Save original values
 	origFormat := config.OutputFormat
 	origStdout := os.Stdout
@@ -227,7 +227,7 @@ func TestPrintError(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := PrintError(100, "test error")
+	err := Print(Fail(100, "test error"))
 	w.Close()
 
 	var buf bytes.Buffer
@@ -237,17 +237,17 @@ func TestPrintError(t *testing.T) {
 	os.Stdout = origStdout
 
 	if err != nil {
-		t.Errorf("PrintError() error = %v", err)
+		t.Errorf("Print(Fail(...)) error = %v", err)
 	}
 
 	if !strings.Contains(output, `"success":false`) {
-		t.Errorf("PrintError() output should contain success:false, got %q", output)
+		t.Errorf("Print(Fail(...)) output should contain success:false, got %q", output)
 	}
 	if !strings.Contains(output, `"code":100`) {
-		t.Errorf("PrintError() output should contain code:100, got %q", output)
+		t.Errorf("Print(Fail(...)) output should contain code:100, got %q", output)
 	}
 	if !strings.Contains(output, `"message":"test error"`) {
-		t.Errorf("PrintError() output should contain message, got %q", output)
+		t.Errorf("Print(Fail(...)) output should contain message, got %q", output)
 	}
 }
 

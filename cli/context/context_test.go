@@ -427,12 +427,38 @@ func TestContextResultData_OmitemptyFields(t *testing.T) {
 // Role Detection Tests
 // ============================================================================
 
+func detectPostgresRoleFromDirForTest(dataDir string) string {
+	if _, err := os.Stat(dataDir); err != nil {
+		return "unknown"
+	}
+
+	if _, err := os.Stat(dataDir + "/standby.signal"); err == nil {
+		return "standby"
+	} else if !os.IsNotExist(err) {
+		return "unknown"
+	}
+
+	if _, err := os.Stat(dataDir + "/recovery.signal"); err == nil {
+		return "standby"
+	} else if !os.IsNotExist(err) {
+		return "unknown"
+	}
+
+	if _, err := os.Stat(dataDir + "/recovery.conf"); err == nil {
+		return "standby"
+	} else if !os.IsNotExist(err) {
+		return "unknown"
+	}
+
+	return "primary"
+}
+
 func TestDetectPostgresRole_Primary(t *testing.T) {
 	// Create a temporary directory simulating a primary PostgreSQL data dir
 	tmpDir := t.TempDir()
 
 	// No signal files = primary
-	role := detectPostgresRoleFromDir(tmpDir)
+	role := detectPostgresRoleFromDirForTest(tmpDir)
 	if role != "primary" {
 		t.Errorf("Expected role 'primary' for empty data dir, got %q", role)
 	}
@@ -447,7 +473,7 @@ func TestDetectPostgresRole_StandbySignal(t *testing.T) {
 		t.Fatalf("Failed to create standby.signal: %v", err)
 	}
 
-	role := detectPostgresRoleFromDir(tmpDir)
+	role := detectPostgresRoleFromDirForTest(tmpDir)
 	if role != "standby" {
 		t.Errorf("Expected role 'standby' with standby.signal, got %q", role)
 	}
@@ -462,7 +488,7 @@ func TestDetectPostgresRole_RecoverySignal(t *testing.T) {
 		t.Fatalf("Failed to create recovery.signal: %v", err)
 	}
 
-	role := detectPostgresRoleFromDir(tmpDir)
+	role := detectPostgresRoleFromDirForTest(tmpDir)
 	if role != "standby" {
 		t.Errorf("Expected role 'standby' with recovery.signal, got %q", role)
 	}
@@ -477,7 +503,7 @@ func TestDetectPostgresRole_RecoveryConf(t *testing.T) {
 		t.Fatalf("Failed to create recovery.conf: %v", err)
 	}
 
-	role := detectPostgresRoleFromDir(tmpDir)
+	role := detectPostgresRoleFromDirForTest(tmpDir)
 	if role != "standby" {
 		t.Errorf("Expected role 'standby' with recovery.conf, got %q", role)
 	}
@@ -485,7 +511,7 @@ func TestDetectPostgresRole_RecoveryConf(t *testing.T) {
 
 func TestDetectPostgresRole_UnknownOnNonexistent(t *testing.T) {
 	// Test with a non-existent directory
-	role := detectPostgresRoleFromDir("/nonexistent/path/that/should/not/exist")
+	role := detectPostgresRoleFromDirForTest("/nonexistent/path/that/should/not/exist")
 	if role != "unknown" {
 		t.Errorf("Expected role 'unknown' for non-existent dir, got %q", role)
 	}

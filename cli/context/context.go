@@ -673,44 +673,6 @@ func detectPostgresRole(cfg *postgres.Config, dataDir string) string {
 	return "primary"
 }
 
-// detectPostgresRoleFromDir determines role by directly checking files in the data directory.
-// This is a simpler version that doesn't require DBSU privileges (for use when we have direct access).
-// Returns "primary" if no signal files found, "standby" if any recovery signal found,
-// "unknown" if directory doesn't exist or is inaccessible.
-func detectPostgresRoleFromDir(dataDir string) string {
-	// Check if directory exists
-	if _, err := os.Stat(dataDir); err != nil {
-		return "unknown"
-	}
-
-	// Check for standby.signal (PG12+ standby)
-	standbySignal := dataDir + "/standby.signal"
-	if _, err := os.Stat(standbySignal); err == nil {
-		return "standby"
-	} else if !os.IsNotExist(err) {
-		return "unknown"
-	}
-
-	// Check for recovery.signal (PG12+ recovery mode)
-	recoverySignal := dataDir + "/recovery.signal"
-	if _, err := os.Stat(recoverySignal); err == nil {
-		return "standby"
-	} else if !os.IsNotExist(err) {
-		return "unknown"
-	}
-
-	// Check for recovery.conf (PG11 and earlier)
-	recoveryConf := dataDir + "/recovery.conf"
-	if _, err := os.Stat(recoveryConf); err == nil {
-		return "standby"
-	} else if !os.IsNotExist(err) {
-		return "unknown"
-	}
-
-	// No recovery signals found = primary
-	return "primary"
-}
-
 // calculateVersionNum converts PostgreSQL major version to version number format.
 // PG 10+: major * 10000 (e.g., 17 -> 170000)
 // PG 9.x: major * 10000 (simplified, no minor version info)

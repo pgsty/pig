@@ -1,6 +1,7 @@
 package license
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -120,7 +121,7 @@ func TestSetPrivateKey(t *testing.T) {
 	}
 
 	// Should fail when trying to issue without setting private key
-	_, err = lm.IssueLicenseFast("test")
+	_, err = lm.IssueLicense(DefaultIssuer, "test", time.Now(), 0, DefaultMode, DefaultNode)
 	if err == nil {
 		t.Fatal("should fail to issue license without private key")
 	}
@@ -132,7 +133,7 @@ func TestSetPrivateKey(t *testing.T) {
 	}
 
 	// Should succeed when issuing again
-	token, err := lm.IssueLicenseFast("test-user")
+	token, err := lm.IssueLicense(DefaultIssuer, "test-user", time.Now(), 0, DefaultMode, DefaultNode)
 	if err != nil {
 		t.Fatalf("failed to issue license after setting private key: %v", err)
 	}
@@ -180,7 +181,7 @@ func TestValidate(t *testing.T) {
 	lm, _ := NewLicenseManager()
 	lm.AddPublicKey(testPublicKey)
 	lm.SetPrivateKey(testPrivateKey)
-	tokenStr, err := lm.IssueLicenseFast("test-user")
+	tokenStr, err := lm.IssueLicense(DefaultIssuer, "test-user", time.Now(), 0, DefaultMode, DefaultNode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,8 +207,8 @@ func TestIsValidJWT(t *testing.T) {
 	}
 }
 
-// Test IssueJWT and ValidateJWT
-func TestIssueAndValidateJWT(t *testing.T) {
+// Test IssueJWT
+func TestIssueJWT(t *testing.T) {
 	// Prepare public-private keys (must match)
 	privateKeyPem := testPrivateKey
 	publicKeyPem := testPublicKey
@@ -231,7 +232,12 @@ func TestIssueAndValidateJWT(t *testing.T) {
 		t.Fatalf("failed to load public key: %v", err)
 	}
 
-	tok, err := ValidateJWT(tokenStr, pubKey)
+	tok, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return pubKey, nil
+	})
 	if err != nil {
 		t.Fatalf("failed to validate JWT: %v", err)
 	}

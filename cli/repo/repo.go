@@ -21,8 +21,8 @@ type Repository struct {
 	Arch        []string          `yaml:"arch"`
 	BaseURL     map[string]string `yaml:"baseurl"`
 	Meta        map[string]string `yaml:"meta"`
-	Minor       bool              `yaml:"minor"`  // if true, use full version (e.g. 9.6) instead of major (e.g. 9) in $releasever
-	Distro      string            `yaml:"-"`      // el|deb
+	Minor       bool              `yaml:"minor"` // if true, use full version (e.g. 9.6) instead of major (e.g. 9) in $releasever
+	Distro      string            `yaml:"-"`     // el|deb
 }
 
 // SupportAmd64 checks if the repository supports amd64 architecture
@@ -106,14 +106,6 @@ func (r *Repository) Available(code string, arch string) bool {
 		return false
 	}
 	return true
-}
-
-// needsEL10VersionFix checks if this repo needs the EL10 aarch64 version workaround
-func (r *Repository) needsEL10VersionFix() bool {
-	if config.OSMajor == 10 && (config.OSArch == "aarch64" || config.OSArch == "arm64") && config.OSType == config.DistroEL {
-		return strings.HasPrefix(strings.ToLower(r.Name), "pgdg") && len(r.Name) >= 6 && r.Name[4] >= '0' && r.Name[4] <= '9'
-	}
-	return false
 }
 
 // useMinorVersion checks if this repo should use full minor version (e.g. 9.6) instead of major (e.g. 9) in $releasever
