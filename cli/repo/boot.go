@@ -13,46 +13,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Boot will bootstrap a local repo from offline package
-func Boot(offlinePkg, targetDir string) error {
-	logrus.Infof("booting repo from %s to %s", offlinePkg, targetDir)
-	if targetDir == "" {
-		targetDir = "/www"
-	}
-	if offlinePkg == "" {
-		offlinePkg = "/tmp/pkg.tgz"
-	}
-
-	// check if offline package exists
-	if _, err := os.Stat(offlinePkg); os.IsNotExist(err) {
-		return fmt.Errorf("offline package not found: %s", offlinePkg)
-	}
-
-	// sudo mkdir -p targetDir
-	if err := utils.SudoCommand([]string{"mkdir", "-p", targetDir}); err != nil {
-		return fmt.Errorf("failed to create target directory: %s", err)
-	}
-
-	// extract package using tar
-	if err := utils.SudoCommand([]string{"tar", "-xvzf", offlinePkg, "-C", targetDir}); err != nil {
-		return fmt.Errorf("failed to extract package: %s", err)
-	} else {
-		logrus.Infof("repo bootstrapped from %s to %s", offlinePkg, targetDir)
-	}
-
-	// Check if targetDir/pigsty/repo_complete exists
-	repoCompleteFile := filepath.Join(targetDir, "pigsty", "repo_complete")
-	if _, err := os.Stat(repoCompleteFile); err == nil {
-		logrus.Infof("%s found, add local repo config...", repoCompleteFile)
-
-		if err := addLocalRepo(filepath.Join(targetDir, "pigsty")); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // addLocalRepo adds local repo config for yum/apt
 func addLocalRepo(targetDir string) error {
 	switch config.OSType {
@@ -151,10 +111,13 @@ func BootWithResult(offlinePkg, targetDir string) *output.Result {
 	repoCompleteFile := filepath.Join(targetDir, "pigsty", "repo_complete")
 	if _, err := os.Stat(repoCompleteFile); err == nil {
 		pigstyDir := filepath.Join(targetDir, "pigsty")
-		if err := addLocalRepo(pigstyDir); err == nil {
-			data.LocalRepoAdded = true
-			data.LocalRepoPath = getLocalRepoPath()
+		data.LocalRepoPath = getLocalRepoPath()
+		if err := addLocalRepo(pigstyDir); err != nil {
+			data.DurationMs = time.Since(startTime).Milliseconds()
+			return output.Fail(output.CodeRepoBootFailed,
+				fmt.Sprintf("failed to add local repo config: %v", err)).WithData(data)
 		}
+		data.LocalRepoAdded = true
 	}
 
 	data.DurationMs = time.Since(startTime).Milliseconds()

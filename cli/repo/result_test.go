@@ -2068,3 +2068,333 @@ func TestCacheWithResultDefaults(t *testing.T) {
 		t.Errorf("Expected default included_repos ['pigsty'], got %v", cacheData.IncludedRepos)
 	}
 }
+
+/********************
+ * Tests for DTO Text() methods (Story 7.2)
+ ********************/
+
+func TestRepoListDataText(t *testing.T) {
+	// Test nil receiver
+	var nilData *RepoListData
+	if nilData.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test available repos (showAll=false)
+	data := &RepoListData{
+		OSEnv: &OSEnvironment{
+			Code:  "el9",
+			Arch:  "x86_64",
+			Type:  "rpm",
+			Major: 9,
+		},
+		ShowAll:   false,
+		RepoCount: 2,
+		Repos: []*RepoSummary{
+			{
+				Name:        "pigsty-pgsql",
+				Description: "Pigsty PGSQL",
+				Module:      "pgsql",
+				Releases:    []int{8, 9, 10},
+				Arch:        []string{"x86_64", "aarch64"},
+				BaseURL:     "https://repo.pigsty.io/yum/pgsql",
+				Available:   true,
+			},
+			{
+				Name:        "pgdg17",
+				Description: "PGDG 17",
+				Module:      "pgdg",
+				Releases:    []int{8, 9, 10},
+				Arch:        []string{"x86_64", "aarch64"},
+				BaseURL:     "https://download.postgresql.org/pub/repos/yum",
+				Available:   true,
+			},
+		},
+		Modules: map[string][]string{
+			"pgsql":  {"pigsty-pgsql", "pgdg17"},
+			"pigsty": {"pigsty-pgsql"},
+		},
+	}
+
+	text := data.Text()
+	if !strings.Contains(text, "os_environment:") {
+		t.Errorf("Expected os_environment header, got '%s'", text)
+	}
+	if !strings.Contains(text, "el9") {
+		t.Errorf("Expected 'el9' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "repo_upstream:") {
+		t.Errorf("Expected 'repo_upstream:' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "pigsty-pgsql") {
+		t.Errorf("Expected 'pigsty-pgsql' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "repo_modules:") {
+		t.Errorf("Expected 'repo_modules:' in text, got '%s'", text)
+	}
+
+	// Test showAll=true
+	dataAll := &RepoListData{
+		OSEnv: &OSEnvironment{
+			Code:  "el9",
+			Arch:  "x86_64",
+			Type:  "rpm",
+			Major: 9,
+		},
+		ShowAll:   true,
+		RepoCount: 2,
+		Repos: []*RepoSummary{
+			{
+				Name:      "pigsty-pgsql",
+				Available: true,
+			},
+			{
+				Name:      "some-unavailable",
+				Available: false,
+			},
+		},
+	}
+	textAll := dataAll.Text()
+	if !strings.Contains(textAll, "repo_rawdata:") {
+		t.Errorf("Expected 'repo_rawdata:' for showAll, got '%s'", textAll)
+	}
+	// Check markers
+	if !strings.Contains(textAll, "o {") {
+		t.Errorf("Expected 'o' marker for available repo, got '%s'", textAll)
+	}
+	if !strings.Contains(textAll, "x {") {
+		t.Errorf("Expected 'x' marker for unavailable repo, got '%s'", textAll)
+	}
+}
+
+func TestRepoInfoDataText(t *testing.T) {
+	// Test nil receiver
+	var nilData *RepoInfoData
+	if nilData.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test with repos
+	data := &RepoInfoData{
+		Requested: []string{"pigsty"},
+		Repos: []*RepoDetail{
+			{
+				Name:        "pigsty-pgsql",
+				Description: "Pigsty PGSQL Repo",
+				Module:      "pgsql",
+				Releases:    []int{8, 9, 10},
+				Arch:        []string{"x86_64", "aarch64"},
+				BaseURL: map[string]string{
+					"default": "https://repo.pigsty.io/yum/pgsql",
+					"china":   "https://repo.pigsty.cc/yum/pgsql",
+				},
+				Meta: map[string]string{
+					"enabled":  "1",
+					"gpgcheck": "0",
+				},
+				Available: true,
+				Content:   "[pigsty-pgsql]\nname=pigsty-pgsql\n",
+			},
+		},
+	}
+
+	text := data.Text()
+	if !strings.Contains(text, "#---------") {
+		t.Errorf("Expected separator in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "Name       : pigsty-pgsql") {
+		t.Errorf("Expected 'Name       : pigsty-pgsql' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "Available  : Yes") {
+		t.Errorf("Expected 'Available  : Yes' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "Module     : pgsql") {
+		t.Errorf("Expected 'Module     : pgsql' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "china") {
+		t.Errorf("Expected 'china' region in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "# default repo content") {
+		t.Errorf("Expected repo content section in text, got '%s'", text)
+	}
+
+	// Test unavailable repo
+	unavailData := &RepoInfoData{
+		Requested: []string{"test"},
+		Repos: []*RepoDetail{
+			{
+				Name:      "test-repo",
+				Available: false,
+			},
+		},
+	}
+	unavailText := unavailData.Text()
+	if !strings.Contains(unavailText, "Available  : No") {
+		t.Errorf("Expected 'Available  : No' in text, got '%s'", unavailText)
+	}
+}
+
+func TestRepoStatusDataText(t *testing.T) {
+	// Test nil receiver
+	var nilData *RepoStatusData
+	if nilData.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test with data
+	data := &RepoStatusData{
+		OSType:      "rpm",
+		RepoDir:     "/etc/yum.repos.d",
+		RepoFiles:   []string{"/etc/yum.repos.d/pigsty.repo", "/etc/yum.repos.d/pgdg.repo"},
+		ActiveRepos: []string{"pigsty-pgsql", "pgdg17"},
+	}
+
+	text := data.Text()
+	if !strings.Contains(text, "Repo Dir: /etc/yum.repos.d") {
+		t.Errorf("Expected repo dir in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "Repo Files:") {
+		t.Errorf("Expected 'Repo Files:' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "pigsty.repo") {
+		t.Errorf("Expected 'pigsty.repo' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "Active Repos:") {
+		t.Errorf("Expected 'Active Repos:' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "pgdg17") {
+		t.Errorf("Expected 'pgdg17' in text, got '%s'", text)
+	}
+
+	// Test with empty files
+	emptyData := &RepoStatusData{
+		OSType:    "deb",
+		RepoDir:   "/etc/apt/sources.list.d",
+		RepoFiles: []string{},
+	}
+	emptyText := emptyData.Text()
+	if !strings.Contains(emptyText, "(none)") {
+		t.Errorf("Expected '(none)' for empty repo files, got '%s'", emptyText)
+	}
+}
+
+func TestRepoAddDataText(t *testing.T) {
+	// Test nil receiver
+	var nilData *RepoAddData
+	if nilData.Text() != "" {
+		t.Error("Text on nil should return empty string")
+	}
+
+	// Test with backup and added repos
+	data := &RepoAddData{
+		OSEnv: &OSEnvironment{
+			Code:  "el9",
+			Arch:  "x86_64",
+			Type:  "rpm",
+			Major: 9,
+		},
+		Region:           "default",
+		RequestedModules: []string{"all"},
+		ExpandedModules:  []string{"node", "pgsql"},
+		AddedRepos: []*AddedRepoItem{
+			{
+				Module:   "node",
+				FilePath: "/etc/yum.repos.d/node.repo",
+				Repos:    []string{"baseos", "appstream"},
+			},
+			{
+				Module:   "pgsql",
+				FilePath: "/etc/yum.repos.d/pgsql.repo",
+				Repos:    []string{"pigsty-pgsql", "pgdg17"},
+			},
+		},
+		BackupInfo: &BackupInfo{
+			BackupDir:     "/etc/yum.repos.d/backup",
+			BackedUpFiles: []string{"/etc/yum.repos.d/old.repo"},
+		},
+		UpdateResult: &UpdateCacheResult{
+			Command: "dnf makecache",
+			Success: true,
+		},
+		DurationMs: 1234,
+	}
+
+	text := data.Text()
+	if !strings.Contains(text, "Backed up 1 files") {
+		t.Errorf("Expected backup info in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "Added module: node") {
+		t.Errorf("Expected 'Added module: node' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "Added module: pgsql") {
+		t.Errorf("Expected 'Added module: pgsql' in text, got '%s'", text)
+	}
+	if !strings.Contains(text, "Cache updated: dnf makecache") {
+		t.Errorf("Expected cache update info in text, got '%s'", text)
+	}
+
+	// Test with failed modules
+	failedData := &RepoAddData{
+		AddedRepos: []*AddedRepoItem{},
+		Failed: []*FailedRepoItem{
+			{
+				Module: "nonexistent",
+				Error:  "module not found",
+				Code:   output.CodeRepoModuleNotFound,
+			},
+		},
+	}
+	failedText := failedData.Text()
+	if !strings.Contains(failedText, "Failed module: nonexistent") {
+		t.Errorf("Expected failed module info in text, got '%s'", failedText)
+	}
+
+	// Test with failed cache update
+	failCacheData := &RepoAddData{
+		UpdateResult: &UpdateCacheResult{
+			Command: "apt-get update",
+			Success: false,
+			Error:   "network error",
+		},
+	}
+	failCacheText := failCacheData.Text()
+	if !strings.Contains(failCacheText, "Cache update failed") {
+		t.Errorf("Expected cache update failure in text, got '%s'", failCacheText)
+	}
+}
+
+func TestFormatIntSlice(t *testing.T) {
+	tests := []struct {
+		input    []int
+		expected string
+	}{
+		{nil, "[]"},
+		{[]int{}, "[]"},
+		{[]int{9}, "[9]"},
+		{[]int{8, 9, 10}, "[8,9,10]"},
+	}
+	for _, tt := range tests {
+		result := formatIntSlice(tt.input)
+		if result != tt.expected {
+			t.Errorf("formatIntSlice(%v) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}
+
+func TestFormatStrSlice(t *testing.T) {
+	tests := []struct {
+		input    []string
+		expected string
+	}{
+		{nil, "[]"},
+		{[]string{}, "[]"},
+		{[]string{"x86_64"}, "[x86_64]"},
+		{[]string{"x86_64", "aarch64"}, "[x86_64, aarch64]"},
+	}
+	for _, tt := range tests {
+		result := formatStrSlice(tt.input)
+		if result != tt.expected {
+			t.Errorf("formatStrSlice(%v) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}

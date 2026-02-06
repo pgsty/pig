@@ -8,22 +8,10 @@ import (
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
-	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
 )
-
-// CreateRepos will create a local YUM/APT repository in the
-func CreateRepos(repos ...string) error {
-	logrus.Infof("create repo for %s", strings.Join(repos, ","))
-	for _, repo := range repos {
-		if err := Create(repo); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 // Create will create a local YUM/APT repository in the specified directory
 func Create(dirPath string) error {

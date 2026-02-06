@@ -52,7 +52,7 @@ func TestRepoContentGeneration(t *testing.T) {
 			expectedString: "10.0",
 		},
 		{
-			name:           "EL10 x86_64 pgdg17 should not replace",
+			name:           "EL10 x86_64 pgdg17 should replace on minor-specific release",
 			osMajor:        10,
 			osArch:         "x86_64",
 			osType:         config.DistroEL,
@@ -60,8 +60,8 @@ func TestRepoContentGeneration(t *testing.T) {
 			osVersion:      "10",
 			osCode:         "el10",
 			repoName:       "pgdg17",
-			expectReplace:  false,
-			expectedString: "$releasever",
+			expectReplace:  true,
+			expectedString: "10.0",
 		},
 		{
 			name:           "EL9 aarch64 pgdg17 should not replace",

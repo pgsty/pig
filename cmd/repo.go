@@ -6,9 +6,7 @@ import (
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
-	"strings"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +45,7 @@ var repoCmd = &cobra.Command{
 	GroupID: "pgext",
 	Annotations: map[string]string{
 		"name":       "pig repo",
-		"type":       "group",
+		"type":       "query",
 		"volatility": "stable",
 		"parallel":   "safe",
 		"idempotent": "true",
@@ -104,20 +102,8 @@ var repoListCmd = &cobra.Command{
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		showAll := len(args) > 0 && args[0] == "all"
-
-		// Structured output mode (YAML/JSON)
-		if config.IsStructuredOutput() {
-			result := repo.ListRepos(showAll)
-			return handleRepoStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		if len(args) == 0 {
-			return repo.List()
-		} else if args[0] == "all" {
-			return repo.ListAll()
-		}
-		return nil
+		result := repo.ListRepos(showAll)
+		return handleRepoStructuredResult(result)
 	},
 }
 
@@ -138,19 +124,8 @@ var repoInfoCmd = &cobra.Command{
 		"cost":       "50",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Structured output mode (YAML/JSON)
-		if config.IsStructuredOutput() {
-			result := repo.GetRepoInfo(args)
-			return handleRepoStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		if len(args) == 0 {
-			logrus.Errorf("repo or module name is required, check available repo list:")
-			_ = repo.ListAll()
-			return fmt.Errorf("repo or module name is required")
-		}
-		return repo.Info(args...)
+		result := repo.GetRepoInfo(args)
+		return handleRepoStructuredResult(result)
 	},
 }
 
@@ -191,63 +166,17 @@ var repoAddCmd = &cobra.Command{
   # check available repo & modules with pig repo list
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Structured output mode (YAML/JSON)
-		if config.IsStructuredOutput() {
-			if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
-				result := output.Fail(output.CodeRepoUnsupportedOS,
-					fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-				return handleRepoStructuredResult(result)
-			}
-			if len(args) == 0 {
-				args = []string{"all"}
-			}
-			modules := repo.ExpandModuleArgs(args)
-			result := repo.AddRepos(modules, repoRegion, repoRemove, repoUpdate)
-			return handleRepoStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
 		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
-			return fmt.Errorf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull)
+			result := output.Fail(output.CodeRepoUnsupportedOS,
+				fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
+			return handleRepoStructuredResult(result)
 		}
 		if len(args) == 0 {
 			args = []string{"all"}
 		}
 		modules := repo.ExpandModuleArgs(args)
-		manager, err := repo.NewManager()
-		if err != nil {
-			logrus.Errorf("failed to get repo manager: %v", err)
-			return fmt.Errorf("failed to get repo manager: %v", err)
-		}
-		if repoRemove {
-			logrus.Infof("move existing repo to backup dir")
-			if err := manager.BackupRepo(); err != nil {
-				logrus.Error(err)
-				return fmt.Errorf("failed to backup repo: %v", err)
-			}
-		}
-
-		manager.DetectRegion(repoRegion)
-		if err := manager.AddModules(modules...); err != nil {
-			logrus.Error(err)
-			return fmt.Errorf("failed to add repo: %v", err)
-		}
-
-		utils.PadHeader("ls -l "+manager.RepoDir, 48)
-		if err := utils.ShellCommand([]string{"ls", "-l", manager.RepoDir}); err != nil {
-			logrus.Errorf("failed to list repo dir: %s", manager.RepoDir)
-			return fmt.Errorf("failed to list repo dir: %s", manager.RepoDir)
-		}
-
-		if repoUpdate {
-			if err := utils.SudoCommand(manager.UpdateCmd); err != nil {
-				logrus.Error(err)
-				return fmt.Errorf("failed to update repo: %v", err)
-			}
-		} else {
-			logrus.Infof("repo added, run: sudo %s", strings.Join(manager.UpdateCmd, " "))
-		}
-		return nil
+		result := repo.AddRepos(modules, repoRegion, repoRemove, repoUpdate)
+		return handleRepoStructuredResult(result)
 	},
 }
 
@@ -305,49 +234,14 @@ var repoRmCmd = &cobra.Command{
   pig repo rm node pigsty -u       # remove module 'node' & 'pigsty' and update repo cache
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		modules := repo.ExpandModuleArgs(args)
-
-		// Structured output mode (YAML/JSON)
-		if config.IsStructuredOutput() {
-			if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
-				result := output.Fail(output.CodeRepoUnsupportedOS,
-					fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-				return handleRepoStructuredResult(result)
-			}
-			result := repo.RmRepos(modules, repoUpdate)
+		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
+			result := output.Fail(output.CodeRepoUnsupportedOS,
+				fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
 			return handleRepoStructuredResult(result)
 		}
-
-		// Text mode: preserve existing behavior
-		manager, err := repo.NewManager()
-		if err != nil {
-			logrus.Errorf("failed to get repo manager: %v", err)
-			return fmt.Errorf("failed to get repo manager: %v", err)
-
-		}
-		if len(modules) == 0 {
-			logrus.Debugf("repo remove called with no args, remove all modules & repos")
-			if err := manager.BackupRepo(); err != nil {
-				logrus.Error(err)
-				return err
-			}
-			return nil
-		} else {
-			for _, module := range modules {
-				if err := manager.RemoveRepo(module); err != nil {
-					logrus.Error(err)
-					return err
-				}
-			}
-		}
-
-		if repoUpdate {
-			if err := utils.SudoCommand(manager.UpdateCmd); err != nil {
-				logrus.Error(err)
-				return err
-			}
-		}
-		return nil
+		modules := repo.ExpandModuleArgs(args)
+		result := repo.RmRepos(modules, repoUpdate)
+		return handleRepoStructuredResult(result)
 	},
 }
 
@@ -371,29 +265,13 @@ var repoUpdateCmd = &cobra.Command{
   pig repo update                  # yum makecache or apt update
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Structured output mode (YAML/JSON)
-		if config.IsStructuredOutput() {
-			if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
-				result := output.Fail(output.CodeRepoUnsupportedOS,
-					fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-				return handleRepoStructuredResult(result)
-			}
-			result := repo.UpdateCache()
+		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
+			result := output.Fail(output.CodeRepoUnsupportedOS,
+				fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
 			return handleRepoStructuredResult(result)
 		}
-
-		// Text mode: preserve existing behavior
-		manager, err := repo.NewManager()
-		if err != nil {
-			logrus.Errorf("failed to get repo manager: %v", err)
-			return fmt.Errorf("failed to get repo manager: %v", err)
-
-		}
-		if err := utils.SudoCommand(manager.UpdateCmd); err != nil {
-			logrus.Error(err)
-			return fmt.Errorf("failed to update repo: %v", err)
-		}
-		return nil
+		result := repo.UpdateCache()
+		return handleRepoStructuredResult(result)
 	},
 }
 
@@ -414,14 +292,8 @@ var repoStatusCmd = &cobra.Command{
 		"cost":       "500",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Structured output mode (YAML/JSON)
-		if config.IsStructuredOutput() {
-			result := repo.GetRepoStatus()
-			return handleRepoStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		return repo.Status()
+		result := repo.GetRepoStatus()
+		return handleRepoStructuredResult(result)
 	},
 }
 
@@ -447,14 +319,8 @@ var repoBootCmd = &cobra.Command{
   pig repo boot -d /srv            # boot repo to another directory /srv
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Structured output mode (YAML/JSON)
-		if config.IsStructuredOutput() {
-			result := repo.BootWithResult(repoBootPkg, repoBootDir)
-			return handleRepoStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		return repo.Boot(repoBootPkg, repoBootDir)
+		result := repo.BootWithResult(repoBootPkg, repoBootDir)
+		return handleRepoStructuredResult(result)
 	},
 }
 
@@ -488,15 +354,8 @@ var repoCacheCmd = &cobra.Command{
 		if len(args) > 0 {
 			repos = args
 		}
-
-		// Structured output mode (YAML/JSON)
-		if config.IsStructuredOutput() {
-			result := repo.CacheWithResult(repoCacheDir, repoCachePkg, repos)
-			return handleRepoStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		return repo.Cache(repoCacheDir, repoCachePkg, repos)
+		result := repo.CacheWithResult(repoCacheDir, repoCachePkg, repos)
+		return handleRepoStructuredResult(result)
 	},
 }
 
@@ -527,15 +386,8 @@ var repoCreateCmd = &cobra.Command{
 		if len(args) > 0 {
 			repos = args
 		}
-
-		// Structured output mode (YAML/JSON)
-		if config.IsStructuredOutput() {
-			result := repo.CreateReposWithResult(repos)
-			return handleRepoStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		return repo.CreateRepos(repos...)
+		result := repo.CreateReposWithResult(repos)
+		return handleRepoStructuredResult(result)
 	},
 }
 
@@ -556,14 +408,8 @@ var repoReloadCmd = &cobra.Command{
 		"cost":       "3000",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Structured output mode (YAML/JSON)
-		if config.IsStructuredOutput() {
-			result := repo.ReloadRepoCatalogWithResult()
-			return handleRepoStructuredResult(result)
-		}
-
-		// Text mode: preserve existing behavior
-		return repo.ReloadRepoCatalog()
+		result := repo.ReloadRepoCatalogWithResult()
+		return handleRepoStructuredResult(result)
 	},
 }
 

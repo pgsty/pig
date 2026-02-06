@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/output"
+	"sort"
 	"strings"
 )
 
@@ -72,6 +73,200 @@ type RepoStatusData struct {
 	RepoDir     string   `json:"repo_dir" yaml:"repo_dir"`
 	RepoFiles   []string `json:"repo_files" yaml:"repo_files"`
 	ActiveRepos []string `json:"active_repos,omitempty" yaml:"active_repos,omitempty"`
+}
+
+/********************
+ * Text Methods for DTOs
+ ********************/
+
+// Text returns a human-readable representation of RepoListData
+// that matches the output quality of the old List()/ListAll() functions.
+func (r *RepoListData) Text() string {
+	if r == nil {
+		return ""
+	}
+	var sb strings.Builder
+
+	// OS environment header
+	if r.OSEnv != nil {
+		sb.WriteString(fmt.Sprintf("os_environment: {code: %s, arch: %s, type: %s, major: %d}\n",
+			r.OSEnv.Code, r.OSEnv.Arch, r.OSEnv.Type, r.OSEnv.Major))
+	}
+
+	if r.ShowAll {
+		// Show all repos with available/unavailable markers
+		sb.WriteString(fmt.Sprintf("repo_rawdata:  # {total: %d}\n", r.RepoCount))
+		for _, repo := range r.Repos {
+			if repo == nil {
+				continue
+			}
+			marker := "o"
+			if !repo.Available {
+				marker = "x"
+			}
+			sb.WriteString(fmt.Sprintf("  %s { name: %-14s ,description: %-20s ,module: %-8s ,releases: %s ,arch: %s ,baseurl: '%s' }\n",
+				marker, repo.Name, fmt.Sprintf("'%s'", repo.Description), repo.Module,
+				formatIntSlice(repo.Releases), formatStrSlice(repo.Arch), repo.BaseURL))
+		}
+	} else {
+		// Show available repos
+		sb.WriteString(fmt.Sprintf("repo_upstream:  # Available Repo: %d\n", r.RepoCount))
+		for _, repo := range r.Repos {
+			if repo == nil {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("  - { name: %-14s ,description: %-20s ,module: %-8s ,releases: %s ,arch: %s ,baseurl: '%s' }\n",
+				repo.Name, fmt.Sprintf("'%s'", repo.Description), repo.Module,
+				formatIntSlice(repo.Releases), formatStrSlice(repo.Arch), repo.BaseURL))
+		}
+
+		// Modules section
+		if len(r.Modules) > 0 {
+			// Sort module names for deterministic output
+			moduleNames := make([]string, 0, len(r.Modules))
+			for name := range r.Modules {
+				moduleNames = append(moduleNames, name)
+			}
+			sort.Strings(moduleNames)
+			sb.WriteString(fmt.Sprintf("repo_modules:   # Available Modules: %d\n", len(r.Modules)))
+			for _, name := range moduleNames {
+				sb.WriteString(fmt.Sprintf("  - %-10s: %s\n", name, strings.Join(r.Modules[name], ", ")))
+			}
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// Text returns a human-readable representation of RepoInfoData
+// that matches the output quality of the old Info() function.
+func (r *RepoInfoData) Text() string {
+	if r == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for i, repo := range r.Repos {
+		if repo == nil {
+			continue
+		}
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("#-------------------------------------------------\n")
+		sb.WriteString(fmt.Sprintf("Name       : %s\n", repo.Name))
+		sb.WriteString(fmt.Sprintf("Summary    : %s\n", repo.Description))
+		avail := "No"
+		if repo.Available {
+			avail = "Yes"
+		}
+		sb.WriteString(fmt.Sprintf("Available  : %s\n", avail))
+		sb.WriteString(fmt.Sprintf("Module     : %s\n", repo.Module))
+		sb.WriteString(fmt.Sprintf("OS Arch    : %s\n", formatStrSlice(repo.Arch)))
+		sb.WriteString(fmt.Sprintf("OS Distro  : %s\n", formatIntSlice(repo.Releases)))
+		// Meta
+		metaStr := ""
+		if len(repo.Meta) > 0 {
+			parts := make([]string, 0, len(repo.Meta))
+			for k, v := range repo.Meta {
+				parts = append(parts, fmt.Sprintf("%s=%s", k, v))
+			}
+			metaStr = strings.Join(parts, " ")
+		}
+		sb.WriteString(fmt.Sprintf("Meta       : %s\n", metaStr))
+		// Base URL
+		defaultURL := ""
+		if repo.BaseURL != nil {
+			defaultURL = repo.BaseURL["default"]
+		}
+		sb.WriteString(fmt.Sprintf("Base URL   : %s\n", defaultURL))
+		// Additional regions
+		if len(repo.BaseURL) > 1 {
+			for key, value := range repo.BaseURL {
+				if key != "default" {
+					sb.WriteString(fmt.Sprintf("%10s : %s\n", key, value))
+				}
+			}
+		}
+		// Content
+		if repo.Content != "" {
+			sb.WriteString(fmt.Sprintf("\n# default repo content\n%s\n", repo.Content))
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// Text returns a human-readable representation of RepoStatusData
+func (r *RepoStatusData) Text() string {
+	if r == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Repo Dir: %s\n", r.RepoDir))
+	if len(r.RepoFiles) > 0 {
+		sb.WriteString("Repo Files:\n")
+		for _, f := range r.RepoFiles {
+			sb.WriteString(fmt.Sprintf("  %s\n", f))
+		}
+	} else {
+		sb.WriteString("Repo Files: (none)\n")
+	}
+	if len(r.ActiveRepos) > 0 {
+		sb.WriteString("Active Repos:\n")
+		for _, r := range r.ActiveRepos {
+			sb.WriteString(fmt.Sprintf("  %s\n", r))
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// Text returns a human-readable representation of RepoAddData
+func (r *RepoAddData) Text() string {
+	if r == nil {
+		return ""
+	}
+	var sb strings.Builder
+	if r.BackupInfo != nil && len(r.BackupInfo.BackedUpFiles) > 0 {
+		sb.WriteString(fmt.Sprintf("Backed up %d files to %s\n", len(r.BackupInfo.BackedUpFiles), r.BackupInfo.BackupDir))
+	}
+	for _, item := range r.AddedRepos {
+		if item == nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("Added module: %s -> %s  repos: %s\n", item.Module, item.FilePath, strings.Join(item.Repos, ", ")))
+	}
+	for _, item := range r.Failed {
+		if item == nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("Failed module: %s -> %s\n", item.Module, item.Error))
+	}
+	if r.UpdateResult != nil {
+		if r.UpdateResult.Success {
+			sb.WriteString(fmt.Sprintf("Cache updated: %s\n", r.UpdateResult.Command))
+		} else {
+			sb.WriteString(fmt.Sprintf("Cache update failed: %s (%s)\n", r.UpdateResult.Error, r.UpdateResult.Command))
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// formatIntSlice formats an int slice to a compact inline string like [7,8,9]
+func formatIntSlice(rs []int) string {
+	if len(rs) == 0 {
+		return "[]"
+	}
+	parts := make([]string, len(rs))
+	for i, v := range rs {
+		parts[i] = fmt.Sprintf("%d", v)
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+// formatStrSlice formats a string slice to a compact inline string like [x86_64, aarch64]
+func formatStrSlice(a []string) string {
+	if len(a) == 0 {
+		return "[]"
+	}
+	return "[" + strings.Join(a, ", ") + "]"
 }
 
 /********************
