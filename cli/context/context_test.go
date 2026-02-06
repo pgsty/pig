@@ -1499,9 +1499,9 @@ func TestContextResultWithModules_SingleModule(t *testing.T) {
 	// The key test is that the filter logic works, not that modules are available
 }
 
-// TestContextResult_BackwardCompatible tests that ContextResult() without args works (AC#3)
-func TestContextResult_BackwardCompatible(t *testing.T) {
-	result := ContextResult()
+// TestContextResult_NilModules tests that nil module filter keeps default behavior.
+func TestContextResult_NilModules(t *testing.T) {
+	result := ContextResultWithModules(nil)
 	if result == nil {
 		t.Fatal("Result should not be nil")
 	}

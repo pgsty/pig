@@ -508,13 +508,6 @@ func isColorEnabled() bool {
 	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
-// ContextResult creates a structured result for pig context command.
-// It collects all environment context information and returns it in a Result structure.
-// Returns nil-safe Result on all paths.
-func ContextResult() *output.Result {
-	return ContextResultWithModules(nil)
-}
-
 // ContextResultWithModules creates a structured result for pig context command with module filtering.
 // Returns nil-safe Result on all paths.
 func ContextResultWithModules(modules []string) *output.Result {

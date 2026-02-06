@@ -219,29 +219,6 @@ func TestGetTargetDescription(t *testing.T) {
 	}
 }
 
-func TestIsPlanMode(t *testing.T) {
-	tests := []struct {
-		name     string
-		opts     *Options
-		expected bool
-	}{
-		{"nil opts", nil, false},
-		{"plan true", &Options{Plan: true}, true},
-		{"dry-run true", &Options{DryRun: true}, true},
-		{"both false", &Options{}, false},
-		{"both true", &Options{Plan: true, DryRun: true}, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isPlanMode(tt.opts)
-			if got != tt.expected {
-				t.Errorf("isPlanMode() = %v, want %v", got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestBuildActions(t *testing.T) {
 	// Test with nil inputs
 	actions := buildActions(nil, nil)

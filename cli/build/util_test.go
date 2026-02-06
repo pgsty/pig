@@ -28,18 +28,18 @@ func TestParsePGVersions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ParsePGVersions(tt.input)
+			result, err := parsePgVersions(tt.input)
 
 			if tt.expectErr {
 				if err == nil {
-					t.Errorf("ParsePGVersions(%q) expected error, got nil", tt.input)
+					t.Errorf("parsePgVersions(%q) expected error, got nil", tt.input)
 				}
 			} else {
 				if err != nil {
-					t.Errorf("ParsePGVersions(%q) unexpected error: %v", tt.input, err)
+					t.Errorf("parsePgVersions(%q) unexpected error: %v", tt.input, err)
 				}
 				if !intSlicesEqual(result, tt.expected) {
-					t.Errorf("ParsePGVersions(%q) = %v, want %v", tt.input, result, tt.expected)
+					t.Errorf("parsePgVersions(%q) = %v, want %v", tt.input, result, tt.expected)
 				}
 			}
 		})

@@ -262,12 +262,3 @@ func RunPgBackRestOutput(cfg *Config, command string, extraArgs []string) (strin
 	}
 	return utils.DBSUCommandOutput(dbsu, args)
 }
-
-// CheckPgBackRestExists verifies pgbackrest is installed.
-func CheckPgBackRestExists() error {
-	_, err := exec.LookPath("pgbackrest")
-	if err != nil {
-		return fmt.Errorf("pgbackrest not found (install with: pig ext add pgbackrest)")
-	}
-	return nil
-}

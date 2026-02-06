@@ -218,31 +218,6 @@ func TestPbBackupResultDataOmitEmpty(t *testing.T) {
 	}
 }
 
-// TestNormalizeBackupType tests the normalizeBackupType helper function.
-func TestNormalizeBackupType(t *testing.T) {
-	testCases := []struct {
-		input    string
-		expected string
-	}{
-		{"", "auto"},
-		{"full", "full"},
-		{"FULL", "full"},
-		{"diff", "diff"},
-		{"DIFF", "diff"},
-		{"incr", "incr"},
-		{"INCR", "incr"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.input, func(t *testing.T) {
-			result := normalizeBackupType(tc.input)
-			if result != tc.expected {
-				t.Errorf("normalizeBackupType(%q) = %q, want %q", tc.input, result, tc.expected)
-			}
-		})
-	}
-}
-
 // TestPbBackupResultDataWithLSN tests backup data with LSN information.
 func TestPbBackupResultDataWithLSN(t *testing.T) {
 	data := &PbBackupResultData{
@@ -339,8 +314,8 @@ func TestPbBackupResultDataCompleteScenario(t *testing.T) {
 		Type:            "incr",
 		StartTime:       1738692000,
 		StopTime:        1738693800,
-		Size:            536870912,  // 512MB
-		SizeRepo:        134217728,  // 128MB (compressed)
+		Size:            536870912, // 512MB
+		SizeRepo:        134217728, // 128MB (compressed)
 		DurationSeconds: 1800,
 		Stanza:          "pg-production",
 		LSNStart:        "0/5000000",
@@ -379,9 +354,9 @@ func TestPbBackupResultDataLargeSizes(t *testing.T) {
 		Type:            "full",
 		StartTime:       1738670400,
 		StopTime:        1738699200,
-		Size:            5497558138880,  // 5TB
-		SizeRepo:        1099511627776,  // 1TB (compressed)
-		DurationSeconds: 28800,          // 8 hours
+		Size:            5497558138880, // 5TB
+		SizeRepo:        1099511627776, // 1TB (compressed)
+		DurationSeconds: 28800,         // 8 hours
 		Stanza:          "pg-warehouse",
 	}
 

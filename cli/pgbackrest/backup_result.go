@@ -261,9 +261,3 @@ func parseBackupLabel(output string) string {
 
 // normalizeBackupType returns a normalized backup type string.
 // Empty type means pgBackRest auto-selects (full if none, else incr).
-func normalizeBackupType(t string) string {
-	if t == "" {
-		return "auto"
-	}
-	return strings.ToLower(t)
-}

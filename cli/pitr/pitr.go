@@ -375,13 +375,6 @@ func getTargetDescription(opts *Options) string {
 	return "Unknown"
 }
 
-func isPlanMode(opts *Options) bool {
-	if opts == nil {
-		return false
-	}
-	return opts.Plan || opts.DryRun
-}
-
 // Plan builds a plan with pre-check validation for CLI plan mode.
 func Plan(opts *Options) (*output.Plan, error) {
 	state, err := preCheck(opts)
