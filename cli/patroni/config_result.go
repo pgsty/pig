@@ -38,7 +38,7 @@ func (d *PtConfigResultData) Text() string {
 	if d == nil {
 		return ""
 	}
-	if d.Raw == nil || len(d.Raw) == 0 {
+	if len(d.Raw) == 0 {
 		return ""
 	}
 	b, err := yaml.Marshal(d.Raw)

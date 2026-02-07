@@ -169,7 +169,7 @@ func (s *Schema) IsEmpty() bool {
 		s.Type == "" &&
 		s.Volatility == "" &&
 		s.Parallel == "" &&
-		s.Idempotent == false &&
+		!s.Idempotent &&
 		s.Risk == "" &&
 		s.Confirm == "" &&
 		s.OSUser == "" &&

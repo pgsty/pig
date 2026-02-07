@@ -67,7 +67,7 @@ func BuildMake(pkg string, pgVersions string, debugPkg bool) error {
 	// Check if Makefile exists
 	makeFile := filepath.Join(makeDir, "Makefile")
 	if _, err := os.Stat(makeFile); err != nil {
-		return fmt.Errorf("Makefile not found at %s", makeFile)
+		return fmt.Errorf("makefile not found at %s", makeFile)
 	}
 
 	logrus.Infof("path   : %s", makeFile)

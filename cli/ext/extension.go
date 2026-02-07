@@ -534,6 +534,6 @@ func (e *Extension) GetPGVersions() []int {
 		}
 	}
 
-	sort.Sort(sort.IntSlice(versions))
+	sort.Ints(versions)
 	return versions
 }

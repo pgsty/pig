@@ -59,7 +59,7 @@ func ConfigShow(dbsu string) error {
 // ConfigSet sets Patroni configuration with key=value pairs (non-interactive)
 func ConfigSet(dbsu string, kvPairs []string) error {
 	if len(kvPairs) == 0 {
-		return fmt.Errorf("no key=value pairs provided\nUsage: pig pt config set key=value ...")
+		return fmt.Errorf("no key=value pairs provided; usage: pig pt config set key=value")
 	}
 	args := []string{"edit-config", "--force"}
 	for _, kv := range kvPairs {
@@ -71,7 +71,7 @@ func ConfigSet(dbsu string, kvPairs []string) error {
 // ConfigPG sets PostgreSQL configuration with key=value pairs (non-interactive)
 func ConfigPG(dbsu string, kvPairs []string) error {
 	if len(kvPairs) == 0 {
-		return fmt.Errorf("no key=value pairs provided\nUsage: pig pt config pg key=value ...")
+		return fmt.Errorf("no key=value pairs provided; usage: pig pt config pg key=value")
 	}
 	args := []string{"edit-config", "--force"}
 	for _, kv := range kvPairs {

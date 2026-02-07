@@ -497,7 +497,7 @@ func (b *ExtensionBuilder) buildForAll() {
 		fmt.Sprintf("DIR  : %s", buildDir),
 		fmt.Sprintf("TIME : %s", time.Now().Format("2006-01-02 15:04:05 -07")),
 		fmt.Sprintf("PATH : %s", envPATH),
-		fmt.Sprintf("CMD  : make"),
+		"CMD  : make",
 	}
 
 	// Write task header to log
@@ -597,7 +597,7 @@ func (b *ExtensionBuilder) createDEBBuildCommand(pgVer int, task *BuildTask) (*e
 		fmt.Sprintf("DIR  : %s", buildDir),
 		fmt.Sprintf("TIME : %s", time.Now().Format("2006-01-02 15:04:05 -07")),
 		fmt.Sprintf("PATH : %s", envPATH),
-		fmt.Sprintf("CMD  : make"),
+		"CMD  : make",
 	}
 
 	return cmd, metadata
