@@ -16,6 +16,78 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type cacheWalkContext struct {
+	absBase   string
+	tarWriter *tar.Writer
+	total     int
+	processed int
+}
+
+func (c *cacheWalkContext) walk(filePath string, info os.FileInfo, walkErr error) error {
+	if walkErr != nil {
+		return walkErr
+	}
+
+	// Ensure file path is within absBase (no "../" references).
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to get abs path for %s: %v", filePath, err)
+	}
+	if !strings.HasPrefix(absFilePath, c.absBase) {
+		logrus.Warnf("file path references an upper-level directory, skipping: %s", absFilePath)
+		return nil
+	}
+
+	// Compute tar header name (relative to base dir).
+	relPath, err := filepath.Rel(c.absBase, absFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to get relative path for %s: %v", filePath, err)
+	}
+
+	// Create tar header.
+	header, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		return fmt.Errorf("failed to create file info header for %s: %v", filePath, err)
+	}
+	header.Name = relPath
+
+	// If it's a symbolic link, store its target.
+	if info.Mode()&os.ModeSymlink != 0 {
+		linkTarget, readErr := os.Readlink(filePath)
+		if readErr != nil {
+			return fmt.Errorf("failed to read symlink %s: %v", filePath, readErr)
+		}
+		header.Linkname = linkTarget
+		header.Typeflag = tar.TypeSymlink
+	}
+
+	// Write header.
+	if err := c.tarWriter.WriteHeader(header); err != nil {
+		return fmt.Errorf("failed to write tar header for %s: %v", filePath, err)
+	}
+
+	// If it's a regular file, write its content.
+	if info.Mode().IsRegular() {
+		f, openErr := os.Open(filePath)
+		if openErr != nil {
+			logrus.Warnf("failed to open file, skipping: %s, error: %v", filePath, openErr)
+			return nil
+		}
+
+		_, copyErr := io.Copy(c.tarWriter, f)
+		f.Close() // Close immediately after use.
+		if copyErr != nil {
+			logrus.Warnf("failed to copy file content, skipping: %s, error: %v", filePath, copyErr)
+			return nil
+		}
+
+		c.processed++
+		printProgressAndFile(c.processed, c.total, relPath)
+	}
+
+	return nil
+}
+
 // Cache creates a compressed tarball of specified subdirectories under dirPath.
 // 1) Closes files immediately after processing (no deferred file close).
 // 2) Preserves symbolic links and empty directories in the tarball.
@@ -82,7 +154,11 @@ func Cache(dirPath, pkgPath string, repos []string) error {
 	tarWriter := tar.NewWriter(gzipWriter)
 	defer tarWriter.Close()
 
-	processed := 0 // number of files processed
+	walkCtx := &cacheWalkContext{
+		absBase:   absBase,
+		tarWriter: tarWriter,
+		total:     totalFiles,
+	}
 
 	// Traverse each specified repository subdirectory
 	for _, subDirName := range repos {
@@ -92,69 +168,7 @@ func Cache(dirPath, pkgPath string, repos []string) error {
 			continue
 		}
 
-		err = filepath.Walk(subDirPath, func(filePath string, info os.FileInfo, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-
-			// Ensure file path is within absBase (no "../" references)
-			absFilePath, err := filepath.Abs(filePath)
-			if err != nil {
-				return fmt.Errorf("failed to get abs path for %s: %v", filePath, err)
-			}
-			if !strings.HasPrefix(absFilePath, absBase) {
-				logrus.Warnf("file path references an upper-level directory, skipping: %s", absFilePath)
-				return nil
-			}
-
-			// Compute tar header name (relative to base dir)
-			relPath, err := filepath.Rel(absBase, absFilePath)
-			if err != nil {
-				return fmt.Errorf("failed to get relative path for %s: %v", filePath, err)
-			}
-
-			// Create tar header
-			header, err := tar.FileInfoHeader(info, "")
-			if err != nil {
-				return fmt.Errorf("failed to create file info header for %s: %v", filePath, err)
-			}
-			header.Name = relPath
-
-			// If it's a symbolic link, store its target
-			if info.Mode()&os.ModeSymlink != 0 {
-				linkTarget, readErr := os.Readlink(filePath)
-				if readErr != nil {
-					return fmt.Errorf("failed to read symlink %s: %v", filePath, readErr)
-				}
-				header.Linkname = linkTarget
-				header.Typeflag = tar.TypeSymlink
-			}
-
-			// Write header
-			if err := tarWriter.WriteHeader(header); err != nil {
-				return fmt.Errorf("failed to write tar header for %s: %v", filePath, err)
-			}
-
-			// If it's a regular file, write its content
-			if info.Mode().IsRegular() {
-				f, openErr := os.Open(filePath)
-				if openErr != nil {
-					logrus.Warnf("failed to open file, skipping: %s, error: %v", filePath, openErr)
-					return nil
-				}
-
-				_, copyErr := io.Copy(tarWriter, f)
-				f.Close() // Close immediately after use
-				if copyErr != nil {
-					logrus.Warnf("failed to copy file content, skipping: %s, error: %v", filePath, copyErr)
-					return nil
-				}
-
-				processed++
-				printProgressAndFile(processed, totalFiles, relPath)
-			}
-			return nil
-		})
+		err = filepath.Walk(subDirPath, walkCtx.walk)
 		if err != nil {
 			logrus.Warnf("failed to walk subdirectory %s: %v", subDirPath, err)
 			continue

@@ -51,21 +51,32 @@ func (r *Repository) InferOS() string {
 	if len(r.Releases) == 0 {
 		return ""
 	}
-	if slices.Contains(r.Releases, 11) || slices.Contains(r.Releases, 12) || slices.Contains(r.Releases, 20) || slices.Contains(r.Releases, 22) || slices.Contains(r.Releases, 24) {
-		return config.DistroDEB
-	}
-	if slices.Contains(r.Releases, 7) || slices.Contains(r.Releases, 8) || slices.Contains(r.Releases, 9) {
-		return config.DistroEL
+
+	for _, rel := range r.Releases {
+		switch rel {
+		case 11, 12, 13, 20, 22, 24:
+			return config.DistroDEB
+		case 7, 8, 9, 10:
+			return config.DistroEL
+		}
 	}
 
 	// Infer from base URL if releases do not provide enough information
 	for _, url := range r.BaseURL {
-		if strings.Contains(url, "debian") || strings.Contains(url, "ubuntu") || strings.Contains(url, "/deb/") || strings.Contains(url, "/apt/") {
-			return config.DistroDEB
+		if distro := inferOSFromURL(url); distro != "" {
+			return distro
 		}
-		if strings.Contains(url, "centos") || strings.Contains(url, "redhat") || strings.Contains(url, "fedora") || strings.Contains(url, "/yum/") || strings.Contains(url, "/rpm/") {
-			return config.DistroEL
-		}
+	}
+	return ""
+}
+
+func inferOSFromURL(url string) string {
+	u := strings.ToLower(url)
+	if strings.Contains(u, "debian") || strings.Contains(u, "ubuntu") || strings.Contains(u, "/deb/") || strings.Contains(u, "/apt/") {
+		return config.DistroDEB
+	}
+	if strings.Contains(u, "centos") || strings.Contains(u, "redhat") || strings.Contains(u, "fedora") || strings.Contains(u, "/yum/") || strings.Contains(u, "/rpm/") {
+		return config.DistroEL
 	}
 	return ""
 }
