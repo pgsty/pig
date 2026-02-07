@@ -38,55 +38,26 @@ func RmExtensions(pgVer int, names []string, yes bool) *output.Result {
 		return output.Fail(output.CodeExtensionCatalogError, "extension catalog not initialized")
 	}
 
-	Catalog.LoadAliasMap(config.OSType)
-
 	// Collect packages to remove, tracking each extension
-	var allPkgNames []string
 	var removed []string
 	var failed []*FailedExtItem
-	pkgToExt := make(map[string]string) // maps package name to extension name
-
-	for _, name := range names {
-		ext, ok := Catalog.ExtNameMap[name]
-		if !ok {
-			ext, ok = Catalog.ExtPkgMap[name]
-		}
-		if !ok {
-			// try to find in AliasMap (if it is not a postgres extension)
-			if pgPkg, ok := Catalog.AliasMap[name]; ok {
-				pkgNamesProcessed := processPkgName(pgPkg, pgVer)
-				for _, pkg := range pkgNamesProcessed {
-					pkgToExt[pkg] = name
-				}
-				allPkgNames = append(allPkgNames, pkgNamesProcessed...)
-				continue
-			} else {
-				// Extension not found
-				failed = append(failed, &FailedExtItem{
-					Name:  name,
-					Error: "extension not found in catalog",
-					Code:  output.CodeExtensionNotFound,
-				})
-				continue
-			}
-		}
-
-		pkgName := ext.PackageName(pgVer)
-		if pkgName == "" {
-			failed = append(failed, &FailedExtItem{
-				Name:  name,
-				Error: fmt.Sprintf("no package available for extension on PG %d", pgVer),
-				Code:  output.CodeExtensionNoPackage,
-			})
-			continue
-		}
-
-		pkgNamesProcessed := processPkgName(pkgName, pgVer)
-		for _, pkg := range pkgNamesProcessed {
-			pkgToExt[pkg] = ext.Name
-		}
-		allPkgNames = append(allPkgNames, pkgNamesProcessed...)
+	resolved := ResolveExtensionPackages(pgVer, names, false)
+	for _, name := range resolved.NotFound {
+		failed = append(failed, &FailedExtItem{
+			Name:  name,
+			Error: "extension not found in catalog",
+			Code:  output.CodeExtensionNotFound,
+		})
 	}
+	for _, name := range resolved.NoPackage {
+		failed = append(failed, &FailedExtItem{
+			Name:  name,
+			Error: fmt.Sprintf("no package available for extension on PG %d", pgVer),
+			Code:  output.CodeExtensionNoPackage,
+		})
+	}
+	allPkgNames := resolved.Packages
+	pkgToExt := resolved.PackageOwner
 
 	// If no packages to remove, return early
 	if len(allPkgNames) == 0 {

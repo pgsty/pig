@@ -5,8 +5,6 @@ import (
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -15,36 +13,12 @@ import (
 // getPackageManagerCmd returns the appropriate package manager command for the current OS
 // This helper function eliminates code duplication across add/rm/update operations
 func getPackageManagerCmd(operation string) string {
-	switch config.OSType {
-	case config.DistroEL:
-		// EL 8/9/10 use dnf, older versions use yum
-		if config.OSVersion == "8" || config.OSVersion == "9" || config.OSVersion == "10" {
-			return "dnf"
-		}
-		return "yum"
-	case config.DistroDEB:
-		return "apt-get"
-	default:
-		return ""
-	}
+	return PackageManagerCmd(operation)
 }
 
 // processPkgName processes the package name and returns the list of package names according to the given version
 func processPkgName(pkgName string, pgVer int) []string {
-	if pkgName == "" {
-		return []string{}
-	}
-	parts := strings.Split(strings.Replace(strings.TrimSpace(pkgName), ",", " ", -1), " ")
-	var pkgNames []string
-	pkgNameSet := make(map[string]struct{})
-	for _, part := range parts {
-		partStr := strings.ReplaceAll(part, "$v", strconv.Itoa(pgVer))
-		if _, exists := pkgNameSet[partStr]; !exists {
-			pkgNames = append(pkgNames, partStr)
-			pkgNameSet[partStr] = struct{}{}
-		}
-	}
-	return pkgNames
+	return ProcessPkgName(pkgName, pgVer)
 }
 
 // AddExtensions installs extensions and returns a structured Result
@@ -75,81 +49,26 @@ func AddExtensions(pgVer int, names []string, yes bool) *output.Result {
 		return output.Fail(output.CodeExtensionCatalogError, "extension catalog not initialized")
 	}
 
-	Catalog.LoadAliasMap(config.OSType)
-
 	// Collect packages to install, tracking each extension
-	var allPkgNames []string
 	var installed []*InstalledExtItem
 	var failed []*FailedExtItem
-	pkgToExt := make(map[string]string) // maps package name to extension name
-
-	for _, name := range names {
-		// package version is specified in (name=version format)
-		var version string
-		originalName := name
-		if parts := strings.Split(name, "="); len(parts) == 2 {
-			name = parts[0]
-			version = parts[1]
-		}
-
-		ext, ok := Catalog.ExtNameMap[name]
-		if !ok {
-			ext, ok = Catalog.ExtPkgMap[name]
-		}
-		if !ok {
-			// try to find in AliasMap (if it is not a postgres extension)
-			if pgPkg, ok := Catalog.AliasMap[name]; ok {
-				pkgNamesProcessed := processPkgName(pgPkg, pgVer)
-				if version != "" {
-					for i, pkg := range pkgNamesProcessed {
-						if config.OSType == config.DistroEL {
-							pkgNamesProcessed[i] = fmt.Sprintf("%s-%s", pkg, version)
-						} else if config.OSType == config.DistroDEB {
-							pkgNamesProcessed[i] = fmt.Sprintf("%s=%s*", pkg, version)
-						}
-					}
-				}
-				for _, pkg := range pkgNamesProcessed {
-					pkgToExt[pkg] = originalName
-				}
-				allPkgNames = append(allPkgNames, pkgNamesProcessed...)
-				continue
-			} else {
-				// Extension not found
-				failed = append(failed, &FailedExtItem{
-					Name:  originalName,
-					Error: "extension not found in catalog",
-					Code:  output.CodeExtensionNotFound,
-				})
-				continue
-			}
-		}
-
-		pkgName := ext.PackageName(pgVer)
-		if pkgName == "" {
-			failed = append(failed, &FailedExtItem{
-				Name:  originalName,
-				Error: fmt.Sprintf("no package available for extension on PG %d", pgVer),
-				Code:  output.CodeExtensionNoPackage,
-			})
-			continue
-		}
-
-		pkgNamesProcessed := processPkgName(pkgName, pgVer)
-		if version != "" {
-			for i, pkg := range pkgNamesProcessed {
-				if config.OSType == config.DistroEL {
-					pkgNamesProcessed[i] = fmt.Sprintf("%s-%s", pkg, version)
-				} else if config.OSType == config.DistroDEB {
-					pkgNamesProcessed[i] = fmt.Sprintf("%s=%s*", pkg, version)
-				}
-			}
-		}
-		for _, pkg := range pkgNamesProcessed {
-			pkgToExt[pkg] = ext.Name
-		}
-		allPkgNames = append(allPkgNames, pkgNamesProcessed...)
+	resolved := ResolveExtensionPackages(pgVer, names, true)
+	for _, name := range resolved.NotFound {
+		failed = append(failed, &FailedExtItem{
+			Name:  name,
+			Error: "extension not found in catalog",
+			Code:  output.CodeExtensionNotFound,
+		})
 	}
+	for _, name := range resolved.NoPackage {
+		failed = append(failed, &FailedExtItem{
+			Name:  name,
+			Error: fmt.Sprintf("no package available for extension on PG %d", pgVer),
+			Code:  output.CodeExtensionNoPackage,
+		})
+	}
+	allPkgNames := resolved.Packages
+	pkgToExt := resolved.PackageOwner
 
 	// If no packages to install, return early
 	if len(allPkgNames) == 0 {
