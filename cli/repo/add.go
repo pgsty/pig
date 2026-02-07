@@ -213,23 +213,33 @@ func AddRepos(modules []string, region string, doRemove, doUpdate bool) *output.
 	}
 
 	data.DurationMs = time.Since(startTime).Milliseconds()
+	return buildAddReposResult(data, expandedModules)
+}
 
-	// Determine overall result
+// buildAddReposResult computes the final AddRepos result from collected operation data.
+func buildAddReposResult(data *RepoAddData, expandedModules []string) *output.Result {
 	if len(data.AddedRepos) == 0 {
 		return output.Fail(output.CodeRepoAddFailed,
 			fmt.Sprintf("failed to add all %d modules", len(expandedModules))).WithData(data)
+	}
+
+	// Keep update failure as a hard failure for automation safety.
+	if data.UpdateResult != nil && !data.UpdateResult.Success {
+		msg := "cache update failed"
+		if data.UpdateResult.Error != "" {
+			msg = fmt.Sprintf("cache update failed: %s", data.UpdateResult.Error)
+		}
+		result := output.Fail(output.CodeRepoCacheUpdateFailed, msg).WithData(data)
+		if len(data.Failed) > 0 {
+			result.Detail = fmt.Sprintf("failed: %d modules", len(data.Failed))
+		}
+		return result
 	}
 
 	message := fmt.Sprintf("Added %d modules (%d repos)", len(data.AddedRepos), countRepos(data.AddedRepos))
 	result := output.OK(message, data)
 	if len(data.Failed) > 0 {
 		result.Detail = fmt.Sprintf("failed: %d modules", len(data.Failed))
-	}
-	if data.UpdateResult != nil && !data.UpdateResult.Success {
-		if result.Detail != "" {
-			result.Detail += "; "
-		}
-		result.Detail += "cache update failed"
 	}
 	return result
 }

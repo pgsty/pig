@@ -118,8 +118,11 @@ func RmRepos(modules []string, doUpdate bool) *output.Result {
 	}
 
 	data.DurationMs = time.Since(startTime).Milliseconds()
+	return buildRmReposResult(data, len(modules))
+}
 
-	// Count successes and failures
+// buildRmReposResult computes the final RmRepos result from collected operation data.
+func buildRmReposResult(data *RepoRmData, moduleCount int) *output.Result {
 	successCount := 0
 	failCount := 0
 	for _, item := range data.RemovedRepos {
@@ -130,22 +133,28 @@ func RmRepos(modules []string, doUpdate bool) *output.Result {
 		}
 	}
 
-	// Determine overall result
 	if successCount == 0 && len(data.RemovedRepos) > 0 {
 		return output.Fail(output.CodeRepoRemoveFailed,
-			fmt.Sprintf("failed to remove all %d modules", len(modules))).WithData(data)
+			fmt.Sprintf("failed to remove all %d modules", moduleCount)).WithData(data)
+	}
+
+	// Keep update failure as a hard failure for automation safety.
+	if data.UpdateResult != nil && !data.UpdateResult.Success {
+		msg := "cache update failed"
+		if data.UpdateResult.Error != "" {
+			msg = fmt.Sprintf("cache update failed: %s", data.UpdateResult.Error)
+		}
+		result := output.Fail(output.CodeRepoCacheUpdateFailed, msg).WithData(data)
+		if failCount > 0 {
+			result.Detail = fmt.Sprintf("failed: %d module(s)", failCount)
+		}
+		return result
 	}
 
 	message := fmt.Sprintf("Removed %d module(s)", successCount)
 	result := output.OK(message, data)
 	if failCount > 0 {
 		result.Detail = fmt.Sprintf("failed: %d module(s)", failCount)
-	}
-	if data.UpdateResult != nil && !data.UpdateResult.Success {
-		if result.Detail != "" {
-			result.Detail += "; "
-		}
-		result.Detail += "cache update failed"
 	}
 	return result
 }
