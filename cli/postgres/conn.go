@@ -13,7 +13,6 @@ import (
 	"pig/internal/utils"
 )
 
-
 // ============================================================================
 // Connection List (ps)
 // ============================================================================
@@ -82,6 +81,77 @@ type KillOptions struct {
 	Watch   int    // repeat every N seconds
 }
 
+func validateKillOptions(opts *KillOptions) error {
+	// Validate inputs to prevent SQL injection.
+	if opts == nil {
+		return nil
+	}
+
+	if !ValidateIdentifier(opts.User) {
+		return fmt.Errorf("invalid username: %s", opts.User)
+	}
+	if !ValidateIdentifier(opts.Db) {
+		return fmt.Errorf("invalid database name: %s", opts.Db)
+	}
+	// State can contain spaces (e.g., "idle in transaction"), validate against known values.
+	if !utils.ValidateConnectionState(opts.State) {
+		return fmt.Errorf("invalid state: %s (valid: active, idle, idle in transaction)", opts.State)
+	}
+	// Query pattern: allow alphanumeric, spaces, and wildcards; escape SQL special chars.
+	if !utils.ValidateSQLLikePattern(opts.Query) {
+		return fmt.Errorf("invalid query pattern: %s (use alphanumeric characters, spaces, and wildcards)", opts.Query)
+	}
+	return nil
+}
+
+func pickKillFunc(opts *KillOptions) string {
+	// Choose function: pg_cancel_backend or pg_terminate_backend.
+	if opts != nil && opts.Cancel {
+		return "pg_cancel_backend"
+	}
+	return "pg_terminate_backend"
+}
+
+func buildKillWhereClause(opts *KillOptions) string {
+	conditions := []string{"pid <> pg_backend_pid()"}
+	if opts == nil || !opts.All {
+		conditions = append(conditions, "backend_type = 'client backend'")
+	}
+	if opts != nil && opts.User != "" {
+		conditions = append(conditions, fmt.Sprintf("usename = '%s'", opts.User))
+	}
+	if opts != nil && opts.Db != "" {
+		conditions = append(conditions, fmt.Sprintf("datname = '%s'", opts.Db))
+	}
+	if opts != nil && opts.State != "" {
+		conditions = append(conditions, fmt.Sprintf("state = '%s'", utils.EscapeSQLString(opts.State)))
+	}
+	if opts != nil && opts.Query != "" {
+		// Escape LIKE wildcards and single quotes for safe pattern matching.
+		escapedQuery := utils.EscapeSQLLikePattern(opts.Query)
+		conditions = append(conditions, fmt.Sprintf("query ILIKE '%%%s%%' ESCAPE '\\\\'", escapedQuery))
+	}
+	return strings.Join(conditions, " AND ")
+}
+
+func buildKillSQL(killFunc string, opts *KillOptions) string {
+	if opts != nil && opts.Pid > 0 {
+		return fmt.Sprintf("SELECT %s(%d)", killFunc, opts.Pid)
+	}
+
+	whereClause := buildKillWhereClause(opts)
+	if opts != nil && opts.Execute {
+		return fmt.Sprintf("SELECT %s(pid), pid, usename, datname, state FROM pg_stat_activity WHERE %s", killFunc, whereClause)
+	}
+
+	// Dry-run: just show what would be killed.
+	return fmt.Sprintf("SELECT pid, usename, datname, client_addr, state, LEFT(query, 40) AS query FROM pg_stat_activity WHERE %s", whereClause)
+}
+
+func shouldShowKillDryRunBanner(opts *KillOptions) bool {
+	return (opts == nil || !opts.Execute) && (opts == nil || opts.Pid == 0)
+}
+
 // Kill kills PostgreSQL connections (dry-run by default)
 func Kill(cfg *Config, opts *KillOptions) error {
 	dbsu := GetDbSU(cfg)
@@ -90,67 +160,17 @@ func Kill(cfg *Config, opts *KillOptions) error {
 		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
-	// Validate inputs to prevent SQL injection
-	if opts != nil {
-		if !ValidateIdentifier(opts.User) {
-			return fmt.Errorf("invalid username: %s", opts.User)
-		}
-		if !ValidateIdentifier(opts.Db) {
-			return fmt.Errorf("invalid database name: %s", opts.Db)
-		}
-		// State can contain spaces (e.g., "idle in transaction"), validate against known values
-		if !utils.ValidateConnectionState(opts.State) {
-			return fmt.Errorf("invalid state: %s (valid: active, idle, idle in transaction)", opts.State)
-		}
-		// Query pattern: allow alphanumeric, spaces, and wildcards; escape SQL special chars
-		if !utils.ValidateSQLLikePattern(opts.Query) {
-			return fmt.Errorf("invalid query pattern: %s (use alphanumeric characters, spaces, and wildcards)", opts.Query)
-		}
+	if err := validateKillOptions(opts); err != nil {
+		return err
 	}
 
-	// Choose function: pg_cancel_backend or pg_terminate_backend
-	killFunc := "pg_terminate_backend"
-	if opts != nil && opts.Cancel {
-		killFunc = "pg_cancel_backend"
-	}
+	killFunc := pickKillFunc(opts)
 
 	for {
-		var sql string
-		if opts != nil && opts.Pid > 0 {
-			// Kill specific PID
-			sql = fmt.Sprintf("SELECT %s(%d)", killFunc, opts.Pid)
-		} else {
-			// Build WHERE clause
-			conditions := []string{"pid <> pg_backend_pid()"}
-			if opts == nil || !opts.All {
-				conditions = append(conditions, "backend_type = 'client backend'")
-			}
-			if opts != nil && opts.User != "" {
-				conditions = append(conditions, fmt.Sprintf("usename = '%s'", opts.User))
-			}
-			if opts != nil && opts.Db != "" {
-				conditions = append(conditions, fmt.Sprintf("datname = '%s'", opts.Db))
-			}
-			if opts != nil && opts.State != "" {
-				conditions = append(conditions, fmt.Sprintf("state = '%s'", utils.EscapeSQLString(opts.State)))
-			}
-			if opts != nil && opts.Query != "" {
-				// Escape LIKE wildcards and single quotes for safe pattern matching
-				escapedQuery := utils.EscapeSQLLikePattern(opts.Query)
-				conditions = append(conditions, fmt.Sprintf("query ILIKE '%%%s%%' ESCAPE '\\\\'", escapedQuery))
-			}
+		sql := buildKillSQL(killFunc, opts)
+		showDryRunBanner := shouldShowKillDryRunBanner(opts)
 
-			whereClause := strings.Join(conditions, " AND ")
-
-			if opts != nil && opts.Execute {
-				sql = fmt.Sprintf("SELECT %s(pid), pid, usename, datname, state FROM pg_stat_activity WHERE %s", killFunc, whereClause)
-			} else {
-				// Dry-run: just show what would be killed
-				sql = fmt.Sprintf("SELECT pid, usename, datname, client_addr, state, LEFT(query, 40) AS query FROM pg_stat_activity WHERE %s", whereClause)
-			}
-		}
-
-		if (opts == nil || !opts.Execute) && (opts == nil || opts.Pid == 0) {
+		if showDryRunBanner {
 			fmt.Printf("%s[DRY-RUN] Connections that would be killed:%s\n", utils.ColorYellow, utils.ColorReset)
 		}
 
@@ -160,7 +180,7 @@ func Kill(cfg *Config, opts *KillOptions) error {
 			return err
 		}
 
-		if (opts == nil || !opts.Execute) && (opts == nil || opts.Pid == 0) {
+		if showDryRunBanner {
 			fmt.Printf("\n%sUse -x/--execute to actually kill these connections%s\n", utils.ColorYellow, utils.ColorReset)
 		}
 
