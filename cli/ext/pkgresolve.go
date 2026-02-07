@@ -22,7 +22,7 @@ type packageResolveOptions struct {
 }
 
 // PackageManagerCmd returns the package manager binary for current OS.
-func PackageManagerCmd(_ string) string {
+func PackageManagerCmd() string {
 	switch config.OSType {
 	case config.DistroEL:
 		if config.OSVersion == "8" || config.OSVersion == "9" || config.OSVersion == "10" {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"pig/internal/config"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -206,54 +207,43 @@ func (e *Extension) SchemaStr() string {
 	return fmt.Sprintf("Schemas: [ %s ]", strings.Join(e.Schemas, ", "))
 }
 
+func yesNo(v bool) string {
+	if v {
+		return "Yes"
+	}
+	return "No"
+}
+
+func triStateTF(v string) string {
+	switch v {
+	case "t":
+		return "Yes"
+	case "f":
+		return "No"
+	default:
+		return "N/A"
+	}
+}
+
 // GetBool returns a string of "Yes" / "No" / "N/A" according to the boolean value
 func (e *Extension) GetBool(name string) string {
-	// return yes / no n/a  according to the boolean value
 	switch name {
 	case "ddl":
-		if e.NeedDDL {
-			return "Yes"
-		}
-		return "No"
+		return yesNo(e.NeedDDL)
 	case "load":
-		if e.NeedLoad {
-			return "Yes"
-		}
-		return "No"
+		return yesNo(e.NeedLoad)
 	case "has_bin":
-		if e.HasBin {
-			return "Yes"
-		}
-		return "No"
+		return yesNo(e.HasBin)
 	case "has_lib":
-		if e.HasLib {
-			return "Yes"
-		}
-		return "No"
+		return yesNo(e.HasLib)
 	case "contrib":
-		if e.Contrib {
-			return "Yes"
-		}
-		return "No"
+		return yesNo(e.Contrib)
 	case "lead":
-		if e.Lead {
-			return "Yes"
-		}
-		return "No"
+		return yesNo(e.Lead)
 	case "relocatable":
-		if e.Relocatable == "t" {
-			return "Yes"
-		} else if e.Relocatable == "f" {
-			return "No"
-		}
-		return "N/A"
+		return triStateTF(e.Relocatable)
 	case "trusted":
-		if e.Trusted == "t" {
-			return "Yes"
-		} else if e.Trusted == "f" {
-			return "No"
-		}
-		return "N/A"
+		return triStateTF(e.Trusted)
 	}
 	return "N/A"
 }
@@ -464,30 +454,12 @@ func (e *Extension) Available(pgVer int) bool {
 	// test1: check rpm/deb version compatibility
 	switch config.OSType {
 	case config.DistroEL:
-		if e.RpmPg != nil {
-			found := false
-			for _, ver := range e.RpmPg {
-				if ver == verStr {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return false
-			}
+		if e.RpmPg != nil && !slices.Contains(e.RpmPg, verStr) {
+			return false
 		}
 	case config.DistroDEB:
-		if e.DebPg != nil {
-			found := false
-			for _, ver := range e.DebPg {
-				if ver == verStr {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return false
-			}
+		if e.DebPg != nil && !slices.Contains(e.DebPg, verStr) {
+			return false
 		}
 	case config.DistroMAC:
 		return true
@@ -502,17 +474,12 @@ func (e *Extension) Available(pgVer int) bool {
 	v, ok := badCases[e.Name]
 	if !ok {
 		return true
-	} else {
-		if len(v) == 0 { // match all version
-			return false
-		}
-		for _, ver := range v {
-			if ver == pgVer {
-				return false
-			}
-		}
-		return true
 	}
+
+	if len(v) == 0 { // match all versions
+		return false
+	}
+	return !slices.Contains(v, pgVer)
 }
 
 // GetPGVersions returns sorted list of supported PostgreSQL versions as integers

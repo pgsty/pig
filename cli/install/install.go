@@ -24,12 +24,12 @@ func InstallPackages(pgVer int, names []string, yes bool, noTranslation bool) er
 	var installCmds []string
 	switch config.OSType {
 	case config.DistroEL:
-		installCmds = append(installCmds, []string{ext.PackageManagerCmd("install"), "install"}...)
+		installCmds = append(installCmds, []string{ext.PackageManagerCmd(), "install"}...)
 		if yes {
 			installCmds = append(installCmds, "-y")
 		}
 	case config.DistroDEB:
-		installCmds = append(installCmds, []string{ext.PackageManagerCmd("install"), "install"}...)
+		installCmds = append(installCmds, []string{ext.PackageManagerCmd(), "install"}...)
 		if yes {
 			installCmds = append(installCmds, "-y")
 		}

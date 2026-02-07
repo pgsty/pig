@@ -3520,8 +3520,7 @@ func TestLinkPostgresResultVersionRange(t *testing.T) {
 	}
 }
 
-// Test helper function getPackageManagerCmd
-func TestGetPackageManagerCmd(t *testing.T) {
+func TestPackageManagerCmd(t *testing.T) {
 	// Save and restore original state
 	origOSType := config.OSType
 	origOSVersion := config.OSVersion
@@ -3548,9 +3547,9 @@ func TestGetPackageManagerCmd(t *testing.T) {
 	for _, tt := range tests {
 		config.OSType = tt.osType
 		config.OSVersion = tt.osVersion
-		result := getPackageManagerCmd("install")
+		result := PackageManagerCmd()
 		if result != tt.expected {
-			t.Errorf("getPackageManagerCmd() for OSType=%s, OSVersion=%s: expected %s, got %s",
+			t.Errorf("PackageManagerCmd() for OSType=%s, OSVersion=%s: expected %s, got %s",
 				tt.osType, tt.osVersion, tt.expected, result)
 		}
 	}

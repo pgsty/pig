@@ -153,98 +153,133 @@ func (ei *ExtensionInstall) ParseControlFile() error {
 	return scanner.Err()
 }
 
-// ScanExtensions scans PostgreSQL extensions
-func (p *PostgresInstall) ScanExtensions() error {
-	// scan shared libraries
-	entries, err := os.ReadDir(p.LibPath)
+func scanSharedLibraries(libPath string) (map[string]bool, error) {
+	entries, err := os.ReadDir(libPath)
 	if err != nil {
-		return fmt.Errorf("failed to read shared libraries dir: %v", err)
+		return nil, err
 	}
+
 	shareLibs := make(map[string]bool)
 	for _, entry := range entries {
-		if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".so") || strings.HasSuffix(entry.Name(), ".dylib")) {
-			libName := strings.TrimSuffix(entry.Name(), ".so")
-			libName = strings.TrimSuffix(libName, ".dylib")
-			shareLibs[libName] = false
+		if entry.IsDir() {
+			continue
 		}
+		if !strings.HasSuffix(entry.Name(), ".so") && !strings.HasSuffix(entry.Name(), ".dylib") {
+			continue
+		}
+		libName := strings.TrimSuffix(entry.Name(), ".so")
+		libName = strings.TrimSuffix(libName, ".dylib")
+		shareLibs[libName] = false
 	}
+	return shareLibs, nil
+}
 
-	// scan control files
-	var extensions []*ExtensionInstall
-	extMap := make(map[string]*ExtensionInstall)
-	extensionsPath := filepath.Join(p.ExtPath)
-	entries, err = os.ReadDir(extensionsPath)
+func scanControlFiles(p *PostgresInstall, catalog *ExtensionCatalog) ([]*ExtensionInstall, map[string]*ExtensionInstall, error) {
+	entries, err := os.ReadDir(p.ExtPath)
 	if err != nil {
-		return fmt.Errorf("failed to read extensions dir: %v", err)
+		return nil, nil, err
 	}
+
+	extensions := make([]*ExtensionInstall, 0)
+	extMap := make(map[string]*ExtensionInstall)
+
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".control") {
-			extName := strings.TrimSuffix(entry.Name(), ".control")
-			if badCaseExtensions[extName] {
-				continue
-			}
-
-			// Normalize extension name for omni extensions (e.g., omni_sqlite--0.2.2 -> omni_sqlite)
-			normExtName := extName
-			if strings.HasPrefix(extName, "omni") {
-				normExtName = strings.SplitN(extName, "--", 2)[0]
-			}
-
-			// Skip if normalized name already exists (avoid duplicates for versioned control files)
-			if _, alreadyExists := extMap[normExtName]; alreadyExists {
-				continue
-			}
-
-			extInstall := &ExtensionInstall{Postgres: p, ControlName: extName}
-			extMap[extName] = extInstall
-			// Also add normalized name to extMap for control-less lookup
-			if normExtName != extName {
-				extMap[normExtName] = extInstall
-			}
-			extensions = append(extensions, extInstall)
-			extInstall.Libraries = make(map[string]bool, 0)
-			_ = extInstall.ParseControlFile()
-
-			// DEPENDENCY: find the extension object in the global Extensions list
-			ext := Catalog.ExtNameMap[normExtName]
-			if ext == nil {
-				logrus.Debugf("failed to find extension %s in catalog", normExtName)
-				continue
-			} else {
-				extInstall.Extension = ext
-			}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".control") {
+			continue
 		}
+		extName := strings.TrimSuffix(entry.Name(), ".control")
+		if badCaseExtensions[extName] {
+			continue
+		}
+
+		normExtName := extName
+		if strings.HasPrefix(extName, "omni") {
+			normExtName = strings.SplitN(extName, "--", 2)[0]
+		}
+
+		// Skip if normalized name already exists (avoid duplicates for versioned omni control files).
+		if _, alreadyExists := extMap[normExtName]; alreadyExists {
+			continue
+		}
+
+		extInstall := &ExtensionInstall{
+			Postgres:    p,
+			ControlName: extName,
+			Libraries:   make(map[string]bool),
+		}
+		extensions = append(extensions, extInstall)
+		extMap[extName] = extInstall
+		if normExtName != extName {
+			extMap[normExtName] = extInstall
+		}
+		_ = extInstall.ParseControlFile()
+
+		if catalog == nil {
+			continue
+		}
+		ext := catalog.ExtNameMap[normExtName]
+		if ext == nil {
+			logrus.Debugf("failed to find extension %s in catalog", normExtName)
+			continue
+		}
+		extInstall.Extension = ext
 	}
 
-	// add control less extensions if found
-	for name := range Catalog.ControlLess {
-		if _, exists := shareLibs[name]; exists {
-			// skip if already added from control file
-			if _, alreadyExists := extMap[name]; alreadyExists {
-				continue
-			}
-			extInstall := &ExtensionInstall{Postgres: p}
-			// DEPENDENCY: find the control less extension in catalog
-			extInstall.Extension = Catalog.ExtNameMap[name]
-			extInstall.Libraries = map[string]bool{name: true}
-			extensions = append(extensions, extInstall)
-		}
+	return extensions, extMap, nil
+}
+
+func addControlLessExtensions(p *PostgresInstall, catalog *ExtensionCatalog, shareLibs map[string]bool, extensions []*ExtensionInstall, extMap map[string]*ExtensionInstall) []*ExtensionInstall {
+	if catalog == nil {
+		return extensions
 	}
 
+	for name := range catalog.ControlLess {
+		if _, exists := shareLibs[name]; !exists {
+			continue
+		}
+		// Skip if already added from control file.
+		if _, alreadyExists := extMap[name]; alreadyExists {
+			continue
+		}
+
+		extInstall := &ExtensionInstall{Postgres: p}
+		extInstall.Extension = catalog.ExtNameMap[name]
+		extInstall.Libraries = map[string]bool{name: true}
+		extensions = append(extensions, extInstall)
+	}
+	return extensions
+}
+
+func matchSharedLibraries(shareLibs map[string]bool, extMap map[string]*ExtensionInstall, extensions []*ExtensionInstall) {
 	// match existing extensions with shared libraries
 	for lib := range shareLibs {
 		if ext, exists := extMap[lib]; exists {
 			ext.Libraries[lib] = true
 			shareLibs[lib] = true
-		} else {
-			for _, ext := range extensions {
-				if MatchExtensionWithLibs(ext.ExtName(), lib) {
-					ext.Libraries[lib] = true
-					shareLibs[lib] = true
-				}
+			continue
+		}
+		for _, ext := range extensions {
+			if MatchExtensionWithLibs(ext.ExtName(), lib) {
+				ext.Libraries[lib] = true
+				shareLibs[lib] = true
 			}
 		}
 	}
+}
+
+// ScanExtensions scans PostgreSQL extensions
+func (p *PostgresInstall) ScanExtensions() error {
+	shareLibs, err := scanSharedLibraries(p.LibPath)
+	if err != nil {
+		return fmt.Errorf("failed to read shared libraries dir: %v", err)
+	}
+
+	extensions, extMap, err := scanControlFiles(p, Catalog)
+	if err != nil {
+		return fmt.Errorf("failed to read extensions dir: %v", err)
+	}
+	extensions = addControlLessExtensions(p, Catalog, shareLibs, extensions, extMap)
+	matchSharedLibraries(shareLibs, extMap, extensions)
 
 	// update extension map
 	p.Extensions = extensions

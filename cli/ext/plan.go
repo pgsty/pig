@@ -20,6 +20,56 @@ type resolvedExt struct {
 	alias    bool // true if resolved via AliasMap
 }
 
+func resolvePlanExtensions(pgVer int, names []string, parseVersionSpec bool) ([]resolvedExt, []string) {
+	Catalog.LoadAliasMap(config.OSType)
+
+	resolved := make([]resolvedExt, 0, len(names))
+	notFound := make([]string, 0)
+
+	for _, raw := range names {
+		lookupName := raw
+		if parseVersionSpec {
+			if parts := strings.Split(raw, "="); len(parts) == 2 {
+				lookupName = parts[0]
+			}
+		}
+
+		ext, ok := Catalog.ExtNameMap[lookupName]
+		if !ok {
+			ext, ok = Catalog.ExtPkgMap[lookupName]
+		}
+		if !ok {
+			// Try alias map.
+			if pgPkg, aliasOk := Catalog.AliasMap[lookupName]; aliasOk {
+				pkgs := ProcessPkgName(pgPkg, pgVer)
+				resolved = append(resolved, resolvedExt{
+					name:     lookupName,
+					packages: pkgs,
+					alias:    true,
+				})
+				continue
+			}
+			notFound = append(notFound, raw)
+			continue
+		}
+
+		pkgName := ext.PackageName(pgVer)
+		if pkgName == "" {
+			notFound = append(notFound, raw)
+			continue
+		}
+
+		pkgs := ProcessPkgName(pkgName, pgVer)
+		resolved = append(resolved, resolvedExt{
+			name:     ext.Name,
+			ext:      ext,
+			packages: pkgs,
+		})
+	}
+
+	return resolved, notFound
+}
+
 // ============================================================================
 // BuildAddPlan
 // ============================================================================
@@ -41,50 +91,7 @@ func BuildAddPlan(pgVer int, names []string) *output.Plan {
 		pgVer = PostgresLatestMajorVersion
 	}
 
-	Catalog.LoadAliasMap(config.OSType)
-
-	var resolved []resolvedExt
-	var notFound []string
-
-	for _, name := range names {
-		// Strip version suffix for lookup
-		lookupName := name
-		if parts := strings.Split(name, "="); len(parts) == 2 {
-			lookupName = parts[0]
-		}
-
-		ext, ok := Catalog.ExtNameMap[lookupName]
-		if !ok {
-			ext, ok = Catalog.ExtPkgMap[lookupName]
-		}
-		if !ok {
-			// Try alias map
-			if pgPkg, aliasOk := Catalog.AliasMap[lookupName]; aliasOk {
-				pkgs := processPkgName(pgPkg, pgVer)
-				resolved = append(resolved, resolvedExt{
-					name:     lookupName,
-					packages: pkgs,
-					alias:    true,
-				})
-				continue
-			}
-			notFound = append(notFound, name)
-			continue
-		}
-
-		pkgName := ext.PackageName(pgVer)
-		if pkgName == "" {
-			notFound = append(notFound, name)
-			continue
-		}
-
-		pkgs := processPkgName(pkgName, pgVer)
-		resolved = append(resolved, resolvedExt{
-			name:     ext.Name,
-			ext:      ext,
-			packages: pkgs,
-		})
-	}
+	resolved, notFound := resolvePlanExtensions(pgVer, names, true)
 
 	// Check if extensions are already installed
 	var alreadyInstalled []string
@@ -151,7 +158,7 @@ func buildAddActions(resolved []resolvedExt, notFound []string, pgVer int) []out
 		for _, r := range resolved {
 			allPkgs = append(allPkgs, r.packages...)
 		}
-		pkgMgr := getPackageManagerCmd("install")
+		pkgMgr := PackageManagerCmd()
 		actions = append(actions, output.Action{
 			Step:        step,
 			Description: fmt.Sprintf("Execute: sudo %s install -y %s", pkgMgr, strings.Join(allPkgs, " ")),
@@ -264,43 +271,7 @@ func BuildRmPlan(pgVer int, names []string) *output.Plan {
 		pgVer = PostgresLatestMajorVersion
 	}
 
-	Catalog.LoadAliasMap(config.OSType)
-
-	var resolved []resolvedExt
-	var notFound []string
-
-	for _, name := range names {
-		ext, ok := Catalog.ExtNameMap[name]
-		if !ok {
-			ext, ok = Catalog.ExtPkgMap[name]
-		}
-		if !ok {
-			if pgPkg, aliasOk := Catalog.AliasMap[name]; aliasOk {
-				pkgs := processPkgName(pgPkg, pgVer)
-				resolved = append(resolved, resolvedExt{
-					name:     name,
-					packages: pkgs,
-					alias:    true,
-				})
-				continue
-			}
-			notFound = append(notFound, name)
-			continue
-		}
-
-		pkgName := ext.PackageName(pgVer)
-		if pkgName == "" {
-			notFound = append(notFound, name)
-			continue
-		}
-
-		pkgs := processPkgName(pkgName, pgVer)
-		resolved = append(resolved, resolvedExt{
-			name:     ext.Name,
-			ext:      ext,
-			packages: pkgs,
-		})
-	}
+	resolved, notFound := resolvePlanExtensions(pgVer, names, false)
 
 	return buildRmPlanFromState(names, resolved, notFound, pgVer)
 }
@@ -352,7 +323,7 @@ func buildRmActions(resolved []resolvedExt, notFound []string, pgVer int) []outp
 		for _, r := range resolved {
 			allPkgs = append(allPkgs, r.packages...)
 		}
-		pkgMgr := getPackageManagerCmd("remove")
+		pkgMgr := PackageManagerCmd()
 		actions = append(actions, output.Action{
 			Step:        step,
 			Description: fmt.Sprintf("Execute: sudo %s remove -y %s", pkgMgr, strings.Join(allPkgs, " ")),

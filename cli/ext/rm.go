@@ -13,125 +13,62 @@ import (
 // RmExtensions removes extensions and returns a structured Result
 // This function is used for YAML/JSON output modes
 func RmExtensions(pgVer int, names []string, yes bool) *output.Result {
-	startTime := time.Now()
-
-	if len(names) == 0 {
-		return output.Fail(output.CodeExtensionInvalidArgs, "no extensions specified")
-	}
-	if pgVer == 0 {
-		logrus.Debugf("using latest postgres version: %d by default", PostgresLatestMajorVersion)
-		pgVer = PostgresLatestMajorVersion
-	}
-
-	// Check OS support
-	switch config.OSType {
-	case config.DistroEL, config.DistroDEB:
-		// supported
-	case config.DistroMAC:
-		return output.Fail(output.CodeExtensionUnsupportedOS, "macOS brew removal not supported")
-	default:
-		return output.Fail(output.CodeExtensionUnsupportedOS, fmt.Sprintf("unsupported OS: %s", config.OSType))
+	prep, result := prepareExtensionPkgOp(preparePkgOpOptions{
+		PgVersion:             pgVer,
+		Requested:             names,
+		ParseVersionSpec:      false,
+		MacUnsupportedMessage: "macOS brew removal not supported",
+	})
+	if result != nil {
+		return result
 	}
 
-	// Check Catalog is initialized
-	if Catalog == nil {
-		return output.Fail(output.CodeExtensionCatalogError, "extension catalog not initialized")
-	}
-
-	// Collect packages to remove, tracking each extension
-	var removed []string
-	var failed []*FailedExtItem
-	resolved := ResolveExtensionPackages(pgVer, names, false)
-	for _, name := range resolved.NotFound {
-		failed = append(failed, &FailedExtItem{
-			Name:  name,
-			Error: "extension not found in catalog",
-			Code:  output.CodeExtensionNotFound,
-		})
-	}
-	for _, name := range resolved.NoPackage {
-		failed = append(failed, &FailedExtItem{
-			Name:  name,
-			Error: fmt.Sprintf("no package available for extension on PG %d", pgVer),
-			Code:  output.CodeExtensionNoPackage,
-		})
-	}
-	allPkgNames := resolved.Packages
-	pkgToExt := resolved.PackageOwner
+	allPkgNames := prep.Packages
+	pkgToExt := prep.PkgToExt
+	failed := prep.Failed
 
 	// If no packages to remove, return early
 	if len(allPkgNames) == 0 {
 		data := &ExtensionRmData{
-			PgVersion:   pgVer,
+			PgVersion:   prep.PgVersion,
 			OSCode:      config.OSCode,
 			Arch:        config.OSArch,
 			Requested:   names,
 			Packages:    []string{},
 			Removed:     []string{},
 			Failed:      failed,
-			DurationMs:  time.Since(startTime).Milliseconds(),
+			DurationMs:  time.Since(prep.StartTime).Milliseconds(),
 			AutoConfirm: yes,
 		}
 		return output.Fail(output.CodeExtensionNotFound, "no packages to remove").WithData(data)
 	}
 
-	// Build remove command
-	var removeCmds []string
-	pkgMgr := getPackageManagerCmd("remove")
-	switch config.OSType {
-	case config.DistroEL:
-		removeCmds = append(removeCmds, pkgMgr, "remove")
-		if yes {
-			removeCmds = append(removeCmds, "-y")
-		}
-	case config.DistroDEB:
-		removeCmds = append(removeCmds, pkgMgr, "remove")
-		if yes {
-			removeCmds = append(removeCmds, "-y")
-		}
-	}
-
-	removeCmds = append(removeCmds, allPkgNames...)
+	removeCmds := buildPackageManagerCommand(pkgOpRemove, yes, allPkgNames)
 	logrus.Debugf("executing remove command: %v", removeCmds)
 
 	// Execute remove command
 	err := utils.SudoCommand(removeCmds)
 
 	// Determine which packages were removed successfully
+	var removed []string
 	if err != nil {
-		// All packages failed to remove
-		for _, pkg := range allPkgNames {
-			extName := pkgToExt[pkg]
-			if extName == "" {
-				extName = pkg
-			}
-			failed = append(failed, &FailedExtItem{
-				Name:    extName,
-				Package: pkg,
-				Error:   err.Error(),
-				Code:    output.CodeExtensionRemoveFailed,
-			})
-		}
+		failed = appendPackageFailures(failed, allPkgNames, pkgToExt, err, output.CodeExtensionRemoveFailed)
 	} else {
 		// All packages removed successfully
 		for _, pkg := range allPkgNames {
-			extName := pkgToExt[pkg]
-			if extName == "" {
-				extName = pkg
-			}
-			removed = append(removed, extName)
+			removed = append(removed, extNameForPackage(pkg, pkgToExt))
 		}
 	}
 
 	data := &ExtensionRmData{
-		PgVersion:   pgVer,
+		PgVersion:   prep.PgVersion,
 		OSCode:      config.OSCode,
 		Arch:        config.OSArch,
 		Requested:   names,
 		Packages:    allPkgNames,
 		Removed:     removed,
 		Failed:      failed,
-		DurationMs:  time.Since(startTime).Milliseconds(),
+		DurationMs:  time.Since(prep.StartTime).Milliseconds(),
 		AutoConfirm: yes,
 	}
 

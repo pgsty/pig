@@ -81,7 +81,7 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 		if !ok {
 			// try to find in AliasMap (if it is not a postgres extension)
 			if pgPkg, ok := Catalog.AliasMap[name]; ok {
-				pkgNames = append(pkgNames, processPkgName(pgPkg, pgVer)...)
+				pkgNames = append(pkgNames, ProcessPkgName(pgPkg, pgVer)...)
 				continue
 			} else {
 				logrus.Debugf("cannot find '%s' in extension name or alias", name)
@@ -96,7 +96,7 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 			continue
 		}
 		logrus.Debugf("translate extension %s to package name: %s", ext.Name, pkgName)
-		pkgNames = append(pkgNames, processPkgName(pkgName, pgVer)...)
+		pkgNames = append(pkgNames, ProcessPkgName(pkgName, pgVer)...)
 	}
 
 	if len(pkgNames) == 0 {
