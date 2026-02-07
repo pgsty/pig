@@ -3,6 +3,7 @@ package cmd
 import (
 	"pig/cli/build"
 	"pig/cli/ext"
+	"pig/internal/output"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -21,6 +22,10 @@ var (
 	buildRustYes   bool
 	buildMirror    bool
 )
+
+func runBuildLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
+	return runLegacyStructured(output.MODULE_BUILD, command, args, params, fn)
+}
 
 // buildCmd represents the top-level `build` command
 var buildCmd = &cobra.Command{
@@ -108,12 +113,14 @@ var buildToolCmd = &cobra.Command{
 	},
 	Aliases: []string{"t"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var mode string
-		if len(args) > 0 {
-			mode = args[0]
-		}
-		logrus.Infof("Init pg ext build env in %s mode", mode)
-		return build.InstallBuildTools(mode)
+		return runBuildLegacy("pig build tool", args, nil, func() error {
+			var mode string
+			if len(args) > 0 {
+				mode = args[0]
+			}
+			logrus.Infof("Init pg ext build env in %s mode", mode)
+			return build.InstallBuildTools(mode)
+		})
 	},
 }
 
@@ -135,17 +142,19 @@ var buildProxyCmd = &cobra.Command{
 	Args:    cobra.MaximumNArgs(2),
 	Aliases: []string{"x"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var remote, local string
-		if len(args) == 0 {
-			return build.InstallProxy()
-		} else {
-			if len(args) == 2 {
-				remote, local = args[0], args[1]
+		return runBuildLegacy("pig build proxy", args, nil, func() error {
+			var remote, local string
+			if len(args) == 0 {
+				return build.InstallProxy()
 			} else {
-				remote, local = args[0], "127.0.0.1:12345"
+				if len(args) == 2 {
+					remote, local = args[0], args[1]
+				} else {
+					remote, local = args[0], "127.0.0.1:12345"
+				}
 			}
-		}
-		return build.SetupProxy(remote, local)
+			return build.SetupProxy(remote, local)
+		})
 	},
 }
 
@@ -166,7 +175,11 @@ var buildRustCmd = &cobra.Command{
 	},
 	Aliases: []string{"rs"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.SetupRust(buildRustYes)
+		return runBuildLegacy("pig build rust", args, map[string]interface{}{
+			"yes": buildRustYes,
+		}, func() error {
+			return build.SetupRust(buildRustYes)
+		})
 	},
 }
 
@@ -187,7 +200,12 @@ var buildPgrxCmd = &cobra.Command{
 	},
 	Aliases: []string{"rx"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.SetupPgrx(buildPgrxVer, buildPgrxPg)
+		return runBuildLegacy("pig build pgrx", args, map[string]interface{}{
+			"pgrx": buildPgrxVer,
+			"pg":   buildPgrxPg,
+		}, func() error {
+			return build.SetupPgrx(buildPgrxVer, buildPgrxPg)
+		})
 	},
 }
 
@@ -210,7 +228,12 @@ var buildSpecCmd = &cobra.Command{
 	Aliases: []string{"s"},
 	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.SpecDirSetup(buildSpecForce, buildMirror)
+		return runBuildLegacy("pig build spec", args, map[string]interface{}{
+			"force":  buildSpecForce,
+			"mirror": buildMirror,
+		}, func() error {
+			return build.SpecDirSetup(buildSpecForce, buildMirror)
+		})
 	},
 }
 
@@ -232,7 +255,12 @@ var buildGetCmd = &cobra.Command{
 	Aliases: []string{"g"},
 	Args:    cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.DownloadSources(args, buildGetForce, buildMirror)
+		return runBuildLegacy("pig build get", args, map[string]interface{}{
+			"force":  buildGetForce,
+			"mirror": buildMirror,
+		}, func() error {
+			return build.DownloadSources(args, buildGetForce, buildMirror)
+		})
 	},
 }
 
@@ -254,7 +282,11 @@ var buildDepCmd = &cobra.Command{
 	Aliases: []string{"d"},
 	Args:    cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.InstallDepsList(args, buildDepPg)
+		return runBuildLegacy("pig build dep", args, map[string]interface{}{
+			"pg": buildDepPg,
+		}, func() error {
+			return build.InstallDepsList(args, buildDepPg)
+		})
 	},
 }
 
@@ -276,7 +308,12 @@ var buildExtCmd = &cobra.Command{
 	Aliases: []string{"e"},
 	Args:    cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.BuildExtensions(args, buildPkgPg, buildPkgSymbol)
+		return runBuildLegacy("pig build ext", args, map[string]interface{}{
+			"pg":     buildPkgPg,
+			"symbol": buildPkgSymbol,
+		}, func() error {
+			return build.BuildExtensions(args, buildPkgPg, buildPkgSymbol)
+		})
 	},
 }
 
@@ -299,7 +336,12 @@ var buildPkgCmd = &cobra.Command{
 	Aliases: []string{"p"},
 	Args:    cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return build.BuildPackages(args, buildAllPg, buildAllSymbol)
+		return runBuildLegacy("pig build pkg", args, map[string]interface{}{
+			"pg":     buildAllPg,
+			"symbol": buildAllSymbol,
+		}, func() error {
+			return build.BuildPackages(args, buildAllPg, buildAllSymbol)
+		})
 	},
 }
 
@@ -331,14 +373,16 @@ func init() {
 	buildPkgCmd.Flags().BoolVarP(&buildAllSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
 
 	// Add subcommands
-	buildCmd.AddCommand(buildSpecCmd)
-	buildCmd.AddCommand(buildRepoCmd)
-	buildCmd.AddCommand(buildToolCmd)
-	buildCmd.AddCommand(buildRustCmd)
-	buildCmd.AddCommand(buildPgrxCmd)
-	buildCmd.AddCommand(buildProxyCmd)
-	buildCmd.AddCommand(buildGetCmd)
-	buildCmd.AddCommand(buildDepCmd)
-	buildCmd.AddCommand(buildExtCmd)
-	buildCmd.AddCommand(buildPkgCmd)
+	buildCmd.AddCommand(
+		buildSpecCmd,
+		buildRepoCmd,
+		buildToolCmd,
+		buildRustCmd,
+		buildPgrxCmd,
+		buildProxyCmd,
+		buildGetCmd,
+		buildDepCmd,
+		buildExtCmd,
+		buildPkgCmd,
+	)
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"pig/cli/do"
+	"pig/internal/output"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -13,10 +14,14 @@ var (
 	doRemoveWithUninstall bool
 )
 
+func runDoLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
+	return runLegacyStructured(output.MODULE_DO, command, args, params, fn)
+}
+
 // doCmd represents the pig do management command
 var doCmd = &cobra.Command{
-	Use:     "do",
-	Short:   "run admin tasks",
+	Use:   "do",
+	Short: "run admin tasks",
 	Annotations: map[string]string{
 		"name":       "pig do",
 		"type":       "query",
@@ -54,8 +59,8 @@ var doCmd = &cobra.Command{
 
 // doPgsqlAddCmd - create pgsql cluster/instance
 var doPgsqlAddCmd = &cobra.Command{
-	Use:     "pgsql-add",
-	Short:   "add instances to cluster",
+	Use:   "pgsql-add",
+	Short: "add instances to cluster",
 	Annotations: map[string]string{
 		"name":       "pig do pgsql-add",
 		"type":       "action",
@@ -77,17 +82,19 @@ var doPgsqlAddCmd = &cobra.Command{
   `,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		selector := args[0]
-		command := []string{"pgsql.yml", "-l", selector}
-		command = append(command, args[1:]...)
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do pgsql-add", args, nil, func() error {
+			selector := args[0]
+			command := []string{"pgsql.yml", "-l", selector}
+			command = append(command, args[1:]...)
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doPgsqlRmCmd - Remove pgsql cluster/instance
 var doPgsqlRmCmd = &cobra.Command{
-	Use:     "pgsql-rm",
-	Short:   "remove instances from cluster",
+	Use:   "pgsql-rm",
+	Short: "remove instances from cluster",
 	Annotations: map[string]string{
 		"name":       "pig do pgsql-rm",
 		"type":       "action",
@@ -109,19 +116,23 @@ var doPgsqlRmCmd = &cobra.Command{
 
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		selector := args[0]
-		command := []string{"pgsql-rm.yml", "-l", selector}
-		if doRemoveWithUninstall {
-			command = append(command, "-e", "pg_uninstall=true")
-		}
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do pgsql-rm", args, map[string]interface{}{
+			"uninstall": doRemoveWithUninstall,
+		}, func() error {
+			selector := args[0]
+			command := []string{"pgsql-rm.yml", "-l", selector}
+			if doRemoveWithUninstall {
+				command = append(command, "-e", "pg_uninstall=true")
+			}
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doPgsqlUserCmd - Create a PostgreSQL user
 var doPgsqlUserCmd = &cobra.Command{
-	Use:     "pgsql-user",
-	Short:   "create/update pgsql user",
+	Use:   "pgsql-user",
+	Short: "create/update pgsql user",
 	Annotations: map[string]string{
 		"name":       "pig do pgsql-user",
 		"type":       "action",
@@ -141,18 +152,20 @@ var doPgsqlUserCmd = &cobra.Command{
   pig do pu         pg-test test`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cls := args[0]
-		username := args[1]
-		command := []string{"pgsql-user.yml", "-l", cls, "-e", fmt.Sprintf("username=%s", username)}
-		command = append(command, args[2:]...)
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do pgsql-user", args, nil, func() error {
+			cls := args[0]
+			username := args[1]
+			command := []string{"pgsql-user.yml", "-l", cls, "-e", fmt.Sprintf("username=%s", username)}
+			command = append(command, args[2:]...)
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doPgsqlDbCmd - Create/Update pgsql database
 var doPgsqlDbCmd = &cobra.Command{
-	Use:     "pgsql-db",
-	Short:   "create/update pgsql database",
+	Use:   "pgsql-db",
+	Short: "create/update pgsql database",
 	Annotations: map[string]string{
 		"name":       "pig do pgsql-db",
 		"type":       "action",
@@ -171,18 +184,20 @@ var doPgsqlDbCmd = &cobra.Command{
   pig do pg-db    pg-test test`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cls := args[0]
-		dbname := args[1]
-		command := []string{"pgsql-db.yml", "-l", cls, "-e", fmt.Sprintf("dbname=%s", dbname)}
-		command = append(command, args[2:]...)
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do pgsql-db", args, nil, func() error {
+			cls := args[0]
+			dbname := args[1]
+			command := []string{"pgsql-db.yml", "-l", cls, "-e", fmt.Sprintf("dbname=%s", dbname)}
+			command = append(command, args[2:]...)
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doPgsqlExtCmd - Install pgsql extensions
 var doPgsqlExtCmd = &cobra.Command{
-	Use:     "pgsql-ext",
-	Short:   "install pgsql extensions",
+	Use:   "pgsql-ext",
+	Short: "install pgsql extensions",
 	Annotations: map[string]string{
 		"name":       "pig do pgsql-ext",
 		"type":       "action",
@@ -203,21 +218,23 @@ var doPgsqlExtCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		selector := args[0]
-		command := []string{"pgsql.yml", "-l", selector, "-t", "pg_extension"}
-		if len(args) > 1 {
-			packages := strings.Join(args[1:], ",")
-			packages = fmt.Sprintf(`{"pg_extensions":["%s"]}`, packages)
-			command = append(command, "-e", packages)
-		}
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do pgsql-ext", args, nil, func() error {
+			selector := args[0]
+			command := []string{"pgsql.yml", "-l", selector, "-t", "pg_extension"}
+			if len(args) > 1 {
+				packages := strings.Join(args[1:], ",")
+				packages = fmt.Sprintf(`{"pg_extensions":["%s"]}`, packages)
+				command = append(command, "-e", packages)
+			}
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doPgsqlHbaCmd - Refresh pgsql hba
 var doPgsqlHbaCmd = &cobra.Command{
-	Use:     "pgsql-hba",
-	Short:   "refresh pgsql hba",
+	Use:   "pgsql-hba",
+	Short: "refresh pgsql hba",
 	Annotations: map[string]string{
 		"name":       "pig do pgsql-hba",
 		"type":       "action",
@@ -238,16 +255,18 @@ var doPgsqlHbaCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cls := args[0]
-		command := []string{"pgsql.yml", "-l", cls, "-t", "pg_hba,pg_reload,pgbouncer_hba,pgbouncer_reload"}
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do pgsql-hba", args, nil, func() error {
+			cls := args[0]
+			command := []string{"pgsql.yml", "-l", cls, "-t", "pg_hba,pg_reload,pgbouncer_hba,pgbouncer_reload"}
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doPgsqlSvcCmd - Refresh pgsql service
 var doPgsqlSvcCmd = &cobra.Command{
-	Use:     "pgsql-svc",
-	Short:   "refresh pgsql service",
+	Use:   "pgsql-svc",
+	Short: "refresh pgsql service",
 	Annotations: map[string]string{
 		"name":       "pig do pgsql-svc",
 		"type":       "action",
@@ -268,16 +287,18 @@ var doPgsqlSvcCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		selector := args[0]
-		command := []string{"pgsql.yml", "-l", selector, "-t", "pg_service"}
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do pgsql-svc", args, nil, func() error {
+			selector := args[0]
+			command := []string{"pgsql.yml", "-l", selector, "-t", "pg_service"}
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doPgmonAddCmd - Add remote pg monitor target
 var doPgmonAddCmd = &cobra.Command{
-	Use:     "pgmon-add",
-	Short:   "add remote pg monitor target",
+	Use:   "pgmon-add",
+	Short: "add remote pg monitor target",
 	Annotations: map[string]string{
 		"name":       "pig do pgmon-add",
 		"type":       "action",
@@ -298,16 +319,18 @@ var doPgmonAddCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cls := args[0]
-		command := []string{"pgsql-monitor.yml", "-e", fmt.Sprintf("clsname=%s", cls)}
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do pgmon-add", args, nil, func() error {
+			cls := args[0]
+			command := []string{"pgsql-monitor.yml", "-e", fmt.Sprintf("clsname=%s", cls)}
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doPgmonRmCmd - Remove remote pg monitor target
 var doPgmonRmCmd = &cobra.Command{
-	Use:     "pgmon-rm",
-	Short:   "remove remote pg monitor target",
+	Use:   "pgmon-rm",
+	Short: "remove remote pg monitor target",
 	Annotations: map[string]string{
 		"name":       "pig do pgmon-rm",
 		"type":       "action",
@@ -328,17 +351,19 @@ var doPgmonRmCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cls := args[0]
-		target := fmt.Sprintf(`/etc/prometheus/targets/pgrds/%s.yml`, cls)
-		logrus.Infof("removing pgsql monitor target %s", cls)
-		return do.RunAnsible(inventory, []string{"infra", "-m", "file", "-b", "-a", fmt.Sprintf(`path=%s state=absent`, target)})
+		return runDoLegacy("pig do pgmon-rm", args, nil, func() error {
+			cls := args[0]
+			target := fmt.Sprintf(`/etc/prometheus/targets/pgrds/%s.yml`, cls)
+			logrus.Infof("removing pgsql monitor target %s", cls)
+			return do.RunAnsible(inventory, []string{"infra", "-m", "file", "-b", "-a", fmt.Sprintf(`path=%s state=absent`, target)})
+		})
 	},
 }
 
 // doNodeAddCmd - Add node to pigsty
 var doNodeAddCmd = &cobra.Command{
-	Use:     "node-add",
-	Short:   "add node to pigsty",
+	Use:   "node-add",
+	Short: "add node to pigsty",
 	Annotations: map[string]string{
 		"name":       "pig do node-add",
 		"type":       "action",
@@ -359,16 +384,18 @@ var doNodeAddCmd = &cobra.Command{
   `,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cls := args[0]
-		command := []string{"node.yml", "-l", cls}
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do node-add", args, nil, func() error {
+			cls := args[0]
+			command := []string{"node.yml", "-l", cls}
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doNodeRmCmd - Remove node from pigsty
 var doNodeRmCmd = &cobra.Command{
-	Use:     "node-rm",
-	Short:   "remove node from pigsty",
+	Use:   "node-rm",
+	Short: "remove node from pigsty",
 	Annotations: map[string]string{
 		"name":       "pig do node-rm",
 		"type":       "action",
@@ -389,16 +416,18 @@ var doNodeRmCmd = &cobra.Command{
   `,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		selector := args[0]
-		command := []string{"node-rm.yml", "-l", selector}
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do node-rm", args, nil, func() error {
+			selector := args[0]
+			command := []string{"node-rm.yml", "-l", selector}
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doNodeRepoCmd - Remove node from pigsty
 var doNodeRepoCmd = &cobra.Command{
-	Use:     "node-repo",
-	Short:   "update node repo",
+	Use:   "node-repo",
+	Short: "update node repo",
 	Annotations: map[string]string{
 		"name":       "pig do node-repo",
 		"type":       "action",
@@ -420,31 +449,33 @@ var doNodeRepoCmd = &cobra.Command{
   modules: local,infra,pgsql,node,extra,mysql,mongo,redis,haproxy,grafana,kube,...
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var selector, module string
-		if len(args) >= 1 {
-			selector = args[0]
-		}
-		if len(args) >= 2 {
-			module = args[1]
-		}
-		if len(args) >= 3 {
-			cmd.Help()
-		}
-		command := []string{"node.yml", "-t", "node_repo"}
-		if selector != "" {
-			command = append(command, "-l", selector)
-		}
-		if module != "" {
-			command = append(command, "-e", fmt.Sprintf("node_repo_modules=%s", module))
-		}
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do node-repo", args, nil, func() error {
+			var selector, module string
+			if len(args) >= 1 {
+				selector = args[0]
+			}
+			if len(args) >= 2 {
+				module = args[1]
+			}
+			if len(args) >= 3 {
+				return cmd.Help()
+			}
+			command := []string{"node.yml", "-t", "node_repo"}
+			if selector != "" {
+				command = append(command, "-l", selector)
+			}
+			if module != "" {
+				command = append(command, "-e", fmt.Sprintf("node_repo_modules=%s", module))
+			}
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doNodePkgCmd - Remove node from pigsty
 var doNodePkgCmd = &cobra.Command{
-	Use:     "node-pkg",
-	Short:   "update node package",
+	Use:   "node-pkg",
+	Short: "update node package",
 	Annotations: map[string]string{
 		"name":       "pig do node-pkg",
 		"type":       "action",
@@ -467,21 +498,23 @@ var doNodePkgCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		selector := args[0]
-		command := []string{"node.yml", "-l", selector, "-t", "node_pkg_extra"}
-		if len(args) > 1 {
-			packages := strings.Join(args[1:], ",")
-			packages = fmt.Sprintf(`{"node_packages":["%s"]}`, packages)
-			command = append(command, "-e", packages)
-		}
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do node-pkg", args, nil, func() error {
+			selector := args[0]
+			command := []string{"node.yml", "-l", selector, "-t", "node_pkg_extra"}
+			if len(args) > 1 {
+				packages := strings.Join(args[1:], ",")
+				packages = fmt.Sprintf(`{"node_packages":["%s"]}`, packages)
+				command = append(command, "-e", packages)
+			}
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doNodeRepoCmd - Remove node from pigsty
 var doRepoBuildCmd = &cobra.Command{
-	Use:     "repo-build",
-	Short:   "rebuild infra repo",
+	Use:   "repo-build",
+	Short: "rebuild infra repo",
 	Annotations: map[string]string{
 		"name":       "pig do repo-build",
 		"type":       "action",
@@ -499,15 +532,17 @@ var doRepoBuildCmd = &cobra.Command{
   pig do repo-build   # rebuild infra repo
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		command := []string{"infra.yml", "-l", "infra", "-t", "repo_build"}
-		return do.RunPlaybook(inventory, command)
+		return runDoLegacy("pig do repo-build", args, nil, func() error {
+			command := []string{"infra.yml", "-l", "infra", "-t", "repo_build"}
+			return do.RunPlaybook(inventory, command)
+		})
 	},
 }
 
 // doRedisAddCmd - Add redis to pigsty
 var doRedisAddCmd = &cobra.Command{
-	Use:     "redis-add",
-	Short:   "add redis to pigsty",
+	Use:   "redis-add",
+	Short: "add redis to pigsty",
 	Annotations: map[string]string{
 		"name":       "pig do redis-add",
 		"type":       "action",
@@ -529,25 +564,27 @@ var doRedisAddCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		selector := args[0]
-		if len(args) == 1 {
-			command := []string{"redis.yml", "-l", selector}
-			return do.RunPlaybook(inventory, command)
-		} else {
-			ports := args[1:]
-			for _, port := range ports {
-				command := []string{"redis.yml", "-l", selector, "-e", fmt.Sprintf("redis_port=%s", port)}
+		return runDoLegacy("pig do redis-add", args, nil, func() error {
+			selector := args[0]
+			if len(args) == 1 {
+				command := []string{"redis.yml", "-l", selector}
 				return do.RunPlaybook(inventory, command)
 			}
-		}
-		return nil
+			for _, port := range args[1:] {
+				command := []string{"redis.yml", "-l", selector, "-e", fmt.Sprintf("redis_port=%s", port)}
+				if err := do.RunPlaybook(inventory, command); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	},
 }
 
 // doRedisRmCmd - Remove redis from pigsty
 var doRedisRmCmd = &cobra.Command{
-	Use:     "redis-rm",
-	Short:   "remove redis from pigsty",
+	Use:   "redis-rm",
+	Short: "remove redis from pigsty",
 	Annotations: map[string]string{
 		"name":       "pig do redis-rm",
 		"type":       "action",
@@ -570,18 +607,22 @@ var doRedisRmCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		selector := args[0]
-		if len(args) == 1 {
-			command := []string{"redis-rm.yml", "-l", selector}
-			return do.RunPlaybook(inventory, command)
-		} else {
-			ports := args[1:]
-			for _, port := range ports {
-				command := []string{"redis-rm.yml", "-l", selector, "-e", fmt.Sprintf("redis_port=%s", port)}
+		return runDoLegacy("pig do redis-rm", args, map[string]interface{}{
+			"uninstall": doRemoveWithUninstall,
+		}, func() error {
+			selector := args[0]
+			if len(args) == 1 {
+				command := []string{"redis-rm.yml", "-l", selector}
 				return do.RunPlaybook(inventory, command)
 			}
-		}
-		return nil
+			for _, port := range args[1:] {
+				command := []string{"redis-rm.yml", "-l", selector, "-e", fmt.Sprintf("redis_port=%s", port)}
+				if err := do.RunPlaybook(inventory, command); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	},
 }
 
@@ -590,23 +631,22 @@ func init() {
 	doPgsqlRmCmd.Flags().BoolVarP(&doRemoveWithUninstall, "uninstall", "u", false, "uninstall packages during removal")
 	doRedisRmCmd.Flags().BoolVarP(&doRemoveWithUninstall, "uninstall", "u", false, "uninstall packages during removal")
 
-	doCmd.AddCommand(doPgsqlAddCmd)
-	doCmd.AddCommand(doPgsqlRmCmd)
-	doCmd.AddCommand(doPgsqlUserCmd)
-	doCmd.AddCommand(doPgsqlDbCmd)
-	doCmd.AddCommand(doPgsqlExtCmd)
-	doCmd.AddCommand(doPgsqlHbaCmd)
-	doCmd.AddCommand(doPgsqlSvcCmd)
-	doCmd.AddCommand(doPgmonAddCmd)
-	doCmd.AddCommand(doPgmonRmCmd)
-
-	doCmd.AddCommand(doNodeAddCmd)
-	doCmd.AddCommand(doNodeRmCmd)
-	doCmd.AddCommand(doNodeRepoCmd)
-	doCmd.AddCommand(doNodePkgCmd)
-	doCmd.AddCommand(doRepoBuildCmd)
-
-	doCmd.AddCommand(doRedisAddCmd)
-	doCmd.AddCommand(doRedisRmCmd)
-
+	doCmd.AddCommand(
+		doPgsqlAddCmd,
+		doPgsqlRmCmd,
+		doPgsqlUserCmd,
+		doPgsqlDbCmd,
+		doPgsqlExtCmd,
+		doPgsqlHbaCmd,
+		doPgsqlSvcCmd,
+		doPgmonAddCmd,
+		doPgmonRmCmd,
+		doNodeAddCmd,
+		doNodeRmCmd,
+		doNodeRepoCmd,
+		doNodePkgCmd,
+		doRepoBuildCmd,
+		doRedisAddCmd,
+		doRedisRmCmd,
+	)
 }
