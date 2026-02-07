@@ -2,12 +2,16 @@ package get
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestNetworkConditionSimple(t *testing.T) {
+	if os.Getenv("PIG_NETWORK_TEST") == "" {
+		t.Skip("set PIG_NETWORK_TEST=1 to run network probe test")
+	}
 	start := time.Now()
 	NetworkCondition()
 	fmt.Printf("time: %v, result: %v, region: %v, latest: %v\n", time.Since(start), Source, Region, LatestVersion)

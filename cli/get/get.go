@@ -34,6 +34,99 @@ type VersionInfo struct {
 	DownloadURL string
 }
 
+type probeResult struct {
+	tag      string
+	ok       bool
+	versions []VersionInfo
+}
+
+func probeChecksumsEndpoint(ctx context.Context, timeout time.Duration, baseURL, tag string, details bool, resultChan chan<- probeResult) {
+	url := baseURL + "/src/checksums"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		if details {
+			fmt.Printf("%-10s request error\n", tag)
+		}
+		resultChan <- probeResult{tag: tag}
+		return
+	}
+
+	client := &http.Client{Timeout: timeout}
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		if details {
+			fmt.Printf("%-10s unreachable\n", tag)
+		}
+		resultChan <- probeResult{tag: tag}
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		resultChan <- probeResult{tag: tag}
+		return
+	}
+
+	versions, err := ParseChecksums(resp.Body, tag)
+	if err != nil {
+		if details {
+			fmt.Printf("%-10s parse error: %v\n", tag, err)
+		}
+		resultChan <- probeResult{tag: tag}
+		return
+	}
+
+	if details {
+		fmt.Printf("%s  ping ok: %d ms\n", tag, time.Since(start).Milliseconds())
+	}
+
+	resultChan <- probeResult{
+		tag:      tag,
+		ok:       len(versions) > 0,
+		versions: versions,
+	}
+}
+
+func probeGoogle(ctx context.Context, timeout time.Duration, details bool, resultChan chan<- probeResult) {
+	printTag := "google.com"
+	url := "https://www.google.com"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		if details {
+			fmt.Printf("%-10s request error\n", printTag)
+		}
+		resultChan <- probeResult{tag: "google"}
+		return
+	}
+
+	client := &http.Client{Timeout: timeout}
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		if details {
+			fmt.Printf("%-10s request error\n", printTag)
+		}
+		resultChan <- probeResult{tag: "google"}
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		if details {
+			fmt.Printf("%-10s ping ok: %d ms\n", printTag, time.Since(start).Milliseconds())
+		}
+		resultChan <- probeResult{tag: "google", ok: true}
+		return
+	}
+
+	if details {
+		fmt.Printf("%-10s ping fail: %d ms\n", printTag, time.Since(start).Milliseconds())
+	}
+	resultChan <- probeResult{tag: "google"}
+}
+
 // NetworkCondition probes repository endpoints and returns the fastest responding one.
 func NetworkCondition() string {
 	return NetworkConditionWithTimeout(DefaultTimeout)
@@ -44,91 +137,11 @@ func NetworkConditionWithTimeout(timeout time.Duration) string {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	type result struct {
-		source string
-		data   []VersionInfo
-	}
-	resultChan := make(chan result, 3)
+	resultChan := make(chan probeResult, 3)
 
-	probeEndpoint := func(ctx context.Context, baseURL, tag string) {
-		url := baseURL + "/src/checksums"
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			if Details {
-				fmt.Printf("%-10s request error\n", tag)
-			}
-			resultChan <- result{"", nil}
-			return
-		}
-
-		client := &http.Client{Timeout: timeout}
-		start := time.Now()
-		resp, err := client.Do(req)
-		if err != nil {
-			if Details {
-				fmt.Printf("%-10s unreachable\n", tag)
-			}
-			resultChan <- result{"", nil}
-			return
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode == http.StatusOK {
-			versions, err := ParseChecksums(resp.Body, tag)
-			if err != nil {
-				if Details {
-					fmt.Printf("%-10s parse error: %v\n", tag, err)
-				}
-				resultChan <- result{"", nil}
-				return
-			}
-			if Details {
-				fmt.Printf("%s  ping ok: %d ms\n", tag, time.Since(start).Milliseconds())
-			}
-			resultChan <- result{tag, versions}
-			return
-		}
-		resultChan <- result{"", nil}
-	}
-
-	probeGoogle := func(ctx context.Context) {
-		tag := "google.com"
-		url := "https://www.google.com"
-		req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
-		if err != nil {
-			if Details {
-				fmt.Printf("%-10s request error\n", tag)
-			}
-			resultChan <- result{"google", nil}
-			return
-		}
-		client := &http.Client{Timeout: timeout}
-		start := time.Now()
-		resp, err := client.Do(req)
-		if err != nil {
-			if Details {
-				fmt.Printf("%-10s request error\n", tag)
-			}
-			resultChan <- result{"google", nil}
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
-			if Details {
-				fmt.Printf("%-10s ping ok: %d ms\n", tag, time.Since(start).Milliseconds())
-			}
-			resultChan <- result{"google_ok", nil}
-		} else {
-			if Details {
-				fmt.Printf("%-10s ping fail: %d ms\n", tag, time.Since(start).Milliseconds())
-			}
-			resultChan <- result{"google_fail", nil}
-		}
-	}
-
-	go probeGoogle(ctx)
-	go probeEndpoint(ctx, config.RepoPigstyIO, ViaIO)
-	go probeEndpoint(ctx, config.RepoPigstyCC, ViaCC)
+	go probeGoogle(ctx, timeout, Details, resultChan)
+	go probeChecksumsEndpoint(ctx, timeout, config.RepoPigstyIO, ViaIO, Details, resultChan)
+	go probeChecksumsEndpoint(ctx, timeout, config.RepoPigstyCC, ViaCC, Details, resultChan)
 
 	var ioData, ccData []VersionInfo
 	ioSuccess := false
@@ -136,30 +149,29 @@ func NetworkConditionWithTimeout(timeout time.Duration) string {
 	googleSuccess := false
 	receivedCount := 0
 
+LOOP:
 	for receivedCount < 3 {
 		select {
 		case res := <-resultChan:
 			receivedCount++
-			switch res.source {
+			switch res.tag {
 			case ViaIO:
-				if len(res.data) > 0 {
+				if res.ok {
 					ioSuccess = true
-					ioData = res.data
+					ioData = res.versions
 				}
 			case ViaCC:
-				if len(res.data) > 0 {
+				if res.ok {
 					ccSuccess = true
-					ccData = res.data
+					ccData = res.versions
 				}
-			case "google_ok":
-				googleSuccess = true
+			case "google":
+				googleSuccess = res.ok
 			}
 		case <-ctx.Done():
-			goto DONE
+			break LOOP
 		}
 	}
-
-DONE:
 	if ioSuccess {
 		Source = ViaIO
 		AllVersions = ioData

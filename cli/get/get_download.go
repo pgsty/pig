@@ -14,6 +14,132 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var pigstyVersionRe = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-(?:a|b|c|alpha|beta|rc)\d+)?$`)
+
+type progressReader struct {
+	r        io.Reader
+	total    int64
+	filename string
+	sizeMiB  float64
+
+	readBytes   int64
+	lastPercent int
+	printed     bool
+}
+
+func (p *progressReader) Read(buf []byte) (int, error) {
+	n, err := p.r.Read(buf)
+	if n <= 0 {
+		return n, err
+	}
+
+	p.readBytes += int64(n)
+	if p.total > 0 {
+		percent := int(float64(p.readBytes) / float64(p.total) * 100)
+		if percent != p.lastPercent {
+			fmt.Printf("\rGet %s %.1f MiB: %d%%", p.filename, p.sizeMiB, percent)
+			p.lastPercent = percent
+			p.printed = true
+		}
+	}
+	return n, err
+}
+
+func ensureTargetDir(targetDir string) (string, error) {
+	if targetDir == "" {
+		var err error
+		targetDir, err = os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current directory: %w", err)
+		}
+	}
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create target directory: %w", err)
+	}
+	return targetDir, nil
+}
+
+func md5sumFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := md5.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func shouldSkipOrRemoveExistingFile(targetPath string, expectedChecksum string) (skip bool, err error) {
+	if _, err := os.Stat(targetPath); err != nil {
+		return false, nil
+	}
+
+	if expectedChecksum == "" {
+		logrus.Infof("file exists, skipping download: %s", targetPath)
+		return true, nil
+	}
+
+	existingChecksum, err := md5sumFile(targetPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to open existing file: %w", err)
+	}
+
+	if existingChecksum == expectedChecksum {
+		logrus.Infof("file exists with matching checksum, skipping: %s", targetPath)
+		return true, nil
+	}
+
+	logrus.Warnf("removing existing file with mismatched checksum: %s", targetPath)
+	if err := os.Remove(targetPath); err != nil {
+		return false, fmt.Errorf("failed to remove existing file: %w", err)
+	}
+	return false, nil
+}
+
+func downloadWithMD5(url, targetPath, filename string) (checksum string, sizeMiB float64, err error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to download file: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", 0, fmt.Errorf("download failed: %s", resp.Status)
+	}
+
+	out, err := os.Create(targetPath)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer out.Close()
+
+	size := resp.ContentLength
+	sizeMiB = float64(size) / 1024 / 1024
+
+	h := md5.New()
+	reader := &progressReader{
+		r:        resp.Body,
+		total:    size,
+		filename: filename,
+		sizeMiB:  sizeMiB,
+	}
+
+	n, err := io.CopyBuffer(io.MultiWriter(out, h), reader, make([]byte, 32*1024))
+	if reader.printed {
+		fmt.Println() // New line after progress bar.
+	}
+	if err != nil {
+		return "", sizeMiB, fmt.Errorf("download error: %w", err)
+	}
+	if size <= 0 {
+		sizeMiB = float64(n) / 1024 / 1024
+	}
+	return hex.EncodeToString(h.Sum(nil)), sizeMiB, nil
+}
+
 // DownloadSrc downloads the pigsty source package of specified version to target directory
 func DownloadSrc(version string, targetDir string) error {
 	// Get version info
@@ -21,126 +147,42 @@ func DownloadSrc(version string, targetDir string) error {
 	if verInfo == nil {
 		return fmt.Errorf("invalid version: %s", version)
 	}
+	version = verInfo.Version
 
-	// Use current directory if targetDir is empty
-	if targetDir == "" {
-		var err error
-		targetDir, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get current directory: %w", err)
-		}
-	}
-
-	// Create target directory if not exists
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("failed to create target directory: %w", err)
+	var err error
+	targetDir, err = ensureTargetDir(targetDir)
+	if err != nil {
+		return err
 	}
 
 	filename := fmt.Sprintf("pigsty-%s.tgz", version)
 	targetPath := filepath.Join(targetDir, filename)
 
-	// Check if file already exists
-	if _, err := os.Stat(targetPath); err == nil {
-		// If we have checksum info, verify existing file
-		if verInfo.Checksum != "" {
-			f, err := os.Open(targetPath)
-			if err != nil {
-				return fmt.Errorf("failed to open existing file: %w", err)
-			}
-			defer f.Close()
-
-			h := md5.New()
-			if _, err := io.Copy(h, f); err != nil {
-				return fmt.Errorf("failed to calculate checksum: %w", err)
-			}
-			existingChecksum := hex.EncodeToString(h.Sum(nil))
-
-			if existingChecksum == verInfo.Checksum {
-				logrus.Infof("file exists with matching checksum, skipping: %s", targetPath)
-				return nil
-			}
-
-			// Remove existing file with mismatched checksum
-			logrus.Warnf("removing existing file with mismatched checksum: %s", targetPath)
-			if err := os.Remove(targetPath); err != nil {
-				return fmt.Errorf("failed to remove existing file: %w", err)
-			}
-		} else {
-			// No checksum available, skip if file exists
-			logrus.Infof("file exists, skipping download: %s", targetPath)
-			return nil
-		}
+	skip, err := shouldSkipOrRemoveExistingFile(targetPath, verInfo.Checksum)
+	if err != nil {
+		return err
+	}
+	if skip {
+		return nil
 	}
 
 	// Start download
 	logrus.Infof("downloading: %s", verInfo.DownloadURL)
-	resp, err := http.Get(verInfo.DownloadURL)
+	downloadedChecksum, sizeMiB, err := downloadWithMD5(verInfo.DownloadURL, targetPath, filename)
 	if err != nil {
-		return fmt.Errorf("failed to download file: %w", err)
+		return err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed: %s", resp.Status)
-	}
-
-	// Create output file
-	out, err := os.Create(targetPath)
-	if err != nil {
-		return fmt.Errorf("failed to create output file: %w", err)
-	}
-	defer out.Close()
-
-	// Setup progress tracking
-	size := resp.ContentLength
-	progress := 0
-	lastProgress := 0
-	sizeInMiB := float64(size) / 1024 / 1024
-
-	// Create hash writer to verify checksum
-	h := md5.New()
-	buf := make([]byte, 32*1024)
-
-	// Copy data with progress
-	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			// Write to file and hash
-			if _, err := out.Write(buf[:n]); err != nil {
-				return fmt.Errorf("failed to write file: %w", err)
-			}
-			if _, err := h.Write(buf[:n]); err != nil {
-				return fmt.Errorf("failed to calculate checksum: %w", err)
-			}
-
-			// Update progress
-			progress += n
-			currentProgress := int(float64(progress) / float64(size) * 100)
-			if currentProgress != lastProgress {
-				fmt.Printf("\rGet %s %.1f MiB: %d%%", filename, sizeInMiB, currentProgress)
-				lastProgress = currentProgress
-			}
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("download error: %w", err)
-		}
-	}
-	fmt.Println() // New line after progress bar
 
 	// Verify checksum if available
-	downloadedChecksum := hex.EncodeToString(h.Sum(nil))
 	if verInfo.Checksum != "" {
 		if downloadedChecksum != verInfo.Checksum {
 			logrus.Warnf("removing file due to checksum mismatch")
-			os.Remove(targetPath)
+			_ = os.Remove(targetPath)
 			return fmt.Errorf("checksum mismatch: expected %s, got %s", verInfo.Checksum, downloadedChecksum)
 		}
 	}
 
-	logrus.Infof("downloaded: %s (%.1f MiB, %s)", targetPath, sizeInMiB, downloadedChecksum)
+	logrus.Infof("downloaded: %s (%.1f MiB, %s)", targetPath, sizeMiB, downloadedChecksum)
 	return nil
 }
 
@@ -154,8 +196,7 @@ func IsValidVersion(version string) *VersionInfo {
 	}
 
 	// Check if version matches expected format
-	re := regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-(?:a|b|c|alpha|beta|rc)\d+)?$`)
-	if !re.MatchString(version) {
+	if !pigstyVersionRe.MatchString(version) {
 		return nil
 	}
 
