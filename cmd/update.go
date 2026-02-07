@@ -15,19 +15,9 @@ var updateRegion string
 
 // updateCmd represents the installation command
 var updateCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Upgrade pig itself",
-	Annotations: map[string]string{
-		"name":       "pig update",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "30000",
-	},
+	Use:          "update",
+	Short:        "Upgrade pig itself",
+	Annotations:  ancsAnn("pig update", "action", "volatile", "unsafe", true, "medium", "recommended", "root", 30000),
 	Aliases:      []string{"upd", "u"},
 	SilenceUsage: true,
 	Example: `
@@ -37,7 +27,7 @@ var updateCmd = &cobra.Command{
   pig update -v 1.0.0 		    # update pig to version 1.0.0
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runStyLegacy("pig update", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleSty, "pig update", args, map[string]interface{}{
 			"version": updateVersion,
 			"region":  updateRegion,
 		}, func() error {

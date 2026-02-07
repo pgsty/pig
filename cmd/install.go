@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"pig/cli/ext"
 	"pig/cli/install"
-	"strconv"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -22,20 +21,10 @@ var (
 
 // installCmd represents the install command
 var installCmd = &cobra.Command{
-	Use:   "install",
-	Short: "Install packages using native package manager",
-	Annotations: map[string]string{
-		"name":       "pig install",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "30000",
-	},
-	Aliases: []string{"i", "ins"},
+	Use:         "install",
+	Short:       "Install packages using native package manager",
+	Annotations: ancsAnn("pig install", "action", "stable", "restricted", true, "low", "none", "root", 30000),
+	Aliases:     []string{"i", "ins"},
 	Long: `pig install - Install packages using native package manager with alias translation
 
 This command acts like a smart wrapper around yum/dnf/apt-get, providing automatic
@@ -58,7 +47,7 @@ Examples:
   pig install pg_vector=1.0.0          # install specific version
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runExtLegacy("pig install", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleExt, "pig install", args, map[string]interface{}{
 			"version":        installPgVer,
 			"path":           installPgConfig,
 			"yes":            installYes,
@@ -83,46 +72,17 @@ Examples:
 
 // installProbeVersion returns the PostgreSQL version to use
 func installProbeVersion() (int, error) {
-	// check args
-	if installPgVer != 0 && installPgConfig != "" {
-		return 0, fmt.Errorf("both pg version and pg_config path are specified, please specify only one")
-	}
-
-	// detect postgres installation, but don't fail if not found
-	err := ext.DetectPostgres()
-	if err != nil {
-		logrus.Debugf("failed to detect PostgreSQL: %v", err)
-	}
-
-	// if pg version is specified, try if we can find the actual installation
-	if installPgVer != 0 {
-		_, err := ext.GetPostgres(strconv.Itoa(installPgVer))
-		if err != nil {
-			logrus.Debugf("PostgreSQL installation %d not found: %v , but it's ok", installPgVer, err)
-			// if version is explicitly given, we can fallback without any installation
-		}
-		return installPgVer, nil
-	}
-
-	// if pg_config is specified, we must find the actual installation, to get the major version
-	if installPgConfig != "" {
-		_, err := ext.GetPostgres(installPgConfig)
-		if err != nil {
-			return 0, fmt.Errorf("failed to get PostgreSQL by pg_config path %s: %w", installPgConfig, err)
-		} else {
-			return ext.Postgres.MajorVersion, nil
-		}
-	}
-
-	// if none given, we can fall back to active installation, or if we can't infer the version, we can fallback to no version tabulate
-	if ext.Active != nil {
-		logrus.Debugf("fallback to active PostgreSQL: %d", ext.Active.MajorVersion)
-		ext.Postgres = ext.Active
-		return ext.Active.MajorVersion, nil
-	} else {
-		logrus.Debugf("no active PostgreSQL found, fall back to the latest Major %d", ext.PostgresLatestMajorVersion)
-		return ext.PostgresLatestMajorVersion, nil // 18 by default
-	}
+	return probePostgresMajorVersion(pgMajorProbeOptions{
+		Version:        installPgVer,
+		PGConfig:       installPgConfig,
+		DefaultVersion: ext.PostgresLatestMajorVersion,
+		BothSetError: func() error {
+			return fmt.Errorf("both pg version and pg_config path are specified, please specify only one")
+		},
+		PGConfigError: func(err error) error {
+			return fmt.Errorf("failed to get PostgreSQL by pg_config path %s: %w", installPgConfig, err)
+		},
+	})
 }
 
 func init() {

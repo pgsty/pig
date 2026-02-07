@@ -6,7 +6,6 @@ package cmd
 
 import (
 	"pig/cli/pgbackrest"
-	"pig/internal/output"
 
 	"github.com/spf13/cobra"
 )
@@ -18,27 +17,13 @@ import (
 // Global config
 var pbConfig *pgbackrest.Config
 
-func runPbLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
-	return runLegacyStructured(output.MODULE_PB, command, args, params, fn)
-}
-
 // pbCmd represents the pgbackrest command
 var pbCmd = &cobra.Command{
-	Use:     "pgbackrest",
-	Short:   "Manage pgBackRest backup & restore",
-	Aliases: []string{"pb"},
-	GroupID: "pigsty",
-	Annotations: map[string]string{
-		"name":       "pig pgbackrest",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
+	Use:         "pgbackrest",
+	Short:       "Manage pgBackRest backup & restore",
+	Aliases:     []string{"pb"},
+	GroupID:     "pigsty",
+	Annotations: ancsAnn("pig pgbackrest", "query", "stable", "safe", true, "safe", "none", "current", 100),
 	Long: `Manage pgBackRest backup and point-in-time recovery.
 
 This command wraps pgbackrest to provide simplified backup management,

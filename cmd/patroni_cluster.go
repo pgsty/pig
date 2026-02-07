@@ -25,17 +25,7 @@ var patroniListCmd = &cobra.Command{
   pig pt list -W           # Watch mode
   pig pt list -w 5         # Watch with 5s interval
   pig pt list -w 0.5       # Watch with 0.5s interval`,
-	Annotations: map[string]string{
-		"name":       "pig patroni list",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "2000",
-	},
+	Annotations: ancsAnn("pig patroni list", "query", "stable", "safe", true, "safe", "none", "dbsu", 2000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		watch, _ := cmd.Flags().GetBool("watch")
 		interval, _ := cmd.Flags().GetFloat64("interval")
@@ -72,19 +62,12 @@ var patroniRestartCmd = &cobra.Command{
 	Use:     "restart [member]",
 	Aliases: []string{"reboot", "rt"},
 	Short:   "Restart PostgreSQL instance(s) via Patroni",
-	Annotations: map[string]string{
-		"name":       "pig patroni restart",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "high",
-		"confirm":    "recommended",
-		"os_user":    "dbsu",
-		"cost":       "30000",
-		// Parameter constraints
-		"flags.role.choices": "leader,replica,any",
-	},
+	Annotations: mergeAnn(
+		ancsAnn("pig patroni restart", "action", "volatile", "unsafe", false, "high", "recommended", "dbsu", 30000),
+		map[string]string{
+			"flags.role.choices": "leader,replica,any",
+		},
+	),
 	Long: `Restart PostgreSQL instance(s) managed by Patroni.
 
 This command uses patronictl restart to perform a rolling restart of
@@ -112,7 +95,7 @@ while keeping Patroni running.`,
 			Force:   force,
 			Pending: pending,
 		}
-		return runPatroniLegacy("pig patroni restart", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePt, "pig patroni restart", args, map[string]interface{}{
 			"member":  member,
 			"force":   force,
 			"pending": pending,
@@ -125,26 +108,16 @@ while keeping Patroni running.`,
 
 // patroniReloadCmd: pig pt reload - reload PostgreSQL config via patronictl
 var patroniReloadCmd = &cobra.Command{
-	Use:     "reload",
-	Aliases: []string{"rl", "hup"},
-	Short:   "Reload PostgreSQL configuration via Patroni",
-	Annotations: map[string]string{
-		"name":       "pig patroni reload",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "5000",
-	},
+	Use:         "reload",
+	Aliases:     []string{"rl", "hup"},
+	Short:       "Reload PostgreSQL configuration via Patroni",
+	Annotations: ancsAnn("pig patroni reload", "action", "volatile", "restricted", true, "low", "none", "dbsu", 5000),
 	Long: `Reload PostgreSQL configuration for all cluster members.
 
 This triggers a configuration reload (similar to pg_reload_conf()) on all
 PostgreSQL instances managed by Patroni.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPatroniLegacy("pig patroni reload", args, nil, func() error {
+		return runLegacyStructured(legacyModulePt, "pig patroni reload", args, nil, func() error {
 			return patroni.Reload(utils.GetDBSU(patroniDBSU))
 		})
 	},
@@ -152,20 +125,10 @@ PostgreSQL instances managed by Patroni.`,
 
 // patroniReinitCmd: pig pt reinit <member>
 var patroniReinitCmd = &cobra.Command{
-	Use:     "reinit <member>",
-	Aliases: []string{"ri"},
-	Short:   "Reinitialize a cluster member",
-	Annotations: map[string]string{
-		"name":       "pig patroni reinit",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "critical",
-		"confirm":    "required",
-		"os_user":    "dbsu",
-		"cost":       "300000",
-	},
+	Use:         "reinit <member>",
+	Aliases:     []string{"ri"},
+	Short:       "Reinitialize a cluster member",
+	Annotations: ancsAnn("pig patroni reinit", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 300000),
 	Long: `Reinitialize a cluster member by rebuilding it from the leader.
 
 WARNING: This will DELETE all data on the target member and rebuild it
@@ -184,7 +147,7 @@ from scratch using pg_basebackup from the current leader.`,
 			Force:  force,
 			Wait:   wait,
 		}
-		return runPatroniLegacy("pig patroni reinit", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePt, "pig patroni reinit", args, map[string]interface{}{
 			"member": args[0],
 			"force":  force,
 			"wait":   wait,
@@ -209,17 +172,7 @@ The old leader becomes a replica after switchover.`,
   pig pt switchover --candidate pg-test-2    # switchover to specific member
   pig pt switchover -f                       # switchover without confirmation
   pig pt switchover --scheduled "2024-01-01T12:00:00"  # scheduled switchover`,
-	Annotations: map[string]string{
-		"name":       "pig patroni switchover",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "high",
-		"confirm":    "required",
-		"os_user":    "dbsu",
-		"cost":       "300000",
-	},
+	Annotations: ancsAnn("pig patroni switchover", "action", "volatile", "unsafe", false, "high", "required", "dbsu", 300000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		leader, _ := cmd.Flags().GetString("leader")
 		candidate, _ := cmd.Flags().GetString("candidate")
@@ -269,17 +222,7 @@ the leader is truly unavailable.`,
   pig pt failover -f                       # failover without confirmation
   pig pt failover -f -o json               # structured JSON output
   pig pt failover --plan                   # show execution plan`,
-	Annotations: map[string]string{
-		"name":       "pig patroni failover",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "critical",
-		"confirm":    "required",
-		"os_user":    "dbsu",
-		"cost":       "300000",
-	},
+	Annotations: ancsAnn("pig patroni failover", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 300000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		candidate, _ := cmd.Flags().GetString("candidate")
 		force, _ := cmd.Flags().GetBool("force")
@@ -308,27 +251,17 @@ the leader is truly unavailable.`,
 
 // patroniPauseCmd: pig pt pause
 var patroniPauseCmd = &cobra.Command{
-	Use:     "pause",
-	Aliases: []string{"p"},
-	Short:   "Pause automatic failover",
-	Annotations: map[string]string{
-		"name":       "pig patroni pause",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "dbsu",
-		"cost":       "5000",
-	},
-	Long: `Pause automatic failover for the Patroni cluster.`,
+	Use:         "pause",
+	Aliases:     []string{"p"},
+	Short:       "Pause automatic failover",
+	Annotations: ancsAnn("pig patroni pause", "action", "volatile", "restricted", true, "medium", "recommended", "dbsu", 5000),
+	Long:        `Pause automatic failover for the Patroni cluster.`,
 	Example: `
   pig pt pause              # Pause automatic failover
   pig pt pause --wait       # Wait for all members to confirm`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wait, _ := cmd.Flags().GetBool("wait")
-		return runPatroniLegacy("pig patroni pause", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePt, "pig patroni pause", args, map[string]interface{}{
 			"wait": wait,
 		}, func() error {
 			return patroni.Pause(utils.GetDBSU(patroniDBSU), wait)
@@ -338,27 +271,17 @@ var patroniPauseCmd = &cobra.Command{
 
 // patroniResumeCmd: pig pt resume
 var patroniResumeCmd = &cobra.Command{
-	Use:     "resume",
-	Aliases: []string{"r"},
-	Short:   "Resume automatic failover",
-	Annotations: map[string]string{
-		"name":       "pig patroni resume",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "5000",
-	},
-	Long: `Resume automatic failover for the Patroni cluster.`,
+	Use:         "resume",
+	Aliases:     []string{"r"},
+	Short:       "Resume automatic failover",
+	Annotations: ancsAnn("pig patroni resume", "action", "volatile", "restricted", true, "low", "none", "dbsu", 5000),
+	Long:        `Resume automatic failover for the Patroni cluster.`,
 	Example: `
   pig pt resume              # Resume automatic failover
   pig pt resume --wait       # Wait for all members to confirm`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wait, _ := cmd.Flags().GetBool("wait")
-		return runPatroniLegacy("pig patroni resume", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePt, "pig patroni resume", args, map[string]interface{}{
 			"wait": wait,
 		}, func() error {
 			return patroni.Resume(utils.GetDBSU(patroniDBSU), wait)

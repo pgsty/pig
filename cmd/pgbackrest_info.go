@@ -20,20 +20,10 @@ var pbInfoSet string
 var pbInfoRaw bool
 
 var pbInfoCmd = &cobra.Command{
-	Use:     "info",
-	Aliases: []string{"i"},
-	Short:   "Show backup repository info",
-	Annotations: map[string]string{
-		"name":       "pig pgbackrest info",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "5000",
-	},
+	Use:         "info",
+	Aliases:     []string{"i"},
+	Short:       "Show backup repository info",
+	Annotations: ancsAnn("pig pgbackrest info", "query", "volatile", "safe", true, "safe", "none", "dbsu", 5000),
 	Long: `Display detailed information about the backup repository including
 all backup sets, recovery window, WAL archive status, and backup list.
 
@@ -97,20 +87,13 @@ var pbLsCmd = &cobra.Command{
 	Use:     "ls [type]",
 	Aliases: []string{"l", "list"},
 	Short:   "List backups, repositories, or stanzas",
-	Annotations: map[string]string{
-		"name":       "pig pgbackrest ls",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "5000",
-		// Parameter constraints
-		"args.type.desc": "resource type to list",
-		"args.type.type": "enum",
-	},
+	Annotations: mergeAnn(
+		ancsAnn("pig pgbackrest ls", "query", "volatile", "safe", true, "safe", "none", "dbsu", 5000),
+		map[string]string{
+			"args.type.desc": "resource type to list",
+			"args.type.type": "enum",
+		},
+	),
 	Long: `List resources in the backup repository.
 
 Types:
@@ -128,7 +111,7 @@ Examples:
 		if len(args) > 0 {
 			listType = args[0]
 		}
-		return runPbLegacy("pig pgbackrest ls", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest ls", args, map[string]interface{}{
 			"type": listType,
 		}, func() error {
 			return pgbackrest.Ls(pbConfig, &pgbackrest.LsOptions{

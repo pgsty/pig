@@ -3,7 +3,6 @@ package cmd
 import (
 	"pig/cli/build"
 	"pig/cli/ext"
-	"pig/internal/output"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -23,27 +22,13 @@ var (
 	buildMirror    bool
 )
 
-func runBuildLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
-	return runLegacyStructured(output.MODULE_BUILD, command, args, params, fn)
-}
-
 // buildCmd represents the top-level `build` command
 var buildCmd = &cobra.Command{
-	Use:   "build",
-	Short: "Build Postgres Extension",
-	Annotations: map[string]string{
-		"name":       "pig build",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
-	Aliases: []string{"b"},
-	GroupID: "pgext",
+	Use:         "build",
+	Short:       "Build Postgres Extension",
+	Annotations: ancsAnn("pig build", "query", "stable", "safe", true, "safe", "none", "current", 100),
+	Aliases:     []string{"b"},
+	GroupID:     "pgext",
 	Example: `pig build - Build Postgres Extension
 
 Environment Setup:
@@ -75,20 +60,10 @@ Quick Start:
 
 // buildRepoCmd represents the `build repo` command
 var buildRepoCmd = &cobra.Command{
-	Use:   "repo",
-	Short: "Initialize required repos",
-	Annotations: map[string]string{
-		"name":       "pig build repo",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"r"},
+	Use:         "repo",
+	Short:       "Initialize required repos",
+	Annotations: ancsAnn("pig build repo", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
+	Aliases:     []string{"r"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repoRemove = true
 		repoUpdate = true
@@ -98,22 +73,12 @@ var buildRepoCmd = &cobra.Command{
 
 // buildInitCmd represents the `build init` command
 var buildToolCmd = &cobra.Command{
-	Use:   "tool [mode]",
-	Short: "Initialize build tools",
-	Annotations: map[string]string{
-		"name":       "pig build tool",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"t"},
+	Use:         "tool [mode]",
+	Short:       "Initialize build tools",
+	Annotations: ancsAnn("pig build tool", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
+	Aliases:     []string{"t"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBuildLegacy("pig build tool", args, nil, func() error {
+		return runLegacyStructured(legacyModuleBuild, "pig build tool", args, nil, func() error {
 			var mode string
 			if len(args) > 0 {
 				mode = args[0]
@@ -126,23 +91,13 @@ var buildToolCmd = &cobra.Command{
 
 // buildProxyCmd represents the `build proxy` command
 var buildProxyCmd = &cobra.Command{
-	Use:   "proxy <id@remote> <local>",
-	Short: "Initialize build proxy",
-	Annotations: map[string]string{
-		"name":       "pig build proxy",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "5000",
-	},
-	Args:    cobra.MaximumNArgs(2),
-	Aliases: []string{"x"},
+	Use:         "proxy <id@remote> <local>",
+	Short:       "Initialize build proxy",
+	Annotations: ancsAnn("pig build proxy", "action", "stable", "safe", true, "low", "none", "current", 5000),
+	Args:        cobra.MaximumNArgs(2),
+	Aliases:     []string{"x"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBuildLegacy("pig build proxy", args, nil, func() error {
+		return runLegacyStructured(legacyModuleBuild, "pig build proxy", args, nil, func() error {
 			var remote, local string
 			if len(args) == 0 {
 				return build.InstallProxy()
@@ -160,22 +115,12 @@ var buildProxyCmd = &cobra.Command{
 
 // buildRustCmd represents the `build rust` command
 var buildRustCmd = &cobra.Command{
-	Use:   "rust",
-	Short: "Install Rust toolchain",
-	Annotations: map[string]string{
-		"name":       "pig build rust",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"rs"},
+	Use:         "rust",
+	Short:       "Install Rust toolchain",
+	Annotations: ancsAnn("pig build rust", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
+	Aliases:     []string{"rs"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBuildLegacy("pig build rust", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleBuild, "pig build rust", args, map[string]interface{}{
 			"yes": buildRustYes,
 		}, func() error {
 			return build.SetupRust(buildRustYes)
@@ -185,22 +130,12 @@ var buildRustCmd = &cobra.Command{
 
 // buildPgrxCmd represents the `build pgrx` command
 var buildPgrxCmd = &cobra.Command{
-	Use:   "pgrx",
-	Short: "Install and initialize pgrx (requires Rust)",
-	Annotations: map[string]string{
-		"name":       "pig build pgrx",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"rx"},
+	Use:         "pgrx",
+	Short:       "Install and initialize pgrx (requires Rust)",
+	Annotations: ancsAnn("pig build pgrx", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
+	Aliases:     []string{"rx"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBuildLegacy("pig build pgrx", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleBuild, "pig build pgrx", args, map[string]interface{}{
 			"pgrx": buildPgrxVer,
 			"pg":   buildPgrxPg,
 		}, func() error {
@@ -211,24 +146,14 @@ var buildPgrxCmd = &cobra.Command{
 
 // buildSpecCmd represents the `build spec` command
 var buildSpecCmd = &cobra.Command{
-	Use:   "spec",
-	Short: "Initialize building spec repo",
-	Annotations: map[string]string{
-		"name":       "pig build spec",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Long:    "Download and sync build spec repository via tarball and incremental rsync",
-	Aliases: []string{"s"},
-	Args:    cobra.NoArgs,
+	Use:         "spec",
+	Short:       "Initialize building spec repo",
+	Annotations: ancsAnn("pig build spec", "action", "volatile", "safe", true, "low", "none", "root", 60000),
+	Long:        "Download and sync build spec repository via tarball and incremental rsync",
+	Aliases:     []string{"s"},
+	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBuildLegacy("pig build spec", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleBuild, "pig build spec", args, map[string]interface{}{
 			"force":  buildSpecForce,
 			"mirror": buildMirror,
 		}, func() error {
@@ -239,23 +164,13 @@ var buildSpecCmd = &cobra.Command{
 
 // buildGetCmd represents the `build get` command
 var buildGetCmd = &cobra.Command{
-	Use:   "get <pkg...>",
-	Short: "Download source code tarball",
-	Annotations: map[string]string{
-		"name":       "pig build get",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "300000",
-	},
-	Aliases: []string{"g"},
-	Args:    cobra.MinimumNArgs(1),
+	Use:         "get <pkg...>",
+	Short:       "Download source code tarball",
+	Annotations: ancsAnn("pig build get", "action", "volatile", "safe", true, "low", "none", "root", 300000),
+	Aliases:     []string{"g"},
+	Args:        cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBuildLegacy("pig build get", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleBuild, "pig build get", args, map[string]interface{}{
 			"force":  buildGetForce,
 			"mirror": buildMirror,
 		}, func() error {
@@ -266,23 +181,13 @@ var buildGetCmd = &cobra.Command{
 
 // buildDepCmd represents the `build dep` command
 var buildDepCmd = &cobra.Command{
-	Use:   "dep <pkg...>",
-	Short: "Install extension build dependencies",
-	Annotations: map[string]string{
-		"name":       "pig build dep",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "300000",
-	},
-	Aliases: []string{"d"},
-	Args:    cobra.MinimumNArgs(1),
+	Use:         "dep <pkg...>",
+	Short:       "Install extension build dependencies",
+	Annotations: ancsAnn("pig build dep", "action", "volatile", "unsafe", true, "low", "none", "root", 300000),
+	Aliases:     []string{"d"},
+	Args:        cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBuildLegacy("pig build dep", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleBuild, "pig build dep", args, map[string]interface{}{
 			"pg": buildDepPg,
 		}, func() error {
 			return build.InstallDepsList(args, buildDepPg)
@@ -292,23 +197,13 @@ var buildDepCmd = &cobra.Command{
 
 // buildExtCmd represents the `build ext` command
 var buildExtCmd = &cobra.Command{
-	Use:   "ext <pkg...>",
-	Short: "Build extension package",
-	Annotations: map[string]string{
-		"name":       "pig build ext",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "300000",
-	},
-	Aliases: []string{"e"},
-	Args:    cobra.MinimumNArgs(1),
+	Use:         "ext <pkg...>",
+	Short:       "Build extension package",
+	Annotations: ancsAnn("pig build ext", "action", "volatile", "unsafe", true, "low", "none", "root", 300000),
+	Aliases:     []string{"e"},
+	Args:        cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBuildLegacy("pig build ext", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleBuild, "pig build ext", args, map[string]interface{}{
 			"pg":     buildPkgPg,
 			"symbol": buildPkgSymbol,
 		}, func() error {
@@ -319,24 +214,14 @@ var buildExtCmd = &cobra.Command{
 
 // buildPkgCmd represents the `build pkg` command
 var buildPkgCmd = &cobra.Command{
-	Use:   "pkg <pkg...>",
-	Short: "Complete build pipeline: get, dep, ext",
-	Annotations: map[string]string{
-		"name":       "pig build pkg",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "300000",
-	},
-	Long:    "Execute complete build pipeline for extensions: download source, install dependencies, and build package",
-	Aliases: []string{"p"},
-	Args:    cobra.MinimumNArgs(1),
+	Use:         "pkg <pkg...>",
+	Short:       "Complete build pipeline: get, dep, ext",
+	Annotations: ancsAnn("pig build pkg", "action", "volatile", "unsafe", true, "low", "none", "root", 300000),
+	Long:        "Execute complete build pipeline for extensions: download source, install dependencies, and build package",
+	Aliases:     []string{"p"},
+	Args:        cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBuildLegacy("pig build pkg", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleBuild, "pig build pkg", args, map[string]interface{}{
 			"pg":     buildAllPg,
 			"symbol": buildAllSymbol,
 		}, func() error {

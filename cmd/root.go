@@ -300,8 +300,6 @@ func outputFormatFromArgs(args []string) string {
 }
 
 func init() {
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
-
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug mode")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "log level: debug, info, warn, error, fatal, panic")
 	rootCmd.PersistentFlags().StringVar(&logPath, "log-path", "", "log file path, terminal by default")
@@ -314,6 +312,7 @@ func init() {
 		&cobra.Group{ID: "pigsty", Title: "Pigsty Management Commands"},
 	)
 	rootCmd.AddCommand(
+		contextCmd,
 		extCmd,
 		repoCmd,
 		buildCmd,

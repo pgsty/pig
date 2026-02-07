@@ -33,11 +33,3 @@ func handlePlanOutput(plan *output.Plan) error {
 	fmt.Println(string(data))
 	return nil
 }
-
-func runStyLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
-	return runLegacyStructured(output.MODULE_STY, command, args, params, fn)
-}
-
-func runExtLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
-	return runLegacyStructured(output.MODULE_EXT, command, args, params, fn)
-}

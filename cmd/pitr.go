@@ -83,17 +83,7 @@ The command uses the same execution privilege strategy as other pig commands:
 
   # Auto-promote after recovery
   pig pitr -d -P`,
-	Annotations: map[string]string{
-		"name":       "pig pitr",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "critical",
-		"confirm":    "required",
-		"os_user":    "root",
-		"cost":       "600000",
-	},
+	Annotations: ancsAnn("pig pitr", "action", "volatile", "unsafe", false, "critical", "required", "root", 600000),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if err := initAll(); err != nil {
 			return err

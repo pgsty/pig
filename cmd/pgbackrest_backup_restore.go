@@ -18,20 +18,13 @@ var pbBackupCmd = &cobra.Command{
 	Use:     "backup [type]",
 	Aliases: []string{"bk", "b"},
 	Short:   "Create a backup",
-	Annotations: map[string]string{
-		"name":       "pig pgbackrest backup",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "300000",
-		// Parameter constraints
-		"args.type.desc": "backup type (auto-detected if omitted)",
-		"args.type.type": "enum",
-	},
+	Annotations: mergeAnn(
+		ancsAnn("pig pgbackrest backup", "action", "volatile", "unsafe", true, "low", "none", "dbsu", 300000),
+		map[string]string{
+			"args.type.desc": "backup type (auto-detected if omitted)",
+			"args.type.type": "enum",
+		},
+	),
 	Long: `Create a physical backup. Backup can only run on the primary instance.
 
 Types:
@@ -73,20 +66,10 @@ var pbExpireSet string
 var pbExpireDryRun bool
 
 var pbExpireCmd = &cobra.Command{
-	Use:     "expire",
-	Aliases: []string{"ex", "e"},
-	Short:   "Cleanup expired backups",
-	Annotations: map[string]string{
-		"name":       "pig pgbackrest expire",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "dbsu",
-		"cost":       "30000",
-	},
+	Use:         "expire",
+	Aliases:     []string{"ex", "e"},
+	Short:       "Cleanup expired backups",
+	Annotations: ancsAnn("pig pgbackrest expire", "action", "volatile", "restricted", true, "medium", "recommended", "dbsu", 30000),
 	Long: `Clean up expired backups and WAL archives according to retention policy.
 
 The retention policy is configured in pgbackrest.conf:
@@ -98,7 +81,7 @@ The retention policy is configured in pgbackrest.conf:
   pig pb expire --set 20250101-*   # delete specific backup
   pig pb expire --dry-run          # dry-run (show only)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPbLegacy("pig pgbackrest expire", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest expire", args, map[string]interface{}{
 			"set":     pbExpireSet,
 			"dry_run": pbExpireDryRun,
 		}, func() error {
@@ -129,20 +112,10 @@ var (
 )
 
 var pbRestoreCmd = &cobra.Command{
-	Use:     "restore",
-	Aliases: []string{"rt", "r", "pitr"},
-	Short:   "Restore from backup (PITR)",
-	Annotations: map[string]string{
-		"name":       "pig pgbackrest restore",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "critical",
-		"confirm":    "required",
-		"os_user":    "dbsu",
-		"cost":       "600000",
-	},
+	Use:         "restore",
+	Aliases:     []string{"rt", "r", "pitr"},
+	Short:       "Restore from backup (PITR)",
+	Annotations: ancsAnn("pig pgbackrest restore", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 600000),
 	Long: `Restore from backup with point-in-time recovery (PITR) support.
 
 IMPORTANT: You must specify a recovery target. Running without arguments

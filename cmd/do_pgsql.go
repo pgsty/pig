@@ -10,21 +10,11 @@ import (
 )
 
 var doPgsqlAddCmd = &cobra.Command{
-	Use:   "pgsql-add",
-	Short: "add instances to cluster",
-	Annotations: map[string]string{
-		"name":       "pig do pgsql-add",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "300000",
-	},
-	Aliases: []string{"pg-add", "pa", "pgsql"},
-	Long:    `pig do pgsql-add <selector> [ins...]`,
+	Use:         "pgsql-add",
+	Short:       "add instances to cluster",
+	Annotations: ancsAnn("pig do pgsql-add", "action", "volatile", "unsafe", false, "medium", "recommended", "root", 300000),
+	Aliases:     []string{"pg-add", "pa", "pgsql"},
+	Long:        `pig do pgsql-add <selector> [ins...]`,
 	Example: `
   pig do pgsql-add pg-meta             # init pgsql cluster
   pig do pg-add 10.10.10.10            # init specific instance
@@ -33,7 +23,7 @@ var doPgsqlAddCmd = &cobra.Command{
   `,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoLegacy("pig do pgsql-add", args, nil, func() error {
+		return runLegacyStructured(legacyModuleDo, "pig do pgsql-add", args, nil, func() error {
 			selector := args[0]
 			command := []string{"pgsql.yml", "-l", selector}
 			command = append(command, args[1:]...)
@@ -44,21 +34,11 @@ var doPgsqlAddCmd = &cobra.Command{
 
 // doPgsqlRmCmd - Remove pgsql cluster/instance
 var doPgsqlRmCmd = &cobra.Command{
-	Use:   "pgsql-rm",
-	Short: "remove instances from cluster",
-	Annotations: map[string]string{
-		"name":       "pig do pgsql-rm",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "high",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "300000",
-	},
-	Aliases: []string{"pg-rm", "pr"},
-	Long:    `pig do pgsql-rm <selector> [ins...]`,
+	Use:         "pgsql-rm",
+	Short:       "remove instances from cluster",
+	Annotations: ancsAnn("pig do pgsql-rm", "action", "volatile", "unsafe", false, "high", "recommended", "root", 300000),
+	Aliases:     []string{"pg-rm", "pr"},
+	Long:        `pig do pgsql-rm <selector> [ins...]`,
 	Example: `
   pig do pgsql-rm pg-meta          # remove pgsql cluster
   pig do pg-rm    10.10.10.10      # remove specific instance
@@ -67,7 +47,7 @@ var doPgsqlRmCmd = &cobra.Command{
 
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoLegacy("pig do pgsql-rm", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleDo, "pig do pgsql-rm", args, map[string]interface{}{
 			"uninstall": doRemoveWithUninstall,
 		}, func() error {
 			selector := args[0]
@@ -82,28 +62,18 @@ var doPgsqlRmCmd = &cobra.Command{
 
 // doPgsqlUserCmd - Create a PostgreSQL user
 var doPgsqlUserCmd = &cobra.Command{
-	Use:   "pgsql-user",
-	Short: "create/update pgsql user",
-	Annotations: map[string]string{
-		"name":       "pig do pgsql-user",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "low",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"pg-user", "pu"},
-	Long:    `pig do pgsql-user <cls> <username>`,
+	Use:         "pgsql-user",
+	Short:       "create/update pgsql user",
+	Annotations: ancsAnn("pig do pgsql-user", "action", "volatile", "unsafe", false, "low", "recommended", "root", 60000),
+	Aliases:     []string{"pg-user", "pu"},
+	Long:        `pig do pgsql-user <cls> <username>`,
 	Example: `
   pig do pgsql-user pg-meta dbuser_meta
   pig do pg-user    pg-meta dbuser_view
   pig do pu         pg-test test`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoLegacy("pig do pgsql-user", args, nil, func() error {
+		return runLegacyStructured(legacyModuleDo, "pig do pgsql-user", args, nil, func() error {
 			cls := args[0]
 			username := args[1]
 			command := []string{"pgsql-user.yml", "-l", cls, "-e", fmt.Sprintf("username=%s", username)}
@@ -115,27 +85,17 @@ var doPgsqlUserCmd = &cobra.Command{
 
 // doPgsqlDbCmd - Create/Update pgsql database
 var doPgsqlDbCmd = &cobra.Command{
-	Use:   "pgsql-db",
-	Short: "create/update pgsql database",
-	Annotations: map[string]string{
-		"name":       "pig do pgsql-db",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "low",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"pg-db", "pd"},
-	Long:    `pig do pgsql-db <cls> <dbname>`,
+	Use:         "pgsql-db",
+	Short:       "create/update pgsql database",
+	Annotations: ancsAnn("pig do pgsql-db", "action", "volatile", "unsafe", false, "low", "recommended", "root", 60000),
+	Aliases:     []string{"pg-db", "pd"},
+	Long:        `pig do pgsql-db <cls> <dbname>`,
 	Example: `
   pig do pgsql-db pg-meta meta
   pig do pg-db    pg-test test`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoLegacy("pig do pgsql-db", args, nil, func() error {
+		return runLegacyStructured(legacyModuleDo, "pig do pgsql-db", args, nil, func() error {
 			cls := args[0]
 			dbname := args[1]
 			command := []string{"pgsql-db.yml", "-l", cls, "-e", fmt.Sprintf("dbname=%s", dbname)}
@@ -147,21 +107,11 @@ var doPgsqlDbCmd = &cobra.Command{
 
 // doPgsqlExtCmd - Install pgsql extensions
 var doPgsqlExtCmd = &cobra.Command{
-	Use:   "pgsql-ext",
-	Short: "install pgsql extensions",
-	Annotations: map[string]string{
-		"name":       "pig do pgsql-ext",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "low",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"pg-ext", "pe"},
-	Long:    `pig do pgsql-ext <cls>`,
+	Use:         "pgsql-ext",
+	Short:       "install pgsql extensions",
+	Annotations: ancsAnn("pig do pgsql-ext", "action", "volatile", "unsafe", false, "low", "recommended", "root", 60000),
+	Aliases:     []string{"pg-ext", "pe"},
+	Long:        `pig do pgsql-ext <cls>`,
 	Example: `
   pig do pgsql-ext pg-meta postgis
   pig do pg-ext    pg-test timescaledb
@@ -169,7 +119,7 @@ var doPgsqlExtCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoLegacy("pig do pgsql-ext", args, nil, func() error {
+		return runLegacyStructured(legacyModuleDo, "pig do pgsql-ext", args, nil, func() error {
 			selector := args[0]
 			command := []string{"pgsql.yml", "-l", selector, "-t", "pg_extension"}
 			if len(args) > 1 {
@@ -184,21 +134,11 @@ var doPgsqlExtCmd = &cobra.Command{
 
 // doPgsqlHbaCmd - Refresh pgsql hba
 var doPgsqlHbaCmd = &cobra.Command{
-	Use:   "pgsql-hba",
-	Short: "refresh pgsql hba",
-	Annotations: map[string]string{
-		"name":       "pig do pgsql-hba",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"pg-hba", "ph"},
-	Long:    `pig do pgsql-hba <cls>`,
+	Use:         "pgsql-hba",
+	Short:       "refresh pgsql hba",
+	Annotations: ancsAnn("pig do pgsql-hba", "action", "volatile", "unsafe", false, "medium", "recommended", "root", 60000),
+	Aliases:     []string{"pg-hba", "ph"},
+	Long:        `pig do pgsql-hba <cls>`,
 	Example: `
   pig do pgsql-hba pg-meta
   pig do pg-hba    pg-test
@@ -206,7 +146,7 @@ var doPgsqlHbaCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoLegacy("pig do pgsql-hba", args, nil, func() error {
+		return runLegacyStructured(legacyModuleDo, "pig do pgsql-hba", args, nil, func() error {
 			cls := args[0]
 			command := []string{"pgsql.yml", "-l", cls, "-t", "pg_hba,pg_reload,pgbouncer_hba,pgbouncer_reload"}
 			return do.RunPlaybook(inventory, command)
@@ -216,21 +156,11 @@ var doPgsqlHbaCmd = &cobra.Command{
 
 // doPgsqlSvcCmd - Refresh pgsql service
 var doPgsqlSvcCmd = &cobra.Command{
-	Use:   "pgsql-svc",
-	Short: "refresh pgsql service",
-	Annotations: map[string]string{
-		"name":       "pig do pgsql-svc",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"pg-svc", "ps"},
-	Long:    `pig do pgsql-svc <cls>`,
+	Use:         "pgsql-svc",
+	Short:       "refresh pgsql service",
+	Annotations: ancsAnn("pig do pgsql-svc", "action", "volatile", "unsafe", false, "medium", "recommended", "root", 60000),
+	Aliases:     []string{"pg-svc", "ps"},
+	Long:        `pig do pgsql-svc <cls>`,
 	Example: `
   pig do pgsql-svc pg-meta
   pig do pg-svc    pg-test
@@ -238,7 +168,7 @@ var doPgsqlSvcCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoLegacy("pig do pgsql-svc", args, nil, func() error {
+		return runLegacyStructured(legacyModuleDo, "pig do pgsql-svc", args, nil, func() error {
 			selector := args[0]
 			command := []string{"pgsql.yml", "-l", selector, "-t", "pg_service"}
 			return do.RunPlaybook(inventory, command)
@@ -248,21 +178,11 @@ var doPgsqlSvcCmd = &cobra.Command{
 
 // doPgmonAddCmd - Add remote pg monitor target
 var doPgmonAddCmd = &cobra.Command{
-	Use:   "pgmon-add",
-	Short: "add remote pg monitor target",
-	Annotations: map[string]string{
-		"name":       "pig do pgmon-add",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "low",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"mon-add", "ma"},
-	Long:    `pig do pgmon-add <cls>`,
+	Use:         "pgmon-add",
+	Short:       "add remote pg monitor target",
+	Annotations: ancsAnn("pig do pgmon-add", "action", "volatile", "unsafe", false, "low", "recommended", "root", 60000),
+	Aliases:     []string{"mon-add", "ma"},
+	Long:        `pig do pgmon-add <cls>`,
 	Example: `
   pig do pgmon-add pg-foo
   pig do mon-add   pg-bar
@@ -270,7 +190,7 @@ var doPgmonAddCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoLegacy("pig do pgmon-add", args, nil, func() error {
+		return runLegacyStructured(legacyModuleDo, "pig do pgmon-add", args, nil, func() error {
 			cls := args[0]
 			command := []string{"pgsql-monitor.yml", "-e", fmt.Sprintf("clsname=%s", cls)}
 			return do.RunPlaybook(inventory, command)
@@ -280,21 +200,11 @@ var doPgmonAddCmd = &cobra.Command{
 
 // doPgmonRmCmd - Remove remote pg monitor target
 var doPgmonRmCmd = &cobra.Command{
-	Use:   "pgmon-rm",
-	Short: "remove remote pg monitor target",
-	Annotations: map[string]string{
-		"name":       "pig do pgmon-rm",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"mon-rm", "mr"},
-	Long:    `pig do pgmon-rm <cls>`,
+	Use:         "pgmon-rm",
+	Short:       "remove remote pg monitor target",
+	Annotations: ancsAnn("pig do pgmon-rm", "action", "volatile", "unsafe", false, "medium", "recommended", "root", 60000),
+	Aliases:     []string{"mon-rm", "mr"},
+	Long:        `pig do pgmon-rm <cls>`,
 	Example: `
   pig do pgmon-rm pg-foo
   pig do mon-rm   pg-bar
@@ -302,7 +212,7 @@ var doPgmonRmCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoLegacy("pig do pgmon-rm", args, nil, func() error {
+		return runLegacyStructured(legacyModuleDo, "pig do pgmon-rm", args, nil, func() error {
 			cls := args[0]
 			target := fmt.Sprintf(`/etc/prometheus/targets/pgrds/%s.yml`, cls)
 			logrus.Infof("removing pgsql monitor target %s", cls)

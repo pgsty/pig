@@ -40,21 +40,11 @@ var (
 
 // styCmd represents the pigsty management command
 var styCmd = &cobra.Command{
-	Use:   "sty",
-	Short: "Manage Pigsty Installation",
-	Annotations: map[string]string{
-		"name":       "pig sty",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
-	Aliases: []string{"s", "pigsty"},
-	GroupID: "pigsty",
+	Use:         "sty",
+	Short:       "Manage Pigsty Installation",
+	Annotations: ancsAnn("pig sty", "query", "stable", "safe", true, "safe", "none", "current", 100),
+	Aliases:     []string{"s", "pigsty"},
+	GroupID:     "pigsty",
 	Long: `pig sty -Init (Download), Bootstrap, Configure, and Deploy Pigsty
 
   pig sty init    [-pfvd]         # install pigsty (~/pigsty by default)
@@ -73,20 +63,10 @@ var styCmd = &cobra.Command{
 
 // pigstyInitCmd will extract and setup ~/pigsty
 var pigstyInitCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Install Pigsty",
-	Annotations: map[string]string{
-		"name":       "pig sty init",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "30000",
-	},
-	Aliases: []string{"i"},
+	Use:         "init",
+	Short:       "Install Pigsty",
+	Annotations: ancsAnn("pig sty init", "action", "volatile", "unsafe", false, "medium", "recommended", "root", 30000),
+	Aliases:     []string{"i"},
 	Long: `
 pig sty init
   -p | --path    : where to install, ~/pigsty by default
@@ -103,7 +83,7 @@ pig sty init
   pig sty init 3                 # get & install specific version v3 latest
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runStyLegacy("pig sty init", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleSty, "pig sty init", args, map[string]interface{}{
 			"path":    pigstyInitPath,
 			"force":   pigstyInitForce,
 			"version": pigstyVersion,
@@ -179,20 +159,10 @@ pig sty init
 }
 
 var pigstyBootCmd = &cobra.Command{
-	Use:   "boot",
-	Short: "Bootstrap Pigsty",
-	Annotations: map[string]string{
-		"name":       "pig sty boot",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "60000",
-	},
-	Aliases: []string{"b", "bootstrap"},
+	Use:         "boot",
+	Short:       "Bootstrap Pigsty",
+	Annotations: ancsAnn("pig sty boot", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
+	Aliases:     []string{"b", "bootstrap"},
 	Long: `Bootstrap pigsty with ./bootstrap script
 
 pig sty boot
@@ -203,7 +173,7 @@ pig sty boot
 Check https://pigsty.io/docs/setup/offline/#bootstrap for details
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runStyLegacy("pig sty boot", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleSty, "pig sty boot", args, map[string]interface{}{
 			"region":   pigstyBootRegion,
 			"path":     pigstyBootPackage,
 			"keep":     pigstyBootKeep,
@@ -249,20 +219,10 @@ Check https://pigsty.io/docs/setup/offline/#bootstrap for details
 
 // A thin wrapper around the configure script
 var pigstyConfCmd = &cobra.Command{
-	Use:   "conf",
-	Short: "Configure Pigsty",
-	Annotations: map[string]string{
-		"name":       "pig sty conf",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "10000",
-	},
-	Aliases: []string{"c", "configure"},
+	Use:         "conf",
+	Short:       "Configure Pigsty",
+	Annotations: ancsAnn("pig sty conf", "action", "volatile", "safe", true, "medium", "recommended", "root", 10000),
+	Aliases:     []string{"c", "configure"},
 	Long: `Configure pigsty with ./configure
 
 pig sty conf
@@ -293,7 +253,7 @@ Check https://pigsty.io/docs/setup/install/#configure for details
   pig sty conf -c full -g -O ha.yml  # full HA template with random passwords to ha.yml
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runStyLegacy("pig sty conf", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleSty, "pig sty conf", args, map[string]interface{}{
 			"conf":            pigstyConfName,
 			"ip":              pigstyConfIP,
 			"version":         pigstyConfVer,
@@ -358,20 +318,10 @@ Check https://pigsty.io/docs/setup/install/#configure for details
 }
 
 var pigstyListcmd = &cobra.Command{
-	Use:   "list",
-	Short: "list pigsty available versions",
-	Annotations: map[string]string{
-		"name":       "pig sty list",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "5000",
-	},
-	Aliases: []string{"l", "ls"},
+	Use:         "list",
+	Short:       "list pigsty available versions",
+	Annotations: ancsAnn("pig sty list", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
+	Aliases:     []string{"l", "ls"},
 	Long: `List available pigsty versions
 
 	pig sty list [-v version]
@@ -385,7 +335,7 @@ var pigstyListcmd = &cobra.Command{
   pig sty list all       # list all available versions
 	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runStyLegacy("pig sty list", args, nil, func() error {
+		return runLegacyStructured(legacyModuleSty, "pig sty list", args, nil, func() error {
 			logrus.Info("fetching pigsty version info...")
 			get.NetworkCondition()
 			if get.AllVersions == nil {
@@ -423,22 +373,12 @@ var pigstyListcmd = &cobra.Command{
 }
 
 var pigstyGetcmd = &cobra.Command{
-	Use:   "get",
-	Short: "download pigsty available versions",
-	Annotations: map[string]string{
-		"name":       "pig sty get",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "30000",
-	},
-	Aliases: []string{"g", "download"},
+	Use:         "get",
+	Short:       "download pigsty available versions",
+	Annotations: ancsAnn("pig sty get", "action", "volatile", "safe", true, "low", "none", "current", 30000),
+	Aliases:     []string{"g", "download"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runStyLegacy("pig sty get", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleSty, "pig sty get", args, map[string]interface{}{
 			"version": pigstyVersion,
 			"dir":     pigstyDownloadDir,
 		}, func() error {
@@ -483,20 +423,10 @@ var pigstyGetcmd = &cobra.Command{
 }
 
 var pigstyDeployCmd = &cobra.Command{
-	Use:   "deploy",
-	Short: "run pigsty deploy.yml playbook",
-	Annotations: map[string]string{
-		"name":       "pig sty deploy",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "high",
-		"confirm":    "required",
-		"os_user":    "root",
-		"cost":       "600000",
-	},
-	Aliases: []string{"d", "de", "install", "ins"},
+	Use:         "deploy",
+	Short:       "run pigsty deploy.yml playbook",
+	Annotations: ancsAnn("pig sty deploy", "action", "volatile", "unsafe", false, "high", "required", "root", 600000),
+	Aliases:     []string{"d", "de", "install", "ins"},
 	Long: `Deploy Pigsty using the deploy.yml playbook
 
 This command runs the deploy.yml playbook from your Pigsty installation.
@@ -513,7 +443,7 @@ WARNING: This operation makes changes to your system. Use with caution!
   pig sty de           # short alias
   pig sty ins          # short alias`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runStyLegacy("pig sty deploy", args, nil, func() error {
+		return runLegacyStructured(legacyModuleSty, "pig sty deploy", args, nil, func() error {
 			return runPigstyInstall()
 		})
 	},
@@ -561,7 +491,9 @@ func runPigstyInstall() error {
 	}
 
 	// run the playbook
-	os.Chdir(config.PigstyHome)
+	if err := os.Chdir(config.PigstyHome); err != nil {
+		return fmt.Errorf("failed to change directory to %s: %w", config.PigstyHome, err)
+	}
 	logrus.Infof("run playbook %s", playbookName)
 	logrus.Warnf("IT'S DANGEROUS TO RUN THIS ON INSTALLED SYSTEM!!! Use Ctrl+C to abort")
 	return utils.Command([]string{"ansible-playbook", playbookName})

@@ -13,46 +13,26 @@ import (
 // ============================================================================
 
 var pbCheckCmd = &cobra.Command{
-	Use:     "check",
-	Aliases: []string{"ck"},
-	Short:   "Verify backup repository",
-	Annotations: map[string]string{
-		"name":       "pig pgbackrest check",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "10000",
-	},
-	Long: `Verify the backup repository integrity and configuration.`,
+	Use:         "check",
+	Aliases:     []string{"ck"},
+	Short:       "Verify backup repository",
+	Annotations: ancsAnn("pig pgbackrest check", "query", "volatile", "safe", true, "safe", "none", "dbsu", 10000),
+	Long:        `Verify the backup repository integrity and configuration.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPbLegacy("pig pgbackrest check", args, nil, func() error {
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest check", args, nil, func() error {
 			return pgbackrest.Check(pbConfig)
 		})
 	},
 }
 
 var pbStartCmd = &cobra.Command{
-	Use:     "start",
-	Aliases: []string{"on"},
-	Short:   "Enable pgBackRest operations",
-	Annotations: map[string]string{
-		"name":       "pig pgbackrest start",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "1000",
-	},
-	Long: `Allow pgBackRest to perform operations on the stanza.`,
+	Use:         "start",
+	Aliases:     []string{"on"},
+	Short:       "Enable pgBackRest operations",
+	Annotations: ancsAnn("pig pgbackrest start", "action", "volatile", "restricted", true, "low", "none", "dbsu", 1000),
+	Long:        `Allow pgBackRest to perform operations on the stanza.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPbLegacy("pig pgbackrest start", args, nil, func() error {
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest start", args, nil, func() error {
 			return pgbackrest.Start(pbConfig)
 		})
 	},
@@ -61,23 +41,13 @@ var pbStartCmd = &cobra.Command{
 var pbStopForce bool
 
 var pbStopCmd = &cobra.Command{
-	Use:     "stop",
-	Aliases: []string{"off"},
-	Short:   "Disable pgBackRest operations",
-	Annotations: map[string]string{
-		"name":       "pig pgbackrest stop",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "dbsu",
-		"cost":       "1000",
-	},
-	Long: `Prevent pgBackRest from performing operations on the stanza (for maintenance).`,
+	Use:         "stop",
+	Aliases:     []string{"off"},
+	Short:       "Disable pgBackRest operations",
+	Annotations: ancsAnn("pig pgbackrest stop", "action", "volatile", "restricted", true, "medium", "recommended", "dbsu", 1000),
+	Long:        `Prevent pgBackRest from performing operations on the stanza (for maintenance).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPbLegacy("pig pgbackrest stop", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest stop", args, map[string]interface{}{
 			"force": pbStopForce,
 		}, func() error {
 			return pgbackrest.Stop(pbConfig, &pgbackrest.StopOptions{
@@ -94,20 +64,10 @@ var pbStopCmd = &cobra.Command{
 var pbLogLines int
 
 var pbLogCmd = &cobra.Command{
-	Use:     "log [list|tail|cat]",
-	Aliases: []string{"l", "lg"},
-	Short:   "View pgBackRest logs",
-	Annotations: map[string]string{
-		"name":       "pig pgbackrest log",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "500",
-	},
+	Use:         "log [list|tail|cat]",
+	Aliases:     []string{"l", "lg"},
+	Short:       "View pgBackRest logs",
+	Annotations: ancsAnn("pig pgbackrest log", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Long: `View pgBackRest log files from /pg/log/pgbackrest/.
 
 Subcommands:
@@ -137,7 +97,7 @@ Subcommands:
 			)
 		}
 
-		return runPbLegacy("pig pgbackrest log", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest log", args, map[string]interface{}{
 			"subcommand": subCmd,
 			"lines":      pbLogLines,
 		}, func() error {

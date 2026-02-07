@@ -1,37 +1,19 @@
 package cmd
 
-import (
-	"pig/internal/output"
-
-	"github.com/spf13/cobra"
-)
+import "github.com/spf13/cobra"
 
 var (
 	doRemoveWithUninstall bool
 )
 
-func runDoLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
-	return runLegacyStructured(output.MODULE_DO, command, args, params, fn)
-}
-
 // doCmd represents the pig do management command
 var doCmd = &cobra.Command{
-	Use:   "do",
-	Short: "run admin tasks",
-	Annotations: map[string]string{
-		"name":       "pig do",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
-	Aliases: []string{"d"},
-	GroupID: "pigsty",
-	Long:    `pig do - perform admin tasks with ansible playbook`,
+	Use:         "do",
+	Short:       "run admin tasks",
+	Annotations: ancsAnn("pig do", "query", "stable", "safe", true, "safe", "none", "current", 100),
+	Aliases:     []string{"d"},
+	GroupID:     "pigsty",
+	Long:        `pig do - perform admin tasks with ansible playbook`,
 	Example: `
   pig do pgsql-add  <sel> [ins...]      # add instances to cluster
   pig do pgsql-rm   <sel> [ins...]      # remove instances from cluster

@@ -10,21 +10,11 @@ import (
 
 // patroniLogCmd: pig pt log
 var patroniLogCmd = &cobra.Command{
-	Use:     "log",
-	Aliases: []string{"l", "lg"},
-	Short:   "View patroni logs",
-	Annotations: map[string]string{
-		"name":       "pig patroni log",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "500",
-	},
-	Long: `View patroni service logs using journalctl.`,
+	Use:         "log",
+	Aliases:     []string{"l", "lg"},
+	Short:       "View patroni logs",
+	Annotations: ancsAnn("pig patroni log", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
+	Long:        `View patroni service logs using journalctl.`,
 	Example: `
   pig pt log          # View recent logs
   pig pt log -f       # Follow logs
@@ -42,7 +32,7 @@ var patroniLogCmd = &cobra.Command{
 				map[string]interface{}{"follow": follow, "lines": lines},
 			)
 		}
-		return runPatroniLegacy("pig patroni log", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePt, "pig patroni log", args, map[string]interface{}{
 			"follow": follow,
 			"lines":  lines,
 		}, func() error {

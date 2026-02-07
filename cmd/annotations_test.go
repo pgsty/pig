@@ -132,37 +132,9 @@ func TestAnnotationEnumValidity(t *testing.T) {
 		}
 
 		t.Run(path, func(t *testing.T) {
-			if v, ok := ann["type"]; ok && !validTypes[v] {
-				t.Errorf("invalid type=%q", v)
-			}
-			if v, ok := ann["volatility"]; ok && !validVolatilities[v] {
-				t.Errorf("invalid volatility=%q", v)
-			}
-			if v, ok := ann["parallel"]; ok && !validParallels[v] {
-				t.Errorf("invalid parallel=%q", v)
-			}
-			if v, ok := ann["risk"]; ok && !validRisks[v] {
-				t.Errorf("invalid risk=%q", v)
-			}
-			if v, ok := ann["confirm"]; ok && !validConfirms[v] {
-				t.Errorf("invalid confirm=%q", v)
-			}
-			if v, ok := ann["os_user"]; ok && !validOSUsers[v] {
-				t.Errorf("invalid os_user=%q", v)
-			}
-			if v, ok := ann["idempotent"]; ok {
-				if v != "true" && v != "false" {
-					t.Errorf("invalid idempotent=%q (must be \"true\" or \"false\")", v)
-				}
-			}
-			if v, ok := ann["cost"]; ok {
-				n, err := strconv.Atoi(v)
-				if err != nil {
-					t.Errorf("invalid cost=%q (must be integer string)", v)
-				} else if n < 0 {
-					t.Errorf("invalid cost=%d (must be non-negative)", n)
-				}
-			}
+			validateAnnotationEnums(t, ann)
+			validateAnnotationIdempotent(t, ann)
+			validateAnnotationCost(t, ann)
 		})
 	}
 }
@@ -678,40 +650,56 @@ func TestAnnotationsSemanticConsistency(t *testing.T) {
 			}
 
 			// Rule 4: all enum values valid (via raw annotations)
-			if v, ok := ann["type"]; ok && !validTypes[v] {
-				t.Errorf("invalid type=%q", v)
-			}
-			if v, ok := ann["volatility"]; ok && !validVolatilities[v] {
-				t.Errorf("invalid volatility=%q", v)
-			}
-			if v, ok := ann["parallel"]; ok && !validParallels[v] {
-				t.Errorf("invalid parallel=%q", v)
-			}
-			if v, ok := ann["risk"]; ok && !validRisks[v] {
-				t.Errorf("invalid risk=%q", v)
-			}
-			if v, ok := ann["confirm"]; ok && !validConfirms[v] {
-				t.Errorf("invalid confirm=%q", v)
-			}
-			if v, ok := ann["os_user"]; ok && !validOSUsers[v] {
-				t.Errorf("invalid os_user=%q", v)
-			}
-			if v, ok := ann["idempotent"]; ok {
-				if v != "true" && v != "false" {
-					t.Errorf("invalid idempotent=%q", v)
-				}
-			}
+			validateAnnotationEnums(t, ann)
+			validateAnnotationIdempotent(t, ann)
 
 			// Rule 5: cost is non-negative integer
-			if v, ok := ann["cost"]; ok {
-				n, err := strconv.Atoi(v)
-				if err != nil {
-					t.Errorf("invalid cost=%q (must be integer)", v)
-				} else if n < 0 {
-					t.Errorf("invalid cost=%d (must be non-negative)", n)
-				}
-			}
+			validateAnnotationCost(t, ann)
 		})
+	}
+}
+
+type enumFieldCheck struct {
+	key   string
+	valid map[string]bool
+}
+
+var annotationEnumChecks = []enumFieldCheck{
+	{key: "type", valid: validTypes},
+	{key: "volatility", valid: validVolatilities},
+	{key: "parallel", valid: validParallels},
+	{key: "risk", valid: validRisks},
+	{key: "confirm", valid: validConfirms},
+	{key: "os_user", valid: validOSUsers},
+}
+
+func validateAnnotationEnums(t *testing.T, ann map[string]string) {
+	t.Helper()
+	for _, check := range annotationEnumChecks {
+		if v, ok := ann[check.key]; ok && !check.valid[v] {
+			t.Errorf("invalid %s=%q", check.key, v)
+		}
+	}
+}
+
+func validateAnnotationIdempotent(t *testing.T, ann map[string]string) {
+	t.Helper()
+	if v, ok := ann["idempotent"]; ok {
+		if v != "true" && v != "false" {
+			t.Errorf("invalid idempotent=%q (must be \"true\" or \"false\")", v)
+		}
+	}
+}
+
+func validateAnnotationCost(t *testing.T, ann map[string]string) {
+	t.Helper()
+	if v, ok := ann["cost"]; ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			t.Errorf("invalid cost=%q (must be integer)", v)
+		} else if n < 0 {
+			t.Errorf("invalid cost=%d (must be non-negative)", n)
+		}
 	}
 }
 

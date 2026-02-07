@@ -8,21 +8,11 @@ import (
 )
 
 var doRedisAddCmd = &cobra.Command{
-	Use:   "redis-add",
-	Short: "add redis to pigsty",
-	Annotations: map[string]string{
-		"name":       "pig do redis-add",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "300000",
-	},
-	Aliases: []string{"redis", "re-add", "ra"},
-	Long:    `pig do redis-add <sel> [port...]`,
+	Use:         "redis-add",
+	Short:       "add redis to pigsty",
+	Annotations: ancsAnn("pig do redis-add", "action", "volatile", "unsafe", false, "medium", "recommended", "root", 300000),
+	Aliases:     []string{"redis", "re-add", "ra"},
+	Long:        `pig do redis-add <sel> [port...]`,
 	Example: `
   pig do redis-add redis-meta                 # init redis cluster
   pig do re-add    redis-test                 # init redis cluster redis-test
@@ -31,7 +21,7 @@ var doRedisAddCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoLegacy("pig do redis-add", args, nil, func() error {
+		return runLegacyStructured(legacyModuleDo, "pig do redis-add", args, nil, func() error {
 			selector := args[0]
 			if len(args) == 1 {
 				command := []string{"redis.yml", "-l", selector}
@@ -50,21 +40,11 @@ var doRedisAddCmd = &cobra.Command{
 
 // doRedisRmCmd - Remove redis from pigsty
 var doRedisRmCmd = &cobra.Command{
-	Use:   "redis-rm",
-	Short: "remove redis from pigsty",
-	Annotations: map[string]string{
-		"name":       "pig do redis-rm",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "high",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "300000",
-	},
-	Aliases: []string{"re-rm", "rr"},
-	Long:    `pig do redis-rm <sel> [port...]`,
+	Use:         "redis-rm",
+	Short:       "remove redis from pigsty",
+	Annotations: ancsAnn("pig do redis-rm", "action", "volatile", "unsafe", false, "high", "recommended", "root", 300000),
+	Aliases:     []string{"re-rm", "rr"},
+	Long:        `pig do redis-rm <sel> [port...]`,
 	Example: `
   pig do redis-rm redis-meta                 # remove redis cluster
   pig do re-rm    redis-test                 # remove redis cluster redis-test
@@ -74,7 +54,7 @@ var doRedisRmCmd = &cobra.Command{
   `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoLegacy("pig do redis-rm", args, map[string]interface{}{
+		return runLegacyStructured(legacyModuleDo, "pig do redis-rm", args, map[string]interface{}{
 			"uninstall": doRemoveWithUninstall,
 		}, func() error {
 			selector := args[0]

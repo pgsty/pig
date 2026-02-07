@@ -30,20 +30,13 @@ Actions:
   pig pt config set ttl=60 loop_wait=15   # Set multiple values
   pig pt config pg max_connections=200    # Set PostgreSQL config
   pig pt config pg shared_buffers=4GB work_mem=256MB`,
-	Annotations: map[string]string{
-		"name":       "pig patroni config",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "false",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "dbsu",
-		"cost":       "3000",
-		// Parameter constraints
-		"args.action.desc": "config action to perform",
-		"args.action.type": "enum",
-	},
+	Annotations: mergeAnn(
+		ancsAnn("pig patroni config", "action", "volatile", "restricted", false, "medium", "recommended", "dbsu", 3000),
+		map[string]string{
+			"args.action.desc": "config action to perform",
+			"args.action.type": "enum",
+		},
+	),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbsu := utils.GetDBSU(patroniDBSU)
 
@@ -87,14 +80,14 @@ Actions:
 			}
 			return patroni.ConfigEdit(dbsu)
 		case "set":
-			return runPatroniLegacy("pig patroni config set", args, map[string]interface{}{
+			return runLegacyStructured(legacyModulePt, "pig patroni config set", args, map[string]interface{}{
 				"action": action,
 				"pairs":  filteredKV,
 			}, func() error {
 				return patroni.ConfigSet(dbsu, filteredKV)
 			})
 		case "pg":
-			return runPatroniLegacy("pig patroni config pg", args, map[string]interface{}{
+			return runLegacyStructured(legacyModulePt, "pig patroni config pg", args, map[string]interface{}{
 				"action": action,
 				"pairs":  filteredKV,
 			}, func() error {

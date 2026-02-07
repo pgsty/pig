@@ -10,7 +10,6 @@ import (
 	"pig/cli/ext"
 	"pig/cli/postgres"
 	"pig/internal/config"
-	"pig/internal/output"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -21,10 +20,6 @@ import (
 // ============================================================================
 
 var pgConfig = postgres.DefaultConfig()
-
-func runPgLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
-	return runLegacyStructured(output.MODULE_PG, command, args, params, fn)
-}
 
 // Additional flags for specific commands
 var (
@@ -101,21 +96,11 @@ var (
 // ============================================================================
 
 var pgCmd = &cobra.Command{
-	Use:     "postgres",
-	Short:   "Manage local PostgreSQL server & databases",
-	Aliases: []string{"pg"},
-	GroupID: "pigsty",
-	Annotations: map[string]string{
-		"name":       "pig postgres",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
+	Use:         "postgres",
+	Short:       "Manage local PostgreSQL server & databases",
+	Aliases:     []string{"pg"},
+	GroupID:     "pigsty",
+	Annotations: ancsAnn("pig postgres", "query", "stable", "safe", true, "safe", "none", "current", 100),
 	Long: `Manage local PostgreSQL server and databases.
 
 Server Control (via pg_ctl):
@@ -167,20 +152,10 @@ Utilities:
 // ============================================================================
 
 var pgInitCmd = &cobra.Command{
-	Use:     "init [-- initdb-options...]",
-	Short:   "Initialize PostgreSQL data directory",
-	Aliases: []string{"initdb", "i"},
-	Annotations: map[string]string{
-		"name":       "pig postgres init",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "high",
-		"confirm":    "recommended",
-		"os_user":    "dbsu",
-		"cost":       "30000",
-	},
+	Use:         "init [-- initdb-options...]",
+	Short:       "Initialize PostgreSQL data directory",
+	Aliases:     []string{"initdb", "i"},
+	Annotations: ancsAnn("pig postgres init", "action", "volatile", "unsafe", false, "high", "recommended", "dbsu", 30000),
 	Example: `  pig pg init                      # use default settings
   pig pg init -v 18                # use PostgreSQL 18
   pig pg init -D /data/pg18 -k     # specify datadir with checksums
@@ -211,20 +186,10 @@ var pgInitCmd = &cobra.Command{
 // ============================================================================
 
 var pgStartCmd = &cobra.Command{
-	Use:     "start",
-	Short:   "Start PostgreSQL server",
-	Aliases: []string{"boot", "up"},
-	Annotations: map[string]string{
-		"name":       "pig postgres start",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "10000",
-	},
+	Use:         "start",
+	Short:       "Start PostgreSQL server",
+	Aliases:     []string{"boot", "up"},
+	Annotations: ancsAnn("pig postgres start", "action", "volatile", "unsafe", true, "medium", "none", "dbsu", 10000),
 	Example: `  pig pg start                     # start with defaults
   pig pg start -D /data/pg18       # specify data directory
   pig pg start -l /pg/log/pg.log   # redirect output to log file
@@ -259,19 +224,12 @@ var pgStopCmd = &cobra.Command{
 	Use:     "stop",
 	Short:   "Stop PostgreSQL server",
 	Aliases: []string{"halt", "down"},
-	Annotations: map[string]string{
-		"name":       "pig postgres stop",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "high",
-		"confirm":    "recommended",
-		"os_user":    "dbsu",
-		"cost":       "10000",
-		// Parameter constraints
-		"flags.mode.choices": "smart,fast,immediate",
-	},
+	Annotations: mergeAnn(
+		ancsAnn("pig postgres stop", "action", "volatile", "unsafe", true, "high", "recommended", "dbsu", 10000),
+		map[string]string{
+			"flags.mode.choices": "smart,fast,immediate",
+		},
+	),
 	Example: `  pig pg stop                      # fast stop (default)
   pig pg stop -m smart             # wait for clients to disconnect
   pig pg stop -m immediate         # immediate shutdown
@@ -309,19 +267,12 @@ var pgRestartCmd = &cobra.Command{
 	Use:     "restart",
 	Short:   "Restart PostgreSQL server",
 	Aliases: []string{"reboot"},
-	Annotations: map[string]string{
-		"name":       "pig postgres restart",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "high",
-		"confirm":    "recommended",
-		"os_user":    "dbsu",
-		"cost":       "30000",
-		// Parameter constraints
-		"flags.mode.choices": "smart,fast,immediate",
-	},
+	Annotations: mergeAnn(
+		ancsAnn("pig postgres restart", "action", "volatile", "unsafe", false, "high", "recommended", "dbsu", 30000),
+		map[string]string{
+			"flags.mode.choices": "smart,fast,immediate",
+		},
+	),
 	Example: `  pig pg restart                   # fast restart
   pig pg restart -m immediate      # immediate restart
   pig pg restart -O "-p 5433"      # restart with new options
@@ -357,20 +308,10 @@ var pgRestartCmd = &cobra.Command{
 // ============================================================================
 
 var pgReloadCmd = &cobra.Command{
-	Use:     "reload",
-	Short:   "Reload PostgreSQL configuration",
-	Aliases: []string{"hup"},
-	Annotations: map[string]string{
-		"name":       "pig postgres reload",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "1000",
-	},
+	Use:         "reload",
+	Short:       "Reload PostgreSQL configuration",
+	Aliases:     []string{"hup"},
+	Annotations: ancsAnn("pig postgres reload", "action", "volatile", "restricted", true, "low", "none", "dbsu", 1000),
 	Example: `  pig pg reload                    # reload config (SIGHUP)
   pig pg reload -D /data/pg18      # specify data directory
   pig pg reload -o json            # structured output (JSON)`,
@@ -391,20 +332,10 @@ var pgReloadCmd = &cobra.Command{
 // ============================================================================
 
 var pgStatusCmd = &cobra.Command{
-	Use:     "status",
-	Short:   "Show PostgreSQL server status",
-	Aliases: []string{"st", "stat"},
-	Annotations: map[string]string{
-		"name":       "pig postgres status",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "500",
-	},
+	Use:         "status",
+	Short:       "Show PostgreSQL server status",
+	Aliases:     []string{"st", "stat"},
+	Annotations: ancsAnn("pig postgres status", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Example: `  pig pg status                    # check server status
   pig pg status -D /data/pg18      # specify data directory
   pig pg status -o json            # structured output (JSON)
@@ -426,20 +357,10 @@ var pgStatusCmd = &cobra.Command{
 // ============================================================================
 
 var pgPromoteCmd = &cobra.Command{
-	Use:     "promote",
-	Short:   "Promote standby to primary",
-	Aliases: []string{"pro"},
-	Annotations: map[string]string{
-		"name":       "pig postgres promote",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "critical",
-		"confirm":    "required",
-		"os_user":    "dbsu",
-		"cost":       "10000",
-	},
+	Use:         "promote",
+	Short:       "Promote standby to primary",
+	Aliases:     []string{"pro"},
+	Annotations: ancsAnn("pig postgres promote", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 10000),
 	Example: `  pig pg promote                   # promote standby
   pig pg promote -D /data/pg18     # specify data directory
   pig pg promote -o json           # structured output (JSON)`,
@@ -465,20 +386,10 @@ var pgPromoteCmd = &cobra.Command{
 // ============================================================================
 
 var pgRoleCmd = &cobra.Command{
-	Use:     "role",
-	Short:   "Detect PostgreSQL instance role (primary or replica)",
-	Aliases: []string{"r"},
-	Annotations: map[string]string{
-		"name":       "pig postgres role",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "500",
-	},
+	Use:         "role",
+	Short:       "Detect PostgreSQL instance role (primary or replica)",
+	Aliases:     []string{"r"},
+	Annotations: ancsAnn("pig postgres role", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Example: `  pig pg role                     # output: primary, replica, or unknown
   pig pg role -V                  # verbose output with detection details
   pig pg role -D /data/pg18       # specify data directory`,
@@ -486,7 +397,7 @@ var pgRoleCmd = &cobra.Command{
 		opts := &postgres.RoleOptions{
 			Verbose: pgRoleVerbose,
 		}
-		return runPgLegacy("pig postgres role", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePg, "pig postgres role", args, map[string]interface{}{
 			"verbose": pgRoleVerbose,
 		}, func() error {
 			return postgres.PrintRole(pgConfig, opts)

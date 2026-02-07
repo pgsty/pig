@@ -32,21 +32,11 @@ import (
 var moduleFlag string
 
 var contextCmd = &cobra.Command{
-	Use:     "context",
-	Short:   "Show environment context snapshot",
-	Aliases: []string{"ctx"},
-	GroupID: "pigsty",
-	Annotations: map[string]string{
-		"name":       "pig context",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "500",
-	},
+	Use:         "context",
+	Short:       "Show environment context snapshot",
+	Aliases:     []string{"ctx"},
+	GroupID:     "pigsty",
+	Annotations: ancsAnn("pig context", "query", "volatile", "safe", true, "safe", "none", "current", 500),
 	Long: `Collect and display a comprehensive environment context snapshot.
 
 This command gathers information about the current environment including:
@@ -105,6 +95,5 @@ Examples:
 // ============================================================================
 
 func init() {
-	rootCmd.AddCommand(contextCmd)
 	contextCmd.Flags().StringVarP(&moduleFlag, "module", "m", "", "Filter output by module(s): host,postgres,patroni,pgbackrest,extensions (prefix with ! to exclude)")
 }

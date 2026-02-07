@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"pig/cli/postgres"
-	"pig/internal/output"
 
 	"github.com/spf13/cobra"
 )
@@ -30,10 +29,6 @@ var (
 	pePort int
 )
 
-func runPeLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
-	return runLegacyStructured(output.MODULE_PE, command, args, params, fn)
-}
-
 // getExporterURL returns the base URL for pg_exporter
 func getExporterURL(path string) string {
 	host := peHost
@@ -48,21 +43,11 @@ func getExporterURL(path string) string {
 }
 
 var peCmd = &cobra.Command{
-	Use:   "pg_exporter",
-	Short: "Manage pg_exporter and metrics",
-	Annotations: map[string]string{
-		"name":       "pig pg_exporter",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
-	Aliases: []string{"pe", "pgexp", "pgexporter"},
-	GroupID: "pigsty",
+	Use:         "pg_exporter",
+	Short:       "Manage pg_exporter and metrics",
+	Annotations: ancsAnn("pig pg_exporter", "query", "stable", "safe", true, "safe", "none", "current", 100),
+	Aliases:     []string{"pe", "pgexp", "pgexporter"},
+	GroupID:     "pigsty",
 	Long: `Manage pg_exporter and access PostgreSQL metrics.
 
 pg_exporter is the Prometheus exporter for PostgreSQL metrics.
@@ -74,21 +59,11 @@ pg_exporter is the Prometheus exporter for PostgreSQL metrics.
 }
 
 var peGetCmd = &cobra.Command{
-	Use:   "get",
-	Short: "Get all PostgreSQL metrics",
-	Annotations: map[string]string{
-		"name":       "pig pg_exporter get",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "5000",
-	},
+	Use:         "get",
+	Short:       "Get all PostgreSQL metrics",
+	Annotations: ancsAnn("pig pg_exporter get", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPeLegacy("pig pg_exporter get", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePe, "pig pg_exporter get", args, map[string]interface{}{
 			"host": peHost,
 			"port": pePort,
 		}, func() error {
@@ -118,21 +93,11 @@ var peGetCmd = &cobra.Command{
 }
 
 var peListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List metric types",
-	Annotations: map[string]string{
-		"name":       "pig pg_exporter list",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "5000",
-	},
+	Use:         "list",
+	Short:       "List metric types",
+	Annotations: ancsAnn("pig pg_exporter list", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPeLegacy("pig pg_exporter list", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePe, "pig pg_exporter list", args, map[string]interface{}{
 			"host": peHost,
 			"port": pePort,
 		}, func() error {
@@ -169,21 +134,11 @@ var peListCmd = &cobra.Command{
 }
 
 var peReloadCmd = &cobra.Command{
-	Use:   "reload",
-	Short: "Reload pg_exporter configuration",
-	Annotations: map[string]string{
-		"name":       "pig pg_exporter reload",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "1000",
-	},
+	Use:         "reload",
+	Short:       "Reload pg_exporter configuration",
+	Annotations: ancsAnn("pig pg_exporter reload", "action", "volatile", "restricted", true, "low", "none", "current", 1000),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPeLegacy("pig pg_exporter reload", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePe, "pig pg_exporter reload", args, map[string]interface{}{
 			"host": peHost,
 			"port": pePort,
 		}, func() error {
@@ -203,21 +158,11 @@ var peReloadCmd = &cobra.Command{
 }
 
 var peStatCmd = &cobra.Command{
-	Use:   "stat",
-	Short: "Show pg_exporter statistics",
-	Annotations: map[string]string{
-		"name":       "pig pg_exporter stat",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "5000",
-	},
+	Use:         "stat",
+	Short:       "Show pg_exporter statistics",
+	Annotations: ancsAnn("pig pg_exporter stat", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPeLegacy("pig pg_exporter stat", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePe, "pig pg_exporter stat", args, map[string]interface{}{
 			"host": peHost,
 			"port": pePort,
 		}, func() error {

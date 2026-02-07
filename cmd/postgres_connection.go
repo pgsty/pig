@@ -13,20 +13,10 @@ import (
 // ============================================================================
 
 var pgPsqlCmd = &cobra.Command{
-	Use:     "psql [dbname]",
-	Short:   "Connect to PostgreSQL database via psql",
-	Aliases: []string{"sql", "connect"},
-	Annotations: map[string]string{
-		"name":       "pig postgres psql",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "false",
-		"risk":       "medium",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "0",
-	},
+	Use:         "psql [dbname]",
+	Short:       "Connect to PostgreSQL database via psql",
+	Aliases:     []string{"sql", "connect"},
+	Annotations: ancsAnn("pig postgres psql", "action", "volatile", "safe", false, "medium", "none", "dbsu", 0),
 	Example: `  pig pg psql                    # connect to postgres database
   pig pg psql mydb               # connect to specific database
   pig pg psql mydb -c "SELECT 1" # run single command
@@ -50,7 +40,7 @@ var pgPsqlCmd = &cobra.Command{
 				map[string]interface{}{"database": dbname},
 			)
 		}
-		return runPgLegacy("pig postgres psql", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePg, "pig postgres psql", args, map[string]interface{}{
 			"database": dbname,
 			"command":  pgPsqlCommand,
 			"file":     pgPsqlFile,
@@ -61,20 +51,10 @@ var pgPsqlCmd = &cobra.Command{
 }
 
 var pgPsCmd = &cobra.Command{
-	Use:     "ps",
-	Short:   "Show PostgreSQL connections",
-	Aliases: []string{"activity", "act"},
-	Annotations: map[string]string{
-		"name":       "pig postgres ps",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "500",
-	},
+	Use:         "ps",
+	Short:       "Show PostgreSQL connections",
+	Aliases:     []string{"activity", "act"},
+	Annotations: ancsAnn("pig postgres ps", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Example: `  pig pg ps                      # show client connections
   pig pg ps -a                   # show all connections
   pig pg ps -u admin             # filter by user
@@ -85,7 +65,7 @@ var pgPsCmd = &cobra.Command{
 			User:     pgPsUser,
 			Database: pgPsDatabase,
 		}
-		return runPgLegacy("pig postgres ps", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePg, "pig postgres ps", args, map[string]interface{}{
 			"all":      pgPsAll,
 			"user":     pgPsUser,
 			"database": pgPsDatabase,
@@ -96,20 +76,10 @@ var pgPsCmd = &cobra.Command{
 }
 
 var pgKillCmd = &cobra.Command{
-	Use:     "kill",
-	Short:   "Kill PostgreSQL connections (dry-run by default)",
-	Aliases: []string{"k"},
-	Annotations: map[string]string{
-		"name":       "pig postgres kill",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "high",
-		"confirm":    "recommended",
-		"os_user":    "dbsu",
-		"cost":       "1000",
-	},
+	Use:         "kill",
+	Short:       "Kill PostgreSQL connections (dry-run by default)",
+	Aliases:     []string{"k"},
+	Annotations: ancsAnn("pig postgres kill", "action", "volatile", "unsafe", false, "high", "recommended", "dbsu", 1000),
 	Example: `  pig pg kill                    # show what would be killed (dry-run)
   pig pg kill -x                 # actually kill connections
   pig pg kill --pid 12345 -x     # kill specific PID
@@ -140,7 +110,7 @@ var pgKillCmd = &cobra.Command{
 				map[string]interface{}{"watch": pgKillWatch},
 			)
 		}
-		return runPgLegacy("pig postgres kill", args, map[string]interface{}{
+		return runLegacyStructured(legacyModulePg, "pig postgres kill", args, map[string]interface{}{
 			"execute":  pgKillExecute,
 			"pid":      pgKillPid,
 			"user":     pgKillUser,

@@ -4,8 +4,6 @@ Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
 package cmd
 
 import (
-	"pig/internal/output"
-
 	"github.com/spf13/cobra"
 )
 
@@ -14,27 +12,13 @@ var (
 	patroniPlan bool
 )
 
-func runPatroniLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
-	return runLegacyStructured(output.MODULE_PT, command, args, params, fn)
-}
-
 // patroniCmd represents the patroni command
 var patroniCmd = &cobra.Command{
-	Use:     "patroni",
-	Short:   "Manage patroni cluster with patronictl",
-	Aliases: []string{"pt"},
-	GroupID: "pigsty",
-	Annotations: map[string]string{
-		"name":       "pig patroni",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
+	Use:         "patroni",
+	Short:       "Manage patroni cluster with patronictl",
+	Aliases:     []string{"pt"},
+	GroupID:     "pigsty",
+	Annotations: ancsAnn("pig patroni", "query", "stable", "safe", true, "safe", "none", "current", 100),
 	Long: `Manage Patroni cluster using patronictl commands.
 
 Cluster Operations (via patronictl):

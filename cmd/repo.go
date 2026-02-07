@@ -23,21 +23,11 @@ var (
 
 // repoCmd represents the top-level `repo` command
 var repoCmd = &cobra.Command{
-	Use:     "repo",
-	Short:   "Manage Linux Software Repo (apt/dnf)",
-	Aliases: []string{"r"},
-	GroupID: "pgext",
-	Annotations: map[string]string{
-		"name":       "pig repo",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
+	Use:         "repo",
+	Short:       "Manage Linux Software Repo (apt/dnf)",
+	Aliases:     []string{"r"},
+	GroupID:     "pgext",
+	Annotations: ancsAnn("pig repo", "query", "stable", "safe", true, "safe", "none", "current", 100),
 	Long: `pig repo - Manage Linux APT/YUM Repo
 
   pig repo list                    # available repo list             (info)
@@ -69,17 +59,7 @@ var repoListCmd = &cobra.Command{
 	Short:        "print available repo list",
 	Aliases:      []string{"l", "ls"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig repo list",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
+	Annotations:  ancsAnn("pig repo list", "query", "stable", "safe", true, "safe", "none", "current", 100),
 	Example: `
   pig repo list                # list available repos on current system
   pig repo list all            # list all unfiltered repo raw data
@@ -96,17 +76,7 @@ var repoInfoCmd = &cobra.Command{
 	Short:        "get repo detailed information",
 	Aliases:      []string{"i"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig repo info",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "50",
-	},
+	Annotations:  ancsAnn("pig repo info", "query", "stable", "safe", true, "safe", "none", "current", 50),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := repo.GetRepoInfo(args)
 		return handleAuxResult(result)
@@ -118,17 +88,7 @@ var repoAddCmd = &cobra.Command{
 	Short:        "add new repository",
 	Aliases:      []string{"a", "append"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig repo add",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "2000",
-	},
+	Annotations:  ancsAnn("pig repo add", "action", "stable", "safe", true, "low", "none", "root", 2000),
 	Example: `
   pig repo add                      # = pig repo add all
   pig repo add all                  # add node,pgsql,infra repo (recommended)
@@ -169,17 +129,7 @@ var repoSetCmd = &cobra.Command{
 	Short:        "wipe, overwrite, and update repository",
 	Aliases:      []string{"overwrite"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig repo set",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "5000",
-	},
+	Annotations:  ancsAnn("pig repo set", "action", "stable", "restricted", true, "medium", "recommended", "root", 5000),
 	Example: `
   pig repo set                      # set repo to node,pgsql,infra (= pig repo add all -ru)
   pig repo set node,pgsql           # use pgdg + pigsty repo
@@ -201,17 +151,7 @@ var repoRmCmd = &cobra.Command{
 	Short:        "remove repository",
 	Aliases:      []string{"remove"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig repo rm",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "2000",
-	},
+	Annotations:  ancsAnn("pig repo rm", "action", "stable", "restricted", true, "medium", "recommended", "root", 2000),
 	Example: `
   pig repo rm                      # remove (backup) all existing repo to backup dir
   pig repo rm all --update         # remove module 'all' and update repo cache
@@ -234,17 +174,7 @@ var repoUpdateCmd = &cobra.Command{
 	Short:        "update repo cache",
 	Aliases:      []string{"u"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig repo update",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "10000",
-	},
+	Annotations:  ancsAnn("pig repo update", "action", "volatile", "safe", true, "safe", "none", "root", 10000),
 	Example: `
   pig repo update                  # yum makecache or apt update
   `,
@@ -264,17 +194,7 @@ var repoStatusCmd = &cobra.Command{
 	Short:        "show current repo status",
 	Aliases:      []string{"s", "st"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig repo status",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "500",
-	},
+	Annotations:  ancsAnn("pig repo status", "query", "volatile", "safe", true, "safe", "none", "current", 500),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := repo.GetRepoStatus()
 		return handleAuxResult(result)
@@ -286,17 +206,7 @@ var repoBootCmd = &cobra.Command{
 	Short:        "bootstrap repo from offline package",
 	Aliases:      []string{"b", "bt"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig repo boot",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "10000",
-	},
+	Annotations:  ancsAnn("pig repo boot", "action", "stable", "restricted", true, "medium", "recommended", "root", 10000),
 	Example: `
   pig repo boot                    # boot repo from /tmp/pkg.tgz to /www
   pig repo boot -p /tmp/pkg.tgz    # boot repo from given package path
@@ -313,17 +223,7 @@ var repoCacheCmd = &cobra.Command{
 	Short:        "create offline package from local repo",
 	Aliases:      []string{"c"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig repo cache",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "30000",
-	},
+	Annotations:  ancsAnn("pig repo cache", "action", "stable", "restricted", true, "low", "none", "root", 30000),
 	Example: `
   pig repo cache                    # create /tmp/pkg.tgz offline package from /www/pigsty
   pig repo cache -f                 # force overwrite existing package
@@ -348,17 +248,7 @@ var repoCreateCmd = &cobra.Command{
 	Short:        "create local YUM/APT repository",
 	Aliases:      []string{"cr"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig repo create",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "5000",
-	},
+	Annotations:  ancsAnn("pig repo create", "action", "stable", "restricted", true, "low", "none", "root", 5000),
 	Example: `
   pig repo create                    # create repo on /www/pigsty
   pig repo create /www/mssql /www/b  # create repo on multiple locations
@@ -380,17 +270,7 @@ var repoReloadCmd = &cobra.Command{
 	Short:        "reload repo catalog to the latest version",
 	SilenceUsage: true,
 	Aliases:      []string{"r", "re"},
-	Annotations: map[string]string{
-		"name":       "pig repo reload",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "3000",
-	},
+	Annotations:  ancsAnn("pig repo reload", "action", "volatile", "safe", true, "safe", "none", "current", 3000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := repo.ReloadRepoCatalogWithResult()
 		return handleAuxResult(result)

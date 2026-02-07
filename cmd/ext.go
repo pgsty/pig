@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"pig/cli/ext"
 	"pig/internal/output"
-	"strconv"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -49,17 +47,7 @@ var extCmd = &cobra.Command{
   pig ext link    [ext...]     # link postgres installation to path
   pig ext reload               # reload the latest extension catalog data
 `,
-	Annotations: map[string]string{
-		"name":       "pig ext",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
+	Annotations: ancsAnn("pig ext", "query", "stable", "safe", true, "safe", "none", "current", 100),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if err := initAll(); err != nil {
 			return err
@@ -79,17 +67,7 @@ var extListCmd = &cobra.Command{
   pig ext ls olap             # list extension of olap category
   pig ext ls gis -v 16        # list gis category for pg 16
 `,
-	Annotations: map[string]string{
-		"name":       "pig ext list",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
+	Annotations: ancsAnn("pig ext list", "query", "stable", "safe", true, "safe", "none", "current", 100),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 1 {
 			return handleAuxResult(output.Fail(output.CodeExtensionInvalidArgs, "too many arguments, only one search query allowed"))
@@ -110,20 +88,10 @@ var extListCmd = &cobra.Command{
 }
 
 var extInfoCmd = &cobra.Command{
-	Use:     "info [ext...]",
-	Short:   "get extension information",
-	Aliases: []string{"i"},
-	Annotations: map[string]string{
-		"name":       "pig ext info",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "50",
-	},
+	Use:         "info [ext...]",
+	Short:       "get extension information",
+	Aliases:     []string{"i"},
+	Annotations: ancsAnn("pig ext info", "query", "stable", "safe", true, "safe", "none", "current", 50),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := ext.GetExtensionInfo(args)
 		return handleAuxResult(result)
@@ -131,20 +99,10 @@ var extInfoCmd = &cobra.Command{
 }
 
 var extStatusCmd = &cobra.Command{
-	Use:     "status",
-	Short:   "show installed extension on active pg",
-	Aliases: []string{"s", "st", "stat"},
-	Annotations: map[string]string{
-		"name":       "pig ext status",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "200",
-	},
+	Use:         "status",
+	Short:       "show installed extension on active pg",
+	Aliases:     []string{"s", "st", "stat"},
+	Annotations: ancsAnn("pig ext status", "query", "volatile", "safe", true, "safe", "none", "current", 200),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if _, err := extProbeVersion(); err != nil {
 			return handleExtProbeError(err)
@@ -155,20 +113,10 @@ var extStatusCmd = &cobra.Command{
 }
 
 var extScanCmd = &cobra.Command{
-	Use:     "scan",
-	Short:   "scan installed extensions for active pg",
-	Aliases: []string{"sc"},
-	Annotations: map[string]string{
-		"name":       "pig ext scan",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "500",
-	},
+	Use:         "scan",
+	Short:       "scan installed extensions for active pg",
+	Aliases:     []string{"sc"},
+	Annotations: ancsAnn("pig ext scan", "query", "volatile", "safe", true, "safe", "none", "current", 500),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if _, err := extProbeVersion(); err != nil {
 			return handleExtProbeError(err)
@@ -179,20 +127,10 @@ var extScanCmd = &cobra.Command{
 }
 
 var extAddCmd = &cobra.Command{
-	Use:     "add",
-	Short:   "install postgres extension",
-	Aliases: []string{"a", "install", "ins"},
-	Annotations: map[string]string{
-		"name":       "pig ext add",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "10000",
-	},
+	Use:         "add",
+	Short:       "install postgres extension",
+	Aliases:     []string{"a", "install", "ins"},
+	Annotations: ancsAnn("pig ext add", "action", "stable", "restricted", true, "low", "none", "root", 10000),
 	Example: `
 Description:
   pig ext add     pg_duckdb                  # install one extension
@@ -228,20 +166,10 @@ Description:
 }
 
 var extRmCmd = &cobra.Command{
-	Use:     "rm",
-	Short:   "remove postgres extension",
-	Aliases: []string{"r", "remove"},
-	Annotations: map[string]string{
-		"name":       "pig ext rm",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "restricted",
-		"idempotent": "false",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "10000",
-	},
+	Use:         "rm",
+	Short:       "remove postgres extension",
+	Aliases:     []string{"r", "remove"},
+	Annotations: ancsAnn("pig ext rm", "action", "stable", "restricted", false, "medium", "recommended", "root", 10000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgVer, err := extProbeVersion()
 		if err != nil {
@@ -260,20 +188,10 @@ var extRmCmd = &cobra.Command{
 }
 
 var extUpdateCmd = &cobra.Command{
-	Use:     "update",
-	Short:   "update installed extensions for current pg version",
-	Aliases: []string{"u", "upd"},
-	Annotations: map[string]string{
-		"name":       "pig ext update",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "10000",
-	},
+	Use:         "update",
+	Short:       "update installed extensions for current pg version",
+	Aliases:     []string{"u", "upd"},
+	Annotations: ancsAnn("pig ext update", "action", "stable", "restricted", true, "low", "none", "root", 10000),
 	Example: `
 Description:
   pig ext update                     # update all installed extensions
@@ -296,17 +214,7 @@ var extImportCmd = &cobra.Command{
 	Short:        "import extension packages to local repo",
 	Aliases:      []string{"get"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig ext import",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "30000",
-	},
+	Annotations:  ancsAnn("pig ext import", "action", "stable", "restricted", true, "low", "none", "root", 30000),
 	Example: `
   pig ext import postgis                # import postgis extension packages
   pig ext import timescaledb pg_cron    # import multiple extensions
@@ -329,17 +237,7 @@ var extLinkCmd = &cobra.Command{
 	Short:        "link postgres to active PATH",
 	Aliases:      []string{"ln"},
 	SilenceUsage: true,
-	Annotations: map[string]string{
-		"name":       "pig ext link",
-		"type":       "action",
-		"volatility": "stable",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "100",
-	},
+	Annotations:  ancsAnn("pig ext link", "action", "stable", "unsafe", true, "medium", "none", "root", 100),
 	Example: `
   pig ext link 18                      # link pgdg postgresql 18 to /usr/pgsql
   pig ext link pg17                    # link postgresql 17 to /usr/pgsql (pg prefix stripped)
@@ -358,17 +256,7 @@ var extReloadCmd = &cobra.Command{
 	Short:        "reload extension catalog to the latest version",
 	SilenceUsage: true,
 	Aliases:      []string{"rl"},
-	Annotations: map[string]string{
-		"name":       "pig ext reload",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "5000",
-	},
+	Annotations:  ancsAnn("pig ext reload", "action", "volatile", "safe", true, "safe", "none", "current", 5000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := ext.ReloadCatalogResult()
 		return handleAuxResult(result)
@@ -386,17 +274,7 @@ var extAvailCmd = &cobra.Command{
   pig ext av pgvector               # show availability for pgvector
   pig ext matrix citus              # alias for avail command
 `,
-	Annotations: map[string]string{
-		"name":       "pig ext avail",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "current",
-		"cost":       "100",
-	},
+	Annotations: ancsAnn("pig ext avail", "query", "stable", "safe", true, "safe", "none", "current", 100),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := ext.GetExtensionAvailability(args)
 		return handleAuxResult(result)
@@ -431,51 +309,23 @@ func extProbeErrorCode(err error) int {
 
 // extProbeVersion returns the PostgreSQL version to use
 func extProbeVersion() (int, error) {
-	// check args
-	if extPgVer != 0 && extPgConfig != "" {
-		return 0, &extProbeError{
-			Code: output.CodeExtensionInvalidArgs,
-			Err:  fmt.Errorf("both pg version and pg_config path are specified, please specify only one"),
-		}
-	}
-
-	// detect postgres installation, but don't fail if not found
-	err := ext.DetectPostgres()
-	if err != nil {
-		logrus.Debugf("failed to detect PostgreSQL: %v", err)
-	}
-
-	// if pg version is specified, try if we can find the actual installation
-	if extPgVer != 0 {
-		_, err := ext.GetPostgres(strconv.Itoa(extPgVer))
-		if err != nil {
-			logrus.Debugf("PostgreSQL installation %d not found: %v , but it's ok", extPgVer, err)
-			// if version is explicitly given, we can fallback without any installation
-		}
-		return extPgVer, nil
-	}
-
-	// if pg_config is specified, we must find the actual installation, to get the major version
-	if extPgConfig != "" {
-		_, err := ext.GetPostgres(extPgConfig)
-		if err != nil {
-			return 0, &extProbeError{
+	return probePostgresMajorVersion(pgMajorProbeOptions{
+		Version:        extPgVer,
+		PGConfig:       extPgConfig,
+		DefaultVersion: 0,
+		BothSetError: func() error {
+			return &extProbeError{
+				Code: output.CodeExtensionInvalidArgs,
+				Err:  fmt.Errorf("both pg version and pg_config path are specified, please specify only one"),
+			}
+		},
+		PGConfigError: func(err error) error {
+			return &extProbeError{
 				Code: output.CodeExtensionPgConfigError,
 				Err:  fmt.Errorf("failed to get PostgreSQL by pg_config path %s: %v", extPgConfig, err),
 			}
-		}
-		return ext.Postgres.MajorVersion, nil
-	}
-
-	// if none given, we can fall back to active installation, or if we can't infer the version, we can fallback to no version tabulate
-	if ext.Active != nil {
-		logrus.Debugf("fallback to active PostgreSQL: %d", ext.Active.MajorVersion)
-		ext.Postgres = ext.Active
-		return ext.Active.MajorVersion, nil
-	}
-
-	logrus.Debugf("no active PostgreSQL found, but it's ok")
-	return 0, nil
+		},
+	})
 }
 
 func init() {
