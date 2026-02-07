@@ -194,99 +194,54 @@ func TestConvertToResultData(t *testing.T) {
 		t.Fatalf("Failed to parse sample JSON: %v", err)
 	}
 
-	if len(infos) != 1 {
-		t.Fatalf("Expected 1 stanza, got %d", len(infos))
-	}
+	assertLen(t, infos, 1, "stanza count")
 
 	// Convert to result data
 	data := convertToResultData(&infos[0])
 
 	// Verify stanza name
-	if data.Stanza != "pg-meta" {
-		t.Errorf("Stanza mismatch: got %q, want %q", data.Stanza, "pg-meta")
-	}
+	assertEq(t, data.Stanza, "pg-meta", "Stanza")
 
 	// Verify status
-	if data.Status.Code != 0 {
-		t.Errorf("Status.Code mismatch: got %d, want 0", data.Status.Code)
-	}
-	if data.Status.Message != "ok" {
-		t.Errorf("Status.Message mismatch: got %q, want %q", data.Status.Message, "ok")
-	}
+	assertEq(t, data.Status.Code, 0, "Status.Code")
+	assertEq(t, data.Status.Message, "ok", "Status.Message")
 
 	// Verify cipher
-	if data.Cipher != "none" {
-		t.Errorf("Cipher mismatch: got %q, want %q", data.Cipher, "none")
-	}
+	assertEq(t, data.Cipher, "none", "Cipher")
 
 	// Verify DB info
-	if len(data.DB) != 1 {
-		t.Fatalf("Expected 1 DB entry, got %d", len(data.DB))
-	}
-	if data.DB[0].Version != "17" {
-		t.Errorf("DB Version mismatch: got %q, want %q", data.DB[0].Version, "17")
-	}
+	assertLen(t, data.DB, 1, "DB count")
+	assertEq(t, data.DB[0].Version, "17", "DB[0].Version")
 
 	// Verify archive info
-	if len(data.Archive) != 1 {
-		t.Fatalf("Expected 1 archive entry, got %d", len(data.Archive))
-	}
-	if data.Archive[0].Min != "000000010000000000000001" {
-		t.Errorf("Archive.Min mismatch: got %q", data.Archive[0].Min)
-	}
+	assertLen(t, data.Archive, 1, "Archive count")
+	assertEq(t, data.Archive[0].Min, "000000010000000000000001", "Archive[0].Min")
 
 	// Verify backup count
-	if data.BackupCount != 2 {
-		t.Errorf("BackupCount mismatch: got %d, want 2", data.BackupCount)
-	}
+	assertEq(t, data.BackupCount, 2, "BackupCount")
 
 	// Verify backups are sorted by timestamp (ascending)
-	if len(data.Backups) != 2 {
-		t.Fatalf("Expected 2 backups, got %d", len(data.Backups))
-	}
-	if data.Backups[0].Label != "20250101-120000F" {
-		t.Errorf("First backup should be full backup, got %q", data.Backups[0].Label)
-	}
-	if data.Backups[1].Label != "20250102-120000I" {
-		t.Errorf("Second backup should be incr backup, got %q", data.Backups[1].Label)
-	}
+	assertLen(t, data.Backups, 2, "Backups count")
+	assertEq(t, data.Backups[0].Label, "20250101-120000F", "Backups[0].Label")
+	assertEq(t, data.Backups[1].Label, "20250102-120000I", "Backups[1].Label")
 
 	// Verify backup details
 	firstBackup := data.Backups[0]
-	if firstBackup.Type != "full" {
-		t.Errorf("First backup type mismatch: got %q, want %q", firstBackup.Type, "full")
-	}
-	if firstBackup.Size != 25719742 {
-		t.Errorf("First backup size mismatch: got %d", firstBackup.Size)
-	}
-	if firstBackup.Prior != "" {
-		t.Errorf("First backup should have no prior, got %q", firstBackup.Prior)
-	}
+	assertEq(t, firstBackup.Type, "full", "Backups[0].Type")
+	assertEq(t, firstBackup.Size, int64(25719742), "Backups[0].Size")
+	assertEq(t, firstBackup.Prior, "", "Backups[0].Prior")
 
 	secondBackup := data.Backups[1]
-	if secondBackup.Type != "incr" {
-		t.Errorf("Second backup type mismatch: got %q, want %q", secondBackup.Type, "incr")
-	}
-	if secondBackup.Prior != "20250101-120000F" {
-		t.Errorf("Second backup prior mismatch: got %q", secondBackup.Prior)
-	}
+	assertEq(t, secondBackup.Type, "incr", "Backups[1].Type")
+	assertEq(t, secondBackup.Prior, "20250101-120000F", "Backups[1].Prior")
 
 	// Verify recovery window
-	if data.RecoveryWindow == nil {
-		t.Fatal("RecoveryWindow should not be nil")
-	}
-	if data.RecoveryWindow.FirstBackupLabel != "20250101-120000F" {
-		t.Errorf("RecoveryWindow.FirstBackupLabel mismatch: got %q", data.RecoveryWindow.FirstBackupLabel)
-	}
-	if data.RecoveryWindow.LastBackupLabel != "20250102-120000I" {
-		t.Errorf("RecoveryWindow.LastBackupLabel mismatch: got %q", data.RecoveryWindow.LastBackupLabel)
-	}
+	window := requireNotNil(t, data.RecoveryWindow, "RecoveryWindow")
+	assertEq(t, window.FirstBackupLabel, "20250101-120000F", "RecoveryWindow.FirstBackupLabel")
+	assertEq(t, window.LastBackupLabel, "20250102-120000I", "RecoveryWindow.LastBackupLabel")
 	// Duration should be from first backup start to last backup stop
 	expectedDuration := int64(1735819260 - 1735732800) // 86460 seconds
-	if data.RecoveryWindow.DurationSeconds != expectedDuration {
-		t.Errorf("RecoveryWindow.DurationSeconds mismatch: got %d, want %d",
-			data.RecoveryWindow.DurationSeconds, expectedDuration)
-	}
+	assertEq(t, window.DurationSeconds, expectedDuration, "RecoveryWindow.DurationSeconds")
 }
 
 // TestConvertToResultDataNil tests conversion with nil input.
@@ -436,4 +391,26 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func assertEq[T comparable](t *testing.T, got, want T, label string) {
+	t.Helper()
+	if got != want {
+		t.Errorf("%s mismatch: got %v, want %v", label, got, want)
+	}
+}
+
+func assertLen[T any](t *testing.T, items []T, want int, label string) {
+	t.Helper()
+	if got := len(items); got != want {
+		t.Fatalf("%s mismatch: got %d, want %d", label, got, want)
+	}
+}
+
+func requireNotNil[T any](t *testing.T, v *T, label string) *T {
+	t.Helper()
+	if v == nil {
+		t.Fatalf("%s should not be nil", label)
+	}
+	return v
 }
