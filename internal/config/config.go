@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -282,72 +283,16 @@ func InitConfigFile(cfgPath string) {
 	}
 }
 
-// DetectEnvironment detects the OS and sets the global variables
-func DetectEnvironment() {
-	OSArch = runtime.GOARCH
-	NodeHostname, _ = os.Hostname()
-	NodeCPUCount = runtime.NumCPU()
+type osReleaseInfo struct {
+	ID              string
+	VersionID       string
+	VersionCodename string
+}
 
-	// Priority 1: Check if we're root by UID (most reliable in Docker)
-	if os.Geteuid() == 0 {
-		CurrentUser = "root"
-		logrus.Debugf("detected root user by UID")
-	} else if user, err := user.Current(); err == nil {
-		// Priority 2: Use system user detection
-		CurrentUser = user.Username
-		logrus.Debugf("detected user: %s", CurrentUser)
-	} else {
-		// Priority 3: Fallback to environment variable
-		logrus.Debugf("could not determine current user: %v", err)
-		if envUser := os.Getenv("USER"); envUser != "" {
-			CurrentUser = envUser
-			logrus.Debugf("using USER env variable: %s", CurrentUser)
-		} else {
-			CurrentUser = "unknown"
-			logrus.Warnf("could not determine current user, using 'unknown'")
-		}
-	}
-	if runtime.GOOS != "linux" {
-		if runtime.GOOS == "darwin" {
-			OSVendor = "macos"
-			OSType = DistroMAC
-			osVersion, err := exec.Command("uname", "-r").Output()
-			if err != nil {
-				logrus.Debugf("Failed to get os version from uname: %s", err)
-				return
-			} else {
-				OSVersionFull = strings.TrimSpace(string(osVersion))
-			}
-			if OSVersionFull != "" {
-				OSVersion = strings.Split(OSVersionFull, ".")[0]
-				OSMajor, _ = strconv.Atoi(OSVersion)
-				OSCode = fmt.Sprintf("a%s", OSVersion)
-				OSVersionCode = OSCode
-			}
-			return
-		}
-		logrus.Debugf("Running on non-Linux platform: %s", runtime.GOOS)
-		return
-	}
+func parseOSRelease(r io.Reader) osReleaseInfo {
+	var info osReleaseInfo
 
-	// First determine OS type by checking package manager
-	if _, err := os.Stat("/usr/bin/rpm"); err == nil {
-		OSType = DistroEL
-	}
-	if _, err := os.Stat("/usr/bin/dpkg"); err == nil {
-		OSType = DistroDEB
-	}
-
-	// Try to read OS release info
-	f, err := os.Open("/etc/os-release")
-	if err != nil {
-		logrus.Debugf("could not read /etc/os-release: %s", err)
-		return
-	}
-	defer f.Close()
-
-	var versionID string
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -359,29 +304,111 @@ func DetectEnvironment() {
 		}
 		key := parts[0]
 		val := strings.Trim(parts[1], "\"")
-
 		switch key {
 		case "ID":
-			OSVendor = val
+			info.ID = val
 		case "VERSION_ID":
-			versionID = val
-			OSVersionFull = val
+			info.VersionID = val
 		case "VERSION_CODENAME":
-			OSVersionCode = val
+			info.VersionCodename = val
 		}
 	}
+	return info
+}
 
-	// Extract major version
-	if versionID != "" {
-		OSVersion = strings.Split(versionID, ".")[0]
-		OSMajor, _ = strconv.Atoi(OSVersion)
+func readOSRelease(path string) (osReleaseInfo, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return osReleaseInfo{}, err
+	}
+	defer f.Close()
+	return parseOSRelease(f), nil
+}
+
+func detectCurrentUser() {
+	// Priority 1: Check if we're root by UID (most reliable in Docker).
+	if os.Geteuid() == 0 {
+		CurrentUser = "root"
+		logrus.Debugf("detected root user by UID")
+		return
 	}
 
-	// Determine OS code based on distribution and package type
+	// Priority 2: Use system user detection.
+	if user, err := user.Current(); err == nil {
+		CurrentUser = user.Username
+		logrus.Debugf("detected user: %s", CurrentUser)
+		return
+	} else {
+		// Priority 3: Fallback to environment variable.
+		logrus.Debugf("could not determine current user: %v", err)
+	}
+
+	if envUser := os.Getenv("USER"); envUser != "" {
+		CurrentUser = envUser
+		logrus.Debugf("using USER env variable: %s", CurrentUser)
+		return
+	}
+
+	CurrentUser = "unknown"
+	logrus.Warnf("could not determine current user, using 'unknown'")
+}
+
+func detectDarwinEnvironment() bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+
+	OSVendor = "macos"
+	OSType = DistroMAC
+
+	osVersion, err := exec.Command("uname", "-r").Output()
+	if err != nil {
+		logrus.Debugf("Failed to get os version from uname: %s", err)
+		return true
+	}
+
+	OSVersionFull = strings.TrimSpace(string(osVersion))
+	if OSVersionFull == "" {
+		return true
+	}
+
+	OSVersion = strings.Split(OSVersionFull, ".")[0]
+	OSMajor, _ = strconv.Atoi(OSVersion)
+	OSCode = fmt.Sprintf("a%s", OSVersion)
+	OSVersionCode = OSCode
+	return true
+}
+
+func detectLinuxPackageManager() {
+	// First determine OS type by checking package manager.
+	if _, err := os.Stat("/usr/bin/rpm"); err == nil {
+		OSType = DistroEL
+	}
+	if _, err := os.Stat("/usr/bin/dpkg"); err == nil {
+		OSType = DistroDEB
+	}
+}
+
+func applyLinuxReleaseInfo(info osReleaseInfo) {
+	OSVendor = info.ID
+	OSVersionFull = info.VersionID
+	OSVersionCode = info.VersionCodename
+
+	// Extract major version.
+	if info.VersionID != "" {
+		OSVersion = strings.Split(info.VersionID, ".")[0]
+		OSMajor, _ = strconv.Atoi(OSVersion)
+	}
+}
+
+func detectLinuxOSCode() {
+	// Determine OS code based on distribution and package type.
 	if OSType == DistroEL {
 		OSCode = "el" + OSVersion
 		OSVersionCode = OSCode
+		return
 	}
+
 	if OSType == DistroDEB {
 		if OSVendor == "ubuntu" {
 			OSCode = "u" + OSVersion
@@ -389,6 +416,33 @@ func DetectEnvironment() {
 			OSCode = "d" + OSVersion
 		}
 	}
+}
+
+// DetectEnvironment detects the OS and sets the global variables
+func DetectEnvironment() {
+	OSArch = runtime.GOARCH
+	NodeHostname, _ = os.Hostname()
+	NodeCPUCount = runtime.NumCPU()
+
+	detectCurrentUser()
+
+	if runtime.GOOS != "linux" {
+		if detectDarwinEnvironment() {
+			return
+		}
+		logrus.Debugf("Running on non-Linux platform: %s", runtime.GOOS)
+		return
+	}
+
+	detectLinuxPackageManager()
+	info, err := readOSRelease("/etc/os-release")
+	if err != nil {
+		logrus.Debugf("could not read /etc/os-release: %s", err)
+		return
+	}
+	applyLinuxReleaseInfo(info)
+	detectLinuxOSCode()
+
 	logrus.Debugf("Detected OS: code=%s arch=%s type=%s vendor=%s version=%s %s major=%d full=%s",
 		OSCode, OSArch, OSType, OSVendor, OSVersion, OSVersionCode, OSMajor, OSVersionFull)
 }

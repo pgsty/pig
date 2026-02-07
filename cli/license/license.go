@@ -65,11 +65,11 @@ type LicenseManager struct {
 // InitLicense will init the license manager with viper config
 func InitLicense(lic string) {
 	if lic == "" {
-		lic := viper.GetString("license")
-		if lic == "" {
-			// logrus.Debugf("no active license configured")
-			return
-		}
+		lic = viper.GetString("license")
+	}
+	if lic == "" {
+		// logrus.Debugf("no active license configured")
+		return
 	}
 	if err := Manager.Register(lic); err != nil {
 		logrus.Debugf("Failed to register license: %v", err)
