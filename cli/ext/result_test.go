@@ -986,7 +986,7 @@ func TestToInfoDataWithNilCatalog(t *testing.T) {
 		t.Fatal("expected non-nil info")
 	}
 	// RequiredBy should be nil/empty when Catalog is nil
-	if info.RequiredBy != nil && len(info.RequiredBy) > 0 {
+	if len(info.RequiredBy) > 0 {
 		t.Errorf("expected empty RequiredBy when Catalog is nil, got %v", info.RequiredBy)
 	}
 }
