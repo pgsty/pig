@@ -5,11 +5,9 @@ Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
 package cmd
 
 import (
-	"fmt"
 	"pig/cli/pitr"
 	"pig/internal/config"
 	"pig/internal/output"
-	"pig/internal/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -111,7 +109,7 @@ The command uses the same execution privilege strategy as other pig commands:
 
 		if !hasTarget {
 			if config.IsStructuredOutput() {
-				return handlePITRResult(
+				return handleAuxResult(
 					output.Fail(output.CodePITRInvalidArgs, "invalid or missing recovery target").
 						WithDetail("choose one of: --default, --immediate, --time, --name, --lsn, --xid"),
 				)
@@ -131,7 +129,7 @@ The command uses the same execution privilege strategy as other pig commands:
 		// Structured output: return Result
 		if config.IsStructuredOutput() {
 			result := pitr.ExecuteResult(pitrOpts)
-			return handlePITRResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text output: keep existing behavior
@@ -168,17 +166,4 @@ func init() {
 	pitrCmd.Flags().StringVarP(&pitrOpts.DataDir, "data", "D", "", "target data directory")
 	pitrCmd.Flags().BoolVarP(&pitrOpts.Exclusive, "exclusive", "X", false, "stop before target (exclusive)")
 	pitrCmd.Flags().BoolVarP(&pitrOpts.Promote, "promote", "P", false, "auto-promote after recovery")
-}
-
-func handlePITRResult(result *output.Result) error {
-	if result == nil {
-		return fmt.Errorf("nil result")
-	}
-	if err := output.Print(result); err != nil {
-		return err
-	}
-	if !result.Success {
-		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message)}
-	}
-	return nil
 }

@@ -15,8 +15,8 @@ var updateRegion string
 
 // updateCmd represents the installation command
 var updateCmd = &cobra.Command{
-	Use:          "update",
-	Short:        "Upgrade pig itself",
+	Use:   "update",
+	Short: "Upgrade pig itself",
 	Annotations: map[string]string{
 		"name":       "pig update",
 		"type":       "action",
@@ -37,11 +37,16 @@ var updateCmd = &cobra.Command{
   pig update -v 1.0.0 		    # update pig to version 1.0.0
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pigVersion := updateVersion
-		if strings.HasPrefix(updateVersion, "v") {
-			pigVersion = strings.TrimLeft(updateVersion, "v")
-		} // remove the vx.y.z 'v' prefix
-		return get.UpdatePig(pigVersion, updateRegion)
+		return runStyLegacy("pig update", args, map[string]interface{}{
+			"version": updateVersion,
+			"region":  updateRegion,
+		}, func() error {
+			pigVersion := updateVersion
+			if strings.HasPrefix(updateVersion, "v") {
+				pigVersion = strings.TrimLeft(updateVersion, "v")
+			} // remove the vx.y.z 'v' prefix
+			return get.UpdatePig(pigVersion, updateRegion)
+		})
 	},
 }
 

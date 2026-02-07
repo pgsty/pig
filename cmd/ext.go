@@ -6,9 +6,7 @@ package cmd
 import (
 	"fmt"
 	"pig/cli/ext"
-	"pig/internal/config"
 	"pig/internal/output"
-	"pig/internal/utils"
 	"strconv"
 
 	"github.com/sirupsen/logrus"
@@ -94,7 +92,7 @@ var extListCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 1 {
-			return handleStructuredResult(output.Fail(output.CodeExtensionInvalidArgs, "too many arguments, only one search query allowed"))
+			return handleAuxResult(output.Fail(output.CodeExtensionInvalidArgs, "too many arguments, only one search query allowed"))
 		}
 
 		pgVer, err := extProbeVersion()
@@ -107,7 +105,7 @@ var extListCmd = &cobra.Command{
 		}
 
 		result := ext.ListExtensions(query, pgVer)
-		return handleStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -128,7 +126,7 @@ var extInfoCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := ext.GetExtensionInfo(args)
-		return handleStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -152,7 +150,7 @@ var extStatusCmd = &cobra.Command{
 			return handleExtProbeError(err)
 		}
 		result := ext.GetExtStatus(extShowContrib)
-		return handleStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -176,7 +174,7 @@ var extScanCmd = &cobra.Command{
 			return handleExtProbeError(err)
 		}
 		result := ext.ScanExtensionsResult()
-		return handleStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -221,11 +219,11 @@ Description:
 		// Plan mode: show plan without executing
 		if extAddPlan {
 			plan := ext.BuildAddPlan(pgVer, args)
-			return handleExtPlanOutput(plan)
+			return handlePlanOutput(plan)
 		}
 
 		result := ext.AddExtensions(pgVer, args, extYes)
-		return handleStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -253,11 +251,11 @@ var extRmCmd = &cobra.Command{
 		// Plan mode: show plan without executing
 		if extRmPlan {
 			plan := ext.BuildRmPlan(pgVer, args)
-			return handleExtPlanOutput(plan)
+			return handlePlanOutput(plan)
 		}
 
 		result := ext.RmExtensions(pgVer, args, extYes)
-		return handleStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -289,7 +287,7 @@ Description:
 			return handleExtProbeError(err)
 		}
 		result := ext.UpgradeExtensions(pgVer, args, extYes)
-		return handleStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -322,7 +320,7 @@ var extImportCmd = &cobra.Command{
 			return handleExtProbeError(err)
 		}
 		result := ext.ImportExtensionsResult(pgVer, args, extRepoDir)
-		return handleStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -351,7 +349,7 @@ var extLinkCmd = &cobra.Command{
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := ext.LinkPostgresResult(args...)
-		return handleStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -373,7 +371,7 @@ var extReloadCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := ext.ReloadCatalogResult()
-		return handleStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -401,7 +399,7 @@ var extAvailCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := ext.GetExtensionAvailability(args)
-		return handleStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -511,33 +509,5 @@ func handleExtProbeError(err error) error {
 		return nil
 	}
 	code := extProbeErrorCode(err)
-	return handleStructuredResult(output.Fail(code, err.Error()))
-}
-
-// handleExtPlanOutput handles plan output for ext commands.
-// It renders the plan according to the global output format (-o flag).
-func handleExtPlanOutput(plan *output.Plan) error {
-	if plan == nil {
-		return fmt.Errorf("nil plan")
-	}
-	format := config.OutputFormat
-	data, err := plan.Render(format)
-	if err != nil {
-		return err
-	}
-	fmt.Println(string(data))
-	return nil
-}
-
-func handleStructuredResult(result *output.Result) error {
-	if result == nil {
-		return fmt.Errorf("nil result")
-	}
-	if err := output.Print(result); err != nil {
-		return err
-	}
-	if !result.Success {
-		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message)}
-	}
-	return nil
+	return handleAuxResult(output.Fail(code, err.Error()))
 }

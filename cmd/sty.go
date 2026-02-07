@@ -40,8 +40,8 @@ var (
 
 // styCmd represents the pigsty management command
 var styCmd = &cobra.Command{
-	Use:     "sty",
-	Short:   "Manage Pigsty Installation",
+	Use:   "sty",
+	Short: "Manage Pigsty Installation",
 	Annotations: map[string]string{
 		"name":       "pig sty",
 		"type":       "query",
@@ -73,8 +73,8 @@ var styCmd = &cobra.Command{
 
 // pigstyInitCmd will extract and setup ~/pigsty
 var pigstyInitCmd = &cobra.Command{
-	Use:     "init",
-	Short:   "Install Pigsty",
+	Use:   "init",
+	Short: "Install Pigsty",
 	Annotations: map[string]string{
 		"name":       "pig sty init",
 		"type":       "action",
@@ -103,76 +103,84 @@ pig sty init
   pig sty init 3                 # get & install specific version v3 latest
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Handle version from args if provided
-		if len(args) > 0 && pigstyVersion == "" {
-			pigstyVersion = args[0]
-		}
-
-		// Default to latest if no version specified
-		if pigstyVersion == "" {
-			pigstyVersion = "latest"
-		}
-
-		// Ensure version has 'v' prefix if it starts with a number
-		if pigstyVersion != "latest" && len(pigstyVersion) > 0 {
-			if pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
-				pigstyVersion = "v" + pigstyVersion
+		return runStyLegacy("pig sty init", args, map[string]interface{}{
+			"path":    pigstyInitPath,
+			"force":   pigstyInitForce,
+			"version": pigstyVersion,
+			"dir":     pigstyDownloadDir,
+		}, func() error {
+			// Handle version from args if provided
+			if len(args) > 0 && pigstyVersion == "" {
+				pigstyVersion = args[0]
 			}
-		}
 
-		// if version is explicit given, always download & install from remote
-		get.NetworkCondition()
-		var ver *get.VersionInfo
-		if get.AllVersions == nil {
-			logrus.Warnf("Fail to get pigsty version list, use the built-in version %s", config.PigstyVersion)
-			// Use built-in version as fallback
-			if pigstyVersion == "latest" {
-				pigstyVersion = config.PigstyVersion
+			// Default to latest if no version specified
+			if pigstyVersion == "" {
+				pigstyVersion = "latest"
 			}
-			// Ensure fallback version has v prefix if it starts with a number
-			if len(pigstyVersion) > 0 && pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
-				pigstyVersion = "v" + pigstyVersion
-			}
-			// Create a fallback VersionInfo for built-in version
-			ver = &get.VersionInfo{
-				Version:     pigstyVersion,
-				DownloadURL: fmt.Sprintf("%s/src/pigsty-%s.tgz", config.RepoPigstyIO, pigstyVersion),
-			}
-		} else {
-			pigstyVersion = get.CompleteVersion(pigstyVersion)
-			ver = get.IsValidVersion(pigstyVersion)
-			if ver == nil {
-				logrus.Errorf("invalid pigsty version: %v", pigstyVersion)
-				return nil
-			}
-		}
 
-		// download according to the version
-		logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, pigstyDownloadDir)
-		err := get.DownloadSrc(pigstyVersion, pigstyDownloadDir)
-		if err != nil {
-			logrus.Errorf("failed to download pigsty src %s: %v", pigstyVersion, err)
-			os.Exit(2)
-		}
+			// Ensure version has 'v' prefix if it starts with a number
+			if pigstyVersion != "latest" && len(pigstyVersion) > 0 {
+				if pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
+					pigstyVersion = "v" + pigstyVersion
+				}
+			}
 
-		// read, then extract & install it
-		srcTarball, err := sty.LoadPigstySrc(filepath.Join(pigstyDownloadDir, fmt.Sprintf("pigsty-%s.tgz", pigstyVersion)))
-		if err != nil {
-			logrus.Errorf("failed to load pigsty src %s: %v", pigstyVersion, err)
-			os.Exit(3)
-		}
-		err = sty.InstallPigsty(srcTarball, pigstyInitPath, pigstyInitForce)
-		if err != nil {
-			logrus.Errorf("failed to install pigsty src %s: %v", pigstyVersion, err)
-		}
-		logrus.Infof("proceed with pig boot & pig conf")
-		return nil
+			// if version is explicit given, always download & install from remote
+			get.NetworkCondition()
+			var ver *get.VersionInfo
+			if get.AllVersions == nil {
+				logrus.Warnf("Fail to get pigsty version list, use the built-in version %s", config.PigstyVersion)
+				// Use built-in version as fallback
+				if pigstyVersion == "latest" {
+					pigstyVersion = config.PigstyVersion
+				}
+				// Ensure fallback version has v prefix if it starts with a number
+				if len(pigstyVersion) > 0 && pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
+					pigstyVersion = "v" + pigstyVersion
+				}
+				// Create a fallback VersionInfo for built-in version
+				ver = &get.VersionInfo{
+					Version:     pigstyVersion,
+					DownloadURL: fmt.Sprintf("%s/src/pigsty-%s.tgz", config.RepoPigstyIO, pigstyVersion),
+				}
+			} else {
+				pigstyVersion = get.CompleteVersion(pigstyVersion)
+				ver = get.IsValidVersion(pigstyVersion)
+				if ver == nil {
+					logrus.Errorf("invalid pigsty version: %v", pigstyVersion)
+					return fmt.Errorf("invalid pigsty version: %s", pigstyVersion)
+				}
+			}
+
+			// download according to the version
+			logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, pigstyDownloadDir)
+			err := get.DownloadSrc(pigstyVersion, pigstyDownloadDir)
+			if err != nil {
+				logrus.Errorf("failed to download pigsty src %s: %v", pigstyVersion, err)
+				return fmt.Errorf("failed to download pigsty src %s: %w", pigstyVersion, err)
+			}
+
+			// read, then extract & install it
+			srcTarball, err := sty.LoadPigstySrc(filepath.Join(pigstyDownloadDir, fmt.Sprintf("pigsty-%s.tgz", pigstyVersion)))
+			if err != nil {
+				logrus.Errorf("failed to load pigsty src %s: %v", pigstyVersion, err)
+				return fmt.Errorf("failed to load pigsty src %s: %w", pigstyVersion, err)
+			}
+			err = sty.InstallPigsty(srcTarball, pigstyInitPath, pigstyInitForce)
+			if err != nil {
+				logrus.Errorf("failed to install pigsty src %s: %v", pigstyVersion, err)
+				return err
+			}
+			logrus.Infof("proceed with pig boot & pig conf")
+			return nil
+		})
 	},
 }
 
 var pigstyBootCmd = &cobra.Command{
-	Use:     "boot",
-	Short:   "Bootstrap Pigsty",
+	Use:   "boot",
+	Short: "Bootstrap Pigsty",
 	Annotations: map[string]string{
 		"name":       "pig sty boot",
 		"type":       "action",
@@ -195,45 +203,54 @@ pig sty boot
 Check https://pigsty.io/docs/setup/offline/#bootstrap for details
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) > 0 {
-			return fmt.Errorf("unexpected argument: %v", args)
-		}
-		if config.PigstyHome == "" {
-			logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
-			os.Exit(1)
-		}
-		bootstrapPath := filepath.Join(config.PigstyHome, "bootstrap")
-		if _, err := os.Stat(bootstrapPath); os.IsNotExist(err) {
-			logrus.Errorf("bootstrap script not found: %s", bootstrapPath)
-			os.Exit(1)
-		}
+		return runStyLegacy("pig sty boot", args, map[string]interface{}{
+			"region":   pigstyBootRegion,
+			"path":     pigstyBootPackage,
+			"keep":     pigstyBootKeep,
+			"pig_home": config.PigstyHome,
+		}, func() error {
+			if len(args) > 0 {
+				return fmt.Errorf("unexpected argument: %v", args)
+			}
+			if config.PigstyHome == "" {
+				logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
+				return fmt.Errorf("pigsty home & inventory not found")
+			}
+			bootstrapPath := filepath.Join(config.PigstyHome, "bootstrap")
+			if _, err := os.Stat(bootstrapPath); os.IsNotExist(err) {
+				logrus.Errorf("bootstrap script not found: %s", bootstrapPath)
+				return fmt.Errorf("bootstrap script not found: %s", bootstrapPath)
+			}
 
-		cmdArgs := []string{bootstrapPath}
-		if pigstyBootRegion != "" {
-			cmdArgs = append(cmdArgs, "-r", pigstyBootRegion)
-		}
-		if pigstyBootPackage != "" {
-			cmdArgs = append(cmdArgs, "-p", pigstyBootPackage)
-		}
-		if pigstyBootKeep {
-			cmdArgs = append(cmdArgs, "-k")
-		}
-		cmdArgs = append(cmdArgs, args...)
-		os.Chdir(config.PigstyHome)
-		logrus.Infof("bootstrap with: %s", strings.Join(cmdArgs, " "))
-		err := utils.ShellCommand(cmdArgs)
-		if err != nil {
-			logrus.Errorf("bootstrap execution failed: %v", err)
-			os.Exit(1)
-		}
-		return nil
+			cmdArgs := []string{bootstrapPath}
+			if pigstyBootRegion != "" {
+				cmdArgs = append(cmdArgs, "-r", pigstyBootRegion)
+			}
+			if pigstyBootPackage != "" {
+				cmdArgs = append(cmdArgs, "-p", pigstyBootPackage)
+			}
+			if pigstyBootKeep {
+				cmdArgs = append(cmdArgs, "-k")
+			}
+			cmdArgs = append(cmdArgs, args...)
+			if err := os.Chdir(config.PigstyHome); err != nil {
+				return fmt.Errorf("failed to change directory to %s: %w", config.PigstyHome, err)
+			}
+			logrus.Infof("bootstrap with: %s", strings.Join(cmdArgs, " "))
+			err := utils.ShellCommand(cmdArgs)
+			if err != nil {
+				logrus.Errorf("bootstrap execution failed: %v", err)
+				return err
+			}
+			return nil
+		})
 	},
 }
 
 // A thin wrapper around the configure script
 var pigstyConfCmd = &cobra.Command{
-	Use:     "conf",
-	Short:   "Configure Pigsty",
+	Use:   "conf",
+	Short: "Configure Pigsty",
 	Annotations: map[string]string{
 		"name":       "pig sty conf",
 		"type":       "action",
@@ -253,7 +270,7 @@ pig sty conf
   [--ip <ip>]             # primary IP address (skip with -s)
   [-v|--version <pgver>]  # postgres major version: [18|17|16|15|14|13]
   [-r|--region <region>]  # upstream repo region: [default|china|europe]
-  [-o|--output <file>]    # output config file path (default: pigsty.yml)
+  [-O|--output-file <file>]    # output config file path (default: pigsty.yml)
   [-s|--skip]             # skip IP address probing
   [-p|--port <port>]      # specify SSH port (for ssh accessibility check)
   [-x|--proxy]            # write proxy env from environment
@@ -273,63 +290,76 @@ Check https://pigsty.io/docs/setup/install/#configure for details
   pig sty conf -v 17 -c rich         # use conf/rich.yml template with PostgreSQL 17
   pig sty conf -r china -s           # use china region mirrors, skip IP probe
   pig sty conf -x                    # write proxy env from environment to config
-  pig sty conf -c full -g -o ha.yml  # full HA template with random passwords to ha.yml
+  pig sty conf -c full -g -O ha.yml  # full HA template with random passwords to ha.yml
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if config.PigstyHome == "" {
-			logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
-			os.Exit(1)
-		}
-		configurePath := filepath.Join(config.PigstyHome, "configure")
-		if _, err := os.Stat(configurePath); os.IsNotExist(err) {
-			logrus.Errorf("configure script not found: %s", configurePath)
-			os.Exit(1)
-		}
+		return runStyLegacy("pig sty conf", args, map[string]interface{}{
+			"conf":            pigstyConfName,
+			"ip":              pigstyConfIP,
+			"version":         pigstyConfVer,
+			"region":          pigstyConfRegion,
+			"output_file":     pigstyConfOutput,
+			"skip":            pigstyConfSkip,
+			"proxy":           pigstyConfProxy,
+			"non_interactive": pigstyConfNonInteractive,
+			"port":            pigstyConfPort,
+			"generate":        pigstyConfGenerate,
+		}, func() error {
+			if config.PigstyHome == "" {
+				logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
+				return fmt.Errorf("pigsty home & inventory not found")
+			}
+			configurePath := filepath.Join(config.PigstyHome, "configure")
+			if _, err := os.Stat(configurePath); os.IsNotExist(err) {
+				logrus.Errorf("configure script not found: %s", configurePath)
+				return fmt.Errorf("configure script not found: %s", configurePath)
+			}
 
-		cmdArgs := []string{configurePath}
-		if pigstyConfName != "" {
-			cmdArgs = append(cmdArgs, "-c", pigstyConfName)
-		}
-		if pigstyConfIP != "" {
-			cmdArgs = append(cmdArgs, "-i", pigstyConfIP)
-		}
-		if pigstyConfVer != "" {
-			cmdArgs = append(cmdArgs, "-v", pigstyConfVer)
-		}
-		if pigstyConfRegion != "" {
-			cmdArgs = append(cmdArgs, "-r", pigstyConfRegion)
-		}
-		if pigstyConfOutput != "" {
-			cmdArgs = append(cmdArgs, "-o", pigstyConfOutput)
-		}
-		if pigstyConfSkip {
-			cmdArgs = append(cmdArgs, "-s")
-		}
-		if pigstyConfProxy {
-			cmdArgs = append(cmdArgs, "-x")
-		}
-		if pigstyConfNonInteractive {
-			cmdArgs = append(cmdArgs, "-n")
-		}
-		if pigstyConfPort != "" {
-			cmdArgs = append(cmdArgs, "-p", pigstyConfPort)
-		}
-		if pigstyConfGenerate {
-			cmdArgs = append(cmdArgs, "-g")
-		}
-		cmdArgs = append(cmdArgs, args...)
-		if err := os.Chdir(config.PigstyHome); err != nil {
-			logrus.Errorf("failed to change directory to %s: %v", config.PigstyHome, err)
-		}
+			cmdArgs := []string{configurePath}
+			if pigstyConfName != "" {
+				cmdArgs = append(cmdArgs, "-c", pigstyConfName)
+			}
+			if pigstyConfIP != "" {
+				cmdArgs = append(cmdArgs, "-i", pigstyConfIP)
+			}
+			if pigstyConfVer != "" {
+				cmdArgs = append(cmdArgs, "-v", pigstyConfVer)
+			}
+			if pigstyConfRegion != "" {
+				cmdArgs = append(cmdArgs, "-r", pigstyConfRegion)
+			}
+			if pigstyConfOutput != "" {
+				cmdArgs = append(cmdArgs, "-o", pigstyConfOutput)
+			}
+			if pigstyConfSkip {
+				cmdArgs = append(cmdArgs, "-s")
+			}
+			if pigstyConfProxy {
+				cmdArgs = append(cmdArgs, "-x")
+			}
+			if pigstyConfNonInteractive {
+				cmdArgs = append(cmdArgs, "-n")
+			}
+			if pigstyConfPort != "" {
+				cmdArgs = append(cmdArgs, "-p", pigstyConfPort)
+			}
+			if pigstyConfGenerate {
+				cmdArgs = append(cmdArgs, "-g")
+			}
+			cmdArgs = append(cmdArgs, args...)
+			if err := os.Chdir(config.PigstyHome); err != nil {
+				return fmt.Errorf("failed to change directory to %s: %w", config.PigstyHome, err)
+			}
 
-		logrus.Infof("configure with: %s", strings.Join(cmdArgs, " "))
-		return utils.ShellCommand(cmdArgs)
+			logrus.Infof("configure with: %s", strings.Join(cmdArgs, " "))
+			return utils.ShellCommand(cmdArgs)
+		})
 	},
 }
 
 var pigstyListcmd = &cobra.Command{
-	Use:     "list",
-	Short:   "list pigsty available versions",
+	Use:   "list",
+	Short: "list pigsty available versions",
 	Annotations: map[string]string{
 		"name":       "pig sty list",
 		"type":       "query",
@@ -355,44 +385,46 @@ var pigstyListcmd = &cobra.Command{
   pig sty list all       # list all available versions
 	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logrus.Info("fetching pigsty version info...")
-		get.NetworkCondition()
-		if get.AllVersions == nil {
-			logrus.Errorf("Fail to list pigsty versions")
-			os.Exit(1)
-		}
-		var since string
-		if len(args) > 0 {
-			if len(args) > 1 {
-				logrus.Warnf("expect at most one version string, unexpected args: %s", strings.Join(args, " "))
+		return runStyLegacy("pig sty list", args, nil, func() error {
+			logrus.Info("fetching pigsty version info...")
+			get.NetworkCondition()
+			if get.AllVersions == nil {
+				logrus.Errorf("Fail to list pigsty versions")
+				return fmt.Errorf("failed to list pigsty versions")
 			}
-			if args[0] == "all" {
-				since = "v1.0.0"
-				logrus.Debugf("list all versions, set since to %s", since)
+			var since string
+			if len(args) > 0 {
+				if len(args) > 1 {
+					logrus.Warnf("expect at most one version string, unexpected args: %s", strings.Join(args, " "))
+				}
+				if args[0] == "all" {
+					since = "v1.0.0"
+					logrus.Debugf("list all versions, set since to %s", since)
+				} else {
+					since = get.CompleteVersion(args[0])
+					logrus.Debugf("complete given %s to %s", args[0], since)
+				}
 			} else {
-				since = get.CompleteVersion(args[0])
-				logrus.Debugf("complete given %s to %s", args[0], since)
+				since = "v3.0.0"
+				logrus.Debugf("no version given, fallback to %s", since)
 			}
-		} else {
-			since = "v3.0.0"
-			logrus.Debugf("no version given, fallback to %s", since)
-		}
 
-		if !get.ValidVersion(since) {
-			logrus.Errorf("invalid version: %s", since)
-		} else {
+			if !get.ValidVersion(since) {
+				logrus.Errorf("invalid version: %s", since)
+				return fmt.Errorf("invalid version: %s", since)
+			}
 			logrus.Debugf("the since version %s given", since)
-		}
 
-		logrus.Infof("pigsty versions since %s ,from %s", since, get.Source)
-		get.PirntAllVersions(since)
-		return nil
+			logrus.Infof("pigsty versions since %s ,from %s", since, get.Source)
+			get.PrintAllVersions(since)
+			return nil
+		})
 	},
 }
 
 var pigstyGetcmd = &cobra.Command{
-	Use:     "get",
-	Short:   "download pigsty available versions",
+	Use:   "get",
+	Short: "download pigsty available versions",
 	Annotations: map[string]string{
 		"name":       "pig sty get",
 		"type":       "action",
@@ -406,47 +438,53 @@ var pigstyGetcmd = &cobra.Command{
 	},
 	Aliases: []string{"g", "download"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		get.NetworkCondition()
-		if get.AllVersions == nil {
-			logrus.Errorf("Fail to get pigsty version list")
-			os.Exit(1)
-		}
-		if pigstyVersion == "" && len(args) > 0 {
-			pigstyVersion = args[0]
-		}
-
-		// Ensure version has 'v' prefix if it starts with a number
-		if pigstyVersion != "" && pigstyVersion != "latest" && len(pigstyVersion) > 0 {
-			if pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
-				pigstyVersion = "v" + pigstyVersion
+		return runStyLegacy("pig sty get", args, map[string]interface{}{
+			"version": pigstyVersion,
+			"dir":     pigstyDownloadDir,
+		}, func() error {
+			get.NetworkCondition()
+			if get.AllVersions == nil {
+				logrus.Errorf("Fail to get pigsty version list")
+				return fmt.Errorf("failed to get pigsty version list")
 			}
-		}
+			if pigstyVersion == "" && len(args) > 0 {
+				pigstyVersion = args[0]
+			}
 
-		if completeVer := get.CompleteVersion(pigstyVersion); completeVer != pigstyVersion {
-			logrus.Debugf("Complete pigsty version from %s to %s", pigstyVersion, completeVer)
-			pigstyVersion = completeVer
-		}
+			// Ensure version has 'v' prefix if it starts with a number
+			if pigstyVersion != "" && pigstyVersion != "latest" && len(pigstyVersion) > 0 {
+				if pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
+					pigstyVersion = "v" + pigstyVersion
+				}
+			}
 
-		ver := get.IsValidVersion(pigstyVersion)
-		if ver == nil {
-			logrus.Errorf("Invalid version: %s", pigstyVersion)
-			os.Exit(1)
-		} else {
-			logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, pigstyDownloadDir)
-		}
+			if completeVer := get.CompleteVersion(pigstyVersion); completeVer != pigstyVersion {
+				logrus.Debugf("Complete pigsty version from %s to %s", pigstyVersion, completeVer)
+				pigstyVersion = completeVer
+			}
 
-		logrus.Debugf("Download pigsty src %s to %s", pigstyVersion, pigstyDownloadDir)
-		err := get.DownloadSrc(pigstyVersion, pigstyDownloadDir)
-		if err != nil {
-			logrus.Errorf("failed to download pigsty src: %v", err)
-		}
-		return nil
+			ver := get.IsValidVersion(pigstyVersion)
+			if ver == nil {
+				logrus.Errorf("Invalid version: %s", pigstyVersion)
+				return fmt.Errorf("invalid version: %s", pigstyVersion)
+			} else {
+				logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, pigstyDownloadDir)
+			}
+
+			logrus.Debugf("Download pigsty src %s to %s", pigstyVersion, pigstyDownloadDir)
+			err := get.DownloadSrc(pigstyVersion, pigstyDownloadDir)
+			if err != nil {
+				logrus.Errorf("failed to download pigsty src: %v", err)
+				return err
+			}
+			return nil
+		})
 	},
 }
 
 var pigstyDeployCmd = &cobra.Command{
-	Use:     "deploy",
-	Short:   "run pigsty deploy.yml playbook",
+	Use:   "deploy",
+	Short: "run pigsty deploy.yml playbook",
 	Annotations: map[string]string{
 		"name":       "pig sty deploy",
 		"type":       "action",
@@ -475,7 +513,9 @@ WARNING: This operation makes changes to your system. Use with caution!
   pig sty de           # short alias
   pig sty ins          # short alias`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPigstyInstall()
+		return runStyLegacy("pig sty deploy", args, nil, func() error {
+			return runPigstyInstall()
+		})
 	},
 }
 
@@ -541,7 +581,7 @@ func init() {
 	pigstyConfCmd.Flags().StringVar(&pigstyConfIP, "ip", "", "primary ip address")
 	pigstyConfCmd.Flags().StringVarP(&pigstyConfVer, "version", "v", "", "postgres major version")
 	pigstyConfCmd.Flags().StringVarP(&pigstyConfRegion, "region", "r", "", "upstream repo region")
-	pigstyConfCmd.Flags().StringVarP(&pigstyConfOutput, "output", "o", "", "output config file path")
+	pigstyConfCmd.Flags().StringVarP(&pigstyConfOutput, "output-file", "O", "", "output config file path")
 	pigstyConfCmd.Flags().BoolVarP(&pigstyConfSkip, "skip", "s", false, "skip ip probe")
 	pigstyConfCmd.Flags().BoolVarP(&pigstyConfProxy, "proxy", "x", false, "write proxy env from environment")
 	pigstyConfCmd.Flags().BoolVarP(&pigstyConfNonInteractive, "non-interactive", "n", false, "non-interactive mode")

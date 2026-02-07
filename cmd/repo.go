@@ -5,25 +5,9 @@ import (
 	"pig/cli/repo"
 	"pig/internal/config"
 	"pig/internal/output"
-	"pig/internal/utils"
 
 	"github.com/spf13/cobra"
 )
-
-// handleRepoStructuredResult handles structured output for repo commands.
-// It uses output.Print for consistent output rendering and returns proper exit codes.
-func handleRepoStructuredResult(result *output.Result) error {
-	if result == nil {
-		return fmt.Errorf("nil result")
-	}
-	if err := output.Print(result); err != nil {
-		return err
-	}
-	if !result.Success {
-		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message)}
-	}
-	return nil
-}
 
 var (
 	repoRegion string
@@ -103,7 +87,7 @@ var repoListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		showAll := len(args) > 0 && args[0] == "all"
 		result := repo.ListRepos(showAll)
-		return handleRepoStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -125,7 +109,7 @@ var repoInfoCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := repo.GetRepoInfo(args)
-		return handleRepoStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -169,14 +153,14 @@ var repoAddCmd = &cobra.Command{
 		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
 			result := output.Fail(output.CodeRepoUnsupportedOS,
 				fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-			return handleRepoStructuredResult(result)
+			return handleAuxResult(result)
 		}
 		if len(args) == 0 {
 			args = []string{"all"}
 		}
 		modules := repo.ExpandModuleArgs(args)
 		result := repo.AddRepos(modules, repoRegion, repoRemove, repoUpdate)
-		return handleRepoStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -237,11 +221,11 @@ var repoRmCmd = &cobra.Command{
 		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
 			result := output.Fail(output.CodeRepoUnsupportedOS,
 				fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-			return handleRepoStructuredResult(result)
+			return handleAuxResult(result)
 		}
 		modules := repo.ExpandModuleArgs(args)
 		result := repo.RmRepos(modules, repoUpdate)
-		return handleRepoStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -268,10 +252,10 @@ var repoUpdateCmd = &cobra.Command{
 		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
 			result := output.Fail(output.CodeRepoUnsupportedOS,
 				fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-			return handleRepoStructuredResult(result)
+			return handleAuxResult(result)
 		}
 		result := repo.UpdateCache()
-		return handleRepoStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -293,7 +277,7 @@ var repoStatusCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := repo.GetRepoStatus()
-		return handleRepoStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -320,7 +304,7 @@ var repoBootCmd = &cobra.Command{
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := repo.BootWithResult(repoBootPkg, repoBootDir)
-		return handleRepoStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -355,7 +339,7 @@ var repoCacheCmd = &cobra.Command{
 			repos = args
 		}
 		result := repo.CacheWithResult(repoCacheDir, repoCachePkg, repos)
-		return handleRepoStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -387,7 +371,7 @@ var repoCreateCmd = &cobra.Command{
 			repos = args
 		}
 		result := repo.CreateReposWithResult(repos)
-		return handleRepoStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -409,7 +393,7 @@ var repoReloadCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := repo.ReloadRepoCatalogWithResult()
-		return handleRepoStructuredResult(result)
+		return handleAuxResult(result)
 	},
 }
 

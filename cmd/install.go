@@ -4,7 +4,7 @@ Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
 package cmd
 
 import (
-	"os"
+	"fmt"
 	"pig/cli/ext"
 	"pig/cli/install"
 	"strconv"
@@ -22,8 +22,8 @@ var (
 
 // installCmd represents the install command
 var installCmd = &cobra.Command{
-	Use:     "install",
-	Short:   "Install packages using native package manager",
+	Use:   "install",
+	Short: "Install packages using native package manager",
 	Annotations: map[string]string{
 		"name":       "pig install",
 		"type":       "action",
@@ -58,24 +58,34 @@ Examples:
   pig install pg_vector=1.0.0          # install specific version
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var pgVer int
-		if !installNoTranslation {
-			pgVer = installProbeVersion()
-		}
-		if err := install.InstallPackages(pgVer, args, installYes, installNoTranslation); err != nil {
-			logrus.Errorf("failed to install packages: %v", err)
+		return runExtLegacy("pig install", args, map[string]interface{}{
+			"version":        installPgVer,
+			"path":           installPgConfig,
+			"yes":            installYes,
+			"no_translation": installNoTranslation,
+		}, func() error {
+			var pgVer int
+			if !installNoTranslation {
+				probed, err := installProbeVersion()
+				if err != nil {
+					return err
+				}
+				pgVer = probed
+			}
+			if err := install.InstallPackages(pgVer, args, installYes, installNoTranslation); err != nil {
+				logrus.Errorf("failed to install packages: %v", err)
+				return err
+			}
 			return nil
-		}
-		return nil
+		})
 	},
 }
 
 // installProbeVersion returns the PostgreSQL version to use
-func installProbeVersion() int {
+func installProbeVersion() (int, error) {
 	// check args
 	if installPgVer != 0 && installPgConfig != "" {
-		logrus.Errorf("both pg version and pg_config path are specified, please specify only one")
-		os.Exit(1)
+		return 0, fmt.Errorf("both pg version and pg_config path are specified, please specify only one")
 	}
 
 	// detect postgres installation, but don't fail if not found
@@ -91,17 +101,16 @@ func installProbeVersion() int {
 			logrus.Debugf("PostgreSQL installation %d not found: %v , but it's ok", installPgVer, err)
 			// if version is explicitly given, we can fallback without any installation
 		}
-		return installPgVer
+		return installPgVer, nil
 	}
 
 	// if pg_config is specified, we must find the actual installation, to get the major version
 	if installPgConfig != "" {
 		_, err := ext.GetPostgres(installPgConfig)
 		if err != nil {
-			logrus.Errorf("failed to get PostgreSQL by pg_config path %s: %v", installPgConfig, err)
-			os.Exit(3)
+			return 0, fmt.Errorf("failed to get PostgreSQL by pg_config path %s: %w", installPgConfig, err)
 		} else {
-			return ext.Postgres.MajorVersion
+			return ext.Postgres.MajorVersion, nil
 		}
 	}
 
@@ -109,10 +118,10 @@ func installProbeVersion() int {
 	if ext.Active != nil {
 		logrus.Debugf("fallback to active PostgreSQL: %d", ext.Active.MajorVersion)
 		ext.Postgres = ext.Active
-		return ext.Active.MajorVersion
+		return ext.Active.MajorVersion, nil
 	} else {
 		logrus.Debugf("no active PostgreSQL found, fall back to the latest Major %d", ext.PostgresLatestMajorVersion)
-		return ext.PostgresLatestMajorVersion // 18 by default
+		return ext.PostgresLatestMajorVersion, nil // 18 by default
 	}
 }
 

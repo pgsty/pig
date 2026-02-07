@@ -20,8 +20,6 @@ import (
 	"pig/cli/context"
 	"pig/cli/ext"
 	"pig/internal/config"
-	"pig/internal/output"
-	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -86,7 +84,7 @@ Examples:
 
 		// Structured output mode (YAML/JSON)
 		if config.IsStructuredOutput() {
-			return handleContextResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text mode: use the Text() method on data
@@ -98,7 +96,7 @@ Examples:
 		}
 
 		// Fallback: just print the result
-		return handleContextResult(result)
+		return handleAuxResult(result)
 	},
 }
 
@@ -109,23 +107,4 @@ Examples:
 func init() {
 	rootCmd.AddCommand(contextCmd)
 	contextCmd.Flags().StringVarP(&moduleFlag, "module", "m", "", "Filter output by module(s): host,postgres,patroni,pgbackrest,extensions (prefix with ! to exclude)")
-}
-
-// ============================================================================
-// Structured Output Helpers
-// ============================================================================
-
-// handleContextResult handles structured output for context command.
-// It prints the result and returns appropriate exit code on failure.
-func handleContextResult(result *output.Result) error {
-	if result == nil {
-		return fmt.Errorf("nil result")
-	}
-	if err := output.Print(result); err != nil {
-		return err
-	}
-	if !result.Success {
-		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message)}
-	}
-	return nil
 }

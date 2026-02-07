@@ -83,7 +83,7 @@ func TestAllLeafCommandsHaveAnnotations(t *testing.T) {
 		path := cmd.CommandPath()
 		t.Run(path, func(t *testing.T) {
 			ann := cmd.Annotations
-			if ann == nil || len(ann) == 0 {
+			if len(ann) == 0 {
 				t.Errorf("command %q has Run/RunE but no Annotations", path)
 				return
 			}
@@ -127,7 +127,7 @@ func TestAnnotationEnumValidity(t *testing.T) {
 	for _, cmd := range cmds {
 		path := cmd.CommandPath()
 		ann := cmd.Annotations
-		if ann == nil || len(ann) == 0 {
+		if len(ann) == 0 {
 			continue
 		}
 
@@ -179,7 +179,7 @@ func TestParentCommandsHaveAnnotations(t *testing.T) {
 		path := cmd.CommandPath()
 		t.Run(path, func(t *testing.T) {
 			ann := cmd.Annotations
-			if ann == nil || len(ann) == 0 {
+			if len(ann) == 0 {
 				t.Errorf("parent command %q has subcommands but no Annotations", path)
 				return
 			}
@@ -197,7 +197,7 @@ func TestFromAnnotationsRoundTrip(t *testing.T) {
 
 	for _, cmd := range cmds {
 		ann := cmd.Annotations
-		if ann == nil || len(ann) == 0 {
+		if len(ann) == 0 {
 			continue
 		}
 		path := cmd.CommandPath()
@@ -389,8 +389,8 @@ func TestSubcommandSchemaHasArgsAndFlags(t *testing.T) {
 		hasArgs  bool
 		hasFlags bool
 	}{
-		{"pig ext add", false, true},    // Use: "add" (no args in Use string)
-		{"pig ext info", false, true},   // Use: "info" (no args in Use string)
+		{"pig ext add", false, true},  // Use: "add" (no args in Use string)
+		{"pig ext info", false, true}, // Use: "info" (no args in Use string)
 		{"pig postgres start", false, true},
 		{"pig pgbackrest backup", false, true},
 		{"pig pitr", false, true},
@@ -424,7 +424,7 @@ func TestAnnotationCountSanity(t *testing.T) {
 
 	annotatedCount := 0
 	for _, cmd := range cmds {
-		if cmd.Annotations != nil && len(cmd.Annotations) > 0 {
+		if len(cmd.Annotations) > 0 {
 			annotatedCount++
 		}
 	}
@@ -577,7 +577,7 @@ func TestAnnotationsCoverage(t *testing.T) {
 	for _, cmd := range cmds {
 		path := cmd.CommandPath()
 		ann := cmd.Annotations
-		if ann == nil || len(ann) == 0 {
+		if len(ann) == 0 {
 			missing = append(missing, path)
 			continue
 		}
@@ -652,7 +652,7 @@ func TestAnnotationsSemanticConsistency(t *testing.T) {
 
 	for _, cmd := range cmds {
 		ann := cmd.Annotations
-		if ann == nil || len(ann) == 0 {
+		if len(ann) == 0 {
 			continue
 		}
 		path := cmd.CommandPath()

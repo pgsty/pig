@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"pig/cli/postgres"
+	"pig/internal/output"
 
 	"github.com/spf13/cobra"
 )
@@ -29,6 +30,10 @@ var (
 	pePort int
 )
 
+func runPeLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
+	return runLegacyStructured(output.MODULE_PE, command, args, params, fn)
+}
+
 // getExporterURL returns the base URL for pg_exporter
 func getExporterURL(path string) string {
 	host := peHost
@@ -43,8 +48,8 @@ func getExporterURL(path string) string {
 }
 
 var peCmd = &cobra.Command{
-	Use:     "pg_exporter",
-	Short:   "Manage pg_exporter and metrics",
+	Use:   "pg_exporter",
+	Short: "Manage pg_exporter and metrics",
 	Annotations: map[string]string{
 		"name":       "pig pg_exporter",
 		"type":       "query",
@@ -83,27 +88,32 @@ var peGetCmd = &cobra.Command{
 		"cost":       "5000",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		url := getExporterURL("/metrics")
-		postgres.PrintHint([]string{"curl", url})
-		resp, err := http.Get(url)
-		if err != nil {
-			return fmt.Errorf("failed to fetch metrics: %w", err)
-		}
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return err
-		}
-
-		// Filter lines starting with pg_
-		lines := strings.Split(string(body), "\n")
-		for _, line := range lines {
-			if strings.HasPrefix(line, "pg_") || strings.HasPrefix(line, "# HELP pg_") || strings.HasPrefix(line, "# TYPE pg_") {
-				fmt.Println(line)
+		return runPeLegacy("pig pg_exporter get", args, map[string]interface{}{
+			"host": peHost,
+			"port": pePort,
+		}, func() error {
+			url := getExporterURL("/metrics")
+			postgres.PrintHint([]string{"curl", url})
+			resp, err := http.Get(url)
+			if err != nil {
+				return fmt.Errorf("failed to fetch metrics: %w", err)
 			}
-		}
-		return nil
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
+
+			// Filter lines starting with pg_
+			lines := strings.Split(string(body), "\n")
+			for _, line := range lines {
+				if strings.HasPrefix(line, "pg_") || strings.HasPrefix(line, "# HELP pg_") || strings.HasPrefix(line, "# TYPE pg_") {
+					fmt.Println(line)
+				}
+			}
+			return nil
+		})
 	},
 }
 
@@ -122,34 +132,39 @@ var peListCmd = &cobra.Command{
 		"cost":       "5000",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		url := getExporterURL("/metrics")
-		resp, err := http.Get(url)
-		if err != nil {
-			return fmt.Errorf("failed to fetch metrics: %w", err)
-		}
-		defer resp.Body.Close()
+		return runPeLegacy("pig pg_exporter list", args, map[string]interface{}{
+			"host": peHost,
+			"port": pePort,
+		}, func() error {
+			url := getExporterURL("/metrics")
+			resp, err := http.Get(url)
+			if err != nil {
+				return fmt.Errorf("failed to fetch metrics: %w", err)
+			}
+			defer resp.Body.Close()
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return err
-		}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
 
-		// Extract unique metric names with HELP
-		seen := make(map[string]bool)
-		lines := strings.Split(string(body), "\n")
-		for _, line := range lines {
-			if strings.HasPrefix(line, "# HELP pg_") {
-				parts := strings.SplitN(line, " ", 4)
-				if len(parts) >= 3 {
-					name := parts[2]
-					if !seen[name] {
-						seen[name] = true
-						fmt.Println(line)
+			// Extract unique metric names with HELP
+			seen := make(map[string]bool)
+			lines := strings.Split(string(body), "\n")
+			for _, line := range lines {
+				if strings.HasPrefix(line, "# HELP pg_") {
+					parts := strings.SplitN(line, " ", 4)
+					if len(parts) >= 3 {
+						name := parts[2]
+						if !seen[name] {
+							seen[name] = true
+							fmt.Println(line)
+						}
 					}
 				}
 			}
-		}
-		return nil
+			return nil
+		})
 	},
 }
 
@@ -168,17 +183,22 @@ var peReloadCmd = &cobra.Command{
 		"cost":       "1000",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		url := getExporterURL("/reload")
-		postgres.PrintHint([]string{"curl", url})
-		resp, err := http.Get(url)
-		if err != nil {
-			return fmt.Errorf("failed to reload: %w", err)
-		}
-		defer resp.Body.Close()
+		return runPeLegacy("pig pg_exporter reload", args, map[string]interface{}{
+			"host": peHost,
+			"port": pePort,
+		}, func() error {
+			url := getExporterURL("/reload")
+			postgres.PrintHint([]string{"curl", url})
+			resp, err := http.Get(url)
+			if err != nil {
+				return fmt.Errorf("failed to reload: %w", err)
+			}
+			defer resp.Body.Close()
 
-		body, _ := io.ReadAll(resp.Body)
-		fmt.Println(string(body))
-		return nil
+			body, _ := io.ReadAll(resp.Body)
+			fmt.Println(string(body))
+			return nil
+		})
 	},
 }
 
@@ -197,17 +217,22 @@ var peStatCmd = &cobra.Command{
 		"cost":       "5000",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		url := getExporterURL("/stat")
-		postgres.PrintHint([]string{"curl", url})
-		resp, err := http.Get(url)
-		if err != nil {
-			return fmt.Errorf("failed to get stats: %w", err)
-		}
-		defer resp.Body.Close()
+		return runPeLegacy("pig pg_exporter stat", args, map[string]interface{}{
+			"host": peHost,
+			"port": pePort,
+		}, func() error {
+			url := getExporterURL("/stat")
+			postgres.PrintHint([]string{"curl", url})
+			resp, err := http.Get(url)
+			if err != nil {
+				return fmt.Errorf("failed to get stats: %w", err)
+			}
+			defer resp.Body.Close()
 
-		body, _ := io.ReadAll(resp.Body)
-		fmt.Println(string(body))
-		return nil
+			body, _ := io.ReadAll(resp.Body)
+			fmt.Println(string(body))
+			return nil
+		})
 	},
 }
 
