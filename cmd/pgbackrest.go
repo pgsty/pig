@@ -11,7 +11,6 @@ import (
 	"pig/cli/pgbackrest"
 	"pig/internal/config"
 	"pig/internal/output"
-	"pig/internal/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -22,6 +21,10 @@ import (
 
 // Global config
 var pbConfig *pgbackrest.Config
+
+func runPbLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
+	return runLegacyStructured(output.MODULE_PB, command, args, params, fn)
+}
 
 // pbCmd represents the pgbackrest command
 var pbCmd = &cobra.Command{
@@ -156,7 +159,7 @@ Use -o json/yaml for structured output (agent-friendly format).`,
 		// raw-output only applies in --raw mode
 		if !pbInfoRaw && strings.TrimSpace(pbInfoRawOutput) != "" {
 			if config.IsStructuredOutput() {
-				return handlePbStructuredResult(
+				return handleAuxResult(
 					output.Fail(output.CodePbInvalidInfoParams, "--raw-output can only be used with --raw"),
 				)
 			}
@@ -181,7 +184,7 @@ Use -o json/yaml for structured output (agent-friendly format).`,
 			result := pgbackrest.InfoResult(pbConfig, &pgbackrest.InfoOptions{
 				Set: pbInfoSet,
 			})
-			return handlePbStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text mode: use original Info function
@@ -227,8 +230,12 @@ Examples:
 		if len(args) > 0 {
 			listType = args[0]
 		}
-		return pgbackrest.Ls(pbConfig, &pgbackrest.LsOptions{
-			Type: listType,
+		return runPbLegacy("pig pgbackrest ls", args, map[string]interface{}{
+			"type": listType,
+		}, func() error {
+			return pgbackrest.Ls(pbConfig, &pgbackrest.LsOptions{
+				Type: listType,
+			})
 		})
 	},
 }
@@ -286,7 +293,7 @@ executing. Use --force to skip this check.`,
 		// Structured output mode: use BackupResult
 		if config.IsStructuredOutput() {
 			result := pgbackrest.BackupResult(pbConfig, opts)
-			return handlePbStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text mode: use original Backup function
@@ -323,9 +330,14 @@ The retention policy is configured in pgbackrest.conf:
   pig pb expire --set 20250101-*   # delete specific backup
   pig pb expire --dry-run          # dry-run (show only)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return pgbackrest.Expire(pbConfig, &pgbackrest.ExpireOptions{
-			Set:    pbExpireSet,
-			DryRun: pbExpireDryRun,
+		return runPbLegacy("pig pgbackrest expire", args, map[string]interface{}{
+			"set":     pbExpireSet,
+			"dry_run": pbExpireDryRun,
+		}, func() error {
+			return pgbackrest.Expire(pbConfig, &pgbackrest.ExpireOptions{
+				Set:    pbExpireSet,
+				DryRun: pbExpireDryRun,
+			})
 		})
 	},
 }
@@ -416,7 +428,7 @@ IMPORTANT: PostgreSQL must be stopped before restore.`,
 		// If no target specified, structured mode returns machine-readable error.
 		if !hasTarget {
 			if config.IsStructuredOutput() {
-				return handlePbStructuredResult(
+				return handleAuxResult(
 					output.Fail(output.CodePbInvalidRestoreParams, "invalid restore parameters").
 						WithDetail("no recovery target specified, choose one of: --default, --immediate, --time, --name, --lsn, --xid"),
 				)
@@ -443,7 +455,7 @@ IMPORTANT: PostgreSQL must be stopped before restore.`,
 			// Structured mode implicitly skips confirmation (equivalent to --yes)
 			opts.Yes = true
 			result := pgbackrest.RestoreResult(pbConfig, opts)
-			return handlePbStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text mode: use original Restore function
@@ -482,7 +494,7 @@ var pbCreateCmd = &cobra.Command{
 
 		if config.IsStructuredOutput() {
 			result := pgbackrest.CreateResult(pbConfig, opts)
-			return handlePbStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		return pgbackrest.Create(pbConfig, opts)
@@ -514,7 +526,7 @@ var pbUpgradeCmd = &cobra.Command{
 
 		if config.IsStructuredOutput() {
 			result := pgbackrest.UpgradeResult(pbConfig, opts)
-			return handlePbStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		return pgbackrest.Upgrade(pbConfig, opts)
@@ -555,7 +567,7 @@ All backups for the stanza will be permanently deleted.
 			// Structured mode implicitly skips confirmation (equivalent to --yes)
 			opts.Yes = true
 			result := pgbackrest.DeleteResult(pbConfig, opts)
-			return handlePbStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		return pgbackrest.Delete(pbConfig, opts)
@@ -583,7 +595,9 @@ var pbCheckCmd = &cobra.Command{
 	},
 	Long: `Verify the backup repository integrity and configuration.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return pgbackrest.Check(pbConfig)
+		return runPbLegacy("pig pgbackrest check", args, nil, func() error {
+			return pgbackrest.Check(pbConfig)
+		})
 	},
 }
 
@@ -604,7 +618,9 @@ var pbStartCmd = &cobra.Command{
 	},
 	Long: `Allow pgBackRest to perform operations on the stanza.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return pgbackrest.Start(pbConfig)
+		return runPbLegacy("pig pgbackrest start", args, nil, func() error {
+			return pgbackrest.Start(pbConfig)
+		})
 	},
 }
 
@@ -627,8 +643,12 @@ var pbStopCmd = &cobra.Command{
 	},
 	Long: `Prevent pgBackRest from performing operations on the stanza (for maintenance).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return pgbackrest.Stop(pbConfig, &pgbackrest.StopOptions{
-			Force: pbStopForce,
+		return runPbLegacy("pig pgbackrest stop", args, map[string]interface{}{
+			"force": pbStopForce,
+		}, func() error {
+			return pgbackrest.Stop(pbConfig, &pgbackrest.StopOptions{
+				Force: pbStopForce,
+			})
 		})
 	},
 }
@@ -672,39 +692,37 @@ Subcommands:
 		}
 
 		dbsu := pbConfig.DbSU
-
-		switch subCmd {
-		case "list", "ls":
-			return pgbackrest.LogList(dbsu)
-		case "tail", "follow", "f":
-			return pgbackrest.LogTail(dbsu, pbLogLines)
-		case "cat", "show":
-			filename := ""
-			if len(args) > 1 {
-				filename = args[1]
-			}
-			return pgbackrest.LogCat(dbsu, filename, pbLogLines)
-		default:
-			return pgbackrest.LogList(dbsu)
+		if config.IsStructuredOutput() && (subCmd == "tail" || subCmd == "follow" || subCmd == "f") {
+			return structuredParamError(
+				output.MODULE_PB,
+				"pig pgbackrest log",
+				"streaming log tail is not supported in structured output",
+				"use 'pig pb log cat' in structured mode to get a log snapshot",
+				args,
+				map[string]interface{}{"subcommand": subCmd},
+			)
 		}
+
+		return runPbLegacy("pig pgbackrest log", args, map[string]interface{}{
+			"subcommand": subCmd,
+			"lines":      pbLogLines,
+		}, func() error {
+			switch subCmd {
+			case "list", "ls":
+				return pgbackrest.LogList(dbsu)
+			case "tail", "follow", "f":
+				return pgbackrest.LogTail(dbsu, pbLogLines)
+			case "cat", "show":
+				filename := ""
+				if len(args) > 1 {
+					filename = args[1]
+				}
+				return pgbackrest.LogCat(dbsu, filename, pbLogLines)
+			default:
+				return pgbackrest.LogList(dbsu)
+			}
+		})
 	},
-}
-
-// ============================================================================
-// Structured Output Helper
-// ============================================================================
-
-func handlePbStructuredResult(result *output.Result) error {
-	if result == nil {
-		return fmt.Errorf("nil result")
-	}
-	if err := output.Print(result); err != nil {
-		return err
-	}
-	if !result.Success {
-		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message)}
-	}
-	return nil
 }
 
 func resolvePbInfoRawOutput() (string, error) {
@@ -738,6 +756,11 @@ func init() {
 	// Initialize config
 	pbConfig = pgbackrest.DefaultConfig()
 
+	registerPbFlags()
+	registerPbCommands()
+}
+
+func registerPbFlags() {
 	// Global flags
 	pbCmd.PersistentFlags().StringVarP(&pbConfig.Stanza, "stanza", "s", "", "pgBackRest stanza name (auto-detected if not specified)")
 	pbCmd.PersistentFlags().StringVarP(&pbConfig.ConfigPath, "config", "c", "", "pgBackRest config file path")
@@ -783,7 +806,9 @@ func init() {
 
 	// Log flags
 	pbLogCmd.Flags().IntVarP(&pbLogLines, "lines", "n", 50, "number of lines to show")
+}
 
+func registerPbCommands() {
 	// Register all subcommands
 	pbCmd.AddCommand(
 		// Information

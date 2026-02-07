@@ -18,6 +18,10 @@ var (
 	patroniPlan bool
 )
 
+func runPatroniLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
+	return runLegacyStructured(output.MODULE_PT, command, args, params, fn)
+}
+
 // patroniCmd represents the patroni command
 var patroniCmd = &cobra.Command{
 	Use:     "patroni",
@@ -96,6 +100,16 @@ var patroniListCmd = &cobra.Command{
 
 		// Watch mode always uses passthrough (incompatible with structured output)
 		if watch || interval > 0 {
+			if config.IsStructuredOutput() {
+				return structuredParamError(
+					output.MODULE_PT,
+					"pig patroni list",
+					"watch mode is not supported in structured output",
+					"remove --watch/-W or --interval/-w when using -o json/-o yaml",
+					args,
+					map[string]interface{}{"watch": watch, "interval": interval},
+				)
+			}
 			return patroni.List(dbsu, watch, interval)
 		}
 
@@ -155,7 +169,14 @@ while keeping Patroni running.`,
 			Force:   force,
 			Pending: pending,
 		}
-		return patroni.Restart(utils.GetDBSU(patroniDBSU), opts)
+		return runPatroniLegacy("pig patroni restart", args, map[string]interface{}{
+			"member":  member,
+			"force":   force,
+			"pending": pending,
+			"role":    role,
+		}, func() error {
+			return patroni.Restart(utils.GetDBSU(patroniDBSU), opts)
+		})
 	},
 }
 
@@ -180,7 +201,9 @@ var patroniReloadCmd = &cobra.Command{
 This triggers a configuration reload (similar to pg_reload_conf()) on all
 PostgreSQL instances managed by Patroni.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return patroni.Reload(utils.GetDBSU(patroniDBSU))
+		return runPatroniLegacy("pig patroni reload", args, nil, func() error {
+			return patroni.Reload(utils.GetDBSU(patroniDBSU))
+		})
 	},
 }
 
@@ -218,7 +241,13 @@ from scratch using pg_basebackup from the current leader.`,
 			Force:  force,
 			Wait:   wait,
 		}
-		return patroni.Reinit(utils.GetDBSU(patroniDBSU), opts)
+		return runPatroniLegacy("pig patroni reinit", args, map[string]interface{}{
+			"member": args[0],
+			"force":  force,
+			"wait":   wait,
+		}, func() error {
+			return patroni.Reinit(utils.GetDBSU(patroniDBSU), opts)
+		})
 	},
 }
 
@@ -356,7 +385,11 @@ var patroniPauseCmd = &cobra.Command{
   pig pt pause --wait       # Wait for all members to confirm`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wait, _ := cmd.Flags().GetBool("wait")
-		return patroni.Pause(utils.GetDBSU(patroniDBSU), wait)
+		return runPatroniLegacy("pig patroni pause", args, map[string]interface{}{
+			"wait": wait,
+		}, func() error {
+			return patroni.Pause(utils.GetDBSU(patroniDBSU), wait)
+		})
 	},
 }
 
@@ -382,7 +415,11 @@ var patroniResumeCmd = &cobra.Command{
   pig pt resume --wait       # Wait for all members to confirm`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wait, _ := cmd.Flags().GetBool("wait")
-		return patroni.Resume(utils.GetDBSU(patroniDBSU), wait)
+		return runPatroniLegacy("pig patroni resume", args, map[string]interface{}{
+			"wait": wait,
+		}, func() error {
+			return patroni.Resume(utils.GetDBSU(patroniDBSU), wait)
+		})
 	},
 }
 
@@ -451,11 +488,31 @@ Actions:
 			}
 			return patroni.ConfigShow(dbsu)
 		case "edit":
+			if config.IsStructuredOutput() {
+				return structuredParamError(
+					output.MODULE_PT,
+					"pig patroni config",
+					"interactive config edit is not supported in structured output",
+					"use 'pig pt config show -o json' for read-only structured output",
+					args,
+					map[string]interface{}{"action": action},
+				)
+			}
 			return patroni.ConfigEdit(dbsu)
 		case "set":
-			return patroni.ConfigSet(dbsu, filteredKV)
+			return runPatroniLegacy("pig patroni config set", args, map[string]interface{}{
+				"action": action,
+				"pairs":  filteredKV,
+			}, func() error {
+				return patroni.ConfigSet(dbsu, filteredKV)
+			})
 		case "pg":
-			return patroni.ConfigPG(dbsu, filteredKV)
+			return runPatroniLegacy("pig patroni config pg", args, map[string]interface{}{
+				"action": action,
+				"pairs":  filteredKV,
+			}, func() error {
+				return patroni.ConfigPG(dbsu, filteredKV)
+			})
 		default:
 			if config.IsStructuredOutput() {
 				return handleAuxResult(
@@ -492,7 +549,22 @@ var patroniLogCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		follow, _ := cmd.Flags().GetBool("follow")
 		lines, _ := cmd.Flags().GetString("lines")
-		return patroni.Log(follow, lines)
+		if config.IsStructuredOutput() && follow {
+			return structuredParamError(
+				output.MODULE_PT,
+				"pig patroni log",
+				"log follow mode is not supported in structured output",
+				"use 'pig pt log -n N -o json' without --follow for structured snapshot",
+				args,
+				map[string]interface{}{"follow": follow, "lines": lines},
+			)
+		}
+		return runPatroniLegacy("pig patroni log", args, map[string]interface{}{
+			"follow": follow,
+			"lines":  lines,
+		}, func() error {
+			return patroni.Log(follow, lines)
+		})
 	},
 }
 
@@ -556,7 +628,9 @@ var patroniStartCmd = &cobra.Command{
 	},
 	Long: `Start the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc start'.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return patroni.Systemctl("start")
+		return runPatroniLegacy("pig patroni start", args, nil, func() error {
+			return patroni.Systemctl("start")
+		})
 	},
 }
 
@@ -578,7 +652,9 @@ var patroniStopCmd = &cobra.Command{
 	},
 	Long: `Stop the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc stop'.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return patroni.Systemctl("stop")
+		return runPatroniLegacy("pig patroni stop", args, nil, func() error {
+			return patroni.Systemctl("stop")
+		})
 	},
 }
 
@@ -625,7 +701,9 @@ var patroniSvcStartCmd = &cobra.Command{
 		"cost":       "10000",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return patroni.Systemctl("start")
+		return runPatroniLegacy("pig patroni service start", args, nil, func() error {
+			return patroni.Systemctl("start")
+		})
 	},
 }
 
@@ -645,7 +723,9 @@ var patroniSvcStopCmd = &cobra.Command{
 		"cost":       "10000",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return patroni.Systemctl("stop")
+		return runPatroniLegacy("pig patroni service stop", args, nil, func() error {
+			return patroni.Systemctl("stop")
+		})
 	},
 }
 
@@ -665,7 +745,9 @@ var patroniSvcRestartCmd = &cobra.Command{
 		"cost":       "30000",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return patroni.Systemctl("restart")
+		return runPatroniLegacy("pig patroni service restart", args, nil, func() error {
+			return patroni.Systemctl("restart")
+		})
 	},
 }
 
@@ -685,7 +767,9 @@ var patroniSvcReloadCmd = &cobra.Command{
 		"cost":       "1000",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return patroni.Systemctl("reload")
+		return runPatroniLegacy("pig patroni service reload", args, nil, func() error {
+			return patroni.Systemctl("reload")
+		})
 	},
 }
 
@@ -705,7 +789,9 @@ var patroniSvcStatusCmd = &cobra.Command{
 		"cost":       "500",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return patroni.Systemctl("status")
+		return runPatroniLegacy("pig patroni service status", args, nil, func() error {
+			return patroni.Systemctl("status")
+		})
 	},
 }
 
@@ -717,6 +803,12 @@ func init() {
 	// Global flags for patroni command
 	patroniCmd.PersistentFlags().StringVarP(&patroniDBSU, "dbsu", "U", "", "Database superuser (default: postgres)")
 
+	registerPatroniFlags()
+	registerPatroniSvcCommands()
+	registerPatroniCommands()
+}
+
+func registerPatroniFlags() {
 	// list subcommand flags
 	patroniListCmd.Flags().BoolP("watch", "W", false, "Watch mode")
 	patroniListCmd.Flags().Float64P("interval", "w", 0, "Watch interval in seconds (supports decimals, e.g., 0.5)")
@@ -749,7 +841,9 @@ func init() {
 	// log subcommand flags
 	patroniLogCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	patroniLogCmd.Flags().StringP("lines", "n", "50", "Number of lines to show")
+}
 
+func registerPatroniSvcCommands() {
 	// Build svc subcommand group
 	patroniSvcCmd.AddCommand(
 		patroniSvcStartCmd,
@@ -758,7 +852,9 @@ func init() {
 		patroniSvcReloadCmd,
 		patroniSvcStatusCmd,
 	)
+}
 
+func registerPatroniCommands() {
 	// Add all subcommands to patroni command
 	patroniCmd.AddCommand(
 		// Cluster operations (patronictl)
