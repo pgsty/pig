@@ -7,13 +7,10 @@ Business logic is delegated to cli/postgres package.
 package cmd
 
 import (
-	"fmt"
-
 	"pig/cli/ext"
 	"pig/cli/postgres"
 	"pig/internal/config"
 	"pig/internal/output"
-	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -24,6 +21,10 @@ import (
 // ============================================================================
 
 var pgConfig = postgres.DefaultConfig()
+
+func runPgLegacy(command string, args []string, params map[string]interface{}, fn func() error) error {
+	return runLegacyStructured(output.MODULE_PG, command, args, params, fn)
+}
 
 // Additional flags for specific commands
 var (
@@ -197,7 +198,7 @@ var pgInitCmd = &cobra.Command{
 		// Structured output mode (YAML/JSON)
 		if config.IsStructuredOutput() {
 			result := postgres.InitResult(pgConfig, opts)
-			return handlePgStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -242,7 +243,7 @@ var pgStartCmd = &cobra.Command{
 		// Structured output mode (YAML/JSON)
 		if config.IsStructuredOutput() {
 			result := postgres.StartResult(pgConfig, opts)
-			return handlePgStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -286,13 +287,13 @@ var pgStopCmd = &cobra.Command{
 		// Plan mode: show plan without executing
 		if pgStopPlan {
 			plan := postgres.BuildStopPlan(pgConfig, opts)
-			return handlePgPlanOutput(plan)
+			return handlePlanOutput(plan)
 		}
 
 		// Structured output mode (YAML/JSON)
 		if config.IsStructuredOutput() {
 			result := postgres.StopResult(pgConfig, opts)
-			return handlePgStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -337,13 +338,13 @@ var pgRestartCmd = &cobra.Command{
 		// Plan mode: show plan without executing
 		if pgRestartPlan {
 			plan := postgres.BuildRestartPlan(pgConfig, opts)
-			return handlePgPlanOutput(plan)
+			return handlePlanOutput(plan)
 		}
 
 		// Structured output mode (YAML/JSON)
 		if config.IsStructuredOutput() {
 			result := postgres.RestartResult(pgConfig, opts)
-			return handlePgStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -377,7 +378,7 @@ var pgReloadCmd = &cobra.Command{
 		// Structured output mode (YAML/JSON)
 		if config.IsStructuredOutput() {
 			result := postgres.ReloadResult(pgConfig)
-			return handlePgStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -412,7 +413,7 @@ var pgStatusCmd = &cobra.Command{
 		// Structured output mode (YAML/JSON)
 		if config.IsStructuredOutput() {
 			result := postgres.StatusResult(pgConfig)
-			return handlePgStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -451,7 +452,7 @@ var pgPromoteCmd = &cobra.Command{
 		// Structured output mode (YAML/JSON)
 		if config.IsStructuredOutput() {
 			result := postgres.PromoteResult(pgConfig, opts)
-			return handlePgStructuredResult(result)
+			return handleAuxResult(result)
 		}
 
 		// Text mode: preserve existing behavior
@@ -485,538 +486,11 @@ var pgRoleCmd = &cobra.Command{
 		opts := &postgres.RoleOptions{
 			Verbose: pgRoleVerbose,
 		}
-		return postgres.PrintRole(pgConfig, opts)
-	},
-}
-
-// ============================================================================
-// Log Commands
-// ============================================================================
-
-var pgLogCmd = &cobra.Command{
-	Use:     "log",
-	Short:   "View PostgreSQL log files",
-	Aliases: []string{"l"},
-	Annotations: map[string]string{
-		"name":       "pig postgres log",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "500",
-	},
-	Long: `View and search PostgreSQL log files in /pg/log/postgres directory.
-
-  pig pg log list              # list log files
-  pig pg log tail              # tail -f latest log
-  pig pg log cat [-n 100]      # show last N lines
-  pig pg log less              # open in less
-  pig pg log grep <pattern>    # search logs`,
-}
-
-var pgLogListCmd = &cobra.Command{
-	Use:     "list",
-	Short:   "List log files",
-	Aliases: []string{"ls"},
-	Annotations: map[string]string{
-		"name":       "pig postgres log list",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "500",
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return postgres.LogList(postgres.GetLogDir(pgConfig))
-	},
-}
-
-var pgLogTailCmd = &cobra.Command{
-	Use:     "tail [file]",
-	Short:   "Tail log file (follow mode)",
-	Aliases: []string{"t", "f"},
-	Annotations: map[string]string{
-		"name":       "pig postgres log tail",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "0",
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		file := ""
-		if len(args) > 0 {
-			file = args[0]
-		}
-		return postgres.LogTail(postgres.GetLogDir(pgConfig), file, pgLogNum)
-	},
-}
-
-var pgLogCatCmd = &cobra.Command{
-	Use:     "cat [file]",
-	Short:   "Output log file content",
-	Aliases: []string{"c"},
-	Annotations: map[string]string{
-		"name":       "pig postgres log cat",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "500",
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		file := ""
-		if len(args) > 0 {
-			file = args[0]
-		}
-		return postgres.LogCat(postgres.GetLogDir(pgConfig), file, pgLogNum)
-	},
-}
-
-var pgLogLessCmd = &cobra.Command{
-	Use:     "less [file]",
-	Short:   "Open log file in less",
-	Aliases: []string{"vi", "v"},
-	Annotations: map[string]string{
-		"name":       "pig postgres log less",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "0",
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		file := ""
-		if len(args) > 0 {
-			file = args[0]
-		}
-		return postgres.LogLess(postgres.GetLogDir(pgConfig), file)
-	},
-}
-
-var pgLogGrepCmd = &cobra.Command{
-	Use:     "grep <pattern> [file]",
-	Short:   "Search log files",
-	Aliases: []string{"g", "search"},
-	Annotations: map[string]string{
-		"name":       "pig postgres log grep",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "5000",
-	},
-	Args: cobra.MinimumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		file := ""
-		if len(args) > 1 {
-			file = args[1]
-		}
-		return postgres.LogGrep(postgres.GetLogDir(pgConfig), args[0], file, pgLogGrepIgnoreCase, pgLogGrepContext)
-	},
-}
-
-// ============================================================================
-// Connection Commands
-// ============================================================================
-
-var pgPsqlCmd = &cobra.Command{
-	Use:     "psql [dbname]",
-	Short:   "Connect to PostgreSQL database via psql",
-	Aliases: []string{"sql", "connect"},
-	Annotations: map[string]string{
-		"name":       "pig postgres psql",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "false",
-		"risk":       "medium",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "0",
-	},
-	Example: `  pig pg psql                    # connect to postgres database
-  pig pg psql mydb               # connect to specific database
-  pig pg psql mydb -c "SELECT 1" # run single command
-  pig pg psql -f script.sql      # run SQL script file`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		dbname := ""
-		if len(args) > 0 {
-			dbname = args[0]
-		}
-		opts := &postgres.PsqlOptions{
-			Command: pgPsqlCommand,
-			File:    pgPsqlFile,
-		}
-		return postgres.Psql(pgConfig, dbname, opts)
-	},
-}
-
-var pgPsCmd = &cobra.Command{
-	Use:     "ps",
-	Short:   "Show PostgreSQL connections",
-	Aliases: []string{"activity", "act"},
-	Annotations: map[string]string{
-		"name":       "pig postgres ps",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "500",
-	},
-	Example: `  pig pg ps                      # show client connections
-  pig pg ps -a                   # show all connections
-  pig pg ps -u admin             # filter by user
-  pig pg ps -d mydb              # filter by database`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		opts := &postgres.PsOptions{
-			All:      pgPsAll,
-			User:     pgPsUser,
-			Database: pgPsDatabase,
-		}
-		return postgres.Ps(pgConfig, opts)
-	},
-}
-
-var pgKillCmd = &cobra.Command{
-	Use:     "kill",
-	Short:   "Kill PostgreSQL connections (dry-run by default)",
-	Aliases: []string{"k"},
-	Annotations: map[string]string{
-		"name":       "pig postgres kill",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "high",
-		"confirm":    "recommended",
-		"os_user":    "dbsu",
-		"cost":       "1000",
-	},
-	Example: `  pig pg kill                    # show what would be killed (dry-run)
-  pig pg kill -x                 # actually kill connections
-  pig pg kill --pid 12345 -x     # kill specific PID
-  pig pg kill -u admin -x        # kill connections by user
-  pig pg kill -d mydb -x         # kill connections to database
-  pig pg kill -s idle -x         # kill idle connections
-  pig pg kill --cancel -x        # cancel queries instead of terminate
-  pig pg kill -w 5 -x            # repeat every 5 seconds`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		opts := &postgres.KillOptions{
-			Execute: pgKillExecute,
-			Pid:     pgKillPid,
-			User:    pgKillUser,
-			Db:      pgKillDb,
-			State:   pgKillState,
-			Query:   pgKillQuery,
-			All:     pgKillAll,
-			Cancel:  pgKillCancel,
-			Watch:   pgKillWatch,
-		}
-		return postgres.Kill(pgConfig, opts)
-	},
-}
-
-// ============================================================================
-// Maintenance Commands
-// ============================================================================
-
-var pgVacuumCmd = &cobra.Command{
-	Use:     "vacuum [dbname]",
-	Short:   "Vacuum database tables",
-	Aliases: []string{"vac", "vc"},
-	Annotations: map[string]string{
-		"name":       "pig postgres vacuum",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "60000",
-	},
-	Example: `  pig pg vacuum                  # vacuum current database
-  pig pg vacuum mydb             # vacuum specific database
-  pig pg vacuum -a               # vacuum all databases
-  pig pg vacuum mydb -t mytable  # vacuum specific table
-  pig pg vacuum mydb -n myschema # vacuum tables in schema
-  pig pg vacuum mydb --full      # VACUUM FULL (exclusive lock)`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		dbname := ""
-		if len(args) > 0 {
-			dbname = args[0]
-		}
-		opts := &postgres.VacuumOptions{
-			MaintOptions: postgres.MaintOptions{
-				All:     pgMaintAll,
-				Schema:  pgMaintSchema,
-				Table:   pgMaintTable,
-				Verbose: pgMaintVerbose,
-			},
-			Full: pgMaintFull,
-		}
-		return postgres.Vacuum(pgConfig, dbname, opts)
-	},
-}
-
-var pgAnalyzeCmd = &cobra.Command{
-	Use:     "analyze [dbname]",
-	Short:   "Analyze database tables",
-	Aliases: []string{"ana", "az"},
-	Annotations: map[string]string{
-		"name":       "pig postgres analyze",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "60000",
-	},
-	Example: `  pig pg analyze                 # analyze current database
-  pig pg analyze mydb            # analyze specific database
-  pig pg analyze -a              # analyze all databases
-  pig pg analyze mydb -t mytable # analyze specific table`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		dbname := ""
-		if len(args) > 0 {
-			dbname = args[0]
-		}
-		opts := &postgres.MaintOptions{
-			All:     pgMaintAll,
-			Schema:  pgMaintSchema,
-			Table:   pgMaintTable,
-			Verbose: pgMaintVerbose,
-		}
-		return postgres.Analyze(pgConfig, dbname, opts)
-	},
-}
-
-var pgFreezeCmd = &cobra.Command{
-	Use:   "freeze [dbname]",
-	Short: "Vacuum freeze database",
-	Annotations: map[string]string{
-		"name":       "pig postgres freeze",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "dbsu",
-		"cost":       "60000",
-	},
-	Example: `  pig pg freeze                  # vacuum freeze current database
-  pig pg freeze mydb             # vacuum freeze specific database
-  pig pg freeze -a               # vacuum freeze all databases`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		dbname := ""
-		if len(args) > 0 {
-			dbname = args[0]
-		}
-		opts := &postgres.FreezeOptions{
-			All:     pgMaintAll,
-			Schema:  pgMaintSchema,
-			Table:   pgMaintTable,
-			Verbose: pgMaintVerbose,
-		}
-		return postgres.Freeze(pgConfig, dbname, opts)
-	},
-}
-
-var pgRepackCmd = &cobra.Command{
-	Use:     "repack [dbname]",
-	Short:   "Repack database tables (requires pg_repack)",
-	Aliases: []string{"rp"},
-	Annotations: map[string]string{
-		"name":       "pig postgres repack",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "recommended",
-		"os_user":    "dbsu",
-		"cost":       "300000",
-	},
-	Example: `  pig pg repack mydb             # repack all tables in database
-  pig pg repack -a               # repack all databases
-  pig pg repack mydb -t mytable  # repack specific table
-  pig pg repack mydb -n myschema # repack tables in schema
-  pig pg repack mydb -j 4        # parallel repack
-  pig pg repack mydb --dry-run   # show what would be repacked`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		dbname := ""
-		if len(args) > 0 {
-			dbname = args[0]
-		}
-		opts := &postgres.RepackOptions{
-			MaintOptions: postgres.MaintOptions{
-				All:     pgMaintAll,
-				Schema:  pgMaintSchema,
-				Table:   pgMaintTable,
-				Verbose: pgMaintVerbose,
-			},
-			Jobs:   pgMaintJobs,
-			DryRun: pgMaintDryRun,
-		}
-		return postgres.Repack(pgConfig, dbname, opts)
-	},
-}
-
-// ============================================================================
-// Service Management Commands (via systemctl) - pig pg svc
-// ============================================================================
-
-var pgSvcCmd = &cobra.Command{
-	Use:     "service",
-	Aliases: []string{"svc", "s"},
-	Short:   "Manage postgres systemd service",
-	Annotations: map[string]string{
-		"name":       "pig postgres service",
-		"type":       "query",
-		"volatility": "stable",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "100",
-	},
-	Long: `Manage the PostgreSQL systemd service.
-
-These commands control the postgres service via systemctl. Unlike the pg_ctl
-commands (pig pg start/stop/restart/reload), these operate through systemd.
-
-Use these commands when PostgreSQL is managed as a systemd service.
-For direct pg_ctl operations, use the parent commands instead.`,
-}
-
-var pgSvcStartCmd = &cobra.Command{
-	Use:     "start",
-	Aliases: []string{"boot", "up"},
-	Short:   "Start postgres systemd service",
-	Annotations: map[string]string{
-		"name":       "pig postgres service start",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "medium",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "10000",
-	},
-	Example: `  pig pg svc start                 # systemctl start postgres`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return postgres.RunSystemctl("start", postgres.DefaultSystemdService)
-	},
-}
-
-var pgSvcStopCmd = &cobra.Command{
-	Use:     "stop",
-	Aliases: []string{"halt", "dn", "down"},
-	Short:   "Stop postgres systemd service",
-	Annotations: map[string]string{
-		"name":       "pig postgres service stop",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "true",
-		"risk":       "high",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "10000",
-	},
-	Example: `  pig pg svc stop                  # systemctl stop postgres`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return postgres.RunSystemctl("stop", postgres.DefaultSystemdService)
-	},
-}
-
-var pgSvcRestartCmd = &cobra.Command{
-	Use:     "restart",
-	Aliases: []string{"reboot", "rt"},
-	Short:   "Restart postgres systemd service",
-	Annotations: map[string]string{
-		"name":       "pig postgres service restart",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "unsafe",
-		"idempotent": "false",
-		"risk":       "high",
-		"confirm":    "recommended",
-		"os_user":    "root",
-		"cost":       "30000",
-	},
-	Example: `  pig pg svc restart               # systemctl restart postgres`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return postgres.RunSystemctl("restart", postgres.DefaultSystemdService)
-	},
-}
-
-var pgSvcReloadCmd = &cobra.Command{
-	Use:     "reload",
-	Aliases: []string{"rl", "hup"},
-	Short:   "Reload postgres systemd service",
-	Annotations: map[string]string{
-		"name":       "pig postgres service reload",
-		"type":       "action",
-		"volatility": "volatile",
-		"parallel":   "restricted",
-		"idempotent": "true",
-		"risk":       "low",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "1000",
-	},
-	Example: `  pig pg svc reload                # systemctl reload postgres`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return postgres.RunSystemctl("reload", postgres.DefaultSystemdService)
-	},
-}
-
-var pgSvcStatusCmd = &cobra.Command{
-	Use:     "status",
-	Aliases: []string{"st", "stat"},
-	Short:   "Show postgres systemd service status",
-	Annotations: map[string]string{
-		"name":       "pig postgres service status",
-		"type":       "query",
-		"volatility": "volatile",
-		"parallel":   "safe",
-		"idempotent": "true",
-		"risk":       "safe",
-		"confirm":    "none",
-		"os_user":    "root",
-		"cost":       "500",
-	},
-	Example: `  pig pg svc status                # systemctl status postgres`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return postgres.RunSystemctl("status", postgres.DefaultSystemdService)
+		return runPgLegacy("pig postgres role", args, map[string]interface{}{
+			"verbose": pgRoleVerbose,
+		}, func() error {
+			return postgres.PrintRole(pgConfig, opts)
+		})
 	},
 }
 
@@ -1030,6 +504,14 @@ func init() {
 	pgCmd.PersistentFlags().StringVarP(&pgConfig.PgData, "data", "D", "", "data directory (default: /pg/data)")
 	pgCmd.PersistentFlags().StringVarP(&pgConfig.DbSU, "dbsu", "U", "", "database superuser (default: $PIG_DBSU or postgres)")
 
+	registerPgControlCommands()
+	registerPgLogCommands()
+	registerPgConnectionCommands()
+	registerPgMaintenanceCommands()
+	registerPgServiceCommands()
+}
+
+func registerPgControlCommands() {
 	// init subcommand flags
 	pgInitCmd.Flags().StringVarP(&pgInitEncoding, "encoding", "E", "", "database encoding (default: UTF8)")
 	pgInitCmd.Flags().StringVar(&pgInitLocale, "locale", "", "locale setting (default: C)")
@@ -1064,17 +546,19 @@ func init() {
 	pgRoleCmd.Flags().BoolVarP(&pgRoleVerbose, "verbose", "V", false, "show detailed detection process")
 
 	// Register subcommands - Phase 1
-	pgCmd.AddCommand(pgInitCmd)
-	pgCmd.AddCommand(pgStartCmd)
-	pgCmd.AddCommand(pgStopCmd)
-	pgCmd.AddCommand(pgRestartCmd)
-	pgCmd.AddCommand(pgReloadCmd)
-	pgCmd.AddCommand(pgStatusCmd)
-	pgCmd.AddCommand(pgPromoteCmd)
-	pgCmd.AddCommand(pgRoleCmd)
+	pgCmd.AddCommand(
+		pgInitCmd,
+		pgStartCmd,
+		pgStopCmd,
+		pgRestartCmd,
+		pgReloadCmd,
+		pgStatusCmd,
+		pgPromoteCmd,
+		pgRoleCmd,
+	)
+}
 
-	// ========== Phase 2 Commands ==========
-
+func registerPgLogCommands() {
 	// Log command flags
 	pgLogCmd.PersistentFlags().StringVar(&pgConfig.LogDir, "log-dir", "", "log directory (default: /pg/log/postgres)")
 	pgLogCmd.PersistentFlags().IntVarP(&pgLogNum, "lines", "n", 0, "number of lines")
@@ -1082,13 +566,11 @@ func init() {
 	pgLogGrepCmd.Flags().IntVarP(&pgLogGrepContext, "context", "C", 0, "show N lines of context")
 
 	// Log subcommands
-	pgLogCmd.AddCommand(pgLogListCmd)
-	pgLogCmd.AddCommand(pgLogTailCmd)
-	pgLogCmd.AddCommand(pgLogCatCmd)
-	pgLogCmd.AddCommand(pgLogLessCmd)
-	pgLogCmd.AddCommand(pgLogGrepCmd)
+	pgLogCmd.AddCommand(pgLogListCmd, pgLogTailCmd, pgLogCatCmd, pgLogLessCmd, pgLogGrepCmd)
 	pgCmd.AddCommand(pgLogCmd)
+}
 
+func registerPgConnectionCommands() {
 	// psql command flags
 	pgPsqlCmd.Flags().StringVarP(&pgPsqlCommand, "command", "c", "", "run single SQL command")
 	pgPsqlCmd.Flags().StringVarP(&pgPsqlFile, "file", "f", "", "run commands from file")
@@ -1111,38 +593,37 @@ func init() {
 	pgKillCmd.Flags().BoolVarP(&pgKillCancel, "cancel", "c", false, "cancel query instead of terminate")
 	pgKillCmd.Flags().IntVarP(&pgKillWatch, "watch", "w", 0, "repeat every N seconds")
 	pgCmd.AddCommand(pgKillCmd)
+}
 
-	// Maintenance command shared flags helper
-	addMaintFlags := func(cmd *cobra.Command) {
-		cmd.Flags().BoolVarP(&pgMaintAll, "all", "a", false, "process all databases")
-		cmd.Flags().StringVarP(&pgMaintSchema, "schema", "n", "", "schema name")
-		cmd.Flags().StringVarP(&pgMaintTable, "table", "t", "", "table name")
-		cmd.Flags().BoolVarP(&pgMaintVerbose, "verbose", "V", false, "verbose output")
-	}
+func addPgMaintFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolVarP(&pgMaintAll, "all", "a", false, "process all databases")
+	cmd.Flags().StringVarP(&pgMaintSchema, "schema", "n", "", "schema name")
+	cmd.Flags().StringVarP(&pgMaintTable, "table", "t", "", "table name")
+	cmd.Flags().BoolVarP(&pgMaintVerbose, "verbose", "V", false, "verbose output")
+}
 
+func registerPgMaintenanceCommands() {
 	// vacuum command
-	addMaintFlags(pgVacuumCmd)
+	addPgMaintFlags(pgVacuumCmd)
 	pgVacuumCmd.Flags().BoolVarP(&pgMaintFull, "full", "F", false, "VACUUM FULL (requires exclusive lock)")
 	pgCmd.AddCommand(pgVacuumCmd)
 
 	// analyze command
-	addMaintFlags(pgAnalyzeCmd)
+	addPgMaintFlags(pgAnalyzeCmd)
 	pgCmd.AddCommand(pgAnalyzeCmd)
 
 	// freeze command
-	pgFreezeCmd.Flags().BoolVarP(&pgMaintAll, "all", "a", false, "process all databases")
-	pgFreezeCmd.Flags().StringVarP(&pgMaintSchema, "schema", "n", "", "schema name")
-	pgFreezeCmd.Flags().StringVarP(&pgMaintTable, "table", "t", "", "table name")
-	pgFreezeCmd.Flags().BoolVarP(&pgMaintVerbose, "verbose", "V", false, "verbose output")
+	addPgMaintFlags(pgFreezeCmd)
 	pgCmd.AddCommand(pgFreezeCmd)
 
 	// repack command
-	addMaintFlags(pgRepackCmd)
+	addPgMaintFlags(pgRepackCmd)
 	pgRepackCmd.Flags().IntVarP(&pgMaintJobs, "jobs", "j", 1, "number of parallel jobs")
 	pgRepackCmd.Flags().BoolVarP(&pgMaintDryRun, "dry-run", "N", false, "show what would be repacked")
 	pgCmd.AddCommand(pgRepackCmd)
+}
 
-	// ========== Service Management Commands (systemctl) ==========
+func registerPgServiceCommands() {
 	pgSvcCmd.AddCommand(
 		pgSvcStartCmd,
 		pgSvcStopCmd,
@@ -1151,38 +632,4 @@ func init() {
 		pgSvcStatusCmd,
 	)
 	pgCmd.AddCommand(pgSvcCmd)
-}
-
-// ============================================================================
-// Structured Output Helpers
-// ============================================================================
-
-// handlePgStructuredResult handles structured output for pg commands.
-// It prints the result and returns appropriate exit code on failure.
-func handlePgStructuredResult(result *output.Result) error {
-	if result == nil {
-		return fmt.Errorf("nil result")
-	}
-	if err := output.Print(result); err != nil {
-		return err
-	}
-	if !result.Success {
-		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message)}
-	}
-	return nil
-}
-
-// handlePgPlanOutput handles plan output for pg commands.
-// It renders the plan according to the global output format (-o flag).
-func handlePgPlanOutput(plan *output.Plan) error {
-	if plan == nil {
-		return fmt.Errorf("nil plan")
-	}
-	format := config.OutputFormat
-	data, err := plan.Render(format)
-	if err != nil {
-		return err
-	}
-	fmt.Println(string(data))
-	return nil
 }
