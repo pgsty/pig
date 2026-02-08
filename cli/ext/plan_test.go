@@ -92,7 +92,7 @@ func TestBuildAddPlan_Normal(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildAddPlan(17, []string{"postgis"})
+	plan := BuildAddPlan(17, []string{"postgis"}, false)
 	if plan == nil {
 		t.Fatal("BuildAddPlan returned nil")
 	}
@@ -134,6 +134,60 @@ func TestBuildAddPlan_Normal(t *testing.T) {
 	}
 }
 
+func TestBuildAddPlan_VersionPinAndYesFlag(t *testing.T) {
+	// Save and restore
+	oldCatalog := Catalog
+	oldPostgres := Postgres
+	oldOSType := config.OSType
+	defer func() {
+		Catalog = oldCatalog
+		Postgres = oldPostgres
+		config.OSType = oldOSType
+	}()
+
+	config.OSType = config.DistroEL
+	Postgres = nil
+
+	ext := &Extension{
+		Name:   "test_ext",
+		Pkg:    "test_ext",
+		Lead:   true,
+		RpmPkg: "test_ext_$v",
+		PgVer:  []string{"17"},
+	}
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{ext},
+		ExtNameMap: map[string]*Extension{"test_ext": ext},
+		ExtPkgMap:  map[string]*Extension{"test_ext": ext},
+		Dependency: map[string][]string{},
+		AliasMap:   map[string]string{},
+	}
+
+	plan := BuildAddPlan(17, []string{"test_ext=1.2.3"}, true)
+	if plan == nil {
+		t.Fatal("BuildAddPlan returned nil")
+	}
+	if len(plan.Actions) < 2 {
+		t.Fatalf("expected at least 2 actions, got %d", len(plan.Actions))
+	}
+	exec := plan.Actions[1].Description
+	if !strings.Contains(exec, "test_ext_17-1.2.3") {
+		t.Fatalf("expected version pin in execute action, got %q", exec)
+	}
+	if !strings.Contains(exec, "install -y") {
+		t.Fatalf("expected -y in execute action when yes=true, got %q", exec)
+	}
+
+	plan2 := BuildAddPlan(17, []string{"test_ext=1.2.3"}, false)
+	if plan2 == nil || len(plan2.Actions) < 2 {
+		t.Fatal("expected non-nil plan with actions")
+	}
+	exec2 := plan2.Actions[1].Description
+	if strings.Contains(exec2, "install -y") {
+		t.Fatalf("did not expect -y in execute action when yes=false, got %q", exec2)
+	}
+}
+
 func TestBuildAddPlan_AlreadyInstalled(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
@@ -146,7 +200,7 @@ func TestBuildAddPlan_AlreadyInstalled(t *testing.T) {
 		},
 	}
 
-	plan := BuildAddPlan(17, []string{"postgis"})
+	plan := BuildAddPlan(17, []string{"postgis"}, false)
 	if plan == nil {
 		t.Fatal("BuildAddPlan returned nil")
 	}
@@ -166,7 +220,7 @@ func TestBuildAddPlan_NeedLoad(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildAddPlan(17, []string{"timescaledb"})
+	plan := BuildAddPlan(17, []string{"timescaledb"}, false)
 	if plan == nil {
 		t.Fatal("BuildAddPlan returned nil")
 	}
@@ -200,7 +254,7 @@ func TestBuildAddPlan_MultipleExtensions(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildAddPlan(17, []string{"postgis", "timescaledb"})
+	plan := BuildAddPlan(17, []string{"postgis", "timescaledb"}, false)
 	if plan == nil {
 		t.Fatal("BuildAddPlan returned nil")
 	}
@@ -226,7 +280,7 @@ func TestBuildAddPlan_ExtensionNotFound(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildAddPlan(17, []string{"nonexistent_ext"})
+	plan := BuildAddPlan(17, []string{"nonexistent_ext"}, false)
 	if plan == nil {
 		t.Fatal("BuildAddPlan returned nil")
 	}
@@ -249,7 +303,7 @@ func TestBuildAddPlan_CatalogNil(t *testing.T) {
 	Catalog = nil
 	defer func() { Catalog = oldCatalog }()
 
-	plan := BuildAddPlan(17, []string{"postgis"})
+	plan := BuildAddPlan(17, []string{"postgis"}, false)
 	if plan == nil {
 		t.Fatal("BuildAddPlan returned nil even with nil Catalog")
 	}
@@ -268,7 +322,7 @@ func TestBuildRmPlan_Normal(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildRmPlan(17, []string{"postgis"})
+	plan := BuildRmPlan(17, []string{"postgis"}, false)
 	if plan == nil {
 		t.Fatal("BuildRmPlan returned nil")
 	}
@@ -303,7 +357,7 @@ func TestBuildRmPlan_WithDependents(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildRmPlan(17, []string{"postgis"})
+	plan := BuildRmPlan(17, []string{"postgis"}, false)
 	if plan == nil {
 		t.Fatal("BuildRmPlan returned nil")
 	}
@@ -325,7 +379,7 @@ func TestBuildRmPlan_NotInstalled(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildRmPlan(17, []string{"nonexistent_ext"})
+	plan := BuildRmPlan(17, []string{"nonexistent_ext"}, false)
 	if plan == nil {
 		t.Fatal("BuildRmPlan returned nil")
 	}
@@ -341,7 +395,7 @@ func TestBuildRmPlan_CatalogNil(t *testing.T) {
 	Catalog = nil
 	defer func() { Catalog = oldCatalog }()
 
-	plan := BuildRmPlan(17, []string{"postgis"})
+	plan := BuildRmPlan(17, []string{"postgis"}, false)
 	if plan == nil {
 		t.Fatal("BuildRmPlan returned nil even with nil Catalog")
 	}
@@ -359,7 +413,7 @@ func TestPlanFieldsCompleteness_Add(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildAddPlan(17, []string{"postgis"})
+	plan := BuildAddPlan(17, []string{"postgis"}, false)
 	validateExtPlanFields(t, plan, "add")
 }
 
@@ -367,7 +421,7 @@ func TestPlanFieldsCompleteness_Rm(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildRmPlan(17, []string{"postgis"})
+	plan := BuildRmPlan(17, []string{"postgis"}, false)
 	validateExtPlanFields(t, plan, "rm")
 }
 
@@ -399,7 +453,7 @@ func TestBuildAddActions_WithResolved(t *testing.T) {
 	resolved := []resolvedExt{
 		{name: "postgis", packages: []string{"postgis35_17*"}},
 	}
-	actions := buildAddActions(resolved, nil, 17)
+	actions := buildAddActions(resolved, nil, 17, false)
 	if len(actions) != 2 {
 		t.Errorf("Expected 2 actions, got %d", len(actions))
 	}
@@ -413,7 +467,7 @@ func TestBuildAddActions_WithNotFound(t *testing.T) {
 		{name: "postgis", packages: []string{"postgis35_17*"}},
 	}
 	notFound := []string{"nonexistent"}
-	actions := buildAddActions(resolved, notFound, 17)
+	actions := buildAddActions(resolved, notFound, 17, false)
 	// Should have resolve, execute, skip
 	if len(actions) != 3 {
 		t.Errorf("Expected 3 actions, got %d", len(actions))
@@ -424,7 +478,7 @@ func TestBuildRmActions_WithResolved(t *testing.T) {
 	resolved := []resolvedExt{
 		{name: "postgis", packages: []string{"postgis35_17*"}},
 	}
-	actions := buildRmActions(resolved, nil, 17)
+	actions := buildRmActions(resolved, nil, 17, false)
 	if len(actions) != 2 {
 		t.Errorf("Expected 2 actions, got %d", len(actions))
 	}

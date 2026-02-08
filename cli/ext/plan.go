@@ -28,10 +28,9 @@ func resolvePlanExtensions(pgVer int, names []string, parseVersionSpec bool) ([]
 
 	for _, raw := range names {
 		lookupName := raw
+		version := ""
 		if parseVersionSpec {
-			if parts := strings.Split(raw, "="); len(parts) == 2 {
-				lookupName = parts[0]
-			}
+			lookupName, version = splitNameVersion(raw, true)
 		}
 
 		ext, ok := Catalog.ExtNameMap[lookupName]
@@ -42,6 +41,9 @@ func resolvePlanExtensions(pgVer int, names []string, parseVersionSpec bool) ([]
 			// Try alias map.
 			if pgPkg, aliasOk := Catalog.AliasMap[lookupName]; aliasOk {
 				pkgs := ProcessPkgName(pgPkg, pgVer)
+				for i, pkg := range pkgs {
+					pkgs[i] = applyPackageVersion(pkg, version)
+				}
 				resolved = append(resolved, resolvedExt{
 					name:     lookupName,
 					packages: pkgs,
@@ -60,6 +62,9 @@ func resolvePlanExtensions(pgVer int, names []string, parseVersionSpec bool) ([]
 		}
 
 		pkgs := ProcessPkgName(pkgName, pgVer)
+		for i, pkg := range pkgs {
+			pkgs[i] = applyPackageVersion(pkg, version)
+		}
 		resolved = append(resolved, resolvedExt{
 			name:     ext.Name,
 			ext:      ext,
@@ -76,7 +81,7 @@ func resolvePlanExtensions(pgVer int, names []string, parseVersionSpec bool) ([]
 
 // BuildAddPlan constructs a structured execution plan for ext add.
 // It shows what will happen without actually executing the installation.
-func BuildAddPlan(pgVer int, names []string) *output.Plan {
+func BuildAddPlan(pgVer int, names []string, yes bool) *output.Plan {
 	if Catalog == nil {
 		return &output.Plan{
 			Command:  buildAddCommand(names),
@@ -105,12 +110,12 @@ func BuildAddPlan(pgVer int, names []string) *output.Plan {
 		}
 	}
 
-	return buildAddPlanFromState(names, resolved, notFound, alreadyInstalled, pgVer)
+	return buildAddPlanFromState(names, resolved, notFound, alreadyInstalled, pgVer, yes)
 }
 
 // buildAddPlanFromState constructs an add plan from given state.
 // This is separated for easier testing.
-func buildAddPlanFromState(names []string, resolved []resolvedExt, notFound []string, alreadyInstalled []string, pgVer int) *output.Plan {
+func buildAddPlanFromState(names []string, resolved []resolvedExt, notFound []string, alreadyInstalled []string, pgVer int, yes bool) *output.Plan {
 	// If nothing to install
 	if len(resolved) == 0 && len(alreadyInstalled) > 0 {
 		return &output.Plan{
@@ -122,7 +127,7 @@ func buildAddPlanFromState(names []string, resolved []resolvedExt, notFound []st
 		}
 	}
 
-	actions := buildAddActions(resolved, notFound, pgVer)
+	actions := buildAddActions(resolved, notFound, pgVer, yes)
 	affects := buildAddAffects(resolved, pgVer)
 	expected := buildAddExpected(resolved, alreadyInstalled)
 	risks := buildAddRisks(resolved, notFound, alreadyInstalled)
@@ -136,7 +141,7 @@ func buildAddPlanFromState(names []string, resolved []resolvedExt, notFound []st
 	}
 }
 
-func buildAddActions(resolved []resolvedExt, notFound []string, pgVer int) []output.Action {
+func buildAddActions(resolved []resolvedExt, notFound []string, pgVer int, yes bool) []output.Action {
 	actions := []output.Action{}
 	step := 1
 
@@ -159,9 +164,13 @@ func buildAddActions(resolved []resolvedExt, notFound []string, pgVer int) []out
 			allPkgs = append(allPkgs, r.packages...)
 		}
 		pkgMgr := PackageManagerCmd()
+		yesArg := ""
+		if yes {
+			yesArg = " -y"
+		}
 		actions = append(actions, output.Action{
 			Step:        step,
-			Description: fmt.Sprintf("Execute: sudo %s install -y %s", pkgMgr, strings.Join(allPkgs, " ")),
+			Description: fmt.Sprintf("Execute: sudo %s install%s %s", pkgMgr, yesArg, strings.Join(allPkgs, " ")),
 		})
 		step++
 	}
@@ -256,7 +265,7 @@ func buildAddCommand(names []string) string {
 
 // BuildRmPlan constructs a structured execution plan for ext rm.
 // It shows what will happen without actually executing the removal.
-func BuildRmPlan(pgVer int, names []string) *output.Plan {
+func BuildRmPlan(pgVer int, names []string, yes bool) *output.Plan {
 	if Catalog == nil {
 		return &output.Plan{
 			Command:  buildRmCommand(names),
@@ -273,12 +282,12 @@ func BuildRmPlan(pgVer int, names []string) *output.Plan {
 
 	resolved, notFound := resolvePlanExtensions(pgVer, names, false)
 
-	return buildRmPlanFromState(names, resolved, notFound, pgVer)
+	return buildRmPlanFromState(names, resolved, notFound, pgVer, yes)
 }
 
 // buildRmPlanFromState constructs a remove plan from given state.
 // This is separated for easier testing.
-func buildRmPlanFromState(names []string, resolved []resolvedExt, notFound []string, pgVer int) *output.Plan {
+func buildRmPlanFromState(names []string, resolved []resolvedExt, notFound []string, pgVer int, yes bool) *output.Plan {
 	if len(resolved) == 0 {
 		return &output.Plan{
 			Command:  buildRmCommand(names),
@@ -289,7 +298,7 @@ func buildRmPlanFromState(names []string, resolved []resolvedExt, notFound []str
 		}
 	}
 
-	actions := buildRmActions(resolved, notFound, pgVer)
+	actions := buildRmActions(resolved, notFound, pgVer, yes)
 	affects := buildRmAffects(resolved)
 	expected := buildRmExpected(resolved)
 	risks := buildRmRisks(resolved, notFound)
@@ -303,7 +312,7 @@ func buildRmPlanFromState(names []string, resolved []resolvedExt, notFound []str
 	}
 }
 
-func buildRmActions(resolved []resolvedExt, notFound []string, pgVer int) []output.Action {
+func buildRmActions(resolved []resolvedExt, notFound []string, pgVer int, yes bool) []output.Action {
 	actions := []output.Action{}
 	step := 1
 
@@ -324,9 +333,13 @@ func buildRmActions(resolved []resolvedExt, notFound []string, pgVer int) []outp
 			allPkgs = append(allPkgs, r.packages...)
 		}
 		pkgMgr := PackageManagerCmd()
+		yesArg := ""
+		if yes {
+			yesArg = " -y"
+		}
 		actions = append(actions, output.Action{
 			Step:        step,
-			Description: fmt.Sprintf("Execute: sudo %s remove -y %s", pkgMgr, strings.Join(allPkgs, " ")),
+			Description: fmt.Sprintf("Execute: sudo %s remove%s %s", pkgMgr, yesArg, strings.Join(allPkgs, " ")),
 		})
 		step++
 	}

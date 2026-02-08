@@ -156,7 +156,7 @@ Description:
 
 		// Plan mode: show plan without executing
 		if extAddPlan {
-			plan := ext.BuildAddPlan(pgVer, args)
+			plan := ext.BuildAddPlan(pgVer, args, extYes)
 			return handlePlanOutput(plan)
 		}
 
@@ -178,7 +178,7 @@ var extRmCmd = &cobra.Command{
 
 		// Plan mode: show plan without executing
 		if extRmPlan {
-			plan := ext.BuildRmPlan(pgVer, args)
+			plan := ext.BuildRmPlan(pgVer, args, extYes)
 			return handlePlanOutput(plan)
 		}
 
