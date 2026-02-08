@@ -2,6 +2,7 @@ package ext
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"pig/internal/config"
 	"pig/internal/output"
@@ -113,12 +114,47 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 		return result
 	}
 
+	// Ensure downloads are placed into the target repo directory.
+	cwd, err := os.Getwd()
+	if err != nil {
+		result := output.Fail(output.CodeExtensionImportFailed, fmt.Sprintf("failed to get current working directory: %v", err))
+		result.Data = &ImportResultData{
+			PgVersion:  pgVer,
+			OSCode:     config.OSCode,
+			Arch:       config.OSArch,
+			RepoDir:    importPath,
+			Requested:  names,
+			Packages:   pkgNames,
+			PkgCount:   len(pkgNames),
+			Failed:     failed,
+			DurationMs: time.Since(startTime).Milliseconds(),
+		}
+		return result
+	}
+	if err := os.Chdir(importPath); err != nil {
+		result := output.Fail(output.CodeExtensionImportFailed, fmt.Sprintf("failed to chdir to import directory %s: %v", importPath, err))
+		result.Data = &ImportResultData{
+			PgVersion:  pgVer,
+			OSCode:     config.OSCode,
+			Arch:       config.OSArch,
+			RepoDir:    importPath,
+			Requested:  names,
+			Packages:   pkgNames,
+			PkgCount:   len(pkgNames),
+			Failed:     failed,
+			DurationMs: time.Since(startTime).Milliseconds(),
+		}
+		return result
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+
+	var downloaded []string
 	var downloadErr error
 	switch config.OSType {
 	case config.DistroEL:
-		downloadErr = DownloadRPM(pkgNames)
+		downloaded, downloadErr = DownloadRPM(pkgNames)
 	case config.DistroDEB:
-		downloadErr = DownloadDEB(pkgNames)
+		downloaded, downloadErr = DownloadDEB(pkgNames)
 	default:
 		downloadErr = fmt.Errorf("unsupported package manager: %s on %s %s", config.OSType, config.OSVendor, config.OSCode)
 	}
@@ -149,7 +185,7 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 		Requested:  names,
 		Packages:   pkgNames,
 		PkgCount:   len(pkgNames),
-		Downloaded: pkgNames,
+		Downloaded: downloaded,
 		Failed:     failed,
 		DurationMs: durationMs,
 	}
@@ -159,7 +195,7 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 }
 
 // DownloadRPM downloads RPM packages with repotrack
-func DownloadRPM(pkgNames []string) error {
+func DownloadRPM(pkgNames []string) ([]string, error) {
 	osarch := config.OSArch
 	switch osarch {
 	case "x86_64", "amd64":
@@ -172,20 +208,19 @@ func DownloadRPM(pkgNames []string) error {
 	downloadCmds = append(downloadCmds, pkgNames...)
 	logrus.Infof("download commands: %s", strings.Join(downloadCmds, " "))
 	if err := utils.SudoCommand(downloadCmds); err != nil {
-		return fmt.Errorf("failed to download packages: %w", err)
+		return nil, fmt.Errorf("failed to download packages: %w", err)
 	} else {
 		logrus.Infof("downloaded %s successfully", strings.Join(pkgNames, " "))
 		logrus.Infof("consider using: pig repo create  to update repo meta")
 	}
-	return nil
+	return pkgNames, nil
 }
 
 // DownloadDEB downloads DEB packages with apt-get and apt-cache
-func DownloadDEB(pkgNames []string) error {
+func DownloadDEB(pkgNames []string) ([]string, error) {
 
 	// Step 1: Get dependencies one by one
 	dependencySet := make(map[string][]string)
-	dependencyMap := make(map[string]bool)
 
 	// Iterate over pkgNames and call apt-cache depends to get the dependency list
 	for _, pkg := range pkgNames {
@@ -195,7 +230,7 @@ func DownloadDEB(pkgNames []string) error {
 			"apt-cache", "depends", "--recurse", "--no-recommends", "--no-suggests", "--no-conflicts", "--no-breaks", "--no-replaces", "--no-enhances", pkg,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to run apt-cache depends for %s: %w", pkg, err)
+			return nil, fmt.Errorf("failed to run apt-cache depends for %s: %w", pkg, err)
 		}
 
 		depList := parseAptDependsOutput(out)
@@ -203,19 +238,12 @@ func DownloadDEB(pkgNames []string) error {
 		dependencySet[pkg] = depList
 	}
 
-	// Merge dependencySet into a large list and remove duplicates
-	candidates := []string{}
-	for _, deps := range dependencySet {
-		for _, dep := range deps {
-			if _, exists := dependencyMap[dep]; !exists {
-				candidates = append(candidates, dep)
-				dependencyMap[dep] = true
-			}
-		}
-	}
+	// Merge requested packages + dependencies into a large list and remove duplicates.
+	// NOTE: apt-get download does not include dependencies automatically.
+	candidates := mergeDEBCandidates(pkgNames, dependencySet)
 	if len(candidates) == 0 {
-		fmt.Println("No dependencies found. Nothing to download.")
-		return nil
+		logrus.Infof("no packages to download")
+		return nil, nil
 	}
 	logrus.Infof("got %d packages & dependencies", len(candidates))
 
@@ -224,12 +252,43 @@ func DownloadDEB(pkgNames []string) error {
 
 	logrus.Infof("download commands: %s", strings.Join(downloadCmds, " "))
 	if err := utils.SudoCommand(downloadCmds); err != nil {
-		return fmt.Errorf("failed to download packages: %w", err)
+		return nil, fmt.Errorf("failed to download packages: %w", err)
 	} else {
-		logrus.Infof("downloaded %s successfully", strings.Join(pkgNames, " "))
+		logrus.Infof("downloaded %s successfully", strings.Join(candidates, " "))
 		logrus.Infof("consider using: pig repo create  to update repo meta")
 	}
-	return nil
+	return candidates, nil
+}
+
+func mergeDEBCandidates(pkgNames []string, dependencySet map[string][]string) []string {
+	if len(pkgNames) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	candidates := make([]string, 0, len(pkgNames))
+	add := func(name string) {
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		candidates = append(candidates, name)
+	}
+
+	// Keep deterministic order: requested packages first.
+	for _, pkg := range pkgNames {
+		add(pkg)
+	}
+	// Then their dependencies, per-request order.
+	for _, pkg := range pkgNames {
+		for _, dep := range dependencySet[pkg] {
+			add(dep)
+		}
+	}
+	return candidates
 }
 
 func parseAptDependsOutput(out string) []string {
