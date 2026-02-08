@@ -13,6 +13,25 @@ import (
 // UpgradeExtensions updates extensions and returns a structured Result
 // This function is used for YAML/JSON output modes
 func UpgradeExtensions(pgVer int, names []string, yes bool) *output.Result {
+	// Safety: never auto-upgrade everything. Without explicit targets, do nothing.
+	if len(names) == 0 {
+		if pgVer == 0 {
+			pgVer = PostgresLatestMajorVersion
+		}
+		data := &ExtensionUpdateData{
+			PgVersion:   pgVer,
+			OSCode:      config.OSCode,
+			Arch:        config.OSArch,
+			Requested:   []string{},
+			Packages:    []string{},
+			Updated:     []string{},
+			Failed:      nil,
+			DurationMs:  0,
+			AutoConfirm: yes,
+		}
+		return output.OK("no extensions specified, nothing to update", data)
+	}
+
 	prep, result := prepareExtensionPkgOp(preparePkgOpOptions{
 		PgVersion:             pgVer,
 		Requested:             names,

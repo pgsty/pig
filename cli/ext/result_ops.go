@@ -114,6 +114,7 @@ func GetExtStatus(showContrib bool) *output.Result {
 	var exts []*ExtensionSummary
 	var notFound []string
 	repoCount := map[string]int{"CONTRIB": 0, "PGDG": 0, "PIGSTY": 0}
+	totalInstalled := 0
 
 	for _, installedExt := range Postgres.Extensions {
 		if installedExt.Extension == nil {
@@ -124,19 +125,24 @@ func GetExtStatus(showContrib bool) *output.Result {
 			notFound = append(notFound, installedExt.Name)
 			continue
 		}
-		if extInfo.RepoName() != "" {
-			if _, ok := repoCount[extInfo.RepoName()]; !ok {
-				repoCount[extInfo.RepoName()] = 0
-			}
-			repoCount[extInfo.RepoName()]++
+
+		repo := extInfo.RepoName()
+		if repo == "" {
+			repo = "UNKNOWN"
 		}
+		if _, ok := repoCount[repo]; !ok {
+			repoCount[repo] = 0
+		}
+		repoCount[repo]++
+		totalInstalled++
+
 		if !showContrib && extInfo.Repo == "CONTRIB" {
 			continue
 		}
 		exts = append(exts, extInfo.ToSummary(Postgres.MajorVersion))
 	}
 
-	totalInstalled := len(exts)
+	totalShown := len(exts)
 	data := &ExtensionStatusData{
 		PgInfo: &PostgresInfo{
 			Version:      Postgres.Version,
@@ -153,6 +159,9 @@ func GetExtStatus(showContrib bool) *output.Result {
 	}
 
 	message := fmt.Sprintf("PostgreSQL %d: %d extensions installed", Postgres.MajorVersion, totalInstalled)
+	if totalShown != totalInstalled {
+		message = fmt.Sprintf("PostgreSQL %d: %d extensions installed (%d shown)", Postgres.MajorVersion, totalInstalled, totalShown)
+	}
 	return output.OK(message, data)
 }
 

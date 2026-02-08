@@ -194,12 +194,19 @@ var extUpdateCmd = &cobra.Command{
 	Annotations: ancsAnn("pig ext update", "action", "stable", "restricted", true, "low", "none", "root", 10000),
 	Example: `
 Description:
-  pig ext update                     # update all installed extensions
+  pig ext update                     # no-op (safety), requires explicit targets
   pig ext update postgis             # update specific extension
   pig ext update postgis timescaledb # update multiple extensions
   pig ext up pg_vector -y            # update with auto-confirm
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Safety: no arguments means no-op (avoid "update everything" surprises).
+		// Do not force PG probe in this case.
+		if len(args) == 0 {
+			result := ext.UpgradeExtensions(extPgVer, args, extYes)
+			return handleAuxResult(result)
+		}
+
 		pgVer, err := extProbeVersion()
 		if err != nil {
 			return handleExtProbeError(err)

@@ -819,6 +819,82 @@ func TestGetExtStatusWithPostgres(t *testing.T) {
 	}
 }
 
+func TestGetExtStatusTotalsIndependentOfContribFilter(t *testing.T) {
+	// Save and restore
+	origPostgres := Postgres
+	origCatalog := Catalog
+	origOSType := config.OSType
+	defer func() {
+		Postgres = origPostgres
+		Catalog = origCatalog
+		config.OSType = origOSType
+	}()
+
+	config.OSType = config.DistroEL
+
+	extContrib := &Extension{
+		Name:    "plpgsql",
+		Pkg:     "plpgsql",
+		Repo:    "CONTRIB",
+		RpmRepo: "CONTRIB",
+		PgVer:   []string{"17"},
+	}
+	extPgdg := &Extension{
+		Name:    "postgis",
+		Pkg:     "postgis",
+		Repo:    "PGDG",
+		RpmRepo: "PGDG",
+		PgVer:   []string{"17"},
+	}
+
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{extContrib, extPgdg},
+		ExtNameMap: map[string]*Extension{"plpgsql": extContrib, "postgis": extPgdg},
+		ExtPkgMap:  map[string]*Extension{"plpgsql": extContrib, "postgis": extPgdg},
+	}
+
+	Postgres = &PostgresInstall{
+		Version:      "PostgreSQL 17.0",
+		MajorVersion: 17,
+		Extensions: []*ExtensionInstall{
+			{Extension: extContrib},
+			{Extension: extPgdg},
+		},
+		ExtensionMap: map[string]*ExtensionInstall{
+			"plpgsql": {Extension: extContrib},
+			"postgis": {Extension: extPgdg},
+		},
+	}
+
+	result := GetExtStatus(false) // hide contrib
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if !result.Success {
+		t.Fatalf("expected success=true, got false (code=%d msg=%q)", result.Code, result.Message)
+	}
+
+	data, ok := result.Data.(*ExtensionStatusData)
+	if !ok {
+		t.Fatal("expected data to be *ExtensionStatusData")
+	}
+	if data.Summary == nil {
+		t.Fatal("expected Summary to be non-nil")
+	}
+	if data.Summary.TotalInstalled != 2 {
+		t.Fatalf("expected TotalInstalled=2, got %d", data.Summary.TotalInstalled)
+	}
+	if data.Summary.ByRepo["CONTRIB"] != 1 {
+		t.Fatalf("expected ByRepo[CONTRIB]=1, got %d", data.Summary.ByRepo["CONTRIB"])
+	}
+	if data.Summary.ByRepo["PGDG"] != 1 {
+		t.Fatalf("expected ByRepo[PGDG]=1, got %d", data.Summary.ByRepo["PGDG"])
+	}
+	if len(data.Extensions) != 1 {
+		t.Fatalf("expected 1 shown extension (contrib hidden), got %d", len(data.Extensions))
+	}
+}
+
 func TestBuildExtensionAvailDataNil(t *testing.T) {
 	data := buildExtensionAvailData(nil)
 	if data != nil {
@@ -1017,6 +1093,159 @@ func TestToSummaryStatusInstalled(t *testing.T) {
 	}
 	if summary.Status != "installed" {
 		t.Errorf("expected status=installed, got %v", summary.Status)
+	}
+}
+
+func TestToSummaryStatusAvailable_MatrixPreferred(t *testing.T) {
+	// Save and restore
+	origCatalog := Catalog
+	origPostgres := Postgres
+	origOSCode := config.OSCode
+	origOSArch := config.OSArch
+	origOSType := config.OSType
+	defer func() {
+		Catalog = origCatalog
+		Postgres = origPostgres
+		config.OSCode = origOSCode
+		config.OSArch = origOSArch
+		config.OSType = origOSType
+	}()
+
+	config.OSCode = "el9"
+	config.OSArch = "amd64"
+	config.OSType = config.DistroEL
+	Postgres = nil
+
+	lead := &Extension{
+		Name:   "lead_ext",
+		Pkg:    "lead_pkg",
+		Lead:   true,
+		PgVer:  []string{"17"},
+		Extra:  map[string]interface{}{"matrix": []interface{}{"el9i:17:A:f:1:P:1.0.0"}},
+		RpmPg:  []string{}, // make Available() inconclusive; matrix should decide
+		RpmPkg: "lead_pkg_$v",
+	}
+	child := &Extension{
+		Name:    "child_ext",
+		Pkg:     "lead_pkg",
+		Lead:    false,
+		LeadExt: "lead_ext",
+		PgVer:   []string{"17"},
+		RpmPkg:  "lead_pkg_$v",
+	}
+
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{lead, child},
+		ExtNameMap: map[string]*Extension{"lead_ext": lead, "child_ext": child},
+		ExtPkgMap:  map[string]*Extension{"lead_pkg": lead},
+		AliasMap:   map[string]string{},
+	}
+
+	summary := child.ToSummary(17)
+	if summary == nil {
+		t.Fatal("expected non-nil summary")
+	}
+	if summary.Status != "available" {
+		t.Fatalf("expected status=available (matrix), got %q", summary.Status)
+	}
+}
+
+func TestToSummaryStatusNotAvail_WhenMatrixSaysMissing(t *testing.T) {
+	// Save and restore
+	origCatalog := Catalog
+	origPostgres := Postgres
+	origOSCode := config.OSCode
+	origOSArch := config.OSArch
+	origOSType := config.OSType
+	defer func() {
+		Catalog = origCatalog
+		Postgres = origPostgres
+		config.OSCode = origOSCode
+		config.OSArch = origOSArch
+		config.OSType = origOSType
+	}()
+
+	config.OSCode = "el9"
+	config.OSArch = "amd64"
+	config.OSType = config.DistroEL
+	Postgres = nil
+
+	ext := &Extension{
+		Name:   "test_ext",
+		Pkg:    "test_pkg",
+		Lead:   true,
+		PgVer:  []string{"17"},
+		Extra:  map[string]interface{}{"matrix": []interface{}{"el9i:17:M:f"}},
+		RpmPg:  []string{"17"}, // Available() would be true, but matrix should override
+		RpmPkg: "test_pkg_$v",
+	}
+
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{ext},
+		ExtNameMap: map[string]*Extension{"test_ext": ext},
+		ExtPkgMap:  map[string]*Extension{"test_pkg": ext},
+		AliasMap:   map[string]string{},
+	}
+
+	summary := ext.ToSummary(17)
+	if summary == nil {
+		t.Fatal("expected non-nil summary")
+	}
+	if summary.Status != "not_avail" {
+		t.Fatalf("expected status=not_avail (matrix missing), got %q", summary.Status)
+	}
+}
+
+func TestToSummaryStatusFallbackTheoreticalOnUnsupportedOS(t *testing.T) {
+	// Save and restore
+	origCatalog := Catalog
+	origPostgres := Postgres
+	origOSCode := config.OSCode
+	origOSArch := config.OSArch
+	origOSType := config.OSType
+	defer func() {
+		Catalog = origCatalog
+		Postgres = origPostgres
+		config.OSCode = origOSCode
+		config.OSArch = origOSArch
+		config.OSType = origOSType
+	}()
+
+	// Simulate an OS code not covered by the matrix (e.g. macOS).
+	config.OSCode = "a23"
+	config.OSArch = "amd64"
+	config.OSType = config.DistroMAC
+	Postgres = nil
+
+	ext := &Extension{
+		Name:  "test_ext",
+		Pkg:   "test_pkg",
+		Lead:  true,
+		PgVer: []string{"17"},
+		Extra: map[string]interface{}{"matrix": []interface{}{"el9i:17:M:f"}}, // should be ignored on unsupported OS
+	}
+
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{ext},
+		ExtNameMap: map[string]*Extension{"test_ext": ext},
+		ExtPkgMap:  map[string]*Extension{"test_pkg": ext},
+		AliasMap:   map[string]string{},
+	}
+
+	summary := ext.ToSummary(17)
+	if summary == nil {
+		t.Fatal("expected non-nil summary")
+	}
+	if summary.Status != "available" {
+		t.Fatalf("expected status=available (theoretical pg_ver), got %q", summary.Status)
+	}
+
+	summary2 := ext.ToSummary(18)
+	if summary2 == nil {
+		t.Fatal("expected non-nil summary")
+	}
+	if summary2.Status != "not_avail" {
+		t.Fatalf("expected status=not_avail for unsupported PG version, got %q", summary2.Status)
 	}
 }
 
@@ -2135,11 +2364,8 @@ func TestUpgradeExtensionsNoNames(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if result.Success {
-		t.Error("expected success=false for empty names")
-	}
-	if result.Code != 100101 { // CodeExtensionInvalidArgs
-		t.Errorf("expected CodeExtensionInvalidArgs (100101), got %d", result.Code)
+	if !result.Success {
+		t.Error("expected success=true for empty names (no-op)")
 	}
 }
 

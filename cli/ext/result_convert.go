@@ -3,7 +3,12 @@ Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
 */
 package ext
 
-import "fmt"
+import (
+	"fmt"
+	"pig/internal/config"
+	"strconv"
+	"strings"
+)
 
 /********************
  * Conversion Methods
@@ -17,8 +22,31 @@ func (e *Extension) ToSummary(pgVer int) *ExtensionSummary {
 	status := "not_avail"
 	if Postgres != nil && Postgres.ExtensionMap != nil && Postgres.ExtensionMap[e.Name] != nil {
 		status = "installed"
-	} else if e.Available(pgVer) {
-		status = "available"
+	} else {
+		lead := getLeadExtension(e)
+
+		// Prefer matrix when current OS/arch is supported by the catalog matrix.
+		if lead != nil && validOSCodes[config.OSCode] {
+			if matrix := lead.GetPkgMatrix(); matrix != nil {
+				if matrix.IsAvailable(config.OSCode, config.OSArch, pgVer) {
+					status = "available"
+				}
+			} else if e.Available(pgVer) {
+				// Backward-compat fallback for catalog entries without matrix.
+				status = "available"
+			}
+		} else {
+			// Unsupported runtime OS (e.g. macOS): fall back to theoretical PG support.
+			if lead != nil {
+				verStr := strconv.Itoa(pgVer)
+				for _, v := range lead.PgVer {
+					if strings.TrimSpace(v) == verStr {
+						status = "available"
+						break
+					}
+				}
+			}
+		}
 	}
 
 	return &ExtensionSummary{
