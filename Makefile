@@ -1,9 +1,10 @@
 #==============================================================#
 # File      :   Makefile
-# Mtime     :   2026-01-16
+# Mtime     :   2026-02-08
 # Copyright (C) 2018-2026 Ruohang Feng
 #==============================================================#
-VERSION=v1.0.0
+VERSION=v1.1.0
+PIG_VERSION:=$(patsubst v%,%,$(VERSION))
 
 # Build Variables
 BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -12,7 +13,7 @@ BUILD_DATE=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 GO_VERSION=$(shell go version | awk '{print $$3}')
 
 # LD Flags for injecting build-time variables
-LD_FLAGS=-X 'pig/internal/config.PigVersion=$(VERSION)' \
+LD_FLAGS=-X 'pig/internal/config.PigVersion=$(PIG_VERSION)' \
         -X 'pig/internal/config.Branch=$(BRANCH)' \
         -X 'pig/internal/config.Revision=$(REVISION)' \
         -X 'pig/internal/config.BuildDate=$(BUILD_DATE)' \
