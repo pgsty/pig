@@ -30,11 +30,8 @@ var SpecialSourceMapping = map[string][]string{
 	},
 }
 
-// sourceBaseURL holds the base URL for source downloads
-var sourceBaseURL string
-
 // DownloadSource downloads source tarball for a single package
-func DownloadSource(pkg string, force bool) error {
+func DownloadSource(pkg string, force bool, mirror bool) error {
 	logrus.Info(strings.Repeat("=", 58))
 	logrus.Infof("[GET SOURCE] %s", pkg)
 	logrus.Info(strings.Repeat("=", 58))
@@ -52,9 +49,16 @@ func DownloadSource(pkg string, force bool) error {
 		return nil
 	}
 
+	// Prefer the requested base URL, but fallback to the other one to reduce flakiness
+	// during mirror switching or CDN propagation.
+	baseURLs := []string{config.RepoPigstyIO, config.RepoPigstyCC}
+	if mirror {
+		baseURLs = []string{config.RepoPigstyCC, config.RepoPigstyIO}
+	}
+
 	// Download each source file
 	for _, src := range sources {
-		if err := downloadFile(src, srcDir, force); err != nil {
+		if err := downloadFile(src, srcDir, force, baseURLs); err != nil {
 			return err
 		}
 	}
@@ -68,19 +72,19 @@ func DownloadSources(packages []string, force bool, mirror bool) error {
 		return fmt.Errorf("no packages specified")
 	}
 
-	// Set base URL (default: pigsty.io, mirror: pigsty.cc)
-	sourceBaseURL = config.RepoPigstyIO
-	if mirror {
-		sourceBaseURL = config.RepoPigstyCC
-	}
+	var failed []string
 
 	for _, pkg := range packages {
-		if err := DownloadSource(pkg, force); err != nil {
+		if err := DownloadSource(pkg, force, mirror); err != nil {
 			logrus.Errorf("Failed to download %s: %v", pkg, err)
-			// Continue with next package
+			failed = append(failed, pkg)
+			continue
 		}
 	}
 
+	if len(failed) > 0 {
+		return fmt.Errorf("%d of %d package(s) failed to download: %s", len(failed), len(packages), strings.Join(failed, ", "))
+	}
 	return nil
 }
 
@@ -105,7 +109,7 @@ func getSourceFiles(pkg string) []string {
 }
 
 // Download a single file
-func downloadFile(filename, dstDir string, force bool) error {
+func downloadFile(filename, dstDir string, force bool, baseURLs []string) error {
 	dstPath := filepath.Join(dstDir, filename)
 
 	// Check if exists
@@ -118,18 +122,22 @@ func downloadFile(filename, dstDir string, force bool) error {
 		os.Remove(dstPath)
 	}
 
-	// Use default baseURL if not set (e.g., when called from BuildPackage)
-	baseURL := sourceBaseURL
-	if baseURL == "" {
-		baseURL = config.RepoPigstyIO
-	}
-	url := fmt.Sprintf("%s/ext/src/%s", baseURL, filename)
-	logrus.Infof("Downloading from %s", url)
-
-	if err := utils.DownloadFile(url, dstPath); err != nil {
-		return fmt.Errorf("failed to download %s: %v", filename, err)
+	if len(baseURLs) == 0 {
+		baseURLs = []string{config.RepoPigstyIO, config.RepoPigstyCC}
 	}
 
-	logrus.Infof("Downloaded to %s", dstPath)
-	return nil
+	var lastErr error
+	for _, baseURL := range baseURLs {
+		url := fmt.Sprintf("%s/ext/src/%s", baseURL, filename)
+		logrus.Infof("Downloading from %s", url)
+		if err := utils.DownloadFile(url, dstPath); err != nil {
+			lastErr = err
+			logrus.Debugf("download attempt failed: %s: %v", url, err)
+			continue
+		}
+		logrus.Infof("Downloaded to %s", dstPath)
+		return nil
+	}
+
+	return fmt.Errorf("failed to download %s from %s: %v", filename, strings.Join(baseURLs, ", "), lastErr)
 }

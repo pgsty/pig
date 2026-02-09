@@ -224,8 +224,9 @@ var buildPkgCmd = &cobra.Command{
 		return runLegacyStructured(legacyModuleBuild, "pig build pkg", args, map[string]interface{}{
 			"pg":     buildAllPg,
 			"symbol": buildAllSymbol,
+			"mirror": buildMirror,
 		}, func() error {
-			return build.BuildPackages(args, buildAllPg, buildAllSymbol)
+			return build.BuildPackages(args, buildAllPg, buildAllSymbol, buildMirror)
 		})
 	},
 }
@@ -256,6 +257,7 @@ func init() {
 	// Add pkg specific flags (formerly all)
 	buildPkgCmd.Flags().StringVar(&buildAllPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
 	buildPkgCmd.Flags().BoolVarP(&buildAllSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
+	buildPkgCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "use mirror (pigsty.cc) instead of default")
 
 	// Add subcommands
 	buildCmd.AddCommand(
