@@ -125,7 +125,42 @@ func (b *ExtensionBuilder) Build() error {
 
 	// Display final summary
 	b.printSummary()
+	if failed := buildFailureLabels(b.OSType, b.PGVersions, b.Builds); len(failed) > 0 {
+		return fmt.Errorf("build failed for %s (%s), see log: %s", b.PackageName, strings.Join(failed, ", "), b.LogPath)
+	}
 	return nil
+}
+
+func buildFailureLabels(osType string, pgVersions []int, builds map[int]*BuildTask) []string {
+	var failed []string
+	switch osType {
+	case config.DistroDEB:
+		task := builds[0]
+		if task == nil || !task.Success {
+			failed = append(failed, "ALL")
+		}
+	default:
+		for _, pgVer := range pgVersions {
+			task := builds[pgVer]
+			if task == nil || !task.Success {
+				failed = append(failed, fmt.Sprintf("PG%d", pgVer))
+			}
+		}
+	}
+	return failed
+}
+
+func countNonEmptyLines(s string) int {
+	if strings.TrimSpace(s) == "" {
+		return 0
+	}
+	n := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // printHeader prints the build header
@@ -513,8 +548,20 @@ func (b *ExtensionBuilder) buildForAll() {
 	if err := b.executeBuildCommand(cmd, 0, task); err != nil {
 		task.Error = err.Error()
 	} else {
-		task.Success = true
 		b.findDebianArtifacts(task)
+		expected := len(b.PGVersions)
+		found := countNonEmptyLines(task.Artifact)
+		if expected == 0 {
+			if found > 0 {
+				task.Success = true
+			} else {
+				task.Error = "build finished but no artifacts found"
+			}
+		} else if found == expected {
+			task.Success = true
+		} else {
+			task.Error = fmt.Sprintf("build finished but artifacts incomplete: got %d of %d", found, expected)
+		}
 	}
 
 	// Set end time
@@ -702,31 +749,48 @@ func (b *ExtensionBuilder) processCommandOutput(stdout, stderr io.Reader, pgVer 
 
 // findArtifact finds the build artifact
 func (b *ExtensionBuilder) findArtifact(pgVer int, task *BuildTask) {
-	var artifactDir string
 	var globPattern string
+	var globPaths []string
 
 	switch b.OSType {
 	case "rpm":
-		artifactDir = filepath.Join(b.HomeDir, "rpmbuild", "RPMS", b.OSArch)
 		globPattern = b.resolvePackageGlob(b.Extension.RpmPkg, pgVer, "rpm")
+		rpmDir := filepath.Join(b.HomeDir, "rpmbuild", "RPMS")
+		globPaths = []string{
+			filepath.Join(rpmDir, b.OSArch, globPattern),
+			filepath.Join(rpmDir, "noarch", globPattern),
+			filepath.Join(rpmDir, "*", globPattern),
+		}
 	case "deb":
-		artifactDir = filepath.Join(b.HomeDir, "debbuild", "DEBS", "pool")
 		globPattern = b.resolvePackageGlob(b.Extension.DebPkg, pgVer, "deb")
+		debDir := filepath.Join(b.HomeDir, "ext", "pkg")
+		globPaths = []string{
+			filepath.Join(debDir, globPattern),
+			filepath.Join(debDir, "pool", "*", "*", "*", globPattern),
+		}
 	default:
 		return
 	}
 
-	// Build full glob path
-	fullPattern := filepath.Join(artifactDir, globPattern)
-
-	// Find all matching files using glob
-	candidates, err := filepath.Glob(fullPattern)
-	if err != nil {
-		logrus.Debugf("glob pattern error: %v", err)
-		return
+	// Find all matching files across possible output layouts.
+	seen := make(map[string]struct{})
+	var candidates []string
+	for _, p := range globPaths {
+		matches, err := filepath.Glob(p)
+		if err != nil {
+			logrus.Debugf("glob pattern error: %v", err)
+			continue
+		}
+		for _, m := range matches {
+			if _, ok := seen[m]; ok {
+				continue
+			}
+			seen[m] = struct{}{}
+			candidates = append(candidates, m)
+		}
 	}
 	if len(candidates) == 0 {
-		logrus.Debugf("no artifacts found matching %s", fullPattern)
+		logrus.Debugf("no artifacts found matching %s (PG%d)", globPattern, pgVer)
 		return
 	}
 
@@ -762,18 +826,32 @@ func (b *ExtensionBuilder) findDebianArtifacts(task *BuildTask) {
 	for _, pgVer := range b.PGVersions {
 		// Build glob pattern for this PG version
 		globPattern := b.resolvePackageGlob(b.Extension.DebPkg, pgVer, "deb")
-		fullPattern := filepath.Join(artifactDir, globPattern)
 
-		// Find matching files
-		candidates, err := filepath.Glob(fullPattern)
-		if err != nil {
-			logrus.Debugf("glob pattern error for PG%d: %v", pgVer, err)
-			missingVersions = append(missingVersions, pgVer)
-			continue
+		// Try a few likely layouts under ~/ext/pkg.
+		globPaths := []string{
+			filepath.Join(artifactDir, globPattern),
+			filepath.Join(artifactDir, "pool", "*", "*", "*", globPattern),
+		}
+
+		seen := make(map[string]struct{})
+		var candidates []string
+		for _, p := range globPaths {
+			matches, err := filepath.Glob(p)
+			if err != nil {
+				logrus.Debugf("glob pattern error for PG%d: %v", pgVer, err)
+				continue
+			}
+			for _, m := range matches {
+				if _, ok := seen[m]; ok {
+					continue
+				}
+				seen[m] = struct{}{}
+				candidates = append(candidates, m)
+			}
 		}
 
 		if len(candidates) == 0 {
-			logrus.Debugf("no artifacts found for PG%d matching %s", pgVer, fullPattern)
+			logrus.Debugf("no artifacts found for PG%d matching %s", pgVer, globPattern)
 			missingVersions = append(missingVersions, pgVer)
 			continue
 		}

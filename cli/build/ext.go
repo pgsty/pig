@@ -19,10 +19,15 @@ func BuildExtensions(packages []string, pgVersions string, debugPkg bool) error 
 	if len(packages) == 0 {
 		return fmt.Errorf("no packages specified")
 	}
+	var failed []string
 	for _, pkg := range packages {
 		if err := BuildExtension(pkg, pgVersions, debugPkg); err != nil {
 			logrus.Errorf("Failed to build %s: %v", pkg, err)
+			failed = append(failed, pkg)
 		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d of %d package(s) failed: %s", len(failed), len(packages), strings.Join(failed, ", "))
 	}
 	return nil
 }
