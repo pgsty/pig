@@ -241,11 +241,11 @@ func init() {
 
 	// Add spec specific flags
 	buildSpecCmd.Flags().BoolVarP(&buildSpecForce, "force", "f", false, "force re-download tarball even if exists")
-	buildSpecCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "use mirror (pigsty.cc) instead of default")
+	buildSpecCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
 	// Add get specific flags
 	buildGetCmd.Flags().BoolVarP(&buildGetForce, "force", "f", false, "force download even if file exists")
-	buildGetCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "use mirror (pigsty.cc) instead of default")
+	buildGetCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
 	// Add dep specific flags
 	buildDepCmd.Flags().StringVar(&buildDepPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
@@ -257,7 +257,7 @@ func init() {
 	// Add pkg specific flags (formerly all)
 	buildPkgCmd.Flags().StringVar(&buildAllPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
 	buildPkgCmd.Flags().BoolVarP(&buildAllSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
-	buildPkgCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "use mirror (pigsty.cc) instead of default")
+	buildPkgCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
 	// Add subcommands
 	buildCmd.AddCommand(
