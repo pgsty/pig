@@ -1,9 +1,13 @@
 package build
 
 import (
+	"os"
+	"path/filepath"
 	"pig/internal/config"
 	"reflect"
 	"testing"
+
+	"pig/cli/ext"
 )
 
 func TestBuildFailureLabels(t *testing.T) {
@@ -97,5 +101,43 @@ func TestCountNonEmptyLines(t *testing.T) {
 		if got := countNonEmptyLines(tt.in); got != tt.want {
 			t.Fatalf("countNonEmptyLines(%q) = %d, want %d", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestDefaultBuilderPGVersions_DebianFiltersByDebPgAndInstalled(t *testing.T) {
+	// Preserve globals that defaultBuilderPGVersions depends on.
+	oldOSType := config.OSType
+	oldOSCode := config.OSCode
+	oldOSArch := config.OSArch
+	oldDebLib := debianPgLibDir
+	t.Cleanup(func() {
+		config.OSType = oldOSType
+		config.OSCode = oldOSCode
+		config.OSArch = oldOSArch
+		debianPgLibDir = oldDebLib
+	})
+
+	config.OSType = config.DistroDEB
+	config.OSCode = "d12"
+	config.OSArch = "amd64"
+
+	tmp := t.TempDir()
+	debianPgLibDir = tmp
+	for _, dir := range []string{"17", "18"} {
+		if err := os.MkdirAll(filepath.Join(tmp, dir), 0755); err != nil {
+			t.Fatalf("mkdir fake pg dir: %v", err)
+		}
+	}
+
+	e := &ext.Extension{
+		Name:  "pljava",
+		PgVer: []string{"18", "17"},
+		DebPg: []string{"17"},
+	}
+
+	got := defaultBuilderPGVersions(e)
+	want := []int{17}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("defaultBuilderPGVersions() = %v, want %v", got, want)
 	}
 }

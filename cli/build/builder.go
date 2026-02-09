@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"pig/cli/ext"
 	"pig/internal/config"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +60,8 @@ type ExtensionBuilder struct {
 	HeaderWidth int                // Width for header separators
 }
 
+var debianPgLibDir = "/usr/lib/postgresql"
+
 // NewExtensionBuilder creates a new ExtensionBuilder instance
 func NewExtensionBuilder(packageName string) (*ExtensionBuilder, error) {
 	extension, err := resolveExtension(packageName)
@@ -79,9 +83,94 @@ func NewExtensionBuilder(packageName string) (*ExtensionBuilder, error) {
 	}
 
 	if extension != nil {
-		builder.PGVersions = extension.GetPGVersions()
+		builder.PGVersions = defaultBuilderPGVersions(extension)
 	}
 	return builder, nil
+}
+
+func defaultBuilderPGVersions(extension *ext.Extension) []int {
+	declared := extension.GetPGVersions()
+	if len(declared) == 0 {
+		return nil
+	}
+
+	// Prefer distro-specific availability list to avoid false negatives on Debian/RPM
+	// (e.g. pg_ver includes versions that are not packaged for this distro).
+	var available []int
+	for _, v := range declared {
+		if extension.Available(v) {
+			available = append(available, v)
+		}
+	}
+	if len(available) > 0 {
+		declared = available
+	}
+
+	// Debian builds typically produce packages only for locally installed PG majors.
+	// Use intersection as the default expectation set to avoid reporting errors when
+	// the build succeeds but only a subset of versions are present on the system.
+	if config.OSType == config.DistroDEB {
+		installed := detectInstalledPGVersionsInDir(debianPgLibDir)
+		if len(installed) > 0 {
+			if inter := intersectSortedInts(declared, installed); len(inter) > 0 {
+				return inter
+			}
+			// If there is no overlap, fall back to installed set; the build system will
+			// still decide what it can actually build, but artifact detection should be
+			// driven by what's present locally.
+			return installed
+		}
+	}
+
+	return declared
+}
+
+func detectInstalledPGVersionsInDir(baseDir string) []int {
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return nil
+	}
+
+	seen := make(map[int]struct{})
+	var versions []int
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		v, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		if v < 10 || v > 99 {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		versions = append(versions, v)
+	}
+	sort.Ints(versions)
+	return versions
+}
+
+func intersectSortedInts(a, b []int) []int {
+	// a and b are expected to be sorted asc.
+	i, j := 0, 0
+	var out []int
+	for i < len(a) && j < len(b) {
+		switch {
+		case a[i] == b[j]:
+			out = append(out, a[i])
+			i++
+			j++
+		case a[i] < b[j]:
+			i++
+		default:
+			j++
+		}
+	}
+	return out
 }
 
 // UpdateVersion updates the PG versions to build for
@@ -551,16 +640,16 @@ func (b *ExtensionBuilder) buildForAll() {
 		b.findDebianArtifacts(task)
 		expected := len(b.PGVersions)
 		found := countNonEmptyLines(task.Artifact)
-		if expected == 0 {
-			if found > 0 {
-				task.Success = true
-			} else {
-				task.Error = "build finished but no artifacts found"
-			}
-		} else if found == expected {
+		if found == 0 {
+			task.Error = "build finished but no artifacts found"
+		} else if expected == 0 || found == expected {
 			task.Success = true
 		} else {
-			task.Error = fmt.Sprintf("build finished but artifacts incomplete: got %d of %d", found, expected)
+			// Partial artifacts are not a hard failure on Debian since the build system
+			// typically builds for locally installed PG majors. Surface as warning, but
+			// avoid reporting the whole build as failed when artifacts exist.
+			task.Success = true
+			task.Error = fmt.Sprintf("build finished with partial artifacts: got %d of %d", found, expected)
 		}
 	}
 
@@ -938,9 +1027,17 @@ func (b *ExtensionBuilder) printSummary() {
 		task := b.Builds[0]
 		if task != nil && task.Success {
 			// Count how many artifacts were found
-			artifactCount := 0
-			if task.Artifact != "" {
-				artifactCount = len(strings.Split(task.Artifact, "\n"))
+			artifactCount := countNonEmptyLines(task.Artifact)
+
+			if totalCount == 0 {
+				// Unknown expected versions: treat any artifacts as a success.
+				if artifactCount > 0 {
+					logrus.Infof("[DONE] PASS %d package(s) built in %v",
+						artifactCount, duration.Round(time.Second))
+				} else {
+					logrus.Errorf("[DONE] FAIL no packages found in %v", duration.Round(time.Second))
+				}
+				return
 			}
 
 			if artifactCount == totalCount {
