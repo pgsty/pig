@@ -265,11 +265,13 @@ func PadHeader(str string, length int) string {
 }
 
 func DownloadFile(srcURL, dstPath string) error {
+	client := defaultClient()
+
 	// Best-effort remote size probe via HEAD.
 	// HEAD is an optimization: it should not make downloads fail, and we must close the response
 	// body to avoid leaking connections/HTTP2 streams.
 	remoteSize := int64(-1)
-	resp, err := http.Head(srcURL)
+	resp, err := client.Head(srcURL)
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
@@ -294,7 +296,7 @@ func DownloadFile(srcURL, dstPath string) error {
 
 	// Download the file
 	logrus.Debugf("downloading: %s -> %s", srcURL, dstPath)
-	resp, err = http.Get(srcURL)
+	resp, err = client.Get(srcURL)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()

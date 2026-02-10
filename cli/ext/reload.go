@@ -2,16 +2,15 @@ package ext
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/output"
+	"pig/internal/utils"
+	"strings"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 // ReloadCatalogResult returns a structured Result for the ext reload command
@@ -23,127 +22,55 @@ func ReloadCatalogResult() *output.Result {
 		config.RepoPigstyCC + "/ext/data/extension.csv",
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	ctx := context.Background()
 
-	type downloadResult struct {
-		content   []byte
-		sourceURL string
-		err       error
-	}
-
-	resultChan := make(chan downloadResult, len(urls))
-
-	for _, url := range urls {
-		go func(url string) {
-			logrus.Debugf("Attempting to download from %s", url)
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-			if err != nil {
-				logrus.Errorf("Failed to create request for %s: %v", url, err)
-				resultChan <- downloadResult{nil, url, err}
-				return
-			}
-
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				logrus.Errorf("Failed to download from %s: %v", url, err)
-				resultChan <- downloadResult{nil, url, err}
-				return
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusOK {
-				err := fmt.Errorf("bad status: %s", resp.Status)
-				logrus.Errorf("Failed to download from %s: %v", url, err)
-				resultChan <- downloadResult{nil, url, err}
-				return
-			}
-
-			content, err := io.ReadAll(resp.Body)
-			if err != nil {
-				logrus.Errorf("Failed to read response from %s: %v", url, err)
-				resultChan <- downloadResult{nil, url, err}
-				return
-			}
-
-			logrus.Infof("get latest extension catalog from %s", url)
-			resultChan <- downloadResult{content, url, nil}
-		}(url)
-	}
-
-	var lastErr error
-	var lastURL string
-	for i := 0; i < len(urls); i++ {
-		select {
-		case res := <-resultChan:
-			if res.err != nil {
-				lastErr = res.err
-				lastURL = res.sourceURL
-				continue
-			}
-
-			ec, err := NewExtensionCatalog()
-			if err != nil {
-				result := output.Fail(output.CodeExtensionCatalogError, fmt.Sprintf("failed to create extension catalog: %v", err))
-				result.Data = &ReloadResultData{
-					SourceURL:    res.sourceURL,
-					DurationMs:   time.Since(startTime).Milliseconds(),
-					DownloadedAt: time.Now().Format(time.RFC3339),
-				}
-				return result
-			}
-			if err := ec.Load(res.content); err != nil {
-				result := output.Fail(output.CodeExtensionCatalogError, fmt.Sprintf("failed to validate extension catalog: %v", err))
-				result.Data = &ReloadResultData{
-					SourceURL:    res.sourceURL,
-					DurationMs:   time.Since(startTime).Milliseconds(),
-					DownloadedAt: time.Now().Format(time.RFC3339),
-				}
-				return result
-			}
-
-			extNum := len(ec.Extensions)
-			catalogPath := filepath.Join(config.ConfigDir, "extension.csv")
-			if err := os.WriteFile(catalogPath, res.content, 0644); err != nil {
-				result := output.Fail(output.CodeExtensionReloadFailed, fmt.Sprintf("failed to write extension catalog file: %v", err))
-				result.Data = &ReloadResultData{
-					SourceURL:      res.sourceURL,
-					ExtensionCount: extNum,
-					DurationMs:     time.Since(startTime).Milliseconds(),
-					DownloadedAt:   time.Now().Format(time.RFC3339),
-				}
-				return result
-			}
-
-			data := &ReloadResultData{
-				SourceURL:      res.sourceURL,
-				ExtensionCount: extNum,
-				CatalogPath:    catalogPath,
-				DownloadedAt:   time.Now().Format(time.RFC3339),
-				DurationMs:     time.Since(startTime).Milliseconds(),
-			}
-
-			message := fmt.Sprintf("Reloaded extension catalog: %d extensions from %s", extNum, res.sourceURL)
-			return output.OK(message, data)
-
-		case <-ctx.Done():
-			result := output.Fail(output.CodeExtensionReloadFailed, "download timed out")
-			result.Data = &ReloadResultData{
-				DurationMs:   time.Since(startTime).Milliseconds(),
-				DownloadedAt: time.Now().Format(time.RFC3339),
-			}
-			return result
+	// Success criteria: downloaded content must be a valid extension catalog.
+	var extNum int
+	validate := func(content []byte) error {
+		ec := &ExtensionCatalog{DataPath: "downloaded"}
+		if err := ec.Load(content); err != nil {
+			return fmt.Errorf("failed to validate extension catalog: %w", err)
 		}
+		extNum = len(ec.Extensions)
+		return nil
 	}
 
-	if lastErr == nil {
-		lastErr = fmt.Errorf("all download attempts failed")
+	content, sourceURL, err := utils.FetchFirstValid(ctx, urls, validate)
+	if err != nil {
+		msg := "failed to download extension catalog"
+		var ne interface{ Timeout() bool }
+		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
+			msg = "download timed out"
+		}
+		result := output.Fail(output.CodeExtensionReloadFailed, msg)
+		result.Detail = fmt.Sprintf("attempted:\n- %s\n- %s\nerrors:\n%s", urls[0], urls[1], strings.TrimSpace(err.Error()))
+		result.Data = &ReloadResultData{
+			DurationMs:   time.Since(startTime).Milliseconds(),
+			DownloadedAt: time.Now().Format(time.RFC3339),
+		}
+		return result
 	}
-	result := output.Fail(output.CodeExtensionReloadFailed, lastErr.Error())
-	result.Data = &ReloadResultData{
-		SourceURL:    lastURL,
-		DurationMs:   time.Since(startTime).Milliseconds(),
-		DownloadedAt: time.Now().Format(time.RFC3339),
+
+	catalogPath := filepath.Join(config.ConfigDir, "extension.csv")
+	if err := os.WriteFile(catalogPath, content, 0644); err != nil {
+		result := output.Fail(output.CodeExtensionReloadFailed, fmt.Sprintf("failed to write extension catalog file: %v", err))
+		result.Data = &ReloadResultData{
+			SourceURL:      sourceURL,
+			ExtensionCount: extNum,
+			DurationMs:     time.Since(startTime).Milliseconds(),
+			DownloadedAt:   time.Now().Format(time.RFC3339),
+		}
+		return result
 	}
-	return result
+
+	data := &ReloadResultData{
+		SourceURL:      sourceURL,
+		ExtensionCount: extNum,
+		CatalogPath:    catalogPath,
+		DownloadedAt:   time.Now().Format(time.RFC3339),
+		DurationMs:     time.Since(startTime).Milliseconds(),
+	}
+
+	message := fmt.Sprintf("Reloaded extension catalog: %d extensions from %s", extNum, sourceURL)
+	return output.OK(message, data)
 }

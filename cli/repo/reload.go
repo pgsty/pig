@@ -2,16 +2,16 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/output"
+	"pig/internal/utils"
+	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,108 +25,56 @@ func ReloadRepoCatalogWithResult() *output.Result {
 		config.RepoPigstyCC + "/ext/data/repo.yml",
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	ctx := context.Background()
 
-	type downloadResult struct {
-		content   []byte
-		sourceURL string
-		err       error
+	// Success criteria: downloaded content must be a valid repo catalog.
+	var repos []Repository
+	validate := func(content []byte) error {
+		var tmp []Repository
+		if err := yaml.Unmarshal(content, &tmp); err != nil {
+			return fmt.Errorf("failed to validate repo catalog: %w", err)
+		}
+		repos = tmp
+		return nil
 	}
 
-	resultChan := make(chan downloadResult, len(urls))
-
-	for _, url := range urls {
-		go func(url string) {
-			logrus.Debugf("Attempting to download from %s", url)
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-			if err != nil {
-				logrus.Errorf("Failed to create request for %s: %v", url, err)
-				resultChan <- downloadResult{nil, url, err}
-				return
-			}
-
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				logrus.Errorf("Failed to download from %s: %v", url, err)
-				resultChan <- downloadResult{nil, url, err}
-				return
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusOK {
-				err := fmt.Errorf("bad status: %s", resp.Status)
-				logrus.Errorf("Failed to download from %s: %v", url, err)
-				resultChan <- downloadResult{nil, url, err}
-				return
-			}
-
-			content, err := io.ReadAll(resp.Body)
-			if err != nil {
-				logrus.Errorf("Failed to read response from %s: %v", url, err)
-				resultChan <- downloadResult{nil, url, err}
-				return
-			}
-
-			logrus.Infof("get latest repo catalog from %s", url)
-			resultChan <- downloadResult{content, url, nil}
-		}(url)
-	}
-
-	select {
-	case res := <-resultChan:
-		if res.err != nil {
-			result := output.Fail(output.CodeRepoReloadFailed, res.err.Error())
-			result.Data = &RepoReloadData{
-				SourceURL:    res.sourceURL,
-				DurationMs:   time.Since(startTime).Milliseconds(),
-				DownloadedAt: time.Now().Format(time.RFC3339),
-			}
-			return result
+	content, sourceURL, err := utils.FetchFirstValid(ctx, urls, validate)
+	if err != nil {
+		msg := "failed to download repo catalog"
+		var ne interface{ Timeout() bool }
+		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
+			msg = "download timed out"
 		}
-
-		// Validate the downloaded content
-		var repos []Repository
-		if err := yaml.Unmarshal(res.content, &repos); err != nil {
-			result := output.Fail(output.CodeRepoReloadFailed, fmt.Sprintf("failed to validate repo catalog: %v", err))
-			result.Data = &RepoReloadData{
-				SourceURL:    res.sourceURL,
-				DurationMs:   time.Since(startTime).Milliseconds(),
-				DownloadedAt: time.Now().Format(time.RFC3339),
-			}
-			return result
-		}
-
-		repoNum := len(repos)
-		catalogPath := filepath.Join(config.ConfigDir, "repo.yml")
-		if err := os.WriteFile(catalogPath, res.content, 0644); err != nil {
-			result := output.Fail(output.CodeRepoReloadFailed, fmt.Sprintf("failed to write repo catalog file: %v", err))
-			result.Data = &RepoReloadData{
-				SourceURL:    res.sourceURL,
-				RepoCount:    repoNum,
-				DurationMs:   time.Since(startTime).Milliseconds(),
-				DownloadedAt: time.Now().Format(time.RFC3339),
-			}
-			return result
-		}
-
-		data := &RepoReloadData{
-			SourceURL:    res.sourceURL,
-			RepoCount:    repoNum,
-			CatalogPath:  catalogPath,
-			DownloadedAt: time.Now().Format(time.RFC3339),
-			DurationMs:   time.Since(startTime).Milliseconds(),
-		}
-
-		message := fmt.Sprintf("Reloaded repo catalog: %d repositories from %s", repoNum, res.sourceURL)
-		return output.OK(message, data)
-
-	case <-ctx.Done():
-		result := output.Fail(output.CodeRepoReloadFailed, "download timed out")
+		result := output.Fail(output.CodeRepoReloadFailed, msg)
+		result.Detail = fmt.Sprintf("attempted:\n- %s\n- %s\nerrors:\n%s", urls[0], urls[1], strings.TrimSpace(err.Error()))
 		result.Data = &RepoReloadData{
 			DurationMs:   time.Since(startTime).Milliseconds(),
 			DownloadedAt: time.Now().Format(time.RFC3339),
 		}
 		return result
 	}
+
+	repoNum := len(repos)
+	catalogPath := filepath.Join(config.ConfigDir, "repo.yml")
+	if err := os.WriteFile(catalogPath, content, 0644); err != nil {
+		result := output.Fail(output.CodeRepoReloadFailed, fmt.Sprintf("failed to write repo catalog file: %v", err))
+		result.Data = &RepoReloadData{
+			SourceURL:    sourceURL,
+			RepoCount:    repoNum,
+			DurationMs:   time.Since(startTime).Milliseconds(),
+			DownloadedAt: time.Now().Format(time.RFC3339),
+		}
+		return result
+	}
+
+	data := &RepoReloadData{
+		SourceURL:    sourceURL,
+		RepoCount:    repoNum,
+		CatalogPath:  catalogPath,
+		DownloadedAt: time.Now().Format(time.RFC3339),
+		DurationMs:   time.Since(startTime).Milliseconds(),
+	}
+
+	message := fmt.Sprintf("Reloaded repo catalog: %d repositories from %s", repoNum, sourceURL)
+	return output.OK(message, data)
 }
