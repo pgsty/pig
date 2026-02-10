@@ -107,17 +107,35 @@ func TestPutFile(t *testing.T) {
 		{
 			name: "write to file with insufficient permissions",
 			setup: func(t *testing.T) (string, []byte) {
+				if os.Getuid() == 0 {
+					t.Skip("skipping permission test when running as root")
+				}
+				// PutFile is designed to fall back to a sudo mv approach when the direct
+				// write fails with EPERM. Some CI environments have passwordless sudo,
+				// which makes this test flaky. Force "no sudo" and make the target
+				// directory non-writable so both direct write and mv replacement fail.
+				t.Setenv("PIG_NO_SUDO", "1")
+
 				dir := t.TempDir()
-				path := filepath.Join(dir, "test.txt")
+				protectedDir := filepath.Join(dir, "protected")
+				if err := os.MkdirAll(protectedDir, 0755); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(protectedDir, "test.txt")
 				if err := os.WriteFile(path, []byte("old content"), 0400); err != nil {
 					t.Fatal(err)
+				}
+				if err := os.Chmod(protectedDir, 0555); err != nil {
+					t.Skipf("failed to chmod dir to read-only, skipping: %v", err)
 				}
 				return path, []byte("new content")
 			},
 			wantErr: true,
 			cleanup: func(path string) {
-				os.Chmod(path, 0644)
-				os.Remove(path)
+				// Restore permissions so TempDir cleanup can remove everything.
+				_ = os.Chmod(filepath.Dir(path), 0755)
+				_ = os.Chmod(path, 0644)
+				_ = os.Remove(path)
 			},
 			checkResult: func(t *testing.T, path string, content []byte) {
 				data, err := os.ReadFile(path)
