@@ -35,7 +35,7 @@ By default, displays a parsed and formatted view of backup information including
 
 Use --raw/-R for original pgbackrest output format.
 Use --raw-output/-O to control raw output format (text/json).
-Use -o json/yaml for structured output (agent-friendly format).`,
+Use -o json/yaml for structured output (Result wrapper with pgbackrest native JSON in data).`,
 	Example: `
   pig pb info                      # detailed formatted output
   pig pb info -o json              # structured JSON output

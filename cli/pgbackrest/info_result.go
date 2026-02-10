@@ -132,28 +132,22 @@ func InfoResult(cfg *Config, opts *InfoOptions) *output.Result {
 			WithDetail("pgbackrest info returned empty result")
 	}
 
-	// Convert to simplified DTO format
-	// For single stanza, return data directly; for multiple stanzas, return array
-	if len(infos) == 1 {
-		data := convertToResultData(&infos[0])
-		// Check stanza status for errors
-		if data.Status.Code != 0 {
-			code := output.CodePbInfoFailed
-			if isStanzaNotFoundMessage(data.Status.Message) {
-				code = output.CodePbStanzaNotFound
-			}
-			return output.Fail(code, data.Status.Message).
-				WithData(data)
+	// Structured output should embed pgBackRest native JSON (wrapped by Result),
+	// so agents can consume the upstream schema directly.
+	data := output.NewEmbeddedJSON([]byte(jsonOutput))
+
+	// Preserve existing semantics: if a single stanza reports non-zero status,
+	// treat it as a failure (but still include the upstream info payload).
+	if len(infos) == 1 && infos[0].Status.Code != 0 {
+		code := output.CodePbInfoFailed
+		if isStanzaNotFoundMessage(infos[0].Status.Message) {
+			code = output.CodePbStanzaNotFound
 		}
-		return output.OK("pgBackRest backup info retrieved", data)
+		return output.Fail(code, infos[0].Status.Message).
+			WithData(data)
 	}
 
-	// Multiple stanzas - return as array
-	var results []*PbInfoResultData
-	for i := range infos {
-		results = append(results, convertToResultData(&infos[i]))
-	}
-	return output.OK("pgBackRest backup info retrieved", results)
+	return output.OK("pgBackRest backup info retrieved", data)
 }
 
 // convertToResultData transforms PgBackRestInfo to agent-friendly PbInfoResultData.

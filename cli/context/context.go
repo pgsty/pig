@@ -1090,28 +1090,37 @@ func collectPgBackRestContext() *PgBackRestContext {
 		return ctx
 	}
 
-	// Handle single stanza result
-	if infoData, ok := result.Data.(*pgbackrest.PbInfoResultData); ok {
-		ctx.Stanza = infoData.Stanza
-		ctx.BackupCount = infoData.BackupCount
-		if len(infoData.Backups) > 0 {
-			// Get the most recent backup (last in the sorted list)
-			lastBackup := infoData.Backups[len(infoData.Backups)-1]
-			ctx.LastBackup = lastBackup.Label
-			ctx.LastBackupTime = lastBackup.TimestampStop
+	// pb info structured output now embeds pgBackRest native JSON into Result.Data.
+	// Parse it back into PgBackRestInfo to extract a minimal context summary.
+	var raw json.RawMessage
+	switch v := result.Data.(type) {
+	case output.EmbeddedJSON:
+		raw = v.Raw
+	case *output.EmbeddedJSON:
+		if v != nil {
+			raw = v.Raw
 		}
 	}
+	if len(raw) > 0 {
+		var infos []pgbackrest.PgBackRestInfo
+		if err := json.Unmarshal(raw, &infos); err == nil && len(infos) > 0 {
+			// Use the first stanza for context (pgbackrest info returns an array).
+			info := infos[0]
+			ctx.Stanza = info.Name
+			ctx.BackupCount = len(info.Backup)
 
-	// Handle multiple stanzas result (array)
-	if infoDataList, ok := result.Data.([]*pgbackrest.PbInfoResultData); ok && len(infoDataList) > 0 {
-		// Use the first stanza for context
-		first := infoDataList[0]
-		ctx.Stanza = first.Stanza
-		ctx.BackupCount = first.BackupCount
-		if len(first.Backups) > 0 {
-			lastBackup := first.Backups[len(first.Backups)-1]
-			ctx.LastBackup = lastBackup.Label
-			ctx.LastBackupTime = lastBackup.TimestampStop
+			// Find most recent backup by stop timestamp.
+			var latest *pgbackrest.BackupInfo
+			for i := range info.Backup {
+				b := &info.Backup[i]
+				if latest == nil || b.Timestamp.Stop > latest.Timestamp.Stop {
+					latest = b
+				}
+			}
+			if latest != nil {
+				ctx.LastBackup = latest.Label
+				ctx.LastBackupTime = latest.Timestamp.Stop
+			}
 		}
 	}
 
