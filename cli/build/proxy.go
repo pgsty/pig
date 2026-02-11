@@ -9,6 +9,7 @@ import (
 	"os"
 	"pig/internal/config"
 	"pig/internal/utils"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,34 +37,15 @@ alias pck="curl -I --connect-timeout 10 www.google.com"
 
 // SetupProxy sets up proxy with the given remote and local configurations
 func SetupProxy(remote string, local string) error {
-	if local == "" { // Default local IP and port
-		local = "127.0.0.1:12345"
+	userID, host, port, err := parseRemoteTarget(remote)
+	if err != nil {
+		return err
+	}
+	localHost, localPort, local, err := parseLocalListen(local)
+	if err != nil {
+		return err
 	}
 	logrus.Infof("setting up proxy from local %s to remote %s", local, remote)
-
-	// 1. Parse target address (user@host:port)
-	parts := strings.Split(remote, "@")
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid target format, expected user@host:port, got %s", remote)
-	}
-	userID := parts[0]
-	hostPort := strings.Split(parts[1], ":")
-	if len(hostPort) != 2 {
-		return fmt.Errorf("invalid host:port format, expected host:port, got %s", parts[1])
-	}
-	host := hostPort[0]
-	port := hostPort[1]
-
-	localHost := strings.Split(local, ":")[0]
-	localPort := strings.Split(local, ":")[1]
-	if localHost == "" {
-		localHost = "127.0.0.1"
-		local = "127.0.0.1:" + localPort
-	}
-	if localHost == "*" {
-		localHost = "0.0.0.0"
-		local = "0.0.0.0:" + localPort
-	}
 
 	// 2. Install or make sure proxy packages are installed
 	if err := InstallProxy(); err != nil {
@@ -107,6 +89,55 @@ func SetupProxy(remote string, local string) error {
 		logrus.Infof("Proxy Off   : \t$ px")
 		logrus.Infof("Proxy Check : \t$ pck")
 		logrus.Infof("Proxy Alias : \t$ . /etc/profile.d/proxy.sh")
+	}
+	return nil
+}
+
+func parseRemoteTarget(remote string) (userID string, host string, port string, err error) {
+	parts := strings.SplitN(remote, "@", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", "", fmt.Errorf("invalid target format, expected user@host:port, got %s", remote)
+	}
+	host, port, err = net.SplitHostPort(parts[1])
+	if err != nil {
+		return "", "", "", fmt.Errorf("invalid host:port format, expected host:port, got %s", parts[1])
+	}
+	if host == "" {
+		return "", "", "", fmt.Errorf("invalid host:port format, host is empty")
+	}
+	if err := validatePort(port); err != nil {
+		return "", "", "", err
+	}
+	return parts[0], host, port, nil
+}
+
+func parseLocalListen(local string) (host string, port string, normalized string, err error) {
+	if local == "" {
+		local = "127.0.0.1:12345"
+	}
+
+	host, port, err = net.SplitHostPort(local)
+	if err != nil {
+		return "", "", "", fmt.Errorf("invalid local listen address, expected host:port, got %s", local)
+	}
+	if err := validatePort(port); err != nil {
+		return "", "", "", err
+	}
+
+	switch host {
+	case "":
+		host = "127.0.0.1"
+	case "*":
+		host = "0.0.0.0"
+	}
+
+	return host, port, net.JoinHostPort(host, port), nil
+}
+
+func validatePort(port string) error {
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("invalid port: %s (must be in range 1-65535)", port)
 	}
 	return nil
 }

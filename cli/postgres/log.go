@@ -19,6 +19,25 @@ import (
 	"pig/internal/utils"
 )
 
+func resolveRequestedLogFile(logDir string, file string) (string, error) {
+	if file == "" {
+		return "", fmt.Errorf("invalid log file name: empty")
+	}
+	if file == "." || file == ".." {
+		return "", fmt.Errorf("invalid log file name: %s", file)
+	}
+	if file != filepath.Base(file) || strings.Contains(file, string(os.PathSeparator)) || strings.Contains(file, "\\") {
+		return "", fmt.Errorf("invalid log file name: only file basename is allowed")
+	}
+
+	cleanDir := filepath.Clean(logDir)
+	logPath := filepath.Clean(filepath.Join(cleanDir, file))
+	if !strings.HasPrefix(logPath, cleanDir+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid log file path")
+	}
+	return logPath, nil
+}
+
 // getLatestLogFile finds the latest CSV log file in the log directory
 func getLatestLogFile(logDir string) (string, error) {
 	entries, err := os.ReadDir(logDir)
@@ -132,7 +151,11 @@ func logListWithSudo(logDir string) error {
 func LogTail(logDir, file string, lines int) error {
 	var logFile string
 	if file != "" {
-		logFile = filepath.Join(logDir, file)
+		var err error
+		logFile, err = resolveRequestedLogFile(logDir, file)
+		if err != nil {
+			return err
+		}
 	} else {
 		var err error
 		logFile, err = getLatestLogFile(logDir)
@@ -154,7 +177,11 @@ func LogTail(logDir, file string, lines int) error {
 func LogCat(logDir, file string, lines int) error {
 	var logFile string
 	if file != "" {
-		logFile = filepath.Join(logDir, file)
+		var err error
+		logFile, err = resolveRequestedLogFile(logDir, file)
+		if err != nil {
+			return err
+		}
 	} else {
 		var err error
 		logFile, err = getLatestLogFile(logDir)
@@ -176,7 +203,11 @@ func LogCat(logDir, file string, lines int) error {
 func LogLess(logDir, file string) error {
 	var logFile string
 	if file != "" {
-		logFile = filepath.Join(logDir, file)
+		var err error
+		logFile, err = resolveRequestedLogFile(logDir, file)
+		if err != nil {
+			return err
+		}
 	} else {
 		var err error
 		logFile, err = getLatestLogFile(logDir)
@@ -194,7 +225,11 @@ func LogLess(logDir, file string) error {
 func LogGrep(logDir, pattern, file string, ignoreCase bool, context int) error {
 	var logFile string
 	if file != "" {
-		logFile = filepath.Join(logDir, file)
+		var err error
+		logFile, err = resolveRequestedLogFile(logDir, file)
+		if err != nil {
+			return err
+		}
 	} else {
 		var err error
 		logFile, err = getLatestLogFile(logDir)
