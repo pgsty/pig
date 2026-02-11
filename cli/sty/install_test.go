@@ -151,6 +151,112 @@ func TestInstallPigsty(t *testing.T) {
 	}
 }
 
+func TestExtractPigstyRejectsPathTraversal(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "pigsty-traversal-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dst := filepath.Join(tmpDir, "install")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatalf("Failed to create install dir: %v", err)
+	}
+
+	payload := createCustomTarball(t, "pigsty/../../escape.txt", []byte("pwned"))
+	err = extractPigsty(payload, dst)
+	if err == nil {
+		t.Fatalf("extractPigsty() expected path traversal error, got nil")
+	}
+
+	outsidePath := filepath.Join(tmpDir, "escape.txt")
+	if _, statErr := os.Stat(outsidePath); !os.IsNotExist(statErr) {
+		t.Fatalf("path traversal file should not be created outside destination: %s", outsidePath)
+	}
+}
+
+func TestResolveArchiveTargetPathAcceptsDoubleSlash(t *testing.T) {
+	dst := t.TempDir()
+	rel, target, err := resolveArchiveTargetPath(dst, "pigsty//files/readme.txt")
+	if err != nil {
+		t.Fatalf("resolveArchiveTargetPath returned error: %v", err)
+	}
+	if rel != filepath.Clean("files/readme.txt") {
+		t.Fatalf("unexpected rel path: %s", rel)
+	}
+	if filepath.Dir(target) != filepath.Join(dst, "files") {
+		t.Fatalf("unexpected target path: %s", target)
+	}
+}
+
+func TestExtractPigstyRejectsExistingSymlinkPathComponent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "pigsty-existing-link-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dst := filepath.Join(tmpDir, "install")
+	outside := filepath.Join(tmpDir, "outside")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatalf("Failed to create install dir: %v", err)
+	}
+	if err := os.MkdirAll(outside, 0755); err != nil {
+		t.Fatalf("Failed to create outside dir: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dst, "link")); err != nil {
+		t.Fatalf("Failed to create symlink in install dir: %v", err)
+	}
+
+	payload := createCustomTarball(t, "pigsty/link/escape.txt", []byte("pwned"))
+	err = extractPigsty(payload, dst)
+	if err == nil {
+		t.Fatalf("extractPigsty() expected symlink path component error, got nil")
+	}
+
+	if _, statErr := os.Stat(filepath.Join(outside, "escape.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("file should not be created outside destination via symlink path")
+	}
+}
+
+func TestExtractPigstyRejectsExistingSymlinkTargetFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "pigsty-existing-target-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dst := filepath.Join(tmpDir, "install")
+	outside := filepath.Join(tmpDir, "outside")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatalf("Failed to create install dir: %v", err)
+	}
+	if err := os.MkdirAll(outside, 0755); err != nil {
+		t.Fatalf("Failed to create outside dir: %v", err)
+	}
+	outsideFile := filepath.Join(outside, "victim.txt")
+	if err := os.WriteFile(outsideFile, []byte("old"), 0644); err != nil {
+		t.Fatalf("Failed to create outside file: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(dst, "victim.txt")); err != nil {
+		t.Fatalf("Failed to create target symlink: %v", err)
+	}
+
+	payload := createCustomTarball(t, "pigsty/victim.txt", []byte("new-content"))
+	err = extractPigsty(payload, dst)
+	if err == nil {
+		t.Fatalf("extractPigsty() expected symlink target file error, got nil")
+	}
+
+	content, readErr := os.ReadFile(outsideFile)
+	if readErr != nil {
+		t.Fatalf("Failed to read outside file: %v", readErr)
+	}
+	if string(content) != "old" {
+		t.Fatalf("outside file should remain unchanged, got: %s", string(content))
+	}
+}
+
 func createTestPigstyTarball(t *testing.T) []byte {
 	t.Helper()
 
@@ -197,5 +303,43 @@ func createTestPigstyTarball(t *testing.T) []byte {
 		t.Fatalf("failed to close gzip writer: %v", err)
 	}
 
+	return buf.Bytes()
+}
+
+func createCustomTarball(t *testing.T, filePath string, content []byte) []byte {
+	t.Helper()
+
+	buf := new(bytes.Buffer)
+	gw := gzip.NewWriter(buf)
+	tw := tar.NewWriter(gw)
+
+	root := &tar.Header{
+		Name:     "pigsty",
+		Mode:     0755,
+		Typeflag: tar.TypeDir,
+	}
+	if err := tw.WriteHeader(root); err != nil {
+		t.Fatalf("failed to write root dir header: %v", err)
+	}
+
+	hdr := &tar.Header{
+		Name:     filePath,
+		Mode:     0644,
+		Size:     int64(len(content)),
+		Typeflag: tar.TypeReg,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("failed to write custom file header %s: %v", filePath, err)
+	}
+	if _, err := tw.Write(content); err != nil {
+		t.Fatalf("failed to write custom file content %s: %v", filePath, err)
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("failed to close tar writer: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("failed to close gzip writer: %v", err)
+	}
 	return buf.Bytes()
 }

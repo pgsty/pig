@@ -29,20 +29,12 @@ func SetupRust(force bool) error {
 	}
 	defer resp.Body.Close()
 
-	// Determine script path based on OS
-	var script string
-	if config.OSType == config.DistroMAC {
-		// macOS uses /var/folders for temporary files
-		script = "/tmp/rustup.sh"
-	} else {
-		script = "/tmp/rust.sh"
-	}
-
-	// Write script to file
-	out, err := os.Create(script)
+	// Write script to a unique temp file.
+	out, err := os.CreateTemp("", "pig-rustup-*.sh")
 	if err != nil {
 		return fmt.Errorf("failed to create script file: %v", err)
 	}
+	script := out.Name()
 	defer os.Remove(script) // Clean up after installation
 
 	if _, err := io.Copy(out, resp.Body); err != nil {

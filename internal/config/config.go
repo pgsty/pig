@@ -379,13 +379,44 @@ func detectDarwinEnvironment() bool {
 	return true
 }
 
-func detectLinuxPackageManager() {
-	// First determine OS type by checking package manager.
-	if _, err := os.Stat("/usr/bin/rpm"); err == nil {
-		OSType = DistroEL
+func inferLinuxPackageTypeFromVendor(vendor string) string {
+	switch strings.ToLower(vendor) {
+	case "ubuntu", "debian":
+		return DistroDEB
+	case "rhel", "redhat", "centos", "rocky", "almalinux", "ol", "oracle", "fedora", "anolis", "amzn", "amazon":
+		return DistroEL
+	default:
+		return ""
 	}
+}
+
+func detectLinuxPackageManager(vendor string) {
+	OSType = ""
+
+	// Prefer distro vendor from /etc/os-release. This is more reliable than
+	// checking whether helper binaries are present on mixed environments.
+	if inferred := inferLinuxPackageTypeFromVendor(vendor); inferred != "" {
+		OSType = inferred
+		return
+	}
+
+	// Fallback to distro marker files.
+	if _, err := os.Stat("/etc/debian_version"); err == nil {
+		OSType = DistroDEB
+		return
+	}
+	if _, err := os.Stat("/etc/redhat-release"); err == nil {
+		OSType = DistroEL
+		return
+	}
+
+	// Last fallback: package manager binaries.
 	if _, err := os.Stat("/usr/bin/dpkg"); err == nil {
 		OSType = DistroDEB
+		return
+	}
+	if _, err := os.Stat("/usr/bin/rpm"); err == nil {
+		OSType = DistroEL
 	}
 }
 
@@ -434,13 +465,14 @@ func DetectEnvironment() {
 		return
 	}
 
-	detectLinuxPackageManager()
 	info, err := readOSRelease("/etc/os-release")
 	if err != nil {
 		logrus.Debugf("could not read /etc/os-release: %s", err)
+		detectLinuxPackageManager("")
 		return
 	}
 	applyLinuxReleaseInfo(info)
+	detectLinuxPackageManager(OSVendor)
 	detectLinuxOSCode()
 
 	logrus.Debugf("Detected OS: code=%s arch=%s type=%s vendor=%s version=%s %s major=%d full=%s",

@@ -122,7 +122,7 @@ func ValidVersion(version string) bool {
 
 func PrintInstallMethod() {
 	if Region == "china" {
-		fmt.Printf("\nInstall the latest pig (china mirror)\nncurl -fsSL %s/get | bash\n\n", config.RepoPigstyCC)
+		fmt.Printf("\nInstall the latest pig (china mirror)\ncurl -fsSL %s/get | bash\n\n", config.RepoPigstyCC)
 	} else {
 		fmt.Printf("\nInstall the latest pig\ncurl -fsSL %s/get | bash\n\n", config.RepoPigstyIO)
 	}

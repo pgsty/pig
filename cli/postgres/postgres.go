@@ -241,7 +241,7 @@ func buildTestCmd(dbsu string, flag, path string) *exec.Cmd {
 	}
 
 	if config.CurrentUser == "root" {
-		cmdStr := strings.Join(args, " ")
+		cmdStr := utils.ShellQuoteArgs(args)
 		return exec.Command("su", "-", dbsu, "-c", cmdStr)
 	}
 

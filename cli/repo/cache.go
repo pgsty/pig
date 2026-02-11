@@ -131,9 +131,9 @@ func Cache(dirPath, pkgPath string, repos []string) error {
 	// Print estimated total file size in GiB (1 GiB = 1024^3 bytes)
 	logrus.Infof("Estimated total file size: %.2f GiB", bytesToGiB(totalSize))
 
-	// Remove existing tarball if any
-	if err := os.RemoveAll(pkgPath); err != nil {
-		return fmt.Errorf("failed to remove existing package %s: %v", pkgPath, err)
+	// Prepare output path and remove existing package file safely.
+	if err := preparePackageOutput(pkgPath); err != nil {
+		return err
 	}
 
 	// Create the target tarball file
@@ -289,6 +289,39 @@ func printProgressAndFile(processed, total int, currentFile string) {
 // bytesToGiB converts bytes to GiB (1 GiB = 1024^3 bytes).
 func bytesToGiB(b int64) float64 {
 	return float64(b) / (1024.0 * 1024.0 * 1024.0)
+}
+
+// preparePackageOutput validates package path and safely removes pre-existing file.
+// It refuses dangerous targets (e.g. "/" or directory paths).
+func preparePackageOutput(pkgPath string) error {
+	if pkgPath == "" {
+		return fmt.Errorf("package path is empty")
+	}
+
+	absPath, err := filepath.Abs(filepath.Clean(pkgPath))
+	if err != nil {
+		return fmt.Errorf("failed to resolve package path %s: %v", pkgPath, err)
+	}
+	if absPath == string(os.PathSeparator) {
+		return fmt.Errorf("invalid package path: %s", pkgPath)
+	}
+
+	info, err := os.Lstat(absPath)
+	if err == nil {
+		if info.IsDir() {
+			return fmt.Errorf("package path points to a directory: %s", absPath)
+		}
+		if err := os.Remove(absPath); err != nil {
+			return fmt.Errorf("failed to remove existing package file %s: %v", absPath, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to inspect package path %s: %v", absPath, err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+		return fmt.Errorf("failed to create package parent directory: %v", err)
+	}
+	return nil
 }
 
 // CacheWithResult creates an offline package from local repo and returns a structured Result

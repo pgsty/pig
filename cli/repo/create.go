@@ -28,18 +28,16 @@ func CreateRepoEL(dir string) error {
 		script = createRepoCmdEL7(dir)
 	}
 
-	// generate tmp file name with timestamp (Go reference time: 20060102150405)
-	tmpFile := fmt.Sprintf("create_repo_%s.sh", time.Now().Format("20060102150405"))
-	scriptPath := filepath.Join(os.TempDir(), tmpFile)
-	logrus.Debugf("generate create el repo tmp script: %s", scriptPath)
-	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
-		return fmt.Errorf("failed to write tmp create repo script to %s: %s", scriptPath, err)
+	// write repo script to unique temp file
+	scriptPath, err := writeTempRepoScript(script)
+	if err != nil {
+		return err
 	}
+	logrus.Debugf("generate create el repo tmp script: %s", scriptPath)
 	defer os.Remove(scriptPath)
 
 	// run the script with sudo
-	err := utils.SudoCommand([]string{"sh", scriptPath})
-	if err != nil {
+	if err = utils.SudoCommand([]string{"sh", scriptPath}); err != nil {
 		return fmt.Errorf("failed to create el repo: %v", err)
 	} else {
 		logrus.Infof("repo created, check %s", filepath.Join(dir, "repo_complete"))
@@ -59,18 +57,16 @@ func CreateRepoDEB(dir string) error {
 	// generate the create repo script to tmp dir, and run it with sudo command
 	script := createRepoCmdDEB(dir)
 
-	// generate tmp file name with timestamp (Go reference time: 20060102150405)
-	tmpFile := fmt.Sprintf("create_repo_%s.sh", time.Now().Format("20060102150405"))
-	scriptPath := filepath.Join(os.TempDir(), tmpFile)
-	logrus.Debugf("generate create deb repo tmp script: %s", scriptPath)
-	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
-		return fmt.Errorf("failed to write tmp create repo script to %s: %s", scriptPath, err)
+	// write repo script to unique temp file
+	scriptPath, err := writeTempRepoScript(script)
+	if err != nil {
+		return err
 	}
+	logrus.Debugf("generate create deb repo tmp script: %s", scriptPath)
 	defer os.Remove(scriptPath)
 
 	// run the script with sudo
-	err := utils.SudoCommand([]string{"sh", scriptPath})
-	if err != nil {
+	if err = utils.SudoCommand([]string{"sh", scriptPath}); err != nil {
 		return fmt.Errorf("failed to create deb repo: %v", err)
 	} else {
 		logrus.Infof("repo created, check %s", filepath.Join(dir, "repo_complete"))
@@ -80,39 +76,62 @@ func CreateRepoDEB(dir string) error {
 
 // createRepoCmdEL will create a local YUM repository in the specified directory
 func createRepoCmdEL(dir string) string {
+	dirQ := utils.ShellQuoteArgs([]string{dir})
+	completeQ := utils.ShellQuoteArgs([]string{filepath.Join(dir, "repo_complete")})
 	return fmt.Sprintf(`#!/bin/bash
-cd "%s";
+cd -- %s;
 rm -rf proj-data*;
 rm -rf patroni*3.0.4*;
 rm -rf *docs*;
 createrepo_c . ;
 repo2module -s stable . modules.yaml;
 modifyrepo_c --mdtype=modules modules.yaml repodata/;
-md5sum *.rpm > "%s"
-	`, dir, filepath.Join(dir, "repo_complete"))
+md5sum *.rpm > %s
+	`, dirQ, completeQ)
 }
 
 // createRepoCmdEL7 will create a local YUM repository in the specified directory
 func createRepoCmdEL7(dir string) string {
+	dirQ := utils.ShellQuoteArgs([]string{dir})
+	completeQ := utils.ShellQuoteArgs([]string{filepath.Join(dir, "repo_complete")})
 	return fmt.Sprintf(`#!/bin/bash
-cd "%s";
+cd -- %s;
 rm -f *.i686.rpm;
 rm -rf patroni*3.0.4*;
 rm -rf *docs*;
 createrepo_c . ;
-md5sum *.rpm > "%s"
-	`, dir, filepath.Join(dir, "repo_complete"))
+md5sum *.rpm > %s
+	`, dirQ, completeQ)
 }
 
 // createRepoCmdDEB will create a local APT repository in the specified directory
 func createRepoCmdDEB(dir string) string {
+	dirQ := utils.ShellQuoteArgs([]string{dir})
+	completeQ := utils.ShellQuoteArgs([]string{filepath.Join(dir, "repo_complete")})
 	return fmt.Sprintf(`#!/bin/bash
-cd "%s";
+cd -- %s;
 rm -f *i386.deb;
 rm -rf Packages.gz;
 dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz;
-md5sum *.deb > "%s";
-	`, dir, filepath.Join(dir, "repo_complete"))
+md5sum *.deb > %s;
+	`, dirQ, completeQ)
+}
+
+func writeTempRepoScript(script string) (string, error) {
+	tmp, err := os.CreateTemp("", "create_repo_*.sh")
+	if err != nil {
+		return "", fmt.Errorf("failed to create tmp repo script file: %w", err)
+	}
+	if _, err := tmp.WriteString(script); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return "", fmt.Errorf("failed to write tmp repo script file %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return "", fmt.Errorf("failed to close tmp repo script file %s: %w", tmp.Name(), err)
+	}
+	return tmp.Name(), nil
 }
 
 // CreateReposWithResult creates local YUM/APT repositories and returns a structured Result

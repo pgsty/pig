@@ -45,3 +45,22 @@ VERSION_ID=12
 		t.Fatalf("VersionCodename=%q, want empty", info.VersionCodename)
 	}
 }
+
+func TestInferLinuxPackageTypeFromVendor(t *testing.T) {
+	tests := []struct {
+		vendor string
+		want   string
+	}{
+		{vendor: "ubuntu", want: DistroDEB},
+		{vendor: "debian", want: DistroDEB},
+		{vendor: "rocky", want: DistroEL},
+		{vendor: "RHEL", want: DistroEL},
+		{vendor: "unknown", want: ""},
+	}
+
+	for _, tt := range tests {
+		if got := inferLinuxPackageTypeFromVendor(tt.vendor); got != tt.want {
+			t.Fatalf("inferLinuxPackageTypeFromVendor(%q)=%q, want %q", tt.vendor, got, tt.want)
+		}
+	}
+}

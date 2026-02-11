@@ -114,6 +114,10 @@ func extractPigsty(data []byte, dst string) error {
 		return fmt.Errorf("failed to create gzip reader: %w", err)
 	}
 	defer gzr.Close()
+	dstAbs, err := filepath.Abs(dst)
+	if err != nil {
+		return fmt.Errorf("failed to resolve destination path: %w", err)
+	}
 
 	tarReader := tar.NewReader(gzr)
 	for {
@@ -128,19 +132,23 @@ func extractPigsty(data []byte, dst string) error {
 			continue
 		}
 
-		// Get relative path and construct target path
-		relPath := header.Name
-		parts := strings.SplitN(relPath, "/", 2)
-		if len(parts) <= 1 {
-			continue // Skip root directory
+		// Resolve and validate archive path before extraction.
+		relPath, target, err := resolveArchiveTargetPath(dst, header.Name)
+		if err != nil {
+			return err
 		}
-		relPath = parts[1]
-		target := filepath.Join(dst, relPath)
+		if relPath == "" {
+			continue
+		}
 
 		// Skip protected files and directories
 		if isProtectedFile(relPath, dst) {
 			logrus.Debugf("skipping protected file: %s", relPath)
 			continue
+		}
+
+		if err := ensureNoSymlinkInPath(dstAbs, target); err != nil {
+			return err
 		}
 
 		if err := extractTarEntry(header, target, tarReader); err != nil {
@@ -149,6 +157,40 @@ func extractPigsty(data []byte, dst string) error {
 	}
 
 	return nil
+}
+
+func resolveArchiveTargetPath(dst, archivePath string) (string, string, error) {
+	normalized := strings.TrimPrefix(strings.ReplaceAll(archivePath, "\\", "/"), "/")
+	parts := strings.SplitN(normalized, "/", 2)
+	if len(parts) <= 1 {
+		return "", "", nil
+	}
+
+	relPath := filepath.Clean(strings.TrimLeft(parts[1], "/"))
+	if relPath == "." || relPath == "" {
+		return "", "", nil
+	}
+	if filepath.IsAbs(relPath) || relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) {
+		return "", "", fmt.Errorf("invalid archive entry path: %s", archivePath)
+	}
+
+	dstAbs, err := filepath.Abs(dst)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to resolve destination path: %w", err)
+	}
+	target := filepath.Join(dstAbs, relPath)
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to resolve target path: %w", err)
+	}
+	relToBase, err := filepath.Rel(dstAbs, targetAbs)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to validate target path: %w", err)
+	}
+	if relToBase == ".." || strings.HasPrefix(relToBase, ".."+string(os.PathSeparator)) {
+		return "", "", fmt.Errorf("archive entry escapes destination: %s", archivePath)
+	}
+	return relPath, targetAbs, nil
 }
 
 // LoadPigstySrc loads pigsty source tarball from given path and returns the byte array
@@ -193,6 +235,10 @@ func extractTarEntry(header *tar.Header, target string, reader *tar.Reader) erro
 			return fmt.Errorf("failed to create parent directory: %w", err)
 		}
 
+		if err := ensureRegularFileTarget(target); err != nil {
+			return err
+		}
+
 		f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
 		if err != nil {
 			return fmt.Errorf("failed to create file: %w", err)
@@ -203,6 +249,16 @@ func extractTarEntry(header *tar.Header, target string, reader *tar.Reader) erro
 			return fmt.Errorf("failed to write file: %w", err)
 		}
 	case tar.TypeSymlink:
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return fmt.Errorf("failed to create parent directory for symlink: %w", err)
+		}
+		cleanLink := filepath.Clean(header.Linkname)
+		if filepath.IsAbs(header.Linkname) || cleanLink == ".." || strings.HasPrefix(cleanLink, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("invalid symlink target: %s", header.Linkname)
+		}
+		if err := ensureSymlinkTargetPath(target); err != nil {
+			return err
+		}
 		os.Remove(target) // Remove existing symlink if any
 		if err := os.Symlink(header.Linkname, target); err != nil {
 			return fmt.Errorf("failed to create symlink: %w", err)
@@ -212,6 +268,67 @@ func extractTarEntry(header *tar.Header, target string, reader *tar.Reader) erro
 		logrus.Debugf("skipping unsupported file type %d: %s", header.Typeflag, target)
 	}
 
+	return nil
+}
+
+func ensureNoSymlinkInPath(base, target string) error {
+	parent := filepath.Dir(target)
+	rel, err := filepath.Rel(base, parent)
+	if err != nil {
+		return fmt.Errorf("failed to validate extraction path: %w", err)
+	}
+	if rel == "." {
+		return nil
+	}
+
+	cur := base
+	for _, part := range strings.Split(rel, string(os.PathSeparator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return fmt.Errorf("failed to inspect extraction path %s: %w", cur, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to extract through symlink path component: %s", cur)
+		}
+	}
+	return nil
+}
+
+func ensureRegularFileTarget(target string) error {
+	info, err := os.Lstat(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to inspect target file %s: %w", target, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to overwrite symlink target: %s", target)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("refusing to overwrite directory with file: %s", target)
+	}
+	return nil
+}
+
+func ensureSymlinkTargetPath(target string) error {
+	info, err := os.Lstat(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to inspect symlink target path %s: %w", target, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("refusing to replace directory with symlink: %s", target)
+	}
 	return nil
 }
 
