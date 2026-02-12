@@ -7,12 +7,15 @@ import (
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
 )
+
+var moduleNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // AddModule handles adding a single module to the system
 func (m *Manager) AddModule(module string) error {
@@ -29,14 +32,57 @@ func (m *Manager) AddModule(module string) error {
 
 // getModulePath returns the path to the repository configuration file for a given module
 func (m *Manager) getModulePath(module string) string {
+	module = strings.TrimSpace(module)
+	if !isSafeModuleName(module) {
+		logrus.Warnf("unsafe module name rejected: %q", module)
+		return ""
+	}
+
+	suffix := ""
 	switch config.OSType {
 	case config.DistroEL:
-		return filepath.Join(m.RepoDir, fmt.Sprintf("%s.repo", module))
+		suffix = ".repo"
 	case config.DistroDEB:
-		return filepath.Join(m.RepoDir, fmt.Sprintf("%s.list", module))
+		suffix = ".list"
 	default:
 		return ""
 	}
+
+	targetPath := filepath.Join(m.RepoDir, module+suffix)
+	if !isPathWithinBase(m.RepoDir, targetPath) {
+		logrus.Warnf("refusing path outside repo directory: %q", targetPath)
+		return ""
+	}
+	return targetPath
+}
+
+func isSafeModuleName(module string) bool {
+	if module == "" {
+		return false
+	}
+	if strings.Contains(module, "..") || strings.Contains(module, "/") || strings.Contains(module, `\`) {
+		return false
+	}
+	return moduleNamePattern.MatchString(module)
+}
+
+func isPathWithinBase(basePath, targetPath string) bool {
+	baseAbs, err := filepath.Abs(basePath)
+	if err != nil {
+		return false
+	}
+	targetAbs, err := filepath.Abs(targetPath)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(baseAbs, targetAbs)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 // getModuleContent returns the multiple repo content together

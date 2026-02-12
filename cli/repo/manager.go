@@ -125,6 +125,8 @@ func (m *Manager) LoadData(data []byte) error {
 		repo.Distro = repo.InferOS()
 		switch repo.Distro {
 		case config.DistroEL:
+			// Intentionally permissive default for compatibility with offline/mirror repos.
+			// See config.PigstyGPGCheck for opt-in signature enforcement.
 			meta := map[string]string{"enabled": "1", "gpgcheck": "0", "module_hotfixes": "1"}
 			if repo.Meta != nil {
 				for k, v := range repo.Meta {
@@ -133,6 +135,8 @@ func (m *Manager) LoadData(data []byte) error {
 			}
 			repo.Meta = meta
 		case config.DistroDEB:
+			// Intentionally permissive default for compatibility with offline/mirror repos.
+			// See config.PigstyGPGCheck for opt-in signature enforcement.
 			meta := map[string]string{"trusted": "yes"}
 			if repo.Meta != nil {
 				for k, v := range repo.Meta {

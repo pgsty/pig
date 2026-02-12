@@ -64,7 +64,17 @@ func RmRepos(modules []string, doUpdate bool) *output.Result {
 
 	// Remove specified modules
 	for _, module := range modules {
+		module = strings.TrimSpace(module)
 		if module == "" {
+			continue
+		}
+		if _, ok := manager.Module[module]; !ok {
+			data.RemovedRepos = append(data.RemovedRepos, &RemovedRepoItem{
+				Module:   module,
+				FilePath: "",
+				Success:  false,
+				Error:    fmt.Sprintf("module not found: %s", module),
+			})
 			continue
 		}
 
