@@ -101,16 +101,44 @@ func setupBuildDirs(spec *specConfig, force bool) error {
 }
 
 // createSymlink creates a symbolic link: linkPath -> target
-// In force mode, aggressively removes any existing file/dir/symlink at linkPath
+// In force mode, aggressively removes any existing file/dir/symlink at linkPath.
+// In non-force mode, existing directories are preserved to avoid accidental data loss.
 func createSymlink(target, linkPath string, force bool) error {
-	// Remove existing file/dir/symlink at linkPath
+	if info, err := os.Lstat(linkPath); err == nil {
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			existingTarget, readErr := os.Readlink(linkPath)
+			if readErr == nil && existingTarget == target {
+				return nil
+			}
+			if err := os.Remove(linkPath); err != nil {
+				return fmt.Errorf("failed to replace existing symlink: %w", err)
+			}
+		case info.IsDir():
+			if !force {
+				// Keep existing directories in non-force mode.
+				logrus.Debugf("keeping existing directory in non-force mode: %s", linkPath)
+				return nil
+			}
+			if err := os.RemoveAll(linkPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to remove existing directory: %w", err)
+			}
+		default:
+			if !force {
+				return fmt.Errorf("existing path is not a symlink: %s (use --force to replace)", linkPath)
+			}
+			if err := os.RemoveAll(linkPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to remove existing path: %w", err)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to inspect existing path: %w", err)
+	}
+
+	// Remove existing path in force mode when lstat says it does not exist now.
 	if force {
-		// Force mode: ignore removal errors
-		_ = os.RemoveAll(linkPath)
-	} else {
-		// Normal mode: return error if removal fails
 		if err := os.RemoveAll(linkPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to remove existing path: %w", err)
+			return fmt.Errorf("failed to clean link path: %w", err)
 		}
 	}
 
