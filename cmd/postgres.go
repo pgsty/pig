@@ -473,7 +473,7 @@ func registerPgLogCommands() {
 	// Log command flags
 	pgLogCmd.PersistentFlags().StringVar(&pgConfig.LogDir, "log-dir", "", "log directory (default: /pg/log/postgres)")
 	pgLogCmd.PersistentFlags().IntVarP(&pgLogNum, "lines", "n", 0, "number of lines")
-	pgLogGrepCmd.Flags().BoolVarP(&pgLogGrepIgnoreCase, "ignore-case", "i", false, "ignore case")
+	pgLogGrepCmd.Flags().BoolVar(&pgLogGrepIgnoreCase, "ignore-case", false, "ignore case")
 	pgLogGrepCmd.Flags().IntVarP(&pgLogGrepContext, "context", "C", 0, "show N lines of context")
 
 	// Log subcommands

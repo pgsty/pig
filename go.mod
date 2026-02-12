@@ -1,6 +1,6 @@
 module pig
 
-go 1.25.7
+go 1.26.0
 
 require (
 	github.com/gofrs/uuid/v5 v5.4.0
@@ -23,6 +23,6 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 )
