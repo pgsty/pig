@@ -1,16 +1,19 @@
 # PIG - Postgres Install Genius
 
 [![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
-[![Version: v1.1.0](https://img.shields.io/badge/version-v1.1.0-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v1.1.0)
-[![Pigsty: v4.1.0](https://img.shields.io/badge/Pigsty-v4.1.0-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/docs/about/release)
+[![Doc: pig](https://img.shields.io/badge/Docs-pig-slategray?style=flat)](https://pigsty.io/docs/pig)
+[![Version: v1.1.0](https://img.shields.io/badge/version-v1.1.0-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.1.0)
+[![Pigsty: v4.1.0](https://img.shields.io/badge/Pigsty-v4.1.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 451](https://img.shields.io/badge/extensions-451-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pgsty/pig)
 
 [**pig**](https://pgext.cloud/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pgext.cloud/os) (EL/Debian/Ubuntu) Linux.
 
 Install PostgreSQL 13 ~ 18 along with [451 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
 
-Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the package manager, repository and extension catalog.
+All commands support structured output (`-o yaml/json`) with self-describing schema, making it an **Agent-Friendly** PostgreSQL CLI tool.
+Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the available extensions.
 
 [![PostgreSQL Extension Ecosystem](https://pigsty.io/img/pigsty/ecosystem.jpg)](https://medium.com/@fengruohang/postgres-is-eating-the-database-world-157c204dcfc4)
 
@@ -25,7 +28,7 @@ Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the p
 [![Debian Support: 12/13](https://img.shields.io/badge/Debian-12/13-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pigsty.io/docs/ref/linux#debian)
 [![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://pigsty.io/docs/ref/linux#ubuntu)
 
-[Install](https://pgext.cloud/pig/install) the `pig` package first, (you can also use the `apt` / `yum` or just copy the binary)
+[**Install**](https://pgext.cloud/pig/install) the `pig` package first, (you can also use the `apt` / `yum` or just copy the binary)
 
 ```bash
 curl -fsSL https://repo.pigsty.io/pig | bash
@@ -380,6 +383,10 @@ $ pig ext info pg_duckdb
 ├──────────────┴───────────────────────────────────────────────────────────────────────────────┤
 │ Comment: conflict with duckdb_fdw                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+
+# Print in JSON format
+$ pig ext info pg_duckdb -o json
+{"success":true,"code":0,"message":"Extension: pg_duckdb","data":{"name":"pg_duckdb","pkg":"pg_duckdb","lead_ext":"pg_duckdb","category":"OLAP","license":"MIT","language":"C++","version":"1.1.1","url":"https://github.com/duckdb/pg_duckdb","source":"pg_duckdb-1.1.1.tar.gz","description":"DuckDB Embedded in Postgres","zh_desc":"在PostgreSQL中的嵌入式DuckDB扩展","properties":{"has_bin":false,"has_lib":true,"need_load":true,"need_ddl":true,"relocatable":"f","trusted":"f"},"required_by":["pg_mooncake"],"see_also":["pg_mooncake","duckdb_fdw","pg_analytics","pg_parquet","columnar","citus","citus_columnar","orioledb"],"pg_ver":["18","17","16","15","14"],"rpm_package":{"package":"pg_duckdb_$v","repository":"PIGSTY","version":"1.1.1","pg_ver":["18","17","16","15","14"]},"deb_package":{"package":"postgresql-$v-pg-duckdb","repository":"PIGSTY","version":"1.1.1","pg_ver":["18","17","16","15","14"]},"operations":{"install":"pig ext add pg_duckdb","config":"shared_preload_libraries = 'pg_duckdb'","create":"CREATE EXTENSION pg_duckdb;","build":"pig build pkg pg_duckdb;  # build rpm / deb"},"comment":"conflict with duckdb_fdw"}}
 ```
 
 **Print Extension Availability**
@@ -455,7 +462,8 @@ repo_modules:   # Available Modules: 20
   - pigsty    : pigsty-infra, pigsty-pgsql
   - pgdg      : pgdg
   - node      : base, updates, extras, epel, centos-sclo, centos-sclo-rh, baseos, appstream, powertools, crb, security, backports
-  - infra     : pigsty-infra, nginx, docker-ce
+  - infra     : pigsty-infra, nginx
+  - docker    : docker-ce
   - pgsql     : pigsty-pgsql, pgdg-common, pgdg-el8fix, pgdg-el9fix, pgdg13, pgdg14, pgdg15, pgdg16, pgdg17, pgdg18, pgdg
   - extra     : pgdg-extras, pgdg13-nonfree, pgdg14-nonfree, pgdg15-nonfree, pgdg16-nonfree, pgdg17-nonfree, timescaledb, citus
   - mssql     : wiltondb
@@ -475,7 +483,7 @@ repo_modules:   # Available Modules: 20
 
 **Pigsty Management**
 
-The **pig** can also be used as a [cli](https://pigsty.io/docs/pig/cmd/sty) tool for [Pigsty](https://pigsty.io/) — the battery-include free PostgreSQL RDS.
+The **pig** can also be used as a [**CLI**](https://pigsty.io/docs/pig/sty) tool for PostgreSQL & [Pigsty](https://pigsty.io/) — the battery-include free PostgreSQL RDS.
 Which brings HA, PITR, Monitoring, IaC, and all the extensions to your PostgreSQL cluster.
 
 ```bash
