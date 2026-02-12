@@ -2,13 +2,13 @@
 
 [![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
 [![Version: v1.1.0](https://img.shields.io/badge/version-v1.1.0-slategray?style=flat&logo=cilium&logoColor=white)](https://github.com/pgsty/pig/releases/tag/v1.1.0)
-[![Pigsty: v4.0.0](https://img.shields.io/badge/Pigsty-v4.0.0-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/docs/about/release)
+[![Pigsty: v4.1.0](https://img.shields.io/badge/Pigsty-v4.1.0-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 444](https://img.shields.io/badge/extensions-444-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
+[![Extensions: 451](https://img.shields.io/badge/extensions-451-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
 
 [**pig**](https://pgext.cloud/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pgext.cloud/os) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13 ~ 18 along with [444 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13 ~ 18 along with [451 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
 
 Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the package manager, repository and extension catalog.
 
@@ -39,7 +39,7 @@ $ pig ext install pg18              # install PostgreSQL 18 kernels with native 
 $ pig ext install pg_duckdb -v 18   # install the pg_duckdb extension (for current pg18)
 ```
 
-That's it, All set! Check the [advanced usage](#advanced-usage) for details and [the full list 444 available extensions](https://pgext.cloud/list).
+That's it, All set! Check the [advanced usage](#advanced-usage) for details and [the full list 451 available extensions](https://pgext.cloud/list).
 
 [![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
 

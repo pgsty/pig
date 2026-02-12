@@ -4206,7 +4206,7 @@ func TestReloadResultDataTextNil(t *testing.T) {
 func TestReloadResultDataTextWithData(t *testing.T) {
 	d := &ReloadResultData{
 		SourceURL:      "https://pigsty.io/ext/data/extension.csv",
-		ExtensionCount: 444,
+		ExtensionCount: 451,
 		CatalogPath:    "/root/.pig/extension.csv",
 		DurationMs:     350,
 	}
@@ -4214,7 +4214,7 @@ func TestReloadResultDataTextWithData(t *testing.T) {
 	if !strings.Contains(text, "pigsty.io") {
 		t.Error("expected source URL in output")
 	}
-	if !strings.Contains(text, "444") {
+	if !strings.Contains(text, "451") {
 		t.Error("expected extension count in output")
 	}
 	if !strings.Contains(text, "/root/.pig/extension.csv") {
