@@ -38,10 +38,13 @@ var (
 )
 
 const (
-	PigstyIO       = "https://pigsty.io"
-	PigstyCC       = "https://pigsty.cc"
-	RepoPigstyIO   = "https://repo.pigsty.io"
-	RepoPigstyCC   = "https://repo.pigsty.cc"
+	PigstyIO     = "https://pigsty.io"
+	PigstyCC     = "https://pigsty.cc"
+	RepoPigstyIO = "https://repo.pigsty.io"
+	RepoPigstyCC = "https://repo.pigsty.cc"
+	// PigstyGPGCheck intentionally defaults to false.
+	// This project supports offline/mirror environments where enforcing signatures
+	// and HTTPS-only repos is operationally incompatible by default.
 	PigstyGPGCheck = false
 	DistroEL       = "rpm"
 	DistroDEB      = "deb"
@@ -104,11 +107,18 @@ func InitConfig(inventory, pigstyHome string) {
 	ConfigFile = filepath.Join(ConfigDir, "config.yml")
 	// create that directory if not exists
 	if _, err := os.Stat(ConfigDir); os.IsNotExist(err) {
-		os.MkdirAll(ConfigDir, 0750)
+		if err := os.MkdirAll(ConfigDir, 0750); err != nil {
+			logrus.Warnf("failed to create config directory %s: %v", ConfigDir, err)
+		}
 	}
 	// touch config file if not exists
 	if _, err := os.Stat(ConfigFile); os.IsNotExist(err) {
-		os.Create(ConfigFile)
+		f, err := os.Create(ConfigFile)
+		if err != nil {
+			logrus.Warnf("failed to create config file %s: %v", ConfigFile, err)
+		} else {
+			_ = f.Close()
+		}
 	}
 
 	// set config defaults
