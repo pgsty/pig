@@ -13,6 +13,16 @@ func TestResolveRequestedLogFileValid(t *testing.T) {
 	}
 }
 
+func TestResolveRequestedLogFileValidRootDir(t *testing.T) {
+	got, err := resolveRequestedLogFile("/", "passwd")
+	if err != nil {
+		t.Fatalf("resolveRequestedLogFile returned error: %v", err)
+	}
+	if got != "/passwd" {
+		t.Fatalf("resolveRequestedLogFile returned %q, want %q", got, "/passwd")
+	}
+}
+
 func TestResolveRequestedLogFileRejectsTraversal(t *testing.T) {
 	tests := []string{
 		"../../../etc/hosts",

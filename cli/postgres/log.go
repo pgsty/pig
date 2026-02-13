@@ -32,7 +32,8 @@ func resolveRequestedLogFile(logDir string, file string) (string, error) {
 
 	cleanDir := filepath.Clean(logDir)
 	logPath := filepath.Clean(filepath.Join(cleanDir, file))
-	if !strings.HasPrefix(logPath, cleanDir+string(filepath.Separator)) {
+	rel, err := filepath.Rel(cleanDir, logPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid log file path")
 	}
 	return logPath, nil
