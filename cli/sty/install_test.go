@@ -257,6 +257,57 @@ func TestExtractPigstyRejectsExistingSymlinkTargetFile(t *testing.T) {
 	}
 }
 
+func TestExtractPigstyAllowsSafeRelativeSymlinkTarget(t *testing.T) {
+	dst := t.TempDir()
+	payload := createSymlinkTarball(t,
+		"pigsty/templates/olap.yml",
+		"../roles/pgsql/templates/olap.yml",
+		map[string][]byte{
+			"pigsty/roles/pgsql/templates/olap.yml": []byte("shared-template"),
+		},
+	)
+
+	if err := extractPigsty(payload, dst); err != nil {
+		t.Fatalf("extractPigsty() unexpected error: %v", err)
+	}
+
+	linkPath := filepath.Join(dst, "templates", "olap.yml")
+	linkInfo, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("failed to stat symlink: %v", err)
+	}
+	if linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected symlink at %s", linkPath)
+	}
+	linkTarget, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("failed to read symlink target: %v", err)
+	}
+	if linkTarget != "../roles/pgsql/templates/olap.yml" {
+		t.Fatalf("unexpected symlink target: %s", linkTarget)
+	}
+}
+
+func TestExtractPigstyRejectsEscapingRelativeSymlinkTarget(t *testing.T) {
+	dst := t.TempDir()
+	payload := createSymlinkTarball(t, "pigsty/templates/bad", "../../../etc/passwd", nil)
+
+	err := extractPigsty(payload, dst)
+	if err == nil {
+		t.Fatalf("extractPigsty() expected symlink escape error, got nil")
+	}
+}
+
+func TestExtractPigstyRejectsAbsoluteSymlinkTarget(t *testing.T) {
+	dst := t.TempDir()
+	payload := createSymlinkTarball(t, "pigsty/templates/bad", "/etc/passwd", nil)
+
+	err := extractPigsty(payload, dst)
+	if err == nil {
+		t.Fatalf("extractPigsty() expected absolute symlink target error, got nil")
+	}
+}
+
 func createTestPigstyTarball(t *testing.T) []byte {
 	t.Helper()
 
@@ -333,6 +384,56 @@ func createCustomTarball(t *testing.T, filePath string, content []byte) []byte {
 	}
 	if _, err := tw.Write(content); err != nil {
 		t.Fatalf("failed to write custom file content %s: %v", filePath, err)
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("failed to close tar writer: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("failed to close gzip writer: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func createSymlinkTarball(t *testing.T, linkPath, linkTarget string, files map[string][]byte) []byte {
+	t.Helper()
+
+	buf := new(bytes.Buffer)
+	gw := gzip.NewWriter(buf)
+	tw := tar.NewWriter(gw)
+
+	root := &tar.Header{
+		Name:     "pigsty",
+		Mode:     0755,
+		Typeflag: tar.TypeDir,
+	}
+	if err := tw.WriteHeader(root); err != nil {
+		t.Fatalf("failed to write root dir header: %v", err)
+	}
+
+	for filePath, content := range files {
+		hdr := &tar.Header{
+			Name:     filePath,
+			Mode:     0644,
+			Size:     int64(len(content)),
+			Typeflag: tar.TypeReg,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("failed to write file header %s: %v", filePath, err)
+		}
+		if _, err := tw.Write(content); err != nil {
+			t.Fatalf("failed to write file content %s: %v", filePath, err)
+		}
+	}
+
+	linkHeader := &tar.Header{
+		Name:     linkPath,
+		Mode:     0777,
+		Typeflag: tar.TypeSymlink,
+		Linkname: linkTarget,
+	}
+	if err := tw.WriteHeader(linkHeader); err != nil {
+		t.Fatalf("failed to write symlink header %s -> %s: %v", linkPath, linkTarget, err)
 	}
 
 	if err := tw.Close(); err != nil {

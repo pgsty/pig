@@ -151,7 +151,7 @@ func extractPigsty(data []byte, dst string) error {
 			return err
 		}
 
-		if err := extractTarEntry(header, target, tarReader); err != nil {
+		if err := extractTarEntry(header, target, dstAbs, tarReader); err != nil {
 			return fmt.Errorf("failed to extract %s: %w", target, err)
 		}
 	}
@@ -225,7 +225,7 @@ func isProtectedFile(relPath string, dst string) bool {
 }
 
 // extractTarEntry handles extraction of a single tar entry
-func extractTarEntry(header *tar.Header, target string, reader *tar.Reader) error {
+func extractTarEntry(header *tar.Header, target, dstAbs string, reader *tar.Reader) error {
 	switch header.Typeflag {
 	case tar.TypeDir:
 		return os.MkdirAll(target, os.FileMode(header.Mode))
@@ -252,9 +252,8 @@ func extractTarEntry(header *tar.Header, target string, reader *tar.Reader) erro
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return fmt.Errorf("failed to create parent directory for symlink: %w", err)
 		}
-		cleanLink := filepath.Clean(header.Linkname)
-		if filepath.IsAbs(header.Linkname) || cleanLink == ".." || strings.HasPrefix(cleanLink, ".."+string(os.PathSeparator)) {
-			return fmt.Errorf("invalid symlink target: %s", header.Linkname)
+		if err := validateSymlinkLinkname(dstAbs, target, header.Linkname); err != nil {
+			return err
 		}
 		if err := ensureSymlinkTargetPath(target); err != nil {
 			return err
@@ -269,6 +268,29 @@ func extractTarEntry(header *tar.Header, target string, reader *tar.Reader) erro
 	}
 
 	return nil
+}
+
+func validateSymlinkLinkname(base, linkPath, linkname string) error {
+	if linkname == "" || filepath.IsAbs(linkname) {
+		return fmt.Errorf("invalid symlink target: %s", linkname)
+	}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(linkPath), linkname))
+	ok, err := pathWithinBase(base, resolved)
+	if err != nil {
+		return fmt.Errorf("failed to validate symlink target: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("symlink target escapes destination: %s -> %s", linkPath, linkname)
+	}
+	return nil
+}
+
+func pathWithinBase(base, target string) (bool, error) {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false, err
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)), nil
 }
 
 func ensureNoSymlinkInPath(base, target string) error {
