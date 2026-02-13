@@ -1,14 +1,19 @@
 package build
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/utils"
+	"syscall"
 
 	"github.com/sirupsen/logrus"
 )
+
+var renamePath = os.Rename
 
 // Spec configuration for build environments
 type specConfig struct {
@@ -102,7 +107,8 @@ func setupBuildDirs(spec *specConfig, force bool) error {
 
 // createSymlink creates a symbolic link: linkPath -> target
 // In force mode, aggressively removes any existing file/dir/symlink at linkPath.
-// In non-force mode, existing directories are preserved to avoid accidental data loss.
+// In non-force mode, existing directories are migrated into target first, then
+// replaced by symlink to preserve data while keeping link semantics.
 func createSymlink(target, linkPath string, force bool) error {
 	if info, err := os.Lstat(linkPath); err == nil {
 		switch {
@@ -116,9 +122,14 @@ func createSymlink(target, linkPath string, force bool) error {
 			}
 		case info.IsDir():
 			if !force {
-				// Keep existing directories in non-force mode.
-				logrus.Debugf("keeping existing directory in non-force mode: %s", linkPath)
-				return nil
+				// Preserve existing content by moving it into target before relinking.
+				if err := migrateDirIntoTarget(linkPath, target); err != nil {
+					return err
+				}
+				if err := os.Remove(linkPath); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("failed to remove existing directory after migration: %w", err)
+				}
+				break
 			}
 			if err := os.RemoveAll(linkPath); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("failed to remove existing directory: %w", err)
@@ -150,6 +161,133 @@ func createSymlink(target, linkPath string, force bool) error {
 
 	// Create symlink: linkPath -> target
 	return os.Symlink(target, linkPath)
+}
+
+func migrateDirIntoTarget(srcDir, targetDir string) error {
+	if srcDir == targetDir {
+		return nil
+	}
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("failed to create target directory %s: %w", targetDir, err)
+	}
+	backupDir := filepath.Join(targetDir, ".migrated_from_"+filepath.Base(srcDir))
+
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return fmt.Errorf("failed to read existing directory %s: %w", srcDir, err)
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(srcDir, entry.Name())
+		dstPath := filepath.Join(targetDir, entry.Name())
+
+		if _, err := os.Lstat(dstPath); err == nil {
+			// Keep target entry untouched; move source entry into backup to avoid data loss.
+			if err := os.MkdirAll(backupDir, 0755); err != nil {
+				return fmt.Errorf("failed to create migration backup directory %s: %w", backupDir, err)
+			}
+			backupPath, err := uniqueBackupPath(filepath.Join(backupDir, entry.Name()))
+			if err != nil {
+				return fmt.Errorf("failed to allocate migration backup path: %w", err)
+			}
+			if err := os.Rename(srcPath, backupPath); err != nil {
+				return fmt.Errorf("failed to backup conflicting entry %s to %s: %w", srcPath, backupPath, err)
+			}
+			continue
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to inspect migration target %s: %w", dstPath, err)
+		}
+
+		if err := movePath(srcPath, dstPath); err != nil {
+			return fmt.Errorf("failed to migrate %s to %s: %w", srcPath, dstPath, err)
+		}
+	}
+	return nil
+}
+
+func movePath(src, dst string) error {
+	if err := renamePath(src, dst); err == nil {
+		return nil
+	} else if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+
+	if err := copyPath(src, dst); err != nil {
+		return err
+	}
+	return os.RemoveAll(src)
+}
+
+func copyPath(src, dst string) error {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+
+	switch mode := info.Mode(); {
+	case mode&os.ModeSymlink != 0:
+		target, err := os.Readlink(src)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+			return err
+		}
+		return os.Symlink(target, dst)
+	case info.IsDir():
+		if err := os.MkdirAll(dst, info.Mode().Perm()); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(src)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if err := copyPath(filepath.Join(src, entry.Name()), filepath.Join(dst, entry.Name())); err != nil {
+				return err
+			}
+		}
+		return nil
+	case mode.IsRegular():
+		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+			return err
+		}
+		in, err := os.Open(src)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+
+		out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+		if err != nil {
+			return err
+		}
+		defer out.Close()
+
+		if _, err := io.Copy(out, in); err != nil {
+			return err
+		}
+		return out.Close()
+	default:
+		return fmt.Errorf("unsupported file mode for cross-device move: %s", info.Mode().String())
+	}
+}
+
+func uniqueBackupPath(path string) (string, error) {
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return path, nil
+	} else if err != nil {
+		return "", err
+	}
+
+	for i := 1; i < 1000; i++ {
+		candidate := fmt.Sprintf("%s.%d", path, i)
+		if _, err := os.Lstat(candidate); os.IsNotExist(err) {
+			return candidate, nil
+		} else if err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("failed to allocate backup path for %s", path)
 }
 
 // syncSpec: Download tarball and perform incremental sync via rsync
