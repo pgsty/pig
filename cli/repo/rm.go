@@ -2,14 +2,47 @@ package repo
 
 import (
 	"fmt"
+	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
 )
+
+var rmModuleNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+func resolveModulePathForRm(m *Manager, module string) (string, error) {
+	module = strings.TrimSpace(module)
+	if module == "" {
+		return "", fmt.Errorf("empty module name")
+	}
+	if strings.Contains(module, "..") || strings.Contains(module, "/") || strings.Contains(module, `\`) {
+		return "", fmt.Errorf("unsafe module name: %s", module)
+	}
+	if !rmModuleNamePattern.MatchString(module) {
+		return "", fmt.Errorf("invalid module name: %s", module)
+	}
+
+	suffix := ""
+	switch config.OSType {
+	case config.DistroEL:
+		suffix = ".repo"
+	case config.DistroDEB:
+		suffix = ".list"
+	default:
+		return "", fmt.Errorf("unsupported os type: %s", config.OSType)
+	}
+
+	filePath := filepath.Join(m.RepoDir, module+suffix)
+	if !isPathWithinBase(m.RepoDir, filePath) {
+		return "", fmt.Errorf("module path escapes repo dir")
+	}
+	return filePath, nil
+}
 
 // RmRepos removes repository modules and returns a structured Result
 // This function is used for YAML/JSON output modes
@@ -68,23 +101,14 @@ func RmRepos(modules []string, doUpdate bool) *output.Result {
 		if module == "" {
 			continue
 		}
-		if _, ok := manager.Module[module]; !ok {
-			data.RemovedRepos = append(data.RemovedRepos, &RemovedRepoItem{
-				Module:   module,
-				FilePath: "",
-				Success:  false,
-				Error:    fmt.Sprintf("module not found: %s", module),
-			})
-			continue
-		}
 
-		filePath := manager.getModulePath(module)
-		if filePath == "" {
+		filePath, pathErr := resolveModulePathForRm(manager, module)
+		if pathErr != nil {
 			data.RemovedRepos = append(data.RemovedRepos, &RemovedRepoItem{
 				Module:   module,
 				FilePath: "",
 				Success:  false,
-				Error:    "failed to determine module path",
+				Error:    fmt.Sprintf("failed to determine module path: %v", pathErr),
 			})
 			continue
 		}
