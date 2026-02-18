@@ -83,6 +83,7 @@ func resolvePackageRequests(pgVer int, names []string, opts packageResolveOption
 		Packages:     make([]string, 0, len(names)),
 		PackageOwner: make(map[string]string),
 	}
+	seenPackages := make(map[string]struct{})
 
 	if opts.EnableTranslation && Catalog != nil {
 		Catalog.LoadAliasMap(config.OSType)
@@ -103,6 +104,10 @@ func resolvePackageRequests(pgVer int, names []string, opts packageResolveOption
 
 		for _, pkg := range ProcessPkgName(pkgPattern, pgVer) {
 			resolvedPkg := applyPackageVersion(pkg, version)
+			if _, exists := seenPackages[resolvedPkg]; exists {
+				continue
+			}
+			seenPackages[resolvedPkg] = struct{}{}
 			res.Packages = append(res.Packages, resolvedPkg)
 			res.PackageOwner[resolvedPkg] = owner
 		}

@@ -146,3 +146,43 @@ func TestResolveInstallPackagesNoTranslation(t *testing.T) {
 		t.Fatalf("unexpected owner: %s", res.PackageOwner[res.Packages[0]])
 	}
 }
+
+func TestResolveExtensionPackagesDeduplicatesAcrossRequests(t *testing.T) {
+	ext := &Extension{
+		Name:   "test_ext",
+		Pkg:    "test_pkg",
+		Lead:   true,
+		RpmPkg: "test_ext_$v",
+	}
+	cleanup := withResolveTestEnv(t, config.DistroEL, "9", newTestCatalog(ext))
+	defer cleanup()
+
+	res := ResolveExtensionPackages(17, []string{"test_ext", "test_ext"}, false)
+	if len(res.Packages) != 1 {
+		t.Fatalf("expected deduplicated package list length 1, got %d (%v)", len(res.Packages), res.Packages)
+	}
+	if res.Packages[0] != "test_ext_17" {
+		t.Fatalf("unexpected package: %s", res.Packages[0])
+	}
+}
+
+func TestResolveExtensionPackagesKeepsFirstOwnerOnDuplicatePackage(t *testing.T) {
+	catalog := &ExtensionCatalog{
+		Extensions: []*Extension{},
+		ExtNameMap: map[string]*Extension{},
+		ExtPkgMap:  map[string]*Extension{},
+		Dependency: map[string][]string{},
+		AliasMap:   map[string]string{},
+	}
+	cleanup := withResolveTestEnv(t, config.DistroEL, "9", catalog)
+	defer cleanup()
+
+	res := ResolveExtensionPackages(17, []string{"pg17", "pgsql"}, false)
+	if len(res.Packages) == 0 {
+		t.Fatal("expected alias resolution to produce packages")
+	}
+
+	if owner := res.PackageOwner["postgresql17"]; owner != "pg17" {
+		t.Fatalf("expected first owner pg17 for duplicated package postgresql17, got %q", owner)
+	}
+}
