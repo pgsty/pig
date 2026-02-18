@@ -3,6 +3,7 @@ package output
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 )
 
@@ -47,7 +48,7 @@ func (r *Result) ColorText() string {
 	}
 
 	// Check if color is disabled
-	if !isColorEnabled() {
+	if !IsColorEnabled() {
 		return r.Text()
 	}
 
@@ -89,13 +90,9 @@ func (r *Result) formatText(colorStart, colorEnd string) string {
 	sb.WriteString(r.Message)
 
 	// Optional data text - if Data implements Texter, append its text output
-	if r.Data != nil {
-		if texter, ok := r.Data.(Texter); ok {
-			if dataText := texter.Text(); dataText != "" {
-				sb.WriteString("\n")
-				sb.WriteString(dataText)
-			}
-		}
+	if dataText := renderDataText(r.Data); dataText != "" {
+		sb.WriteString("\n")
+		sb.WriteString(dataText)
 	}
 
 	// Optional detail
@@ -112,9 +109,51 @@ func (r *Result) formatText(colorStart, colorEnd string) string {
 	return sb.String()
 }
 
-// isColorEnabled checks if terminal color output should be enabled.
+// renderDataText renders text for Result.Data.
+// It supports:
+// 1) values implementing Texter
+// 2) slices/arrays whose elements implement Texter (joined by a blank line)
+func renderDataText(data interface{}) string {
+	if data == nil {
+		return ""
+	}
+
+	// Reject typed nil pointers (e.g. (*SomeType)(nil) stored in interface{})
+	// before any type assertion, so callers need not worry about nil receivers.
+	v := reflect.ValueOf(data)
+	if !v.IsValid() {
+		return ""
+	}
+	if v.Kind() == reflect.Ptr && v.IsNil() {
+		return ""
+	}
+
+	// Single value implementing Texter
+	if texter, ok := data.(Texter); ok {
+		return texter.Text()
+	}
+
+	// Slice/array: render each element that implements Texter
+	if v.Kind() != reflect.Slice && v.Kind() != reflect.Array {
+		return ""
+	}
+
+	parts := make([]string, 0, v.Len())
+	for i := 0; i < v.Len(); i++ {
+		item := v.Index(i)
+		if !item.IsValid() || !item.CanInterface() {
+			continue
+		}
+		if text := renderDataText(item.Interface()); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// IsColorEnabled checks if terminal color output should be enabled.
 // Returns false if NO_COLOR is set, TERM=dumb, or stdout is not a TTY.
-func isColorEnabled() bool {
+func IsColorEnabled() bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return false
 	}

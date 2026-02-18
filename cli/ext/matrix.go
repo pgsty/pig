@@ -2,6 +2,8 @@ package ext
 
 import (
 	"fmt"
+	"pig/internal/config"
+	"pig/internal/output"
 	"sort"
 	"strconv"
 	"strings"
@@ -343,6 +345,9 @@ func formatCell(entry *PkgMatrixEntry, width int) string {
 	pad := width - len(text)
 	left, right := pad/2, pad-pad/2
 	color := entryColor(entry)
+	if color == "" {
+		return strings.Repeat(" ", left) + text + strings.Repeat(" ", right)
+	}
 	return strings.Repeat(" ", left) + color + text + colorReset + strings.Repeat(" ", right)
 }
 
@@ -350,6 +355,9 @@ func formatCell(entry *PkgMatrixEntry, width int) string {
 // Colors: Green=PIGSTY, Blue=PGDG, Yellow=BREAK, Red=THROW, Magenta=FORK, Gray=HIDE
 func entryColor(entry *PkgMatrixEntry) string {
 	if entry == nil {
+		return ""
+	}
+	if !matrixColorEnabled() {
 		return ""
 	}
 	switch entry.State {
@@ -370,6 +378,13 @@ func entryColor(entry *PkgMatrixEntry) string {
 		}
 	}
 	return ""
+}
+
+func matrixColorEnabled() bool {
+	if config.IsStructuredOutput() {
+		return false
+	}
+	return output.IsColorEnabled()
 }
 
 // tableBorders creates Unicode table border strings
@@ -459,6 +474,9 @@ func (m PkgMatrix) Summary() string {
 
 // colorLegend returns the color legend string
 func colorLegend() string {
+	if !matrixColorEnabled() {
+		return "(green = PIGSTY, blue = PGDG)"
+	}
 	return fmt.Sprintf("(%s%s%s = PIGSTY, %s%s%s = PGDG)",
 		colorGreen, "green", colorReset, colorBlue, "blue", colorReset)
 }
@@ -520,7 +538,12 @@ func tabulateGlobalMatrix(packages []*Extension, osCode, arch string, pgVersions
 				if ver == "" {
 					ver = "-"
 				}
-				sb.WriteString(entryColor(entry) + fmt.Sprintf("%-*s", verWidths[i], ver) + colorReset)
+				color := entryColor(entry)
+				if color == "" {
+					sb.WriteString(fmt.Sprintf("%-*s", verWidths[i], ver))
+				} else {
+					sb.WriteString(color + fmt.Sprintf("%-*s", verWidths[i], ver) + colorReset)
+				}
 			}
 		}
 		sb.WriteString("\n")

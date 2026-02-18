@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+type nilSafeMockTexter struct {
+	value string
+}
+
+func (m *nilSafeMockTexter) Text() string {
+	if m == nil {
+		return ""
+	}
+	return m.value
+}
+
 func TestResult_Text(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -51,6 +62,42 @@ func TestResult_Text(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRenderDataText(t *testing.T) {
+	t.Run("single texter", func(t *testing.T) {
+		got := renderDataText(&mockTexter{text: "one"})
+		if got != "one" {
+			t.Fatalf("renderDataText(single) = %q, want %q", got, "one")
+		}
+	})
+
+	t.Run("slice of texters", func(t *testing.T) {
+		data := []*mockTexter{{text: "one"}, {text: "two"}}
+		got := renderDataText(data)
+		if got != "one\n\ntwo" {
+			t.Fatalf("renderDataText(slice) = %q, want %q", got, "one\n\ntwo")
+		}
+	})
+
+	t.Run("slice of pointers with nil item", func(t *testing.T) {
+		data := []*nilSafeMockTexter{
+			{value: "one"},
+			nil,
+			{value: "two"},
+		}
+		got := renderDataText(data)
+		if got != "one\n\ntwo" {
+			t.Fatalf("renderDataText(slice ptr) = %q, want %q", got, "one\n\ntwo")
+		}
+	})
+
+	t.Run("non texter value", func(t *testing.T) {
+		got := renderDataText([]string{"a", "b"})
+		if got != "" {
+			t.Fatalf("renderDataText(non-texter) = %q, want empty", got)
+		}
+	})
 }
 
 func TestResult_Text_EmptyFields(t *testing.T) {
@@ -173,21 +220,21 @@ func TestResult_ColorText_DumbTerm(t *testing.T) {
 }
 
 func TestIsColorEnabled(t *testing.T) {
-	// Note: isColorEnabled() also checks for TTY, which will be false in tests.
+	// Note: IsColorEnabled() also checks for TTY, which will be false in tests.
 	// We test the environment variable logic here.
 
 	t.Run("NO_COLOR set disables color", func(t *testing.T) {
 		t.Setenv("NO_COLOR", "1")
 		t.Setenv("TERM", "xterm-256color")
-		if isColorEnabled() {
-			t.Error("isColorEnabled() should return false when NO_COLOR is set")
+		if IsColorEnabled() {
+			t.Error("IsColorEnabled() should return false when NO_COLOR is set")
 		}
 	})
 
 	t.Run("TERM dumb disables color", func(t *testing.T) {
 		t.Setenv("TERM", "dumb")
-		if isColorEnabled() {
-			t.Error("isColorEnabled() should return false when TERM=dumb")
+		if IsColorEnabled() {
+			t.Error("IsColorEnabled() should return false when TERM=dumb")
 		}
 	})
 

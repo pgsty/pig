@@ -4041,6 +4041,66 @@ func TestExtensionAvailDataTextGlobalFallback(t *testing.T) {
 	}
 }
 
+func TestExtensionAvailDataTextGlobalUnsupportedOSShowsFallback(t *testing.T) {
+	origCatalog := Catalog
+	defer func() { Catalog = origCatalog }()
+
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{{Name: "postgis", Pkg: "postgis", Lead: true}},
+		ExtNameMap: map[string]*Extension{},
+		ExtPkgMap:  map[string]*Extension{},
+	}
+
+	d := &ExtensionAvailData{
+		OSCode:       "a25",
+		Arch:         "arm64",
+		PackageCount: 0,
+		Packages:     []*PackageAvailability{},
+	}
+	text := d.Text()
+	if !strings.Contains(text, "Current OS 'a25' is not a supported Linux distribution") {
+		t.Fatalf("expected unsupported OS note, got: %s", text)
+	}
+	if !strings.Contains(text, "Showing matrix for el9.x86_64 as example") {
+		t.Fatalf("expected fallback to el9.x86_64 matrix for unsupported OS, got: %s", text)
+	}
+}
+
+func TestExtensionAvailDataTextGlobalNoANSIInPlainTextMode(t *testing.T) {
+	origCatalog := Catalog
+	origFormat := config.OutputFormat
+	defer func() {
+		Catalog = origCatalog
+		config.OutputFormat = origFormat
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	ext := &Extension{
+		Name:  "postgis",
+		Pkg:   "postgis",
+		Lead:  true,
+		Extra: map[string]interface{}{"matrix": []interface{}{"el9i:17:A:f:1:P:3.5.0"}},
+	}
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{ext},
+		ExtNameMap: map[string]*Extension{"postgis": ext},
+		ExtPkgMap:  map[string]*Extension{"postgis": ext},
+	}
+
+	d := &ExtensionAvailData{
+		OSCode:       "el9",
+		Arch:         "amd64",
+		PackageCount: 1,
+		Packages: []*PackageAvailability{
+			{Pkg: "postgis", Versions: map[string]string{"17": "3.5.0"}},
+		},
+	}
+	text := d.Text()
+	if strings.Contains(text, "\x1b[") {
+		t.Fatalf("plain text output should not contain ANSI escape codes, got: %q", text)
+	}
+}
+
 func TestExtensionAddDataTextNil(t *testing.T) {
 	var d *ExtensionAddData
 	if d.Text() != "" {
