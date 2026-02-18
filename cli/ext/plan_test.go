@@ -314,6 +314,22 @@ func TestBuildAddPlan_CatalogNil(t *testing.T) {
 	}
 }
 
+func TestBuildAddPlan_EmptyNames(t *testing.T) {
+	cleanup := setupTestCatalog()
+	defer cleanup()
+
+	plan := BuildAddPlan(17, []string{}, false)
+	if plan == nil {
+		t.Fatal("BuildAddPlan returned nil")
+	}
+	if !strings.Contains(plan.Expected, "no extensions specified") {
+		t.Fatalf("expected empty-name error in Expected, got %q", plan.Expected)
+	}
+	if len(plan.Actions) != 0 {
+		t.Fatalf("expected no actions for empty names, got %d", len(plan.Actions))
+	}
+}
+
 // ============================================================================
 // BuildRmPlan Tests
 // ============================================================================
@@ -402,6 +418,22 @@ func TestBuildRmPlan_CatalogNil(t *testing.T) {
 
 	if !strings.Contains(plan.Expected, "catalog not initialized") {
 		t.Errorf("Expected should mention catalog error, got %q", plan.Expected)
+	}
+}
+
+func TestBuildRmPlan_EmptyNames(t *testing.T) {
+	cleanup := setupTestCatalog()
+	defer cleanup()
+
+	plan := BuildRmPlan(17, []string{}, false)
+	if plan == nil {
+		t.Fatal("BuildRmPlan returned nil")
+	}
+	if !strings.Contains(plan.Expected, "no extensions specified") {
+		t.Fatalf("expected empty-name error in Expected, got %q", plan.Expected)
+	}
+	if len(plan.Actions) != 0 {
+		t.Fatalf("expected no actions for empty names, got %d", len(plan.Actions))
 	}
 }
 

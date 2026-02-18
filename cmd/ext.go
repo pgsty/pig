@@ -102,6 +102,7 @@ var extStatusCmd = &cobra.Command{
 	Use:         "status",
 	Short:       "show installed extension on active pg",
 	Aliases:     []string{"s", "st", "stat"},
+	Args:        cobra.NoArgs,
 	Annotations: ancsAnn("pig ext status", "query", "volatile", "safe", true, "safe", "none", "current", 200),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if _, err := extProbeVersion(); err != nil {
@@ -116,6 +117,7 @@ var extScanCmd = &cobra.Command{
 	Use:         "scan",
 	Short:       "scan installed extensions for active pg",
 	Aliases:     []string{"sc"},
+	Args:        cobra.NoArgs,
 	Annotations: ancsAnn("pig ext scan", "query", "volatile", "safe", true, "safe", "none", "current", 500),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if _, err := extProbeVersion(); err != nil {
@@ -135,7 +137,7 @@ var extAddCmd = &cobra.Command{
 Description:
   pig ext add     pg_duckdb                  # install one extension
   pig ext add     postgis timescaledb        # install multiple extensions
-  pig ext add     pgvector pgvectorscale     # other alias: add, ins, i, a
+  pig ext add     pgvector pgvectorscale     # other alias: add, ins, install, a
   pig ext ins     pg_search -y               # auto confirm installation
   pig ext install pgsql                      # install the latest version of postgresql kernel
   pig ext a pg17                             # install postgresql 17 kernel packages
@@ -156,6 +158,9 @@ Description:
 
 		// Plan mode: show plan without executing
 		if extAddPlan {
+			if len(args) == 0 {
+				return handleAuxResult(output.Fail(output.CodeExtensionInvalidArgs, "no extensions specified"))
+			}
 			plan := ext.BuildAddPlan(pgVer, args, extYes)
 			return handlePlanOutput(plan)
 		}
@@ -178,6 +183,9 @@ var extRmCmd = &cobra.Command{
 
 		// Plan mode: show plan without executing
 		if extRmPlan {
+			if len(args) == 0 {
+				return handleAuxResult(output.Fail(output.CodeExtensionInvalidArgs, "no extensions specified"))
+			}
 			plan := ext.BuildRmPlan(pgVer, args, extYes)
 			return handlePlanOutput(plan)
 		}
@@ -263,6 +271,7 @@ var extReloadCmd = &cobra.Command{
 	Short:        "reload extension catalog to the latest version",
 	SilenceUsage: true,
 	Aliases:      []string{"rl"},
+	Args:         cobra.NoArgs,
 	Annotations:  ancsAnn("pig ext reload", "action", "volatile", "safe", true, "safe", "none", "current", 5000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := ext.ReloadCatalogResult()

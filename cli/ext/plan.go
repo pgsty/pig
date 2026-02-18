@@ -91,6 +91,15 @@ func BuildAddPlan(pgVer int, names []string, yes bool) *output.Plan {
 			Risks:    []string{"Extension catalog not loaded, cannot resolve packages"},
 		}
 	}
+	if len(names) == 0 {
+		return &output.Plan{
+			Command:  buildAddCommand(names),
+			Actions:  []output.Action{},
+			Affects:  []output.Resource{},
+			Expected: "error: no extensions specified",
+			Risks:    []string{"No extension names were provided"},
+		}
+	}
 
 	if pgVer == 0 {
 		pgVer = PostgresLatestMajorVersion
@@ -273,6 +282,15 @@ func BuildRmPlan(pgVer int, names []string, yes bool) *output.Plan {
 			Affects:  []output.Resource{},
 			Expected: "error: extension catalog not initialized",
 			Risks:    []string{"Extension catalog not loaded, cannot resolve packages"},
+		}
+	}
+	if len(names) == 0 {
+		return &output.Plan{
+			Command:  buildRmCommand(names),
+			Actions:  []output.Action{},
+			Affects:  []output.Resource{},
+			Expected: "error: no extensions specified",
+			Risks:    []string{"No extension names were provided"},
 		}
 	}
 
