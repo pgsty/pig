@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"pig/internal/config"
+	"pig/internal/utils"
 	"regexp"
 
 	"github.com/sirupsen/logrus"
@@ -101,7 +102,7 @@ func shouldSkipOrRemoveExistingFile(targetPath string, expectedChecksum string) 
 }
 
 func downloadWithMD5(url, targetPath, filename string) (checksum string, sizeMiB float64, err error) {
-	resp, err := http.Get(url)
+	resp, err := utils.DefaultClient().Get(url)
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to download file: %w", err)
 	}

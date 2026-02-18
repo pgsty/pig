@@ -40,7 +40,7 @@ func FetchFirstValid(ctx context.Context, urls []string, validate func([]byte) e
 	defer cancel()
 
 	results := make(chan mirrorFetchResult, len(urls))
-	client := defaultClient()
+	client := DefaultClient()
 	for _, u := range urls {
 		u := u
 		go func() {

@@ -7,7 +7,7 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"net/http"
+	"pig/internal/utils"
 	"strings"
 
 	"pig/cli/postgres"
@@ -69,7 +69,7 @@ var peGetCmd = &cobra.Command{
 		}, func() error {
 			url := getExporterURL("/metrics")
 			postgres.PrintHint([]string{"curl", url})
-			resp, err := http.Get(url)
+			resp, err := utils.DefaultClient().Get(url)
 			if err != nil {
 				return fmt.Errorf("failed to fetch metrics: %w", err)
 			}
@@ -102,7 +102,7 @@ var peListCmd = &cobra.Command{
 			"port": pePort,
 		}, func() error {
 			url := getExporterURL("/metrics")
-			resp, err := http.Get(url)
+			resp, err := utils.DefaultClient().Get(url)
 			if err != nil {
 				return fmt.Errorf("failed to fetch metrics: %w", err)
 			}
@@ -144,7 +144,7 @@ var peReloadCmd = &cobra.Command{
 		}, func() error {
 			url := getExporterURL("/reload")
 			postgres.PrintHint([]string{"curl", url})
-			resp, err := http.Get(url)
+			resp, err := utils.DefaultClient().Get(url)
 			if err != nil {
 				return fmt.Errorf("failed to reload: %w", err)
 			}
@@ -168,7 +168,7 @@ var peStatCmd = &cobra.Command{
 		}, func() error {
 			url := getExporterURL("/stat")
 			postgres.PrintHint([]string{"curl", url})
-			resp, err := http.Get(url)
+			resp, err := utils.DefaultClient().Get(url)
 			if err != nil {
 				return fmt.Errorf("failed to get stats: %w", err)
 			}

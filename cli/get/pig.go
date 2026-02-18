@@ -3,7 +3,6 @@ package get
 import (
 	"fmt"
 	"io"
-	"net/http"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"regexp"
@@ -103,7 +102,7 @@ func getLatestPigVersion(region string) (string, error) {
 	if region == "china" {
 		latestURL = config.RepoPigstyCC + "/pkg/pig/latest"
 	}
-	resp, err := http.Get(latestURL)
+	resp, err := utils.DefaultClient().Get(latestURL)
 	if err != nil {
 		return "", err
 	}

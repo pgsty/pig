@@ -3,7 +3,6 @@ package build
 import (
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"pig/internal/config"
 	"pig/internal/utils"
@@ -23,7 +22,7 @@ func SetupRust(force bool) error {
 	logrus.Info("Installing Rust...")
 
 	// Download rustup script
-	resp, err := http.Get("https://sh.rustup.rs")
+	resp, err := utils.DefaultClient().Get("https://sh.rustup.rs")
 	if err != nil {
 		return fmt.Errorf("failed to download rustup script: %v", err)
 	}

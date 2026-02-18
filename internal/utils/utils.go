@@ -265,7 +265,7 @@ func PadHeader(str string, length int) string {
 }
 
 func DownloadFile(srcURL, dstPath string) error {
-	client := defaultClient()
+	client := DefaultClient()
 
 	// Best-effort remote size probe via HEAD.
 	// HEAD is an optimization: it should not make downloads fail, and we must close the response

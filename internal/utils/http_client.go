@@ -44,7 +44,13 @@ func newHTTPClient(connectTimeout time.Duration) *http.Client {
 	return &http.Client{Transport: tr}
 }
 
-func defaultClient() *http.Client {
+// DefaultClient returns an *http.Client with sensible timeouts for connect,
+// TLS handshake, and response headers (30 s each). Body transfer is NOT
+// time-limited so that large downloads can proceed at any speed.
+//
+// All code that makes HTTP requests SHOULD use this client instead of
+// http.DefaultClient (which has no timeouts at all).
+func DefaultClient() *http.Client {
 	return defaultHTTPClient
 }
 
