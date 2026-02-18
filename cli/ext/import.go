@@ -114,47 +114,13 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 		return result
 	}
 
-	// Ensure downloads are placed into the target repo directory.
-	cwd, err := os.Getwd()
-	if err != nil {
-		result := output.Fail(output.CodeExtensionImportFailed, fmt.Sprintf("failed to get current working directory: %v", err))
-		result.Data = &ImportResultData{
-			PgVersion:  pgVer,
-			OSCode:     config.OSCode,
-			Arch:       config.OSArch,
-			RepoDir:    importPath,
-			Requested:  names,
-			Packages:   pkgNames,
-			PkgCount:   len(pkgNames),
-			Failed:     failed,
-			DurationMs: time.Since(startTime).Milliseconds(),
-		}
-		return result
-	}
-	if err := os.Chdir(importPath); err != nil {
-		result := output.Fail(output.CodeExtensionImportFailed, fmt.Sprintf("failed to chdir to import directory %s: %v", importPath, err))
-		result.Data = &ImportResultData{
-			PgVersion:  pgVer,
-			OSCode:     config.OSCode,
-			Arch:       config.OSArch,
-			RepoDir:    importPath,
-			Requested:  names,
-			Packages:   pkgNames,
-			PkgCount:   len(pkgNames),
-			Failed:     failed,
-			DurationMs: time.Since(startTime).Milliseconds(),
-		}
-		return result
-	}
-	defer func() { _ = os.Chdir(cwd) }()
-
 	var downloaded []string
 	var downloadErr error
 	switch config.OSType {
 	case config.DistroEL:
-		downloaded, downloadErr = DownloadRPM(pkgNames)
+		downloaded, downloadErr = DownloadRPM(pkgNames, importPath)
 	case config.DistroDEB:
-		downloaded, downloadErr = DownloadDEB(pkgNames)
+		downloaded, downloadErr = DownloadDEB(pkgNames, importPath)
 	default:
 		downloadErr = fmt.Errorf("unsupported package manager: %s on %s %s", config.OSType, config.OSVendor, config.OSCode)
 	}
@@ -195,7 +161,7 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 }
 
 // DownloadRPM downloads RPM packages with repotrack
-func DownloadRPM(pkgNames []string) ([]string, error) {
+func DownloadRPM(pkgNames []string, workDir string) ([]string, error) {
 	osarch := config.OSArch
 	switch osarch {
 	case "x86_64", "amd64":
@@ -207,7 +173,7 @@ func DownloadRPM(pkgNames []string) ([]string, error) {
 	downloadCmds := []string{"repotrack", "--arch", osarch}
 	downloadCmds = append(downloadCmds, pkgNames...)
 	logrus.Infof("download commands: %s", strings.Join(downloadCmds, " "))
-	if err := utils.SudoCommand(downloadCmds); err != nil {
+	if err := sudoCommandInDir(downloadCmds, workDir); err != nil {
 		return nil, fmt.Errorf("failed to download packages: %w", err)
 	} else {
 		logrus.Infof("downloaded %s successfully", strings.Join(pkgNames, " "))
@@ -217,7 +183,7 @@ func DownloadRPM(pkgNames []string) ([]string, error) {
 }
 
 // DownloadDEB downloads DEB packages with apt-get and apt-cache
-func DownloadDEB(pkgNames []string) ([]string, error) {
+func DownloadDEB(pkgNames []string, workDir string) ([]string, error) {
 
 	// Step 1: Get dependencies one by one
 	dependencySet := make(map[string][]string)
@@ -251,7 +217,7 @@ func DownloadDEB(pkgNames []string) ([]string, error) {
 	downloadCmds = append(downloadCmds, candidates...)
 
 	logrus.Infof("download commands: %s", strings.Join(downloadCmds, " "))
-	if err := utils.SudoCommand(downloadCmds); err != nil {
+	if err := sudoCommandInDir(downloadCmds, workDir); err != nil {
 		return nil, fmt.Errorf("failed to download packages: %w", err)
 	} else {
 		logrus.Infof("downloaded %s successfully", strings.Join(candidates, " "))
@@ -317,6 +283,49 @@ func parseAptDependsOutput(out string) []string {
 		}
 	}
 	return deps
+}
+
+func runCommandInDir(args []string, workDir string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no command specified")
+	}
+	cmd := exec.Command(args[0], args[1:]...)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	cmd.Stdin = os.Stdin
+	if config.IsStructuredOutput() {
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("command failed: %w", err)
+	}
+	return nil
+}
+
+func sudoCommandInDir(args []string, workDir string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no command specified")
+	}
+
+	if nosudoEnv := os.Getenv("PIG_NO_SUDO"); nosudoEnv == "1" || nosudoEnv == "true" {
+		logrus.Debugf("PIG_NO_SUDO set, executing without sudo in %s: %v", workDir, args)
+		return runCommandInDir(args, workDir)
+	}
+
+	finalArgs := args
+	if isRoot := os.Geteuid() == 0 || config.CurrentUser == "root"; !isRoot {
+		if _, err := exec.LookPath("sudo"); err == nil {
+			finalArgs = append([]string{"sudo"}, args...)
+		} else {
+			logrus.Warnf("sudo command not available, trying to execute directly")
+		}
+	}
+	return runCommandInDir(finalArgs, workDir)
 }
 
 // validateTool checks if the required tools are installed
