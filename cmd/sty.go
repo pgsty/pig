@@ -33,10 +33,44 @@ var (
 	pigstyConfNonInteractive bool
 	pigstyConfPort           string
 	pigstyConfGenerate       bool
+	pigstyConfNative         bool
 
 	pigstyDownloadDir string
 	pigstyVersion     string
 )
+
+const styConfigureLong = `Configure pigsty with native or legacy path
+
+pig sty conf (legacy default) | configure (native default)
+  [-c|--conf <name>]      # config template: [meta|rich|slim|full|supabase|...]
+  [--ip <ip>]             # primary IP address (skip with -s)
+  [-v|--version <pgver>]  # postgres major version: [18|17|16|15|14|13]
+  [-r|--region <region>]  # upstream repo region: [default|china|europe]
+  [-O|--output-file <file>]    # output config file path (default: pigsty.yml)
+  [-s|--skip]             # skip IP address probing
+  [-p|--port <port>]      # specify SSH port (for ssh accessibility check)
+  [-x|--proxy]            # write proxy env from environment
+  [-n|--non-interactive]  # non-interactive mode
+
+  [-g|--generate]         # generate random default passwords (RECOMMENDED!)
+
+Check https://pigsty.io/docs/setup/install/#configure for details
+`
+
+const styConfigureExample = `
+  pig sty conf                       # legacy shell configure path
+  pig sty conf --native              # native Go configure path via old command
+  pig sty configure                  # native Go configure path (new command)
+  pig sty conf -g                    # generate with random passwords (RECOMMENDED!)
+  pig sty conf -c rich               # use conf/rich.yml template (with more extensions)
+  pig sty conf -c ha/full            # use conf/ha/full.yml 4-node ha template
+  pig sty conf -c slim               # use conf/slim.yml template (minimal install)
+  pig sty conf -c supabase           # use conf/supabase.yml template (self-hosting)
+  pig sty conf -v 17 -c rich         # use conf/rich.yml template with PostgreSQL 17
+  pig sty conf -r china -s           # use china region mirrors, skip IP probe
+  pig sty conf -x                    # write proxy env from environment to config
+  pig sty conf -c full -g -O ha.yml  # full HA template with random passwords to ha.yml
+`
 
 // styCmd represents the pigsty management command
 var styCmd = &cobra.Command{
@@ -222,99 +256,139 @@ var pigstyConfCmd = &cobra.Command{
 	Use:         "conf",
 	Short:       "Configure Pigsty",
 	Annotations: ancsAnn("pig sty conf", "action", "volatile", "safe", true, "medium", "recommended", "root", 10000),
-	Aliases:     []string{"c", "configure"},
-	Long: `Configure pigsty with ./configure
-
-pig sty conf
-  [-c|--conf <name>]      # config template: [meta|rich|slim|full|supabase|...]
-  [--ip <ip>]             # primary IP address (skip with -s)
-  [-v|--version <pgver>]  # postgres major version: [18|17|16|15|14|13]
-  [-r|--region <region>]  # upstream repo region: [default|china|europe]
-  [-O|--output-file <file>]    # output config file path (default: pigsty.yml)
-  [-s|--skip]             # skip IP address probing
-  [-p|--port <port>]      # specify SSH port (for ssh accessibility check)
-  [-x|--proxy]            # write proxy env from environment
-  [-n|--non-interactive]  # non-interactive mode
-  
-  [-g|--generate]         # generate random default passwords (RECOMMENDED!)
-
-Check https://pigsty.io/docs/setup/install/#configure for details
-`,
-	Example: `
-  pig sty conf                       # use default meta.yml config
-  pig sty conf -g                    # generate with random passwords (RECOMMENDED!)
-  pig sty conf -c rich               # use conf/rich.yml template (with more extensions)
-  pig sty conf -c ha/full            # use conf/ha/full.yml 4-node ha template
-  pig sty conf -c slim               # use conf/slim.yml template (minimal install)
-  pig sty conf -c supabase           # use conf/supabase.yml template (self-hosting)
-  pig sty conf -v 17 -c rich         # use conf/rich.yml template with PostgreSQL 17
-  pig sty conf -r china -s           # use china region mirrors, skip IP probe
-  pig sty conf -x                    # write proxy env from environment to config
-  pig sty conf -c full -g -O ha.yml  # full HA template with random passwords to ha.yml
-`,
+	Aliases:     []string{"c"},
+	Long:        styConfigureLong,
+	Example:     styConfigureExample,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModuleSty, "pig sty conf", args, map[string]interface{}{
-			"conf":            pigstyConfName,
-			"ip":              pigstyConfIP,
-			"version":         pigstyConfVer,
-			"region":          pigstyConfRegion,
-			"output_file":     pigstyConfOutput,
-			"skip":            pigstyConfSkip,
-			"proxy":           pigstyConfProxy,
-			"non_interactive": pigstyConfNonInteractive,
-			"port":            pigstyConfPort,
-			"generate":        pigstyConfGenerate,
-		}, func() error {
-			if config.PigstyHome == "" {
-				logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
-				return fmt.Errorf("pigsty home & inventory not found")
-			}
-			configurePath := filepath.Join(config.PigstyHome, "configure")
-			if _, err := os.Stat(configurePath); os.IsNotExist(err) {
-				logrus.Errorf("configure script not found: %s", configurePath)
-				return fmt.Errorf("configure script not found: %s", configurePath)
-			}
-
-			cmdArgs := []string{configurePath}
-			if pigstyConfName != "" {
-				cmdArgs = append(cmdArgs, "-c", pigstyConfName)
-			}
-			if pigstyConfIP != "" {
-				cmdArgs = append(cmdArgs, "-i", pigstyConfIP)
-			}
-			if pigstyConfVer != "" {
-				cmdArgs = append(cmdArgs, "-v", pigstyConfVer)
-			}
-			if pigstyConfRegion != "" {
-				cmdArgs = append(cmdArgs, "-r", pigstyConfRegion)
-			}
-			if pigstyConfOutput != "" {
-				cmdArgs = append(cmdArgs, "-o", pigstyConfOutput)
-			}
-			if pigstyConfSkip {
-				cmdArgs = append(cmdArgs, "-s")
-			}
-			if pigstyConfProxy {
-				cmdArgs = append(cmdArgs, "-x")
-			}
-			if pigstyConfNonInteractive {
-				cmdArgs = append(cmdArgs, "-n")
-			}
-			if pigstyConfPort != "" {
-				cmdArgs = append(cmdArgs, "-p", pigstyConfPort)
-			}
-			if pigstyConfGenerate {
-				cmdArgs = append(cmdArgs, "-g")
-			}
-			cmdArgs = append(cmdArgs, args...)
-			if err := os.Chdir(config.PigstyHome); err != nil {
-				return fmt.Errorf("failed to change directory to %s: %w", config.PigstyHome, err)
-			}
-
-			logrus.Infof("configure with: %s", strings.Join(cmdArgs, " "))
-			return utils.ShellCommand(cmdArgs)
+		if pigstyConfNative {
+			return runPigstyConfigureNative("pig sty conf", args)
+		}
+		return runLegacyStructured(legacyModuleSty, "pig sty conf", args, styConfigureParams(), func() error {
+			return runPigstyConfigureLegacy(args)
 		})
 	},
+}
+
+// pigstyConfigureCmd is an explicit configure command.
+// It has the same behavior as `pig sty conf`, but is no longer only an alias.
+var pigstyConfigureCmd = &cobra.Command{
+	Use:         "configure",
+	Short:       "Configure Pigsty (same as conf)",
+	Annotations: ancsAnn("pig sty configure", "action", "volatile", "safe", true, "medium", "recommended", "root", 10000),
+	Long:        styConfigureLong,
+	Example:     styConfigureExample,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPigstyConfigureNative("pig sty configure", args)
+	},
+}
+
+func styConfigureParams() map[string]interface{} {
+	return map[string]interface{}{
+		"conf":            pigstyConfName,
+		"ip":              pigstyConfIP,
+		"version":         pigstyConfVer,
+		"region":          pigstyConfRegion,
+		"output_file":     pigstyConfOutput,
+		"skip":            pigstyConfSkip,
+		"proxy":           pigstyConfProxy,
+		"non_interactive": pigstyConfNonInteractive,
+		"port":            pigstyConfPort,
+		"generate":        pigstyConfGenerate,
+		"native":          pigstyConfNative,
+	}
+}
+
+func runPigstyConfigureNative(command string, args []string) error {
+	if len(args) > 0 {
+		return structuredParamError(
+			legacyModuleSty, command, "invalid arguments",
+			fmt.Sprintf("unexpected arguments: %s", strings.Join(args, " ")),
+			args, styConfigureParams(),
+		)
+	}
+	opts := sty.ConfigureOptions{
+		PigstyHome:     config.PigstyHome,
+		Mode:           pigstyConfName,
+		PrimaryIP:      pigstyConfIP,
+		PGVersion:      pigstyConfVer,
+		Region:         pigstyConfRegion,
+		SSHPort:        pigstyConfPort,
+		OutputFile:     pigstyConfOutput,
+		Skip:           pigstyConfSkip,
+		UseProxy:       pigstyConfProxy,
+		NonInteractive: pigstyConfNonInteractive,
+		Generate:       pigstyConfGenerate,
+	}
+	return handleAuxResult(sty.ConfigureNative(opts))
+}
+
+func runPigstyConfigureLegacy(args []string) error {
+	if config.PigstyHome == "" {
+		logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
+		return fmt.Errorf("pigsty home & inventory not found")
+	}
+
+	configurePath := filepath.Join(config.PigstyHome, "configure")
+	if _, err := os.Stat(configurePath); os.IsNotExist(err) {
+		logrus.Errorf("configure script not found: %s", configurePath)
+		return fmt.Errorf("configure script not found: %s", configurePath)
+	}
+
+	cmdArgs := []string{configurePath}
+	if pigstyConfName != "" {
+		cmdArgs = append(cmdArgs, "-c", pigstyConfName)
+	}
+	if pigstyConfIP != "" {
+		cmdArgs = append(cmdArgs, "-i", pigstyConfIP)
+	}
+	if pigstyConfVer != "" {
+		cmdArgs = append(cmdArgs, "-v", pigstyConfVer)
+	}
+	if pigstyConfRegion != "" {
+		cmdArgs = append(cmdArgs, "-r", pigstyConfRegion)
+	}
+	if pigstyConfOutput != "" {
+		cmdArgs = append(cmdArgs, "-o", pigstyConfOutput)
+	}
+	if pigstyConfSkip {
+		cmdArgs = append(cmdArgs, "-s")
+	}
+	if pigstyConfProxy {
+		cmdArgs = append(cmdArgs, "-x")
+	}
+	if pigstyConfNonInteractive {
+		cmdArgs = append(cmdArgs, "-n")
+	}
+	if pigstyConfPort != "" {
+		cmdArgs = append(cmdArgs, "-p", pigstyConfPort)
+	}
+	if pigstyConfGenerate {
+		cmdArgs = append(cmdArgs, "-g")
+	}
+	cmdArgs = append(cmdArgs, args...)
+
+	if err := os.Chdir(config.PigstyHome); err != nil {
+		return fmt.Errorf("failed to change directory to %s: %w", config.PigstyHome, err)
+	}
+
+	logrus.Infof("configure with: %s", strings.Join(cmdArgs, " "))
+	return utils.ShellCommand(cmdArgs)
+}
+
+func addStyConfigureFlags(cmd *cobra.Command) {
+	if cmd == nil {
+		return
+	}
+	cmd.Flags().StringVarP(&pigstyConfName, "conf", "c", "", "config template name")
+	cmd.Flags().StringVar(&pigstyConfIP, "ip", "", "primary ip address")
+	cmd.Flags().StringVarP(&pigstyConfVer, "version", "v", "", "postgres major version")
+	cmd.Flags().StringVarP(&pigstyConfRegion, "region", "r", "", "upstream repo region")
+	cmd.Flags().StringVarP(&pigstyConfOutput, "output-file", "O", "", "output config file path")
+	cmd.Flags().BoolVarP(&pigstyConfSkip, "skip", "s", false, "skip ip probe")
+	cmd.Flags().BoolVarP(&pigstyConfProxy, "proxy", "x", false, "write proxy env from environment")
+	cmd.Flags().BoolVarP(&pigstyConfNonInteractive, "non-interactive", "n", false, "non-interactive mode")
+	cmd.Flags().StringVarP(&pigstyConfPort, "port", "p", "", "SSH port (only used if set)")
+	cmd.Flags().BoolVarP(&pigstyConfGenerate, "generate", "g", false, "generate random passwords")
 }
 
 var pigstyListcmd = &cobra.Command{
@@ -509,20 +583,13 @@ func init() {
 	pigstyBootCmd.Flags().StringVarP(&pigstyBootPackage, "path", "p", "", "offline package path")
 	pigstyBootCmd.Flags().BoolVarP(&pigstyBootKeep, "keep", "k", false, "keep existing repo")
 
-	pigstyConfCmd.Flags().StringVarP(&pigstyConfName, "conf", "c", "", "config template name")
-	pigstyConfCmd.Flags().StringVar(&pigstyConfIP, "ip", "", "primary ip address")
-	pigstyConfCmd.Flags().StringVarP(&pigstyConfVer, "version", "v", "", "postgres major version")
-	pigstyConfCmd.Flags().StringVarP(&pigstyConfRegion, "region", "r", "", "upstream repo region")
-	pigstyConfCmd.Flags().StringVarP(&pigstyConfOutput, "output-file", "O", "", "output config file path")
-	pigstyConfCmd.Flags().BoolVarP(&pigstyConfSkip, "skip", "s", false, "skip ip probe")
-	pigstyConfCmd.Flags().BoolVarP(&pigstyConfProxy, "proxy", "x", false, "write proxy env from environment")
-	pigstyConfCmd.Flags().BoolVarP(&pigstyConfNonInteractive, "non-interactive", "n", false, "non-interactive mode")
-	pigstyConfCmd.Flags().StringVarP(&pigstyConfPort, "port", "p", "", "SSH port (only used if set)")
-	pigstyConfCmd.Flags().BoolVarP(&pigstyConfGenerate, "generate", "g", false, "generate random passwords")
+	addStyConfigureFlags(pigstyConfCmd)
+	addStyConfigureFlags(pigstyConfigureCmd)
+	pigstyConfCmd.Flags().BoolVar(&pigstyConfNative, "native", false, "use native Go configure implementation")
 
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
 
-	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyDeployCmd, pigstyListcmd, pigstyGetcmd)
+	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyConfigureCmd, pigstyDeployCmd, pigstyListcmd, pigstyGetcmd)
 
 }

@@ -194,6 +194,14 @@ const (
 	CodeCtxCollectionFailed = MODULE_CTX + CAT_OPERATION + 1 // Information collection failed
 )
 
+// Pigsty module specific codes (MODULE_STY = 200000)
+const (
+	CodeStyConfigureInvalidArgs      = MODULE_STY + CAT_PARAM + 1     // Invalid configure arguments
+	CodeStyConfigureTemplateNotFound = MODULE_STY + CAT_RESOURCE + 1  // Configure template file not found
+	CodeStyConfigureFailed           = MODULE_STY + CAT_OPERATION + 1 // Configure generation failed
+	CodeStyConfigureWriteFailed      = MODULE_STY + CAT_OPERATION + 2 // Configure output write failed
+)
+
 // System module specific codes (MODULE_SYSTEM = 990000)
 const (
 	CodeSystemInvalidArgs   = MODULE_SYSTEM + CAT_PARAM + 1     // Invalid command/flag/arguments
