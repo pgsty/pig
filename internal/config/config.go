@@ -75,7 +75,7 @@ func IsStructuredOutput() bool {
 // BuildDate format follows RFC3339: YYYY-MM-DDTHH:MM:SSZ (e.g., 2025-01-10T10:20:00Z)
 // This matches the format used in Makefile: date -u +'%Y-%m-%dT%H:%M:%SZ'
 var (
-	PigVersion    = "1.1.1"
+	PigVersion    = "1.1.2"
 	PigstyVersion = "4.1.0"
 	Branch        = "main"        // Will be set during release build
 	Revision      = "HEAD"        // Will be set to commit hash during release build
