@@ -144,7 +144,10 @@ func resolvePackagePattern(pgVer int, rawName, baseName string, opts packageReso
 			}
 			return pkgName, ext.Name, ""
 		}
-		if pgPkg, ok := Catalog.AliasMap[baseName]; ok {
+		if pgPkg, matched, noPackage := resolveAliasPattern(pgVer, baseName); matched {
+			if noPackage {
+				return "", "", "no_package"
+			}
 			return pgPkg, rawName, ""
 		}
 		if !opts.FallbackToRaw {

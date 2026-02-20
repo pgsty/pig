@@ -81,7 +81,11 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 
 		if !ok {
 			// try to find in AliasMap (if it is not a postgres extension)
-			if pgPkg, ok := Catalog.AliasMap[name]; ok {
+			if pgPkg, matched, noPackage := resolveAliasPattern(pgVer, name); matched {
+				if noPackage {
+					failed = append(failed, name)
+					continue
+				}
 				pkgNames = append(pkgNames, ProcessPkgName(pgPkg, pgVer)...)
 				continue
 			} else {

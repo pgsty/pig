@@ -39,7 +39,11 @@ func resolvePlanExtensions(pgVer int, names []string, parseVersionSpec bool) ([]
 		}
 		if !ok {
 			// Try alias map.
-			if pgPkg, aliasOk := Catalog.AliasMap[lookupName]; aliasOk {
+			if pgPkg, aliasOk, noPackage := resolveAliasPattern(pgVer, lookupName); aliasOk {
+				if noPackage {
+					notFound = append(notFound, raw)
+					continue
+				}
 				pkgs := ProcessPkgName(pgPkg, pgVer)
 				for i, pkg := range pkgs {
 					pkgs[i] = applyPackageVersion(pkg, version)
