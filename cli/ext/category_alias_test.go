@@ -183,6 +183,25 @@ func TestResolveCategoryAliasFallbackRPM(t *testing.T) {
 	}
 }
 
+func TestResolveCategoryAliasNoFallbackOnKnownOS(t *testing.T) {
+	extRepoPGDG := newTestCategoryExt(100, "repo_ext", "repo_ext", "FUNC", nil)
+	extRepoPGDG.RpmPkg, extRepoPGDG.RpmRepo, extRepoPGDG.RpmPg = "repo_ext_$v", "PGDG", []string{"18"}
+
+	cleanup := withCategoryAliasTestEnv(t, config.DistroEL, "el9", "amd64", []*Extension{extRepoPGDG})
+	defer cleanup()
+
+	res := ResolveExtensionPackages(18, []string{"pg18-func"}, false)
+	if len(res.NotFound) != 0 {
+		t.Fatalf("expected no not_found entries, got %v", res.NotFound)
+	}
+	if !reflect.DeepEqual(res.NoPackage, []string{"pg18-func"}) {
+		t.Fatalf("expected no_package=[pg18-func], got %v", res.NoPackage)
+	}
+	if len(res.Packages) != 0 {
+		t.Fatalf("expected no packages, got %v", res.Packages)
+	}
+}
+
 func TestResolveCategoryAliasFallbackDEB(t *testing.T) {
 	extMatrix := newTestCategoryExt(100, "matrix_ext", "matrix_ext", "LANG", []string{"d13i:18:A:f:1:G:1.0"})
 	extMatrix.DebPkg, extMatrix.DebRepo, extMatrix.DebPg = "postgresql-$v-matrix-ext", "PGDG", []string{"18"}

@@ -65,15 +65,15 @@ func resolveCategoryAliasPackages(alias string, targetPgVer int) ([]string, bool
 		return nil, false
 	}
 
-	matrixOS, arch := resolveCategoryAliasMatrixTarget()
-	cacheKey := fmt.Sprintf("%p|%s|%s|%s|%d|%s", Catalog, config.OSType, matrixOS, arch, pgVer, category)
+	matrixOS, arch, allowMetadataFallback := resolveCategoryAliasMatrixTarget()
+	cacheKey := fmt.Sprintf("%p|%s|%s|%s|%s|%d|%s|%t", Catalog, config.OSType, config.OSCode, matrixOS, arch, pgVer, category, allowMetadataFallback)
 	if v, ok := categoryAliasCache.Load(cacheKey); ok {
 		if cached, ok := v.([]string); ok {
 			return cached, true
 		}
 	}
 
-	pkgList := buildCategoryPackageList(category, pgVer, matrixOS, arch)
+	pkgList := buildCategoryPackageList(category, pgVer, matrixOS, arch, allowMetadataFallback)
 	categoryAliasCache.Store(cacheKey, pkgList)
 	return pkgList, true
 }
@@ -115,26 +115,26 @@ func parseCategoryAlias(alias string, targetPgVer int) (category string, pgVer i
 	return category, ver, true
 }
 
-func resolveCategoryAliasMatrixTarget() (osCode, arch string) {
+func resolveCategoryAliasMatrixTarget() (osCode, arch string, allowMetadataFallback bool) {
 	arch = normalizeMatrixArch(config.OSArch)
 
 	switch config.OSType {
 	case config.DistroEL:
 		switch config.OSCode {
 		case "el8", "el9", "el10":
-			return config.OSCode, arch
+			return config.OSCode, arch, false
 		default:
-			return "el10", arch
+			return "el10", arch, true
 		}
 	case config.DistroDEB:
 		switch config.OSCode {
 		case "d12", "d13", "u22", "u24":
-			return config.OSCode, arch
+			return config.OSCode, arch, false
 		default:
-			return "d13", arch
+			return "d13", arch, true
 		}
 	default:
-		return config.OSCode, arch
+		return config.OSCode, arch, false
 	}
 }
 
@@ -149,7 +149,7 @@ func normalizeMatrixArch(arch string) string {
 	}
 }
 
-func buildCategoryPackageList(category string, pgVer int, matrixOS, matrixArch string) []string {
+func buildCategoryPackageList(category string, pgVer int, matrixOS, matrixArch string, allowMetadataFallback bool) []string {
 	if Catalog == nil {
 		return nil
 	}
@@ -165,7 +165,7 @@ func buildCategoryPackageList(category string, pgVer int, matrixOS, matrixArch s
 			continue
 		}
 
-		if !isCategoryExtensionInstallable(ext, pgVer, matrixOS, matrixArch) {
+		if !isCategoryExtensionInstallable(ext, pgVer, matrixOS, matrixArch, allowMetadataFallback) {
 			continue
 		}
 
@@ -186,7 +186,7 @@ func buildCategoryPackageList(category string, pgVer int, matrixOS, matrixArch s
 	return pkgs
 }
 
-func isCategoryExtensionInstallable(ext *Extension, pgVer int, matrixOS, matrixArch string) bool {
+func isCategoryExtensionInstallable(ext *Extension, pgVer int, matrixOS, matrixArch string, allowMetadataFallback bool) bool {
 	if ext == nil {
 		return false
 	}
@@ -196,6 +196,11 @@ func isCategoryExtensionInstallable(ext *Extension, pgVer int, matrixOS, matrixA
 		if entry := matrix.Get(matrixOS, matrixArch, pgVer); entry != nil {
 			return entry.State == PkgAvail && !entry.Hide && entry.Org == OrgPGDG
 		}
+		if !allowMetadataFallback {
+			return false
+		}
+	} else if !allowMetadataFallback {
+		return false
 	}
 
 	// Fallback for future/unsupported OS codes:
