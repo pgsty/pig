@@ -14,12 +14,16 @@ import (
 
 // SpecialSourceMapping defines special case mappings for non-extension packages
 var SpecialSourceMapping = map[string][]string{
-	"scws":       {"scws-1.2.3.tar.bz2"},
-	"openhalodb": {"openhalodb-1.0.tar.gz"},
-	"oriolepg":   {"oriolepg-17.16.tar.gz"},
-	"orioledb":   {"orioledb-beta14.tar.gz"},
-	"hunspell":   {"hunspell-1.0.tar.gz"},
-	"libfq":      {"libfq-0.6.1.tar.gz"},
+	"scws":        {"scws-1.2.3.tar.bz2"},
+	"openhalodb":  {"openhalodb-1.0.tar.gz"},
+	"cloudberry":  {"apache-cloudberry-2.0.0-incubating-src.tar.gz"},
+	"babelfishpg": {"babelfishpg-17.8-5.5.0.tar.gz"},
+	"babelfish":   {"babelfishpg-17.8-5.5.0.tar.gz"},
+	"antlr4":      {"antlr4-cpp-runtime-4.13.2-source.zip"},
+	"oriolepg":    {"oriolepg-17.16.tar.gz"},
+	"orioledb":    {"orioledb-beta14.tar.gz"},
+	"hunspell":    {"hunspell-1.0.tar.gz"},
+	"libfq":       {"libfq-0.6.1.tar.gz"},
 
 	// Multi-version PostgreSQL source packages
 	"libfepgutils": {
