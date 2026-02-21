@@ -219,7 +219,21 @@ func isCategoryExtensionVisible(ext *Extension, pgVer int, matrixOS, matrixArch 
 	matrix := ext.GetPkgMatrix()
 	if matrix != nil {
 		if entry := matrix.Get(matrixOS, matrixArch, pgVer); entry != nil {
-			return entry.State == PkgAvail && !entry.Hide
+			if entry.State != PkgAvail || entry.Hide {
+				return false
+			}
+			// Unknown/new distro fallback mode should include PGDG-only packages.
+			// For known distros we keep full parity with Pigsty conf.
+			if !allowMetadataFallback {
+				return true
+			}
+			if entry.Org == OrgPGDG {
+				return true
+			}
+			if entry.Org == OrgPigsty {
+				return false
+			}
+			// Unknown matrix org: fallback to repo metadata check below.
 		}
 		if !allowMetadataFallback {
 			return false

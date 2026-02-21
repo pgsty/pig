@@ -161,6 +161,9 @@ func TestResolveCategoryAliasFallbackRPM(t *testing.T) {
 	extMatrix := newTestCategoryExt(100, "matrix_ext", "matrix_ext", "FUNC", []string{"el10i:18:A:f:1:G:1.0"})
 	extMatrix.RpmPkg, extMatrix.RpmRepo, extMatrix.RpmPg = "matrix_ext_$v", "PGDG", []string{"18"}
 
+	extMatrixPigsty := newTestCategoryExt(105, "matrix_pigsty_ext", "matrix_pigsty_ext", "FUNC", []string{"el10i:18:A:f:1:P:1.0"})
+	extMatrixPigsty.RpmPkg, extMatrixPigsty.RpmRepo, extMatrixPigsty.RpmPg = "matrix_pigsty_ext_$v", "PIGSTY", []string{"18"}
+
 	extRepoPGDG := newTestCategoryExt(110, "repo_ext", "repo_ext", "FUNC", nil)
 	extRepoPGDG.RpmPkg, extRepoPGDG.RpmRepo, extRepoPGDG.RpmPg = "repo_ext_$v", "PGDG", []string{"18"}
 
@@ -168,7 +171,7 @@ func TestResolveCategoryAliasFallbackRPM(t *testing.T) {
 	extRepoPigsty.RpmPkg, extRepoPigsty.RpmRepo, extRepoPigsty.RpmPg = "pigsty_ext_$v", "PIGSTY", []string{"18"}
 
 	cleanup := withCategoryAliasTestEnv(t, config.DistroEL, "el11", "amd64", []*Extension{
-		extMatrix, extRepoPGDG, extRepoPigsty,
+		extMatrix, extMatrixPigsty, extRepoPGDG, extRepoPigsty,
 	})
 	defer cleanup()
 
@@ -180,6 +183,9 @@ func TestResolveCategoryAliasFallbackRPM(t *testing.T) {
 	want := []string{"matrix_ext_18", "repo_ext_18"}
 	if !reflect.DeepEqual(res.Packages, want) {
 		t.Fatalf("resolved packages mismatch\nwant: %v\ngot:  %v", want, res.Packages)
+	}
+	if slices.Contains(res.Packages, "matrix_pigsty_ext_18") {
+		t.Fatalf("matrix pigsty package should be filtered out in fallback mode: %v", res.Packages)
 	}
 }
 
@@ -206,6 +212,9 @@ func TestResolveCategoryAliasFallbackDEB(t *testing.T) {
 	extMatrix := newTestCategoryExt(100, "matrix_ext", "matrix_ext", "LANG", []string{"d13i:18:A:f:1:G:1.0"})
 	extMatrix.DebPkg, extMatrix.DebRepo, extMatrix.DebPg = "postgresql-$v-matrix-ext", "PGDG", []string{"18"}
 
+	extMatrixPigsty := newTestCategoryExt(105, "matrix_pigsty_ext", "matrix_pigsty_ext", "LANG", []string{"d13i:18:A:f:1:P:1.0"})
+	extMatrixPigsty.DebPkg, extMatrixPigsty.DebRepo, extMatrixPigsty.DebPg = "postgresql-$v-matrix-pigsty-ext", "PIGSTY", []string{"18"}
+
 	extRepoPGDG := newTestCategoryExt(110, "repo_ext", "repo_ext", "LANG", nil)
 	extRepoPGDG.DebPkg, extRepoPGDG.DebRepo, extRepoPGDG.DebPg = "postgresql-$v-repo-ext", "PGDG", []string{"18"}
 
@@ -213,7 +222,7 @@ func TestResolveCategoryAliasFallbackDEB(t *testing.T) {
 	extRepoPigsty.DebPkg, extRepoPigsty.DebRepo, extRepoPigsty.DebPg = "postgresql-$v-pigsty-ext", "PIGSTY", []string{"18"}
 
 	cleanup := withCategoryAliasTestEnv(t, config.DistroDEB, "u26", "amd64", []*Extension{
-		extMatrix, extRepoPGDG, extRepoPigsty,
+		extMatrix, extMatrixPigsty, extRepoPGDG, extRepoPigsty,
 	})
 	defer cleanup()
 
@@ -227,6 +236,9 @@ func TestResolveCategoryAliasFallbackDEB(t *testing.T) {
 	}
 	if !slices.Contains(res.Packages, "postgresql-18-repo-ext") {
 		t.Fatalf("expected repo fallback package in %v", res.Packages)
+	}
+	if slices.Contains(res.Packages, "postgresql-18-matrix-pigsty-ext") {
+		t.Fatalf("matrix pigsty package should be filtered out in fallback mode: %v", res.Packages)
 	}
 	if slices.Contains(res.Packages, "postgresql-18-pigsty-ext") {
 		t.Fatalf("pigsty package should be filtered out: %v", res.Packages)
