@@ -72,7 +72,7 @@ func newTestCategoryExt(id int, name, pkg, category string, matrix []string) *Ex
 	}
 }
 
-func TestResolveCategoryAliasPGDGOnly(t *testing.T) {
+func TestResolveCategoryAliasVisibleOnly(t *testing.T) {
 	extPGDG := newTestCategoryExt(100, "pg_cron", "pg_cron", "TIME", []string{"el9i:18:A:f:1:G:1.0"})
 	extPGDG.RpmPkg, extPGDG.RpmRepo, extPGDG.RpmPg = "pg_cron_$v", "PGDG", []string{"18"}
 
@@ -94,13 +94,13 @@ func TestResolveCategoryAliasPGDGOnly(t *testing.T) {
 	if len(res.NotFound) > 0 || len(res.NoPackage) > 0 {
 		t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
 	}
-	want := []string{"pg_cron_18"}
+	want := []string{"pg_cron_18", "pg_task_18"}
 	if !reflect.DeepEqual(res.Packages, want) {
 		t.Fatalf("resolved packages mismatch\nwant: %v\ngot:  %v", want, res.Packages)
 	}
 }
 
-func TestResolvePgsqlCategoryAliasUsesTargetVersion(t *testing.T) {
+func TestResolvePgsqlCategoryAliasUsesTemplateFromLatestVersion(t *testing.T) {
 	extAll := newTestCategoryExt(100, "pg_cron", "pg_cron", "TIME", []string{
 		"el9i:18:A:f:1:G:1.0",
 		"el9i:17:A:f:1:G:1.0",
@@ -117,7 +117,7 @@ func TestResolvePgsqlCategoryAliasUsesTargetVersion(t *testing.T) {
 	if len(res.NotFound) > 0 || len(res.NoPackage) > 0 {
 		t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
 	}
-	want := []string{"pg_cron_17"}
+	want := []string{"pg_cron_17", "pg_topn_17"}
 	if !reflect.DeepEqual(res.Packages, want) {
 		t.Fatalf("resolved packages mismatch\nwant: %v\ngot:  %v", want, res.Packages)
 	}

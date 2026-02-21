@@ -32,6 +32,12 @@ var (
 	categoryAliasCache sync.Map // key -> []string
 )
 
+type categoryAliasSpec struct {
+	category string
+	targetPG int
+	isPgsql  bool
+}
+
 // resolveAliasPattern resolves both static aliases and dynamic category aliases.
 // Returns:
 // - pattern: space-separated package pattern list
@@ -60,59 +66,67 @@ func resolveAliasPattern(pgVer int, alias string) (pattern string, matched bool,
 }
 
 func resolveCategoryAliasPackages(alias string, targetPgVer int) ([]string, bool) {
-	category, pgVer, ok := parseCategoryAlias(alias, targetPgVer)
+	spec, ok := parseCategoryAlias(alias, targetPgVer)
 	if !ok || Catalog == nil {
 		return nil, false
 	}
 
 	matrixOS, arch, allowMetadataFallback := resolveCategoryAliasMatrixTarget()
-	cacheKey := fmt.Sprintf("%p|%s|%s|%s|%s|%d|%s|%t", Catalog, config.OSType, config.OSCode, matrixOS, arch, pgVer, category, allowMetadataFallback)
+	cacheKey := fmt.Sprintf("%p|%s|%s|%s|%s|%d|%s|%t|%t", Catalog, config.OSType, config.OSCode, matrixOS, arch, spec.targetPG, spec.category, allowMetadataFallback, spec.isPgsql)
 	if v, ok := categoryAliasCache.Load(cacheKey); ok {
 		if cached, ok := v.([]string); ok {
 			return cached, true
 		}
 	}
 
-	pkgList := buildCategoryPackageList(category, pgVer, matrixOS, arch, allowMetadataFallback)
+	pkgList := buildCategoryPackageList(spec, matrixOS, arch, allowMetadataFallback)
 	categoryAliasCache.Store(cacheKey, pkgList)
 	return pkgList, true
 }
 
-func parseCategoryAlias(alias string, targetPgVer int) (category string, pgVer int, ok bool) {
+func parseCategoryAlias(alias string, targetPgVer int) (spec categoryAliasSpec, ok bool) {
 	if strings.HasPrefix(alias, "pgsql-") {
-		category = strings.TrimPrefix(alias, "pgsql-")
+		category := strings.TrimPrefix(alias, "pgsql-")
 		if _, exists := categoryAliasSet[category]; !exists {
-			return "", 0, false
+			return categoryAliasSpec{}, false
 		}
 		if targetPgVer == 0 {
 			targetPgVer = PostgresLatestMajorVersion
 		}
-		return category, targetPgVer, true
+		return categoryAliasSpec{
+			category: category,
+			targetPG: targetPgVer,
+			isPgsql:  true,
+		}, true
 	}
 
 	if !strings.HasPrefix(alias, "pg") {
-		return "", 0, false
+		return categoryAliasSpec{}, false
 	}
 
 	parts := strings.SplitN(strings.TrimPrefix(alias, "pg"), "-", 2)
 	if len(parts) != 2 {
-		return "", 0, false
+		return categoryAliasSpec{}, false
 	}
 
 	ver, err := strconv.Atoi(parts[0])
 	if err != nil {
-		return "", 0, false
+		return categoryAliasSpec{}, false
 	}
 	if !slices.Contains(PostgresActiveMajorVersions, ver) {
-		return "", 0, false
+		return categoryAliasSpec{}, false
 	}
 
-	category = parts[1]
+	category := parts[1]
 	if _, exists := categoryAliasSet[category]; !exists {
-		return "", 0, false
+		return categoryAliasSpec{}, false
 	}
 
-	return category, ver, true
+	return categoryAliasSpec{
+		category: category,
+		targetPG: ver,
+		isPgsql:  false,
+	}, true
 }
 
 func resolveCategoryAliasMatrixTarget() (osCode, arch string, allowMetadataFallback bool) {
@@ -149,32 +163,43 @@ func normalizeMatrixArch(arch string) string {
 	}
 }
 
-func buildCategoryPackageList(category string, pgVer int, matrixOS, matrixArch string, allowMetadataFallback bool) []string {
+func buildCategoryPackageList(spec categoryAliasSpec, matrixOS, matrixArch string, allowMetadataFallback bool) []string {
 	if Catalog == nil {
 		return nil
 	}
 
 	pkgs := make([]string, 0, 16)
 	seen := make(map[string]struct{})
+	selectPG := spec.targetPG
+	if spec.isPgsql {
+		selectPG = PostgresLatestMajorVersion
+	}
 
 	for _, ext := range Catalog.Extensions {
 		if ext == nil || !ext.Lead || ext.Contrib {
 			continue
 		}
-		if strings.ToLower(ext.Category) != category {
+		if strings.ToLower(ext.Category) != spec.category {
 			continue
 		}
 
-		if !isCategoryExtensionInstallable(ext, pgVer, matrixOS, matrixArch, allowMetadataFallback) {
+		if !isCategoryExtensionVisible(ext, selectPG, matrixOS, matrixArch, allowMetadataFallback) {
 			continue
 		}
 
-		pkgName := ext.PackageName(pgVer)
+		pkgName := ext.PackageName(selectPG)
 		if pkgName == "" {
 			continue
 		}
-		pkgName = applyCategoryPackageSpecialCase(ext, pkgName, pgVer)
-		for _, pkg := range ProcessPkgName(pkgName, pgVer) {
+
+		if !spec.isPgsql {
+			pkgName = applyCategoryPackageSpecialCase(ext, pkgName, spec.targetPG)
+		}
+
+		for _, pkg := range ProcessPkgName(pkgName, selectPG) {
+			if spec.isPgsql {
+				pkg = rewriteLatestCategoryPkgToTarget(pkg, spec.targetPG)
+			}
 			if _, ok := seen[pkg]; ok {
 				continue
 			}
@@ -186,7 +211,7 @@ func buildCategoryPackageList(category string, pgVer int, matrixOS, matrixArch s
 	return pkgs
 }
 
-func isCategoryExtensionInstallable(ext *Extension, pgVer int, matrixOS, matrixArch string, allowMetadataFallback bool) bool {
+func isCategoryExtensionVisible(ext *Extension, pgVer int, matrixOS, matrixArch string, allowMetadataFallback bool) bool {
 	if ext == nil {
 		return false
 	}
@@ -194,7 +219,7 @@ func isCategoryExtensionInstallable(ext *Extension, pgVer int, matrixOS, matrixA
 	matrix := ext.GetPkgMatrix()
 	if matrix != nil {
 		if entry := matrix.Get(matrixOS, matrixArch, pgVer); entry != nil {
-			return entry.State == PkgAvail && !entry.Hide && entry.Org == OrgPGDG
+			return entry.State == PkgAvail && !entry.Hide
 		}
 		if !allowMetadataFallback {
 			return false
@@ -232,4 +257,22 @@ func applyCategoryPackageSpecialCase(ext *Extension, pkgName string, pgVer int) 
 		}
 	}
 	return pkgName
+}
+
+func rewriteLatestCategoryPkgToTarget(pkg string, targetPG int) string {
+	if targetPG == PostgresLatestMajorVersion {
+		return pkg
+	}
+
+	latest := strconv.Itoa(PostgresLatestMajorVersion)
+	target := strconv.Itoa(targetPG)
+
+	switch config.OSType {
+	case config.DistroEL:
+		return strings.ReplaceAll(pkg, "_"+latest, "_"+target)
+	case config.DistroDEB:
+		return strings.ReplaceAll(pkg, "-"+latest, "-"+target)
+	default:
+		return strings.ReplaceAll(pkg, latest, target)
+	}
 }
