@@ -64,7 +64,7 @@ The command uses the same execution privilege strategy as other pig commands:
 
   # Show execution plan without running
   pig pitr -d --plan
-  pig pitr -d --dry-run   # alias for --plan
+  pig pitr -d --dry-run             # alias for --plan
 
   # Skip confirmation (for automation)
   pig pitr -d -y
@@ -108,7 +108,7 @@ The command uses the same execution privilege strategy as other pig commands:
 		}
 
 		// Plan mode: show plan and exit
-		if pitrOpts.Plan || pitrOpts.DryRun {
+		if pitrOpts.Plan {
 			plan, err := pitr.Plan(pitrOpts)
 			if err != nil {
 				return err
@@ -145,7 +145,7 @@ func init() {
 	pitrCmd.Flags().BoolVarP(&pitrOpts.SkipPatroni, "skip-patroni", "S", false, "skip Patroni stop operation")
 	pitrCmd.Flags().BoolVarP(&pitrOpts.NoRestart, "no-restart", "N", false, "don't restart PostgreSQL after restore")
 	pitrCmd.Flags().BoolVar(&pitrOpts.Plan, "plan", false, "show execution plan without running")
-	pitrCmd.Flags().BoolVar(&pitrOpts.DryRun, "dry-run", false, "show execution plan without running")
+	pitrCmd.Flags().BoolVar(&pitrOpts.Plan, "dry-run", false, "alias for --plan")
 	pitrCmd.Flags().BoolVarP(&pitrOpts.Yes, "yes", "y", false, "skip confirmation countdown")
 
 	// Common flags (inherited from pgbackrest)

@@ -43,7 +43,6 @@ type Options struct {
 	SkipPatroni bool // Skip Patroni operations
 	NoRestart   bool // Don't restart PostgreSQL after restore
 	Plan        bool // Show plan only, don't execute
-	DryRun      bool // Show plan only, don't execute
 	Yes         bool // Skip confirmations
 
 	// Common (inherited from pgbackrest)
@@ -558,7 +557,7 @@ func buildCommand(opts *Options) string {
 	if opts.Promote {
 		args = append(args, "-P")
 	}
-	if opts.Plan || opts.DryRun {
+	if opts.Plan {
 		args = append(args, "--plan")
 	}
 
