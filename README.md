@@ -182,6 +182,9 @@ pig ext install pg16-mini        # install PostgreSQL 16 kernels with minimal pa
 pig ext install pg15 -y          # install PostgreSQL 15 kernels with auto-confirm
 pig ext install pg14=14.3        # install PostgreSQL 14 kernels with an specific minor version
 pig ext install pg13=13.10       # install PostgreSQL 13 kernels
+
+pig install pg17 --plan          # preview translated native install command
+pig install postgis -v 17 -o json --plan   # preview in structured JSON output
 ```
 
 You can link the installed PostgreSQL to the system path with:

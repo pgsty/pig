@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"pig/cli/ext"
 	"pig/cli/install"
+	"pig/internal/output"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -17,6 +18,7 @@ var (
 	installPgConfig      string
 	installYes           bool
 	installNoTranslation bool
+	installPlan          bool
 )
 
 // installCmd represents the install command
@@ -37,6 +39,7 @@ Examples:
   pig ins nginx htop                   # install multiple packages
   pig i pg_vector -y                   # auto confirm installation
   pig install somepackage -n           # disable translation, use package name as-is
+  pig install pg17 --plan              # preview install plan without executing
 `,
 	Example: `
   pig install pg_duckdb                # install PostgreSQL extension pg_duckdb
@@ -45,8 +48,28 @@ Examples:
   pig install postgresql17-server -y   # auto confirm installation
   pig install unknown-package -n       # disable translation for unknown packages
   pig install pg_vector=1.0.0          # install specific version
+  pig install pg17 --plan              # preview translated install command
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Plan mode: show plan without executing install.
+		if installPlan {
+			if len(args) == 0 {
+				return handleAuxResult(output.Fail(output.CodeExtensionInvalidArgs, "no package names provided"))
+			}
+
+			var pgVer int
+			if !installNoTranslation {
+				probed, err := installProbeVersion()
+				if err != nil {
+					return err
+				}
+				pgVer = probed
+			}
+
+			plan := install.BuildInstallPlan(pgVer, args, installYes, installNoTranslation)
+			return handlePlanOutput(plan)
+		}
+
 		return runLegacyStructured(legacyModuleExt, "pig install", args, map[string]interface{}{
 			"version":        installPgVer,
 			"path":           installPgConfig,
@@ -91,4 +114,5 @@ func init() {
 
 	installCmd.Flags().BoolVarP(&installYes, "yes", "y", false, "auto confirm installation")
 	installCmd.Flags().BoolVarP(&installNoTranslation, "no-translation", "n", false, "disable package name translation, use names as-is")
+	installCmd.Flags().BoolVar(&installPlan, "plan", false, "preview install plan without executing")
 }
