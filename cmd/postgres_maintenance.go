@@ -120,7 +120,8 @@ var pgRepackCmd = &cobra.Command{
   pig pg repack mydb -t mytable  # repack specific table
   pig pg repack mydb -n myschema # repack tables in schema
   pig pg repack mydb -j 4        # parallel repack
-  pig pg repack mydb --dry-run   # show what would be repacked`,
+  pig pg repack mydb --plan      # show repack plan without executing (recommended)
+  pig pg repack mydb --dry-run   # alias for --plan`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbname := ""
 		if len(args) > 0 {
@@ -134,7 +135,7 @@ var pgRepackCmd = &cobra.Command{
 				Verbose: pgMaintVerbose,
 			},
 			Jobs:   pgMaintJobs,
-			DryRun: pgMaintDryRun,
+			Plan: pgMaintPlan,
 		}
 		return runLegacyStructured(legacyModulePg, "pig postgres repack", args, map[string]interface{}{
 			"database": dbname,
@@ -143,7 +144,7 @@ var pgRepackCmd = &cobra.Command{
 			"table":    pgMaintTable,
 			"verbose":  pgMaintVerbose,
 			"jobs":     pgMaintJobs,
-			"dry_run":  pgMaintDryRun,
+			"plan":     pgMaintPlan,
 		}, func() error {
 			return postgres.Repack(pgConfig, dbname, opts)
 		})

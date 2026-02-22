@@ -85,7 +85,7 @@ var (
 	pgMaintVerbose bool
 	pgMaintFull    bool
 	pgMaintJobs    int
-	pgMaintDryRun  bool
+	pgMaintPlan    bool
 
 	// role flags
 	pgRoleVerbose bool
@@ -530,7 +530,8 @@ func registerPgMaintenanceCommands() {
 	// repack command
 	addPgMaintFlags(pgRepackCmd)
 	pgRepackCmd.Flags().IntVarP(&pgMaintJobs, "jobs", "j", 1, "number of parallel jobs")
-	pgRepackCmd.Flags().BoolVarP(&pgMaintDryRun, "dry-run", "N", false, "show what would be repacked")
+	pgRepackCmd.Flags().BoolVarP(&pgMaintPlan, "plan", "N", false, "show repack plan without executing")
+	pgRepackCmd.Flags().BoolVar(&pgMaintPlan, "dry-run", false, "alias for --plan")
 	pgCmd.AddCommand(pgRepackCmd)
 }
 

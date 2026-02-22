@@ -84,6 +84,7 @@ Control:
   # Cleanup
   pig pb expire                    # cleanup per retention policy
   pig pb expire --set 20250101-*   # delete specific backup
+  pig pb expire --plan             # preview cleanup plan (recommended)
   pig pb expire --dry-run          # dry-run mode`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if err := initAll(); err != nil {
@@ -123,7 +124,8 @@ func registerPbFlags() {
 
 	// Expire command flags
 	pbExpireCmd.Flags().StringVar(&pbExpireSet, "set", "", "delete specific backup set")
-	pbExpireCmd.Flags().BoolVar(&pbExpireDryRun, "dry-run", false, "dry-run mode: show only")
+	pbExpireCmd.Flags().BoolVar(&pbExpirePlan, "plan", false, "preview cleanup plan without deleting backups")
+	pbExpireCmd.Flags().BoolVar(&pbExpirePlan, "dry-run", false, "alias for --plan")
 
 	// Restore command flags - targets
 	pbRestoreCmd.Flags().BoolVarP(&pbRestoreDefault, "default", "d", false, "recover to end of WAL stream (latest)")

@@ -85,7 +85,7 @@ func checkPrimaryRole() error {
 // ExpireOptions holds options for expire command.
 type ExpireOptions struct {
 	Set    string // Specific backup set to delete
-	DryRun bool   // Dry-run mode: only show what would be deleted
+	Plan bool // Preview cleanup plan without deleting backups
 }
 
 // Expire cleans up expired backups according to retention policy.
@@ -99,8 +99,8 @@ func Expire(cfg *Config, opts *ExpireOptions) error {
 	if opts.Set != "" {
 		args = append(args, "--set="+opts.Set)
 	}
-	if opts.DryRun {
-		args = append(args, "--dry-run")
+	if opts.Plan {
+		args = append(args, "--dry-run") // pgbackrest native flag
 	}
 
 	return RunPgBackRest(effCfg, "expire", args, true)

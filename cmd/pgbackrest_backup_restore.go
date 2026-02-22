@@ -63,7 +63,7 @@ executing. Use --force to skip this check.`,
 }
 
 var pbExpireSet string
-var pbExpireDryRun bool
+var pbExpirePlan bool
 
 var pbExpireCmd = &cobra.Command{
 	Use:         "expire",
@@ -79,15 +79,16 @@ The retention policy is configured in pgbackrest.conf:
 	Example: `
   pig pb expire                    # cleanup per policy
   pig pb expire --set 20250101-*   # delete specific backup
+  pig pb expire --plan             # preview cleanup plan (recommended)
   pig pb expire --dry-run          # dry-run (show only)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModulePb, "pig pgbackrest expire", args, map[string]interface{}{
-			"set":     pbExpireSet,
-			"dry_run": pbExpireDryRun,
+			"set":  pbExpireSet,
+			"plan": pbExpirePlan,
 		}, func() error {
 			return pgbackrest.Expire(pbConfig, &pgbackrest.ExpireOptions{
-				Set:    pbExpireSet,
-				DryRun: pbExpireDryRun,
+				Set:  pbExpireSet,
+				Plan: pbExpirePlan,
 			})
 		})
 	},

@@ -300,7 +300,7 @@ func Freeze(cfg *Config, dbname string, opts *FreezeOptions) error {
 type RepackOptions struct {
 	MaintOptions
 	Jobs   int  // number of parallel jobs
-	DryRun bool // show what would be repacked
+	Plan bool // show what would be repacked without executing
 }
 
 // Repack runs pg_repack on database tables
@@ -309,12 +309,12 @@ func Repack(cfg *Config, dbname string, opts *RepackOptions) error {
 	var schema, table string
 	var all bool
 	var jobs int
-	var dryRun bool
+	var plan bool
 	if opts != nil {
 		schema, table = opts.Schema, opts.Table
 		all = opts.All
 		jobs = opts.Jobs
-		dryRun = opts.DryRun
+		plan = opts.Plan
 	}
 
 	// Validate identifiers
@@ -332,8 +332,8 @@ func Repack(cfg *Config, dbname string, opts *RepackOptions) error {
 	// Build pg_repack command
 	cmdArgs := []string{"pg_repack"}
 
-	if dryRun {
-		cmdArgs = append(cmdArgs, "-N")
+	if plan {
+		cmdArgs = append(cmdArgs, "-N") // pg_repack dry-run flag
 	}
 	if jobs > 1 {
 		cmdArgs = append(cmdArgs, "-j", strconv.Itoa(jobs))
