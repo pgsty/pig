@@ -140,6 +140,68 @@ func (ec *ExtensionCatalog) Load(data []byte) error {
 	return nil
 }
 
+const (
+	ansibleComboEL7  = "ansible sshpass"
+	ansibleComboEL8  = "ansible sshpass python3.12-jmespath python3-cryptography"
+	ansibleComboEL9  = "ansible sshpass python3-jmespath"
+	ansibleComboEL10 = "ansible sshpass"
+	ansibleComboDEB  = "ansible sshpass python3-jmespath"
+
+	nodeBootstrapComboEL7  = "ansible python3 python36-requests python36-idna yum-utils createrepo_c sshpass"
+	nodeBootstrapComboEL8  = "ansible python3 python3-requests python3.12-jmespath python3-cryptography dnf-utils modulemd-tools createrepo_c sshpass"
+	nodeBootstrapComboEL9  = "ansible python3 python3-requests python3-jmespath python3-cryptography dnf-utils modulemd-tools createrepo_c sshpass"
+	nodeBootstrapComboEL10 = "ansible python3 python3-requests python3-jmespath python3-cryptography dnf-utils createrepo_c sshpass crypto-policies-scripts"
+	nodeBootstrapComboD12  = "ansible python3 python3-requests python3-jmespath dpkg-dev sshpass tnftp linux-perf"
+	nodeBootstrapComboU22  = "ansible python3 python3-requests python3-jmespath dpkg-dev sshpass ftp linux-tools-generic"
+)
+
+// OSAliasOverride contains package name overrides for specific OS code combinations
+// Key format: "el9", value is a map of alias -> package list
+var OSAliasOverride = map[string]map[string]string{
+	"el7": {
+		"java-runtime":   "java-11-openjdk-src java-11-openjdk-headless",
+		"ansible":        ansibleComboEL7,
+		"node-bootstrap": nodeBootstrapComboEL7,
+		"kube-runtime":   "containerd.io cri-dockerd",
+		"oriole":         "",
+	},
+	"el8": {
+		"java-runtime":   "java-17-openjdk-src java-17-openjdk-headless",
+		"ansible":        ansibleComboEL8,
+		"node-bootstrap": nodeBootstrapComboEL8,
+	},
+	"el9": {
+		"java-runtime":   "java-17-openjdk-src java-17-openjdk-headless",
+		"ansible":        ansibleComboEL9,
+		"node-bootstrap": nodeBootstrapComboEL9,
+	},
+	"el10": {
+		"java-runtime":   "java-21-openjdk-src java-21-openjdk-headless",
+		"ansible":        ansibleComboEL10,
+		"node-bootstrap": nodeBootstrapComboEL10,
+	},
+	"d12": {
+		"java-runtime":   "openjdk-17-jdk",
+		"ansible":        ansibleComboDEB,
+		"node-bootstrap": nodeBootstrapComboD12,
+	},
+	"d13": {
+		"java-runtime":   "openjdk-21-jdk",
+		"ansible":        ansibleComboDEB,
+		"node-bootstrap": nodeBootstrapComboD12,
+	},
+	"u22": {
+		"java-runtime":   "openjdk-17-jdk",
+		"ansible":        ansibleComboDEB,
+		"node-bootstrap": nodeBootstrapComboU22,
+	},
+	"u24": {
+		"java-runtime":   "openjdk-17-jdk",
+		"ansible":        ansibleComboDEB,
+		"node-bootstrap": nodeBootstrapComboU22,
+	},
+}
+
 // ArchAliasOverride contains package name overrides for specific OS+arch combinations
 // Key format: "el9.arm64", value is a map of alias -> package names
 var ArchAliasOverride = map[string]map[string]string{
@@ -161,6 +223,9 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"postgresql":          "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl",
 			"pgsql-common":        "patroni patroni-etcd pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager",
 			"patroni":             "patroni patroni-etcd",
+			"ansible":             ansibleComboEL9,
+			"node-bootstrap":      nodeBootstrapComboEL9,
+			"java-runtime":        "java-17-openjdk-src java-17-openjdk-headless",
 			"pgbouncer":           "pgbouncer",
 			"pgbackrest":          "pgbackrest",
 			"pg_exporter":         "pg_exporter",
@@ -169,14 +234,13 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"pgbadger":            "pgbadger",
 			"pg_activity":         "pg_activity",
 			"pg_filedump":         "pg_filedump",
-			"pgxnclient":          "pgxnclient",
 			"pgformatter":         "pgformatter",
-			"pgcopydb":            "pgcopydb",
 			"pgloader":            "pgloader",
 			"pg_timetable":        "pg_timetable",
 			"timescaledb-utils":   "timescaledb-tools timescaledb-event-streamer",
 			"ivorysql":            "ivorysql5",
 			"polardb":             "PolarDB",
+			"oriole":              "orioledb_17 oriolepg_17",
 			"orioledb":            "orioledb_17 oriolepg_17",
 			"babelfish":           "babelfishpg_17 babelfish_17",
 			"wiltondb":            "wiltondb",
@@ -186,21 +250,20 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"ferretdb":            "ferretdb2",
 			"cloudberry":          "cloudberry",
 			"duckdb":              "duckdb",
-			"etcd":                "etcd",
-			"haproxy":             "haproxy",
+			"docker":              "docker-ce docker-compose-plugin",
+			"kafka":               "kafka kafka_exporter",
+			"kube-runtime":        "containerd.io",
+			"kubernetes":          "kubeadm kubelet kubectl",
+			"hunspell":            "hunspell_cs_cz_$v hunspell_de_de_$v hunspell_en_us_$v hunspell_fr_$v hunspell_ne_np_$v hunspell_nl_nl_$v hunspell_nn_no_$v hunspell_ru_ru_$v hunspell_ru_ru_aot_$v",
 			"node":                "audit bash bind-utils bzip2 ca-certificates chkconfig chrony cronie etcd git grubby haproxy htop iotop ipvsadm jq keepalived lsof lz4 make ncdu net-tools node_exporter numactl nvme-cli openssh-clients openssh-server openssl patch pig pv python3 readline rsync socat sysstat tcpdump telnet tuned unzip uv vector vim-minimal wget yum zlib",
 			"infra":               "alertmanager ansible blackbox_exporter certbot dnsmasq etcd grafana grafana-plugins grafana-victorialogs-ds grafana-victoriametrics-ds mcli nginx nginx_exporter node_exporter pev2 pg_exporter python3-certbot-nginx python3-requests redis restic victoria-logs victoria-metrics victoria-traces vlogscli vmutils",
-			"pig":                 "pig",
 			"vray":                "vray",
-			"juicefs":             "juicefs",
-			"restic":              "restic",
-			"rclone":              "rclone",
 			"genai-toolbox":       "genai-toolbox",
-			"tigerbeetle":         "tigerbeetle",
 			"clickhouse":          "clickhouse-server clickhouse-client clickhouse-common-static",
-			"victoria":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscil vlagent grafana-victorialogs-ds",
+			"victoria":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent grafana-victorialogs-ds",
 			"vmetrics":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds",
-			"vlogs":               "victoria-logs vlogscil vlagent grafana-victorialogs-ds",
+			"vlogs":               "victoria-logs vlogscli vlagent grafana-victorialogs-ds",
+			"vtraces":             "victoria-traces",
 		}
 		pkgMapTmpl := map[string]string{
 			"pgsql":        "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl", // postgresql$v-llvmjit
@@ -229,6 +292,9 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"postgresql":          "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v postgresql-server-dev-$v",
 			"pgsql-common":        "patroni python3-etcd pgbouncer pgbackrest pg-exporter pgbackrest-exporter vip-manager",
 			"patroni":             "patroni python3-etcd",
+			"ansible":             ansibleComboDEB,
+			"node-bootstrap":      nodeBootstrapComboU22,
+			"java-runtime":        "openjdk-17-jdk",
 			"pgbouncer":           "pgbouncer",
 			"pgbackrest":          "pgbackrest",
 			"pg_exporter":         "pg-exporter",
@@ -237,15 +303,14 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"pgbadger":            "pgbadger",
 			"pg_activity":         "pg-activity",
 			"pg_filedump":         "postgresql-filedump",
-			"pgxnclient":          "pgxnclient",
 			"pgformatter":         "pgformatter",
-			"pgcopydb":            "pgcopydb",
 			"pgloader":            "pgloader",
 			"pg_timetable":        "pg-timetable",
 			"timescaledb-utils":   "timescaledb-tools timescaledb-event-streamer",
 			"ivorysql":            "ivorysql-5",
 			"wiltondb":            "wiltondb",
 			"polardb":             "polardb-for-postgresql",
+			"oriole":              "oriolepg-17 oriolepg-17-orioledb",
 			"orioledb":            "oriolepg-17-orioledb oriolepg-17",
 			"babelfish":           "babelfishpg-17 babelfishpg-17-babelfish",
 			"openhalodb":          "openhalodb",
@@ -254,21 +319,19 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"cloudberry":          "cloudberry",
 			"ferretdb":            "ferretdb2",
 			"duckdb":              "duckdb",
-			"etcd":                "etcd",
-			"haproxy":             "haproxy",
+			"docker":              "docker-ce docker-compose-plugin",
+			"kafka":               "kafka kafka-exporter",
+			"kube-runtime":        "containerd.io",
+			"kubernetes":          "kubeadm kubelet kubectl",
+			"hunspell":            "postgresql-$v-hunspell-cs-cz,postgresql-$v-hunspell-de-de,postgresql-$v-hunspell-en-us,postgresql-$v-hunspell-fr,postgresql-$v-hunspell-ne-np,postgresql-$v-hunspell-nl-nl,postgresql-$v-hunspell-nn-no,postgresql-$v-hunspell-ru-ru,postgresql-$v-hunspell-ru-ru-aot",
 			"node":                "acl bash bzip2 ca-certificates chrony cron etcd git haproxy htop iotop ipvsadm jq keepalived libreadline-dev lsof lz4 make ncdu net-tools node-exporter numactl nvme-cli openssh-client openssh-server openssl patch pig pv python3 rsync socat sysstat telnet tuned unzip uv vector vim-tiny wget zlib1g",
 			"infra":               "alertmanager ansible blackbox-exporter certbot dnsmasq etcd grafana grafana-plugins grafana-victorialogs-ds grafana-victoriametrics-ds mcli nginx nginx-exporter node-exporter pev2 pg-exporter python3-certbot-nginx python3-requests redis restic victoria-logs victoria-metrics victoria-traces vlogscli vmutils",
-			"pig":                 "pig",
 			"vray":                "vray",
-			"juicefs":             "juicefs",
-			"restic":              "restic",
-			"rclone":              "rclone",
 			"genai-toolbox":       "genai-toolbox",
-			"tigerbeetle":         "tigerbeetle",
 			"clickhouse":          "clickhouse-server clickhouse-client clickhouse-common-static",
-			"victoria":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscil vlagent grafana-victorialogs-ds",
+			"victoria":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent grafana-victorialogs-ds",
 			"vmetrics":            "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds",
-			"vlogs":               "victoria-logs vlogscil vlagent grafana-victorialogs-ds",
+			"vlogs":               "victoria-logs vlogscli vlagent grafana-victorialogs-ds",
 			"vtraces":             "victoria-traces",
 		}
 		pkgMapTmpl := map[string]string{
@@ -293,6 +356,14 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			}
 		}
 		ec.AliasMap = pkgMap
+	}
+
+	// Apply OS code-specific alias overrides for node-level package combinations.
+	if overrides, ok := OSAliasOverride[config.OSCode]; ok {
+		logrus.Debugf("applying OS alias overrides for %s", config.OSCode)
+		for k, v := range overrides {
+			ec.AliasMap[k] = v
+		}
 	}
 
 	// Apply architecture-specific overrides
