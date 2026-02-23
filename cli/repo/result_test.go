@@ -5,6 +5,7 @@ package repo
 
 import (
 	"encoding/json"
+	"os"
 	"pig/internal/output"
 	"strings"
 	"testing"
@@ -2019,6 +2020,37 @@ func TestCacheWithResultDirNotFound(t *testing.T) {
 	}
 	if cacheData.DurationMs < 0 {
 		t.Error("DurationMs should be non-negative")
+	}
+}
+
+func TestCacheWithResultPermissionDenied(t *testing.T) {
+	candidates := []string{
+		"/var/root/Library",
+		"/var/root/.ssh",
+		"/root/.ssh",
+		"/root/.bashrc",
+	}
+
+	deniedPath := ""
+	for _, path := range candidates {
+		if _, err := os.Stat(path); os.IsPermission(err) {
+			deniedPath = path
+			break
+		}
+	}
+	if deniedPath == "" {
+		t.Skip("no permission-denied test path found in current environment")
+	}
+
+	result := CacheWithResult(deniedPath, "/tmp/test-cache.tgz", []string{"pigsty"})
+	if result == nil {
+		t.Fatal("CacheWithResult should not return nil")
+	}
+	if result.Success {
+		t.Fatal("CacheWithResult should fail on permission denied base directory")
+	}
+	if result.Code != output.CodeRepoCacheFailed {
+		t.Fatalf("Expected code %d (CodeRepoCacheFailed), got %d", output.CodeRepoCacheFailed, result.Code)
 	}
 }
 

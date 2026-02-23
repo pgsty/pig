@@ -117,8 +117,15 @@ func Cache(dirPath, pkgPath string, repos []string) error {
 
 	// Check if base dir exists
 	baseInfo, err := os.Stat(absBase)
-	if os.IsNotExist(err) || !baseInfo.IsDir() {
-		logrus.Warnf("base directory does not exist or is not a directory: %s", absBase)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logrus.Warnf("base directory does not exist: %s", absBase)
+			return fmt.Errorf("invalid base directory: %s", absBase)
+		}
+		return fmt.Errorf("failed to access base directory %s: %w", absBase, err)
+	}
+	if !baseInfo.IsDir() {
+		logrus.Warnf("base directory is not a directory: %s", absBase)
 		return fmt.Errorf("invalid base directory: %s", absBase)
 	}
 
@@ -366,7 +373,16 @@ func CacheWithResult(dirPath, pkgPath string, repos []string) *output.Result {
 
 	// Check if base dir exists
 	baseInfo, err := os.Stat(absBase)
-	if os.IsNotExist(err) || !baseInfo.IsDir() {
+	if err != nil {
+		data.DurationMs = time.Since(startTime).Milliseconds()
+		if os.IsNotExist(err) {
+			return output.Fail(output.CodeRepoDirNotFound,
+				fmt.Sprintf("invalid base directory: %s", absBase)).WithData(data)
+		}
+		return output.Fail(output.CodeRepoCacheFailed,
+			fmt.Sprintf("failed to access base directory %s: %v", absBase, err)).WithData(data)
+	}
+	if !baseInfo.IsDir() {
 		data.DurationMs = time.Since(startTime).Milliseconds()
 		return output.Fail(output.CodeRepoDirNotFound,
 			fmt.Sprintf("invalid base directory: %s", absBase)).WithData(data)
