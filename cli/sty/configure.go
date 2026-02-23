@@ -88,35 +88,94 @@ type ConfigureData struct {
 	Warnings         []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 }
 
+const (
+	configureANSIReset  = "\033[0m"
+	configureANSIRed    = "\033[0;31m"
+	configureANSIGreen  = "\033[0;32m"
+	configureANSIYellow = "\033[0;33m"
+	configureANSIBlue   = "\033[0;34m"
+)
+
+type configureTextStyle struct {
+	color bool
+}
+
+func (s configureTextStyle) paint(colorCode, text string) string {
+	if !s.color {
+		return text
+	}
+	return colorCode + text + configureANSIReset
+}
+
+func (s configureTextStyle) ok(msg string) string {
+	if !s.color {
+		return "[ OK ] " + msg
+	}
+	return "[" + s.paint(configureANSIGreen, " OK ") + "] " + s.paint(configureANSIGreen, msg)
+}
+
+func (s configureTextStyle) warn(msg string) string {
+	if !s.color {
+		return "[WARN] " + msg
+	}
+	return "[" + s.paint(configureANSIYellow, "WARN") + "] " + s.paint(configureANSIYellow, msg)
+}
+
+func (s configureTextStyle) fail(msg string) string {
+	if !s.color {
+		return "[FAIL] " + msg
+	}
+	return "[" + s.paint(configureANSIRed, "FAIL") + "] " + s.paint(configureANSIRed, msg)
+}
+
+func (s configureTextStyle) hint(msg string) string {
+	return s.paint(configureANSIBlue, msg)
+}
+
+func formatConfigureKV(key, value string) string {
+	return fmt.Sprintf("%-10s = %s", key, value)
+}
+
 // Text renders ConfigureData in text output mode.
 func (d *ConfigureData) Text() string {
 	if d == nil {
 		return ""
 	}
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("mode: %s\n", d.Mode))
-	sb.WriteString(fmt.Sprintf("template: %s\n", d.TemplatePath))
-	sb.WriteString(fmt.Sprintf("output: %s\n", d.OutputPath))
-	sb.WriteString(fmt.Sprintf("region: %s\n", d.Region))
-	sb.WriteString(fmt.Sprintf("primary_ip: %s\n", d.PrimaryIP))
+
+	style := configureTextStyle{color: output.IsColorEnabled()}
+	lines := make([]string, 0, 16+len(d.Warnings))
+
+	lines = append(lines, style.hint(fmt.Sprintf("configure pigsty %s begin", config.PigstyVersion)))
+	lines = append(lines, style.ok(formatConfigureKV("mode", d.Mode)))
+	lines = append(lines, style.ok(formatConfigureKV("template", d.TemplatePath)))
+	lines = append(lines, style.ok(formatConfigureKV("output", d.OutputPath)))
+	lines = append(lines, style.ok(formatConfigureKV("region", d.Region)))
+	lines = append(lines, style.ok(formatConfigureKV("primary_ip", d.PrimaryIP)))
 	if d.SSHPort != "" {
-		sb.WriteString(fmt.Sprintf("ssh_port: %s\n", d.SSHPort))
+		lines = append(lines, style.ok(formatConfigureKV("ssh_port", d.SSHPort)))
 	}
 	if d.PGVersion != "" {
-		sb.WriteString(fmt.Sprintf("pg_version: %s\n", d.PGVersion))
+		lines = append(lines, style.ok(formatConfigureKV("pg_version", d.PGVersion)))
 	}
 	if len(d.GeneratedSecrets) > 0 {
-		sb.WriteString(fmt.Sprintf("generated_secrets: %d\n", len(d.GeneratedSecrets)))
+		lines = append(lines, style.ok(formatConfigureKV("passwords", fmt.Sprintf("%d generated", len(d.GeneratedSecrets)))))
 	}
 	if len(d.Warnings) > 0 {
-		sb.WriteString("warnings:\n")
 		for _, w := range d.Warnings {
-			sb.WriteString("  - ")
-			sb.WriteString(w)
-			sb.WriteByte('\n')
+			if warning := strings.TrimSpace(w); warning != "" {
+				lines = append(lines, style.warn(warning))
+			}
 		}
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	lines = append(lines, style.warn("don't forget to check it and change passwords!"))
+	if d.OutputPath == "" {
+		lines = append(lines, style.fail("output path is empty"))
+	} else if filepath.Base(d.OutputPath) == defaultConfigureOutput {
+		lines = append(lines, style.hint("proceed with ./deploy.yml"))
+	} else {
+		lines = append(lines, style.hint(fmt.Sprintf("proceed with ./deploy.yml -i %s", d.OutputPath)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ConfigureNative generates pigsty config with native Go implementation.

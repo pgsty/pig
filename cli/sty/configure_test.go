@@ -305,15 +305,17 @@ func TestConfigureDataText(t *testing.T) {
 	}
 	text := data.Text()
 	for _, expected := range []string{
-		"mode: meta",
-		"template: /tmp/conf/meta.yml",
-		"output: /tmp/pigsty.yml",
-		"region: default",
-		"primary_ip: 10.10.10.10",
-		"ssh_port: 2222",
-		"pg_version: 18",
-		"warnings:",
-		"warn-a",
+		"configure pigsty",
+		"[ OK ] mode",
+		"/tmp/conf/meta.yml",
+		"/tmp/pigsty.yml",
+		"[ OK ] region",
+		"[ OK ] primary_ip",
+		"[ OK ] ssh_port",
+		"[ OK ] pg_version",
+		"[WARN] warn-a",
+		"[WARN] don't forget to check it and change passwords!",
+		"proceed with ./deploy.yml",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected %q in text output, got:\n%s", expected, text)

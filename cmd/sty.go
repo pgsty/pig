@@ -33,15 +33,15 @@ var (
 	pigstyConfNonInteractive bool
 	pigstyConfPort           string
 	pigstyConfGenerate       bool
-	pigstyConfNative         bool
+	pigstyConfRaw            bool
 
 	pigstyDownloadDir string
 	pigstyVersion     string
 )
 
-const styConfigureLong = `Configure pigsty with native or legacy path
+const styConfigureLong = `Configure pigsty with native workflow (default) or raw shell workflow
 
-pig sty conf (legacy default) | configure (native default)
+pig sty conf (aliases: c, configure)
   [-c|--conf <name>]      # config template: [meta|rich|slim|full|supabase|...]
   [--ip <ip>]             # primary IP address (skip with -s)
   [-v|--version <pgver>]  # postgres major version: [18|17|16|15|14|13]
@@ -53,14 +53,15 @@ pig sty conf (legacy default) | configure (native default)
   [-n|--non-interactive]  # non-interactive mode
 
   [-g|--generate]         # generate random default passwords (RECOMMENDED!)
+  [--raw]                 # use raw legacy shell configure workflow
 
 Check https://pigsty.io/docs/setup/install/#configure for details
 `
 
 const styConfigureExample = `
-  pig sty conf                       # legacy shell configure path
-  pig sty conf --native              # native Go configure path via old command
-  pig sty configure                  # native Go configure path (new command)
+  pig sty conf                       # native Go configure path (default)
+  pig sty conf --raw                 # raw shell configure path fallback
+  pig sty configure                  # same as 'pig sty conf' (alias)
   pig sty conf -g                    # generate with random passwords (RECOMMENDED!)
   pig sty conf -c rich               # use conf/rich.yml template (with more extensions)
   pig sty conf -c ha/full            # use conf/ha/full.yml 4-node ha template
@@ -83,7 +84,7 @@ var styCmd = &cobra.Command{
 
   pig sty init    [-pfvd]         # install pigsty (~/pigsty by default)
   pig sty boot    [-rpk]          # install ansible and prepare offline pkg
-  pig sty conf    [-cvrsoxnpg]   # configure pigsty and generate config
+  pig sty conf    [-cvrsoxnpg --raw] # configure pigsty and generate config
   pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
   pig sty get                     # download pigsty source tarball
   pig sty list                    # list available pigsty versions
@@ -251,34 +252,27 @@ Check https://pigsty.io/docs/setup/offline/#bootstrap for details
 	},
 }
 
-// A thin wrapper around the configure script
+// pigstyConfCmd is the single configure command with aliases.
 var pigstyConfCmd = &cobra.Command{
 	Use:         "conf",
 	Short:       "Configure Pigsty",
 	Annotations: ancsAnn("pig sty conf", "action", "volatile", "safe", true, "medium", "recommended", "root", 10000),
-	Aliases:     []string{"c"},
+	Aliases:     []string{"c", "configure"},
 	Long:        styConfigureLong,
 	Example:     styConfigureExample,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if pigstyConfNative {
-			return runPigstyConfigureNative("pig sty conf", args)
+		command := "pig sty conf"
+		if cmd != nil {
+			if called := strings.TrimSpace(cmd.CalledAs()); called != "" {
+				command = "pig sty " + called
+			}
 		}
-		return runLegacyStructured(legacyModuleSty, "pig sty conf", args, styConfigureParams(), func() error {
-			return runPigstyConfigureLegacy(args)
-		})
-	},
-}
-
-// pigstyConfigureCmd is an explicit configure command.
-// It has the same behavior as `pig sty conf`, but is no longer only an alias.
-var pigstyConfigureCmd = &cobra.Command{
-	Use:         "configure",
-	Short:       "Configure Pigsty (same as conf)",
-	Annotations: ancsAnn("pig sty configure", "action", "volatile", "safe", true, "medium", "recommended", "root", 10000),
-	Long:        styConfigureLong,
-	Example:     styConfigureExample,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPigstyConfigureNative("pig sty configure", args)
+		if pigstyConfRaw {
+			return runLegacyStructured(legacyModuleSty, command, args, styConfigureParams(), func() error {
+				return runPigstyConfigureRaw(args)
+			})
+		}
+		return runPigstyConfigureNative(command, args)
 	},
 }
 
@@ -294,7 +288,7 @@ func styConfigureParams() map[string]interface{} {
 		"non_interactive": pigstyConfNonInteractive,
 		"port":            pigstyConfPort,
 		"generate":        pigstyConfGenerate,
-		"native":          pigstyConfNative,
+		"raw":             pigstyConfRaw,
 	}
 }
 
@@ -322,7 +316,7 @@ func runPigstyConfigureNative(command string, args []string) error {
 	return handleAuxResult(sty.ConfigureNative(opts))
 }
 
-func runPigstyConfigureLegacy(args []string) error {
+func runPigstyConfigureRaw(args []string) error {
 	if config.PigstyHome == "" {
 		logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
 		return fmt.Errorf("pigsty home & inventory not found")
@@ -584,12 +578,11 @@ func init() {
 	pigstyBootCmd.Flags().BoolVarP(&pigstyBootKeep, "keep", "k", false, "keep existing repo")
 
 	addStyConfigureFlags(pigstyConfCmd)
-	addStyConfigureFlags(pigstyConfigureCmd)
-	pigstyConfCmd.Flags().BoolVar(&pigstyConfNative, "native", false, "use native Go configure implementation")
+	pigstyConfCmd.Flags().BoolVar(&pigstyConfRaw, "raw", false, "use raw shell configure implementation")
 
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
 
-	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyConfigureCmd, pigstyDeployCmd, pigstyListcmd, pigstyGetcmd)
+	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyDeployCmd, pigstyListcmd, pigstyGetcmd)
 
 }
