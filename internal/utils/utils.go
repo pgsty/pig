@@ -178,10 +178,6 @@ func PutFile(filePath string, content []byte) error {
 
 	// Fall back to sudo mv approach for permission issues
 	tmpFileName := filepath.Join(os.TempDir(), fmt.Sprintf("%s.%d", filepath.Base(filePath), time.Now().UnixNano()))
-	tmpFile, err := os.Create(tmpFileName)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
-	}
 	defer func(name string) {
 		err := os.Remove(name)
 		if err != nil {
@@ -189,16 +185,16 @@ func PutFile(filePath string, content []byte) error {
 				logrus.Debugf("failed to remove temporary file %q: %v", name, err)
 			}
 		}
-	}(tmpFile.Name()) // Clean up temp file regardless of outcome
+	}(tmpFileName) // Clean up temp file regardless of outcome
 
 	// Write content to temporary file
-	if err := os.WriteFile(tmpFile.Name(), content, 0644); err != nil {
-		return fmt.Errorf("failed to write content to temporary file %q: %w", tmpFile.Name(), err)
+	if err := os.WriteFile(tmpFileName, content, 0644); err != nil {
+		return fmt.Errorf("failed to write content to temporary file %q: %w", tmpFileName, err)
 	}
 
 	// Use sudo to move temp file to target location
-	if err := SudoCommand([]string{"mv", tmpFile.Name(), filePath}); err != nil {
-		return fmt.Errorf("failed to move file with sudo %q -> %q: %w", tmpFile.Name(), filePath, err)
+	if err := SudoCommand([]string{"mv", tmpFileName, filePath}); err != nil {
+		return fmt.Errorf("failed to move file with sudo %q -> %q: %w", tmpFileName, filePath, err)
 	}
 
 	return nil
