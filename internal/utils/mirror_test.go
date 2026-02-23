@@ -97,3 +97,19 @@ func TestFetchFirstValid_AllFail(t *testing.T) {
 	}
 }
 
+func TestFetchFirstValidWithTimeout_DeadlineExceeded(t *testing.T) {
+	srvSlow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("slow"))
+	}))
+	t.Cleanup(srvSlow.Close)
+
+	body, url, err := FetchFirstValidWithTimeout(20*time.Millisecond, []string{srvSlow.URL}, nil)
+	if err == nil {
+		t.Fatalf("expected timeout error, got nil (body=%q url=%q)", string(body), url)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+}

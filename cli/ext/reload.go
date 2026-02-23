@@ -22,8 +22,6 @@ func ReloadCatalogResult() *output.Result {
 		config.RepoPigstyCC + "/ext/data/extension.csv",
 	}
 
-	ctx := context.Background()
-
 	// Success criteria: downloaded content must be a valid extension catalog.
 	var extNum int
 	validate := func(content []byte) error {
@@ -35,7 +33,7 @@ func ReloadCatalogResult() *output.Result {
 		return nil
 	}
 
-	content, sourceURL, err := utils.FetchFirstValid(ctx, urls, validate)
+	content, sourceURL, err := utils.FetchFirstValidWithTimeout(0, urls, validate)
 	if err != nil {
 		msg := "failed to download extension catalog"
 		var ne interface{ Timeout() bool }
