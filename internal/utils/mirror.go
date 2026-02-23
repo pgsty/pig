@@ -6,7 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
+
+// DefaultMirrorFetchTimeout is the default wall-clock timeout used by
+// mirror fetchers when callers don't provide an explicit deadline.
+const DefaultMirrorFetchTimeout = 30 * time.Second
 
 type mirrorFetchResult struct {
 	url     string
@@ -22,9 +27,9 @@ func shouldFallbackToGetOnHeadStatus(code int) bool {
 
 // FetchFirstValid concurrently fetches content from all given URLs and returns the
 // first response that:
-//   1) returns HTTP 200
-//   2) can be fully read
-//   3) passes validate (when validate is not nil)
+//  1. returns HTTP 200
+//  2. can be fully read
+//  3. passes validate (when validate is not nil)
 //
 // It is intentionally quiet: it does not log per-mirror failures. Callers should
 // only surface an error when all mirrors fail (or the context times out).
@@ -122,4 +127,16 @@ func FetchFirstValid(ctx context.Context, urls []string, validate func([]byte) e
 		return nil, "", fmt.Errorf("all mirrors failed")
 	}
 	return nil, "", errors.Join(errs...)
+}
+
+// FetchFirstValidWithTimeout is a convenience wrapper around FetchFirstValid.
+// It creates a context with timeout and guarantees that mirror probing cannot
+// block forever when callers do not already have a deadline.
+func FetchFirstValidWithTimeout(timeout time.Duration, urls []string, validate func([]byte) error) ([]byte, string, error) {
+	if timeout <= 0 {
+		timeout = DefaultMirrorFetchTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return FetchFirstValid(ctx, urls, validate)
 }

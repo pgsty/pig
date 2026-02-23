@@ -25,8 +25,6 @@ func ReloadRepoCatalogWithResult() *output.Result {
 		config.RepoPigstyCC + "/ext/data/repo.yml",
 	}
 
-	ctx := context.Background()
-
 	// Success criteria: downloaded content must be a valid repo catalog.
 	var repos []Repository
 	validate := func(content []byte) error {
@@ -38,7 +36,7 @@ func ReloadRepoCatalogWithResult() *output.Result {
 		return nil
 	}
 
-	content, sourceURL, err := utils.FetchFirstValid(ctx, urls, validate)
+	content, sourceURL, err := utils.FetchFirstValidWithTimeout(0, urls, validate)
 	if err != nil {
 		msg := "failed to download repo catalog"
 		var ne interface{ Timeout() bool }

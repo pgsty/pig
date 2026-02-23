@@ -9,7 +9,9 @@ cli/sty/assets/*.tgz
 
 bin/dist
 bin/dist2
-tmp/
+!tmp/
+tmp/*
+!tmp/go.mod
 dist/
 pig
 .DS_Store

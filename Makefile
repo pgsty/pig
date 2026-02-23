@@ -36,7 +36,7 @@ build-linux-arm64:
 	CGO_ENABLED=0 GOOS=linux  GOARCH=arm64 go build -a -ldflags "$(LD_FLAGS) -extldflags '-static'" -o pig
 	upx pig
 
-r: release
+rel: release
 release: release-linux
 release-linux: linux-amd64 linux-arm64
 linux-amd64: clean build-linux-amd64
@@ -85,11 +85,11 @@ gr-prod-release:
 	goreleaser release --clean
 
 # Check goreleaser configuration
-gr-check: goreleaser-install
+gr-check: gr-install
 	goreleaser check
 
 # New main release task using goreleaser
-release-new: goreleaser-release
+release-new: gr-release
 
 
 ###############################################################
@@ -101,9 +101,9 @@ upload:
 tag:
 	git tag -d $(VERSION) || true
 	git tag $(VERSION)
-r: run
 run:
 	go run main.go
+r: run
 b: build
 build:
 	go build -ldflags "$(LD_FLAGS)" -o pig
@@ -111,10 +111,12 @@ c: clean
 clean:
 	rm -rf pig
 
-d:
+docs-serve:
 	hugo serve
-b:
+docs-build:
 	hugo --minify
+d: docs-serve
+db: docs-build
 
 ###############################################################
 #                         Testing                            #
@@ -132,6 +134,6 @@ amd:
 2j: amd
 	scp pig jp:/tmp/pig; ssh jp sudo mv /tmp/pig /usr/bin/pig
 
-.PHONY: run build clean build-linux-amd64 build-linux-arm64 release release-linux linux-amd64 linux-arm64 \
- goreleaser-install goreleaser-snapshot goreleaser-build goreleaser-release goreleaser-test-release \
- goreleaser-check release-new goreleaser-local
+.PHONY: run build clean rel release release-linux build-linux-amd64 build-linux-arm64 linux-amd64 linux-arm64 \
+ gr-install gr-snapshot gr-build gr-local gr-release gr-prod-release gr-check release-new \
+ upload tag docs-serve docs-build d db r b c arm amd 2m 2c 2a 2j
