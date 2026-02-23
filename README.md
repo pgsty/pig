@@ -2,8 +2,8 @@
 
 [![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
 [![Doc: pig](https://img.shields.io/badge/Docs-pig-slategray?style=flat)](https://pigsty.io/docs/pig)
-[![Version: v1.1.2](https://img.shields.io/badge/version-v1.1.2-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.1.2)
-[![Pigsty: v4.1.0](https://img.shields.io/badge/Pigsty-v4.1.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
+[![Version: v1.2.0](https://img.shields.io/badge/version-v1.2.0-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.2.0)
+[![Pigsty: v4.2.0](https://img.shields.io/badge/Pigsty-v4.2.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 451](https://img.shields.io/badge/extensions-451-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pgsty/pig)
@@ -90,7 +90,7 @@ sudo yum makecache; sudo yum install -y pig
 
 ```bash
 pig update                  # self-update to the latest version
-pig update -v 1.1.2         # self-update to the specific version
+pig update -v 1.2.0         # self-update to the specific version
 pig ext reload              # update extension catalog metadata only
 ```
 
@@ -194,6 +194,8 @@ pig ext link 17               # create /usr/pgsql -> /usr/pgsql-17 or /usr/lib/p
 . /etc/profile.d/pgsql.sh     # reload the path and take effect immediately
 ```
 
+**Using Alias**
+
 You can also use other package aliases, it will translate to corresponding package on your OS distro
 and the `$v` will be replaced with the active or given pg version number, such as `17`, `16`, etc...
 
@@ -209,6 +211,37 @@ pg15-full:    "postgresql15 postgresql15-server postgresql15-libs postgresql15-c
 pg14-main:    "postgresql14 postgresql14-server postgresql14-libs postgresql14-contrib postgresql14-plperl postgresql14-plpython3 postgresql14-pltcl pg_repack_14 wal2json_14 pgvector_14"
 pg13-core:    "postgresql13 postgresql13-server postgresql13-libs postgresql13-contrib postgresql13-plperl postgresql13-plpython3 postgresql13-pltcl"
 ```
+
+Check the actual installed package with `--plan`:
+
+```bash
+vagrant@meta:~$ pig install pg18-gis --plan
+Execution Plan
+Command: pig install pg18-gis
+
+Actions:
+  [1] Resolve package names: postgresql-18-postgis-3 <- pg18-gis, postgresql-18-pgrouting <- pg18-gis, postgresql-18-pointcloud <- pg18-gis, postgresql-18-h3 <- pg18-gis, postgresql-18-q3c <- pg18-gis, postgresql-18-ogr-fdw <- pg18-gis, postgresql-18-geoip <- pg18-gis, postgresql-18-pg-polyline <- pg18-gis, postgresql-18-pg-geohash <- pg18-gis, postgresql-18-mobilitydb <- pg18-gis, postgresql-18-tzf <- pg18-gis
+  [2] Execute: sudo apt-get install postgresql-18-postgis-3 postgresql-18-pgrouting postgresql-18-pointcloud postgresql-18-h3 postgresql-18-q3c postgresql-18-ogr-fdw postgresql-18-geoip postgresql-18-pg-polyline postgresql-18-pg-geohash postgresql-18-mobilitydb postgresql-18-tzf
+
+Affects:
+Type     Name                       Impact   Detail
+──────────────────────────────────────────────────────────────────
+package  postgresql-18-postgis-3    install  requested by pg18-gis
+package  postgresql-18-pgrouting    install  requested by pg18-gis
+package  postgresql-18-pointcloud   install  requested by pg18-gis
+package  postgresql-18-h3           install  requested by pg18-gis
+package  postgresql-18-q3c          install  requested by pg18-gis
+package  postgresql-18-ogr-fdw      install  requested by pg18-gis
+package  postgresql-18-geoip        install  requested by pg18-gis
+package  postgresql-18-pg-polyline  install  requested by pg18-gis
+package  postgresql-18-pg-geohash   install  requested by pg18-gis
+package  postgresql-18-mobilitydb   install  requested by pg18-gis
+package  postgresql-18-tzf          install  requested by pg18-gis
+
+Expected:
+  Packages installed: postgresql-18-postgis-3, postgresql-18-pgrouting, postgresql-18-pointcloud, postgresql-18-h3, postgresql-18-q3c, postgresql-18-ogr-fdw, postgresql-18-geoip, postgresql-18-pg-polyline, postgresql-18-pg-geohash, postgresql-18-mobilitydb, postgresql-18-tzf
+```
+
 
 <details><summary>More Alias</summary>
 
@@ -288,26 +321,26 @@ pig ext install pg16=16.5      # install PostgreSQL 16 with a specific minor ver
 You can perform fuzzy search on extension name, description, and category.
 
 ```bash
-$ pig ext ls olap
-INFO[14:04:25] found 14 extensions matching 'olap':
-Name            Status     Version  Cate  Flags   License       Repo     PGVer  Package               Description
-----            ------     -------  ----  ------  -------       ------   -----  ------------          ---------------------
-citus           installed  14.0.0   OLAP  -dsl--  AGPL-3.0      PIGSTY   16-18  citus_18              Distributed PostgreSQL as an extension
-citus_columnar  installed  14.0.0   OLAP  -ds---  AGPL-3.0      PIGSTY   16-18  citus_18              Citus columnar storage engine
-columnar        not avail  1.1.2    OLAP  -ds---  AGPL-3.0      PIGSTY   13-16  hydra_18              Hydra Columnar extension
-pg_analytics    not avail  0.3.7    OLAP  -ds-t-  PostgreSQL    PIGSTY   14-17  pg_analytics_18       Postgres for analytics, powered by DuckDB
-pg_duckdb       installed  1.1.1    OLAP  -dsl--  MIT           PIGSTY   14-18  pg_duckdb_18          DuckDB Embedded in Postgres
-pg_mooncake     installed  0.2.0    OLAP  -d-l--  MIT           PIGSTY   14-18  pg_mooncake_18        Columnstore Table in Postgres
-pg_clickhouse   available  0.1.2    OLAP  -ds---  Apache-2.0    PIGSTY   13-18  pg_clickhouse_18      Interfaces to query ClickHouse databases from PostgreSQL
-duckdb_fdw      available  1.1.2    OLAP  -ds--r  MIT           PIGSTY   13-17  duckdb_fdw_18         DuckDB Foreign Data Wrapper
-pg_parquet      installed  0.5.1    OLAP  -dslt-  PostgreSQL    PIGSTY   14-18  pg_parquet_18         copy data between Postgres and Parquet
-pg_fkpart       available  1.7.0    OLAP  -d----  GPL-2.0       PIGSTY   13-18  pg_fkpart_18          Table partitioning by foreign key utility
-pg_partman      available  5.4.0    OLAP  -ds---  PostgreSQL    PGDG     13-18  pg_partman_18         Extension to manage partitioned tables by time or ID
-plproxy         available  2.11.0   OLAP  -ds---  BSD 0-Clause  PGDG     13-18  plproxy_18            Database partitioning implemented as procedural language
-pg_strom        not avail  6.0      OLAP  -ds--x  PostgreSQL    PGDG     13-17  pg_strom_18           PG-Strom - big-data processing acceleration using GPU and NVME
-tablefunc       installed  1.0      OLAP  -ds-tx  PostgreSQL    CONTRIB  13-18  postgresql18-contrib  functions that manipulate whole tables, including crosstab
+vagrant@meta:~$ pig ext ls olap
+✓ Found 14 extensions matching 'olap'
+Name            Version  Cate  Flags   License       RPM      DEB      PG Ver  Description
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+citus           14.0.0   OLAP  -dsl--  AGPL-3.0      PIGSTY   PIGSTY   16-18   Distributed PostgreSQL as an extension
+citus_columnar  14.0.0   OLAP  -ds---  AGPL-3.0      PIGSTY   PIGSTY   16-18   Citus columnar storage engine
+columnar        1.1.2    OLAP  -ds---  AGPL-3.0      PIGSTY   PIGSTY   13-16   Hydra Columnar extension
+pg_analytics    0.3.7    OLAP  -ds-t-  PostgreSQL    PIGSTY   PIGSTY   14-17   Postgres for analytics, powered by DuckDB
+pg_duckdb       1.1.1    OLAP  -dsl--  MIT           PIGSTY   PIGSTY   14-18   DuckDB Embedded in Postgres
+pg_mooncake     0.2.0    OLAP  -d-l--  MIT           PIGSTY   PIGSTY   14-18   Columnstore Table in Postgres
+pg_clickhouse   0.1.4    OLAP  -ds---  Apache-2.0    PIGSTY   PIGSTY   13-18   Interfaces to query ClickHouse databases from PostgreSQL
+duckdb_fdw      1.1.2    OLAP  -ds--r  MIT           PIGSTY   PIGSTY   13-17   DuckDB Foreign Data Wrapper
+pg_parquet      0.5.1    OLAP  -dslt-  PostgreSQL    PIGSTY   PIGSTY   14-18   copy data between Postgres and Parquet
+pg_fkpart       1.7.0    OLAP  -d----  GPL-2.0       PIGSTY   PIGSTY   13-18   Table partitioning by foreign key utility
+pg_partman      5.4.2    OLAP  -ds---  PostgreSQL    PGDG     PGDG     13-18   Extension to manage partitioned tables by time or ID
+plproxy         2.11.0   OLAP  -ds---  BSD 0-Clause  PGDG     PGDG     13-18   Database partitioning implemented as procedural language
+pg_strom        6.1      OLAP  -ds--x  PostgreSQL    PGDG              13-17   PG-Strom - big-data processing acceleration using GPU and NVME
+tablefunc       1.0      OLAP  -ds-tx  PostgreSQL    CONTRIB  CONTRIB  13-18   functions that manipulate whole tables, including crosstab
 
-(14 Rows) (Status: installed, available, not avail | Flags: b = HasBin, d = HasDDL, s = HasLib, l = NeedLoad, t = Trusted, r = Relocatable, x = Unknown)
+(14 Rows)
 ```
 
 You can use the `-v 16` or `-p /path/to/pg_config` to find extension availability for other PostgreSQL installation.
@@ -320,6 +353,25 @@ You can check the availability matrix for extensions across different OS/Arch/PG
 $ pig ext avail pg_duckdb            # show availability matrix for pg_duckdb
 $ pig ext avail postgis pgvector     # show matrix for multiple extensions
 $ pig ext avail                      # show all packages availability on current OS
+```
+
+```bash
+vagrant@meta:~$ pig ext avail
+✓ Found 294 packages available on u24.arm64
+
+Extension Availability on u24.aarch64 : https://pgext.cloud/os/u24.aarch64
+Showing 318 packages with 451 extensions  (green = PIGSTY, blue = PGDG)
+
+Pkg                     18          17          16          15          14          13
+timescaledb             2.25.1      2.25.1      2.25.1      2.25.1      2.19.3
+timescaledb_toolkit     1.22.0      1.22.0      1.22.0      1.22.0      1.19.0
+pg_timeseries           0.2.0       0.2.0       0.2.0       0.2.0       0.2.0       0.2.0
+periods                 1.2.3       1.2.3       1.2.3       1.2.3       1.2.3       1.2.3
+temporal_tables         1.2.2       1.2.2       1.2.2       1.2.2       1.2.2       1.2.2
+emaj                    4.7.1       4.7.1       4.7.1       4.7.1       4.7.1       4.7.1
+table_version           1.11.1      1.11.1      1.11.1      1.11.1      1.11.1      1.11.1
+pg_cron                 1.6.7       1.6.7       1.6.7       1.6.7       1.6.7       1.6.7
+...
 ```
 
 
@@ -441,46 +493,57 @@ Details: https://pgext.cloud/e/citus  (green = PIGSTY, blue = PGDG)
 You can list all available repo / module (repo collection) with `pig repo list`:
 
 ```bash
-$ pig repo list
-
-os_environment: {code: d13, arch: amd64, type: deb, major: 13}
-repo_upstream:  # Available Repo: 15
-  - { name: pigsty-local   ,description: 'Pigsty Local'       ,module: local    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'http://${admin_ip}/pigsty ./' }
-  - { name: pigsty-pgsql   ,description: 'Pigsty PgSQL'       ,module: pgsql    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.pigsty.io/apt/pgsql/${distro_codename} ${distro_codename} main' }
-  - { name: pigsty-infra   ,description: 'Pigsty Infra'       ,module: infra    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://repo.pigsty.io/apt/infra/ generic main' }
-  - { name: docker-ce      ,description: 'Docker'             ,module: infra    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://download.docker.com/linux/${distro_name} ${distro_codename} stable' }
-  - { name: base           ,description: 'Debian Basic'       ,module: node     ,releases: [11,12,13         ] ,arch: [x86_64, aarch64]  ,baseurl: 'http://deb.debian.org/debian/ ${distro_codename} main non-free-firmware' }
-  - { name: updates        ,description: 'Debian Updates'     ,module: node     ,releases: [11,12,13         ] ,arch: [x86_64, aarch64]  ,baseurl: 'http://deb.debian.org/debian/ ${distro_codename}-updates main non-free-firmware' }
-  - { name: security       ,description: 'Debian Security'    ,module: node     ,releases: [11,12,13         ] ,arch: [x86_64, aarch64]  ,baseurl: 'http://security.debian.org/debian-security ${distro_codename}-security main non-free-firmware' }
-  - { name: pgdg           ,description: 'PGDG'               ,module: pgsql    ,releases: [11,12,13,22,24   ] ,arch: [x86_64, aarch64]  ,baseurl: 'http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg main' }
-  - { name: pgdg-beta      ,description: 'PGDG Beta'          ,module: beta     ,releases: [11,12,13,22,24   ] ,arch: [x86_64, aarch64]  ,baseurl: 'http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg-testing main 19' }
-  - { name: groonga        ,description: 'Groonga Debian'     ,module: groonga  ,releases: [11,12,13         ] ,arch: [x86_64, aarch64]  ,baseurl: 'https://packages.groonga.org/debian/ ${distro_codename} main' }
-  - { name: grafana        ,description: 'Grafana'            ,module: grafana  ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://apt.grafana.com stable main' }
-  - { name: kubernetes     ,description: 'Kubernetes'         ,module: kube     ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /' }
-  - { name: gitlab-ee      ,description: 'Gitlab EE'          ,module: gitlab   ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://packages.gitlab.com/gitlab/gitlab-ee/${distro_name}/ ${distro_codename} main' }
-  - { name: gitlab-ce      ,description: 'Gitlab CE'          ,module: gitlab   ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://packages.gitlab.com/gitlab/gitlab-ce/${distro_name}/ ${distro_codename} main' }
-  - { name: clickhouse     ,description: 'ClickHouse'         ,module: click    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64]  ,baseurl: 'https://packages.clickhouse.com/deb/ stable main' }
-repo_modules:   # Available Modules: 20
+vagrant@meta:~$ pig repo list
+✓ Found 25 repositories
+os_environment: {code: u24, arch: arm64, type: deb, major: 24}
+repo_upstream:  # Available Repo: 25
+  - { name: pigsty-local   ,description: 'Pigsty Local'       ,module: local    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'http://${admin_ip}/pigsty ./' }
+  - { name: pigsty-pgsql   ,description: 'Pigsty PgSQL'       ,module: pgsql    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://repo.pigsty.io/apt/pgsql/${distro_codename} ${distro_codename} main' }
+  - { name: pigsty-infra   ,description: 'Pigsty Infra'       ,module: infra    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://repo.pigsty.io/apt/infra/ generic main' }
+  - { name: nginx          ,description: 'Nginx'              ,module: infra    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'http://nginx.org/packages/${distro_name} ${distro_codename} nginx' }
+  - { name: docker-ce      ,description: 'Docker'             ,module: docker   ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://download.docker.com/linux/${distro_name} ${distro_codename} stable' }
+  - { name: base           ,description: 'Ubuntu Basic'       ,module: node     ,releases: [20,22,24] ,arch: [aarch64] ,baseurl: 'http://ports.ubuntu.com/ubuntu-ports/ ${distro_codename}             main universe multiverse restricted' }
+  - { name: updates        ,description: 'Ubuntu Updates'     ,module: node     ,releases: [20,22,24] ,arch: [aarch64] ,baseurl: 'http://ports.ubuntu.com/ubuntu-ports/ ${distro_codename}-updates     main restricted universe multiverse' }
+  - { name: backports      ,description: 'Ubuntu Backports'   ,module: node     ,releases: [20,22,24] ,arch: [aarch64] ,baseurl: 'http://ports.ubuntu.com/ubuntu-ports/ ${distro_codename}-backports   main restricted universe multiverse' }
+  - { name: security       ,description: 'Ubuntu Security'    ,module: node     ,releases: [20,22,24] ,arch: [aarch64] ,baseurl: 'http://ports.ubuntu.com/ubuntu-ports/ ${distro_codename}-security    main restricted universe multiverse' }
+  - { name: pgdg           ,description: 'PGDG'               ,module: pgsql    ,releases: [11,12,13,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg main' }
+  - { name: pgdg-beta      ,description: 'PGDG Beta'          ,module: beta     ,releases: [11,12,13,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg-testing main 19' }
+  - { name: timescaledb    ,description: 'TimescaleDB'        ,module: extra    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://packagecloud.io/timescale/timescaledb/${distro_name}/ ${distro_codename} main' }
+  - { name: percona        ,description: 'Percona TDE'        ,module: percona  ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://repo.pigsty.io/apt/percona ${distro_codename} main' }
+  - { name: wiltondb       ,description: 'WiltonDB'           ,module: mssql    ,releases: [20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://repo.pigsty.io/apt/mssql/ ${distro_codename} main' }
+  - { name: groonga        ,description: 'Groonga Ubuntu'     ,module: groonga  ,releases: [20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://ppa.launchpadcontent.net/groonga/ppa/ubuntu/ ${distro_codename} main' }
+  - { name: mysql          ,description: 'MySQL'              ,module: mysql    ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://repo.mysql.com/apt/${distro_name} ${distro_codename} mysql-8.0 mysql-tools' }
+  - { name: mongo          ,description: 'MongoDB'            ,module: mongo    ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://repo.mongodb.org/apt/${distro_name} ${distro_codename}/mongodb-org/8.0 multiverse' }
+  - { name: redis          ,description: 'Redis'              ,module: redis    ,releases: [11,12,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://packages.redis.io/deb ${distro_codename} main' }
+  - { name: llvm           ,description: 'LLVM'               ,module: llvm     ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'http://apt.llvm.org/${distro_codename}/ llvm-toolchain-${distro_codename} main' }
+  - { name: haproxyu       ,description: 'Haproxy Ubuntu'     ,module: haproxy  ,releases: [20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://ppa.launchpadcontent.net/vbernat/haproxy-3.1/ubuntu/ ${distro_codename} main' }
+  - { name: grafana        ,description: 'Grafana'            ,module: grafana  ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://apt.grafana.com stable main' }
+  - { name: kubernetes     ,description: 'Kubernetes'         ,module: kube     ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /' }
+  - { name: gitlab-ee      ,description: 'Gitlab EE'          ,module: gitlab   ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://packages.gitlab.com/gitlab/gitlab-ee/${distro_name}/ ${distro_codename} main' }
+  - { name: gitlab-ce      ,description: 'Gitlab CE'          ,module: gitlab   ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://packages.gitlab.com/gitlab/gitlab-ce/${distro_name}/ ${distro_codename} main' }
+  - { name: clickhouse     ,description: 'ClickHouse'         ,module: click    ,releases: [11,12,13,20,22,24] ,arch: [x86_64, aarch64] ,baseurl: 'https://packages.clickhouse.com/deb/ stable main' }
+repo_modules:   # Available Modules: 22
   - all       : pigsty-infra, pigsty-pgsql, pgdg, base, updates, extras, epel, centos-sclo, centos-sclo-rh, baseos, appstream, powertools, crb, security, backports
-  - pigsty    : pigsty-infra, pigsty-pgsql
-  - pgdg      : pgdg
-  - node      : base, updates, extras, epel, centos-sclo, centos-sclo-rh, baseos, appstream, powertools, crb, security, backports
-  - infra     : pigsty-infra, nginx
-  - docker    : docker-ce
-  - pgsql     : pigsty-pgsql, pgdg-common, pgdg-el8fix, pgdg-el9fix, pgdg13, pgdg14, pgdg15, pgdg16, pgdg17, pgdg18, pgdg
-  - extra     : pgdg-extras, pgdg13-nonfree, pgdg14-nonfree, pgdg15-nonfree, pgdg16-nonfree, pgdg17-nonfree, timescaledb, citus
-  - mssql     : wiltondb
-  - mysql     : mysql
-  - kube      : kubernetes
-  - grafana   : grafana
   - beta      : pgdg19-beta, pgdg-beta
   - click     : clickhouse
+  - docker    : docker-ce
+  - extra     : pgdg-extras, pgdg13-nonfree, pgdg14-nonfree, pgdg15-nonfree, pgdg16-nonfree, pgdg17-nonfree, pgdg18-nonfree, timescaledb, citus
   - gitlab    : gitlab-ee, gitlab-ce
+  - grafana   : grafana
   - groonga   : groonga
   - haproxy   : haproxyd, haproxyu
+  - infra     : pigsty-infra, nginx
+  - kube      : kubernetes
+  - llvm      : llvm
   - local     : pigsty-local
   - mongo     : mongo
+  - mssql     : wiltondb
+  - mysql     : mysql
+  - node      : base, updates, extras, epel, centos-sclo, centos-sclo-rh, baseos, appstream, powertools, crb, security, backports
   - percona   : percona
+  - pgdg      : pgdg
+  - pgsql     : pigsty-pgsql, pgdg-common, pgdg13, pgdg14, pgdg15, pgdg16, pgdg17, pgdg18, pgdg
+  - pigsty    : pigsty-infra, pigsty-pgsql
   - redis     : redis
 ```
 

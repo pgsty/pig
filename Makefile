@@ -3,7 +3,7 @@
 # Mtime     :   2026-02-08
 # Copyright (C) 2018-2026 Ruohang Feng
 #==============================================================#
-VERSION=v1.1.2
+VERSION=v1.2.0
 PIG_VERSION:=$(patsubst v%,%,$(VERSION))
 
 # Build Variables
