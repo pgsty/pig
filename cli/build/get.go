@@ -24,7 +24,7 @@ var SpecialSourceMapping = map[string][]string{
 	"orioledb":    {"orioledb-beta14.tar.gz"},
 	"agensgraph":  {"agensgraph-2.16.0.tar.gz"},
 	"agentsgraph": {"agensgraph-2.16.0.tar.gz"},
-	"pgedge":      {"postgresql-17.7.tar.gz"},
+	"pgedge":      {"postgresql-17.7.tar.gz", "spock-5.0.5.tar.gz"},
 	"hunspell":    {"hunspell-1.0.tar.gz"},
 	"libfq":       {"libfq-0.6.1.tar.gz"},
 
@@ -98,22 +98,50 @@ func DownloadSources(packages []string, force bool, mirror bool) error {
 
 // Get source files for a package
 func getSourceFiles(pkg string) []string {
-	var sources []string
-
 	// 1. Try as extension
 	if ext, err := ResolvePackage(pkg); err == nil && ext.Source != "" {
-		sources = append(sources, ext.Source)
-		return sources
+		return splitAndCleanSources(ext.Source)
 	}
 
 	// 2. Check special mapping
 	if mapped, exists := SpecialSourceMapping[pkg]; exists {
-		return mapped
+		var sources []string
+		for _, item := range mapped {
+			sources = append(sources, splitAndCleanSources(item)...)
+		}
+		return dedupeSources(sources)
 	}
 
 	// 3. Treat as filename
-	sources = append(sources, pkg)
+	return []string{pkg}
+}
+
+// splitAndCleanSources splits source field by whitespace and removes empty items.
+func splitAndCleanSources(raw string) []string {
+	parts := strings.Fields(raw)
+	sources := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if src := strings.TrimSpace(part); src != "" {
+			sources = append(sources, src)
+		}
+	}
 	return sources
+}
+
+func dedupeSources(sources []string) []string {
+	if len(sources) <= 1 {
+		return sources
+	}
+	result := make([]string, 0, len(sources))
+	seen := make(map[string]struct{}, len(sources))
+	for _, src := range sources {
+		if _, exists := seen[src]; exists {
+			continue
+		}
+		seen[src] = struct{}{}
+		result = append(result, src)
+	}
+	return result
 }
 
 // Download a single file
