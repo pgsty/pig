@@ -22,6 +22,9 @@ var SpecialSourceMapping = map[string][]string{
 	"antlr4":      {"antlr4-cpp-runtime-4.13.2-source.zip"},
 	"oriolepg":    {"oriolepg-17.16.tar.gz"},
 	"orioledb":    {"orioledb-beta14.tar.gz"},
+	"agensgraph":  {"agensgraph-2.16.0.tar.gz"},
+	"agentsgraph": {"agensgraph-2.16.0.tar.gz"},
+	"pgedge":      {"postgresql-17.7.tar.gz"},
 	"hunspell":    {"hunspell-1.0.tar.gz"},
 	"libfq":       {"libfq-0.6.1.tar.gz"},
 
