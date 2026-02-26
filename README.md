@@ -272,7 +272,7 @@ Take el for examples:
 "wiltondb":            "wiltondb",
 "polardb":             "PolarDB",
 "orioledb":            "orioledb_17 oriolepg_17",
-"openhalodb":          "openhalodb",
+"openhalodb":          "openhalodb_14",
 "percona-core":        "percona-postgresql18,percona-postgresql18-server,percona-postgresql18-contrib,percona-postgresql18-plperl,percona-postgresql18-plpython3,percona-postgresql18-pltcl,percona-pg_tde18",
 "percona-main":        "percona-postgresql18,percona-postgresql18-server,percona-postgresql18-contrib,percona-postgresql18-plperl,percona-postgresql18-plpython3,percona-postgresql18-pltcl,percona-pg_tde18,percona-postgis35_18,percona-postgis35_18-client,percona-postgis35_18-utils,percona-pgvector_18,percona-wal2json18,percona-pg_repack18,percona-pgaudit18,percona-pgaudit18_set_user,percona-pg_stat_monitor18,percona-pg_gather",
 "ferretdb":            "ferretdb2",

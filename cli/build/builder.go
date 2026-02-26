@@ -662,15 +662,17 @@ func (b *ExtensionBuilder) buildForAll() {
 	// Clear progress line and display result
 	fmt.Print("\r\033[K")
 	if task.Success {
-		logrus.Infof("[ALL] [PASS] Built packages:")
-		// Print each artifact
 		if task.Artifact != "" {
+			logrus.Infof("[ALL] [PASS] Built packages:")
+			// Print each artifact
 			artifacts := strings.Split(task.Artifact, "\n")
 			for _, artifact := range artifacts {
 				if artifact != "" {
 					logrus.Infof("  - %s", artifact)
 				}
 			}
+		} else {
+			logrus.Infof("[ALL] [PASS] Build command succeeded")
 		}
 	} else {
 		logrus.Errorf("[ALL] [FAIL] %s", fmt.Sprintf("grep -A60 %s %s", task.ID, b.LogPath))
