@@ -58,7 +58,7 @@ func InstallDepsList(packages []string, pgVersionsStr string) error {
 			for _, pgVer := range pgVersions {
 				logrus.Infof("Installing deps for extension %s (PG%s)", pkg, pgVer)
 				if err := InstallDeps(pkg, pgVer); err != nil {
-					logrus.Errorf("Failed to install deps for %s (PG%s): %v", pkg, pgVer, err)
+					logrus.Warnf("Dependency warning for %s (PG%s): %v", pkg, pgVer, err)
 					failed = append(failed, fmt.Sprintf("%s(PG%s)", pkg, pgVer))
 					// Continue with next version
 				}
@@ -66,20 +66,20 @@ func InstallDepsList(packages []string, pgVersionsStr string) error {
 		} else if isExtension && len(pgVersions) == 0 {
 			// For extensions without specified versions, use auto-detection
 			if err := InstallDeps(pkg, ""); err != nil {
-				logrus.Errorf("Failed to install deps for %s: %v", pkg, err)
+				logrus.Warnf("Dependency warning for %s: %v", pkg, err)
 				failed = append(failed, pkg)
 			}
 		} else {
 			// For non-extension packages, install once regardless of PG versions
 			if err := InstallDeps(pkg, ""); err != nil {
-				logrus.Errorf("Failed to install deps for %s: %v", pkg, err)
+				logrus.Warnf("Dependency warning for %s: %v", pkg, err)
 				failed = append(failed, pkg)
 			}
 		}
 	}
 
 	if len(failed) > 0 {
-		return fmt.Errorf("%d dependency installation(s) failed: %s", len(failed), strings.Join(failed, ", "))
+		logrus.Warnf("[DEPENDENCE] %d dependency installation warning(s): %s", len(failed), strings.Join(failed, ", "))
 	}
 
 	return nil

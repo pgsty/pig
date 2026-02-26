@@ -3,6 +3,7 @@ package build
 import (
 	"os"
 	"path/filepath"
+	"pig/internal/config"
 	"reflect"
 	"testing"
 )
@@ -124,5 +125,19 @@ func TestIntersectStringSets(t *testing.T) {
 	want := []string{"17"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("intersectStringSets = %v, want %v", got, want)
+	}
+}
+
+func TestInstallDepsListReturnsNilOnDependencyFailures(t *testing.T) {
+	oldOSType := config.OSType
+	t.Cleanup(func() {
+		config.OSType = oldOSType
+	})
+
+	// Force InstallDeps to fail fast without invoking package managers.
+	config.OSType = "unsupported-test-os"
+
+	if err := InstallDepsList([]string{"nonexistent-pkg-for-warning-path"}, ""); err != nil {
+		t.Fatalf("InstallDepsList() should keep warning-only behavior, got error: %v", err)
 	}
 }
