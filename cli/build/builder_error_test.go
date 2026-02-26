@@ -141,3 +141,97 @@ func TestDefaultBuilderPGVersions_DebianFiltersByDebPgAndInstalled(t *testing.T)
 		t.Fatalf("defaultBuilderPGVersions() = %v, want %v", got, want)
 	}
 }
+
+func TestBuildVersionForLog(t *testing.T) {
+	tests := []struct {
+		name   string
+		osType string
+		ext    *ext.Extension
+		want   string
+	}{
+		{
+			name:   "deb prefers DebVer",
+			osType: config.DistroDEB,
+			ext: &ext.Extension{
+				Version: "1.5",
+				DebVer:  "1.0",
+			},
+			want: "1.0",
+		},
+		{
+			name:   "rpm prefers RpmVer",
+			osType: config.DistroEL,
+			ext: &ext.Extension{
+				Version: "1.5",
+				RpmVer:  "1.1",
+			},
+			want: "1.1",
+		},
+		{
+			name:   "fallback to Extension.Version",
+			osType: config.DistroDEB,
+			ext: &ext.Extension{
+				Version: "2.0",
+			},
+			want: "2.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &ExtensionBuilder{
+				OSType:    tt.osType,
+				Extension: tt.ext,
+			}
+			got := b.buildVersionForLog()
+			if got != tt.want {
+				t.Fatalf("buildVersionForLog() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildSourceForLog(t *testing.T) {
+	tests := []struct {
+		name string
+		ext  *ext.Extension
+		want string
+	}{
+		{
+			name: "prefer Source field when available",
+			ext: &ext.Extension{
+				Name:    "aux_mysql",
+				Version: "1.5",
+				Source:  "openhalodb-1.0.tar.gz",
+			},
+			want: "openhalodb-1.0.tar.gz",
+		},
+		{
+			name: "keep multiple sources as one raw string",
+			ext: &ext.Extension{
+				Name:    "pgedge",
+				Version: "5.0.5",
+				Source:  "postgresql-17.7.tar.gz spock-5.0.5.tar.gz",
+			},
+			want: "postgresql-17.7.tar.gz spock-5.0.5.tar.gz",
+		},
+		{
+			name: "empty when Source is missing",
+			ext: &ext.Extension{
+				Name:    "aux_mysql",
+				Version: "1.5",
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &ExtensionBuilder{Extension: tt.ext}
+			got := b.buildSourceForLog()
+			if got != tt.want {
+				t.Fatalf("buildSourceForLog() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

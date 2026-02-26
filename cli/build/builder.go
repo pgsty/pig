@@ -369,11 +369,37 @@ func (b *ExtensionBuilder) printBuildInfo() {
 		logrus.Infof("control : %s", b.SpecPath)
 	}
 
-	logrus.Infof("ver  : %s", b.Extension.Version)
-	logrus.Infof("src  : %s-%s.tar.gz", b.Extension.Name, b.Extension.Version)
+	logrus.Infof("ver  : %s", b.buildVersionForLog())
+	if src := b.buildSourceForLog(); src != "" {
+		logrus.Infof("src  : %s", src)
+	}
 	logrus.Infof("log  : %s/%s.log", b.LogDir, b.Extension.Pkg)
 	logrus.Infof("pg   : %s", b.formatPGVersions())
 	logrus.Info(strings.Repeat("-", b.HeaderWidth))
+}
+
+func (b *ExtensionBuilder) buildVersionForLog() string {
+	if b.Extension == nil {
+		return ""
+	}
+	switch b.OSType {
+	case config.DistroEL:
+		if v := strings.TrimSpace(b.Extension.RpmVer); v != "" {
+			return v
+		}
+	case config.DistroDEB:
+		if v := strings.TrimSpace(b.Extension.DebVer); v != "" {
+			return v
+		}
+	}
+	return strings.TrimSpace(b.Extension.Version)
+}
+
+func (b *ExtensionBuilder) buildSourceForLog() string {
+	if b.Extension == nil {
+		return ""
+	}
+	return strings.TrimSpace(b.Extension.Source)
 }
 
 // initLogger initializes the build log file
