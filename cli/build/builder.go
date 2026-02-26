@@ -637,19 +637,19 @@ func (b *ExtensionBuilder) buildForAll() {
 	if err := b.executeBuildCommand(cmd, 0, task); err != nil {
 		task.Error = err.Error()
 	} else {
+		// Build success is determined by command exit code. Artifact discovery is
+		// best-effort and should not flip an otherwise successful build to failure.
+		task.Success = true
 		b.findDebianArtifacts(task)
+
 		expected := len(b.PGVersions)
 		found := countNonEmptyLines(task.Artifact)
 		if found == 0 {
-			task.Error = "build finished but no artifacts found"
-		} else if expected == 0 || found == expected {
-			task.Success = true
-		} else {
-			// Partial artifacts are not a hard failure on Debian since the build system
-			// typically builds for locally installed PG majors. Surface as warning, but
-			// avoid reporting the whole build as failed when artifacts exist.
-			task.Success = true
-			task.Error = fmt.Sprintf("build finished with partial artifacts: got %d of %d", found, expected)
+			logrus.Warnf("Build command succeeded but no package artifacts were discovered under %s",
+				filepath.Join(b.HomeDir, "ext", "pkg"))
+		} else if expected > 0 && found < expected {
+			logrus.Warnf("Build command succeeded with partial package artifacts: got %d of %d",
+				found, expected)
 		}
 	}
 
@@ -1028,26 +1028,24 @@ func (b *ExtensionBuilder) printSummary() {
 		if task != nil && task.Success {
 			// Count how many artifacts were found
 			artifactCount := countNonEmptyLines(task.Artifact)
+			if artifactCount == 0 {
+				logrus.Warnf("[DONE] PASS build command succeeded, but no packages were discovered in %v",
+					duration.Round(time.Second))
+				return
+			}
 
 			if totalCount == 0 {
-				// Unknown expected versions: treat any artifacts as a success.
-				if artifactCount > 0 {
-					logrus.Infof("[DONE] PASS %d package(s) built in %v",
-						artifactCount, duration.Round(time.Second))
-				} else {
-					logrus.Errorf("[DONE] FAIL no packages found in %v", duration.Round(time.Second))
-				}
+				logrus.Infof("[DONE] PASS build command succeeded, discovered %d package(s) in %v",
+					artifactCount, duration.Round(time.Second))
 				return
 			}
 
 			if artifactCount == totalCount {
 				logrus.Infof("[DONE] PASS all %d packages built in %v",
 					totalCount, duration.Round(time.Second))
-			} else if artifactCount > 0 {
-				logrus.Warnf("[DONE] PARTIAL %d of %d packages built (%d missing) in %v",
-					artifactCount, totalCount, totalCount-artifactCount, duration.Round(time.Second))
 			} else {
-				logrus.Errorf("[DONE] FAIL no packages found in %v", duration.Round(time.Second))
+				logrus.Warnf("[DONE] PASS build command succeeded, discovered %d of %d package(s) in %v",
+					artifactCount, totalCount, duration.Round(time.Second))
 			}
 		} else {
 			logrus.Errorf("[DONE] FAIL build failed in %v", duration.Round(time.Second))
