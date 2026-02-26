@@ -55,9 +55,7 @@ func RmExtensions(pgVer int, names []string, yes bool) *output.Result {
 		failed = appendPackageFailures(failed, allPkgNames, pkgToExt, err, output.CodeExtensionRemoveFailed)
 	} else {
 		// All packages removed successfully
-		for _, pkg := range allPkgNames {
-			removed = append(removed, pkg)
-		}
+		removed = append(removed, allPkgNames...)
 	}
 
 	data := &ExtensionRmData{

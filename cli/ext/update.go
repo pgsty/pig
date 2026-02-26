@@ -74,9 +74,7 @@ func UpgradeExtensions(pgVer int, names []string, yes bool) *output.Result {
 		failed = appendPackageFailures(failed, allPkgNames, pkgToExt, err, output.CodeExtensionUpdateFailed)
 	} else {
 		// All packages updated successfully
-		for _, pkg := range allPkgNames {
-			updated = append(updated, pkg)
-		}
+		updated = append(updated, allPkgNames...)
 	}
 
 	data := &ExtensionUpdateData{
