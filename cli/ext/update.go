@@ -75,7 +75,7 @@ func UpgradeExtensions(pgVer int, names []string, yes bool) *output.Result {
 	} else {
 		// All packages updated successfully
 		for _, pkg := range allPkgNames {
-			updated = append(updated, extNameForPackage(pkg, pkgToExt))
+			updated = append(updated, pkg)
 		}
 	}
 

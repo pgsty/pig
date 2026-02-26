@@ -56,7 +56,7 @@ func RmExtensions(pgVer int, names []string, yes bool) *output.Result {
 	} else {
 		// All packages removed successfully
 		for _, pkg := range allPkgNames {
-			removed = append(removed, extNameForPackage(pkg, pkgToExt))
+			removed = append(removed, pkg)
 		}
 	}
 
