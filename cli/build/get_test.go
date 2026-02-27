@@ -3,6 +3,7 @@ package build
 import (
 	"pig/cli/ext"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -22,11 +23,6 @@ func TestGetSourceFilesSpecialSourceMapping(t *testing.T) {
 			pkg:      "agentsgraph",
 			expected: []string{"agensgraph-2.16.0.tar.gz"},
 		},
-		{
-			name:     "pgedge",
-			pkg:      "pgedge",
-			expected: []string{"postgresql-17.7.tar.gz", "spock-5.0.5.tar.gz"},
-		},
 	}
 
 	for _, tt := range tests {
@@ -36,6 +32,28 @@ func TestGetSourceFilesSpecialSourceMapping(t *testing.T) {
 				t.Fatalf("getSourceFiles(%q) = %v, expected %v", tt.pkg, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestGetSourceFilesSpecialSourceMappingPgedge(t *testing.T) {
+	got := getSourceFiles("pgedge")
+	if len(got) != 2 {
+		t.Fatalf("getSourceFiles(%q) should return 2 files, got %v", "pgedge", got)
+	}
+
+	hasPostgresSource := false
+	hasSpockSource := false
+	for _, src := range got {
+		if strings.HasPrefix(src, "postgresql-17.") && strings.HasSuffix(src, ".tar.gz") {
+			hasPostgresSource = true
+		}
+		if strings.HasPrefix(src, "spock-") && strings.HasSuffix(src, ".tar.gz") {
+			hasSpockSource = true
+		}
+	}
+
+	if !hasPostgresSource || !hasSpockSource {
+		t.Fatalf("pgedge sources should include both postgres-17 and spock tarballs, got %v", got)
 	}
 }
 

@@ -34,7 +34,7 @@ Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the a
 curl -fsSL https://repo.pigsty.io/pig | bash
 ```
 
-Then it's ready to use, assume you want to install the [`pg_duckdb`](https://pgext.cloud/e/pg_duckdb) extension:
+Then you're ready to go. For example, install the [`pg_duckdb`](https://pgext.cloud/e/pg_duckdb) extension:
 
 ```bash
 $ pig repo add pigsty pgdg -u       # add pgdg & pigsty repo, then update repo cache
@@ -42,7 +42,7 @@ $ pig ext install pg18              # install PostgreSQL 18 kernels with native 
 $ pig ext install pg_duckdb -v 18   # install the pg_duckdb extension (for current pg18)
 ```
 
-That's it, All set! Check the [advanced usage](#advanced-usage) for details and [the full list 461 available extensions](https://pgext.cloud/list).
+That's it. All set! Check the [advanced usage](#advanced-usage) for details and the [full list of 461 available extensions](https://pgext.cloud/list).
 
 [![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
 
@@ -52,7 +52,7 @@ That's it, All set! Check the [advanced usage](#advanced-usage) for details and 
 
 ## Installation
 
-The `pig` util is a standalone go binary with no dependencies. You can install with the script:
+The `pig` util is a standalone Go binary with no dependencies. You can install it with:
 
 ```bash
 curl -fsSL https://repo.pigsty.io/pig | bash   # cloudflare default
@@ -84,13 +84,13 @@ EOF
 sudo yum makecache; sudo yum install -y pig
 ```
 
-> For mainland china user: consider replace the `repo.pigsty.io` with `repo.pigsty.cc`
+> For mainland China users: consider replacing `repo.pigsty.io` with `repo.pigsty.cc`.
 
 `pig` has self-update feature, you can update pig itself to the latest version with:
 
 ```bash
 pig update                  # self-update to the latest version
-pig update -v 1.2.1         # self-update to the specific version
+pig update -v <version>     # self-update to a specific released version
 pig ext reload              # update extension catalog metadata only
 ```
 
@@ -100,6 +100,9 @@ pig ext reload              # update extension catalog metadata only
 --------
 
 ## Advanced Usage
+
+> [!NOTE] 
+> command outputs below are examples captured on a specific environment; exact package/version lists can vary by OS, arch, and repo snapshot.
 
 **Environment Status**
 
@@ -159,16 +162,16 @@ pig build pkg   [extname...]     # get+dep+ext, build extension in one-pass
 **Radical Repo Admin**
 
 The default `pig repo add pigsty pgdg` will add the [`PGDG`](https://pgext.cloud/repo/pgdg) repo and [`PIGSTY`](https://pgext.cloud/repo/pgsql) repo to your system.
-While the following command will backup & wipe your existing repo and add all require repo to your system.
+The following command backup and overwrites your existing repo configuration, then adds all required repos.
 
 ```bash
 pig repo add all --ru        # This will OVERWRITE all existing repo with node,pgdg,pigsty repo
 pig repo set                 # = pig repo add all --update --remove
 ```
 
-There's a brutal version of repo add: `repo set`, which will overwrite you existing repo (`-ru`) by default.
+`repo set` is the stronger form of repo add: it overwrites your existing repos (`-ru`) by default.
 
-And you can recover you old repos at `/etc/apt/backup` or `/etc/yum.repos.d/backup`.
+You can recover your old repos from `/etc/apt/backup` or `/etc/yum.repos.d/backup`.
 
 
 **Install PostgreSQL**
@@ -180,7 +183,7 @@ pig ext install postgresql -v 18 # install PostgreSQL 18 kernels
 pig ext install pg17             # install PostgreSQL 17 kernels (all except test/devel)
 pig ext install pg16-mini        # install PostgreSQL 16 kernels with minimal packages
 pig ext install pg15 -y          # install PostgreSQL 15 kernels with auto-confirm
-pig ext install pg14=14.3        # install PostgreSQL 14 kernels with an specific minor version
+pig ext install pg14=14.3        # install PostgreSQL 14 kernels with a specific minor version
 pig ext install pg13=13.10       # install PostgreSQL 13 kernels
 
 pig install pg17 --plan          # preview translated native install command
@@ -196,20 +199,39 @@ pig ext link 17               # create /usr/pgsql -> /usr/pgsql-17 or /usr/lib/p
 
 **Using Alias**
 
-You can also use other package aliases, it will translate to corresponding package on your OS distro
-and the `$v` will be replaced with the active or given pg version number, such as `17`, `16`, etc...
+`pig install` and `pig ext add/install` support alias translation. Alias resolution has two parts:
 
-```yaml
-pgsql:        "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl"
-pg18:         "postgresql18 postgresql18-server postgresql18-libs postgresql18-contrib postgresql18-plperl postgresql18-plpython3 postgresql18-pltcl"
-pg17-client:  "postgresql17"
-pg17-server:  "postgresql17-server postgresql17-libs postgresql17-contrib"
-pg17-devel:   "postgresql17-devel"
-pg17-basic:   "pg_repack_17 wal2json_17 pgvector_17"
-pg16-mini:    "postgresql16 postgresql16-server postgresql16-libs postgresql16-contrib"
-pg15-full:    "postgresql15 postgresql15-server postgresql15-libs postgresql15-contrib postgresql15-plperl postgresql15-plpython3 postgresql15-pltcl postgresql15-llvmjit postgresql15-test postgresql15-devel"
-pg14-main:    "postgresql14 postgresql14-server postgresql14-libs postgresql14-contrib postgresql14-plperl postgresql14-plpython3 postgresql14-pltcl pg_repack_14 wal2json_14 pgvector_14"
-pg13-core:    "postgresql13 postgresql13-server postgresql13-libs postgresql13-contrib postgresql13-plperl postgresql13-plpython3 postgresql13-pltcl"
+1. Static aliases from [`cli/ext/catalog.go`](https://github.com/pgsty/pig/blob/main/cli/ext/catalog.go) (`LoadAliasMap`, with OS/arch overrides).
+2. Dynamic category aliases from [`cli/ext/alias_dynamic.go`](https://github.com/pgsty/pig/blob/main/cli/ext/alias_dynamic.go).
+
+Common PostgreSQL kernel aliases:
+
+```text
+pg<ver>                  pgsql
+pg<ver>-mini             pg<ver>-core
+pg<ver>-full             pg<ver>-main
+pg<ver>-client           pg<ver>-server
+pg<ver>-devel            pg<ver>-basic
+```
+
+Dynamic category aliases (`pg18-gis`, `pg17-rag`, `pgsql-olap`, ...):
+
+```text
+time, gis, rag, fts, olap, feat, lang, type,
+util, func, admin, stat, sec, fdw, sim, etl
+```
+
+Current static alias keys (shared by EL/Debian families):
+
+```text
+agens, agensgraph, ansible, babelfishpg, clickhouse, cloudberry,
+docker, duckdb, ferretdb, genai-toolbox, hunspell, infra, ivorysqldb,
+java-runtime, kafka, kube-runtime, kubernetes, node, node-bootstrap,
+openhalodb, orioledb, patroni, percona-core, percona-main, pg_activity,
+pg_exporter, pg_filedump, pg_timetable, pgbackrest, pgbackrest_exporter,
+pgbadger, pgbouncer, pgedge, pgformatter, pgloader, pgsql-common,
+polardb, postgresql, timescaledb-utils, victoria, vip-manager,
+vlogs, vmetrics, vray, vtraces
 ```
 
 Check the actual installed package with `--plan`:
@@ -299,7 +321,7 @@ Take el for examples:
 **Install for another PG**
 
 `pig` will use the default postgres installation in your active `PATH`,
-but you can install extension for a specific installation with `-v` (when using the PGDG convention),
+but you can install extensions for a specific installation with `-v` (when using the PGDG convention),
 or passing any `pg_config` path for custom installation.
 
 ```bash
@@ -307,7 +329,7 @@ pig ext install pg_duckdb -v 17     # install the extension for pg17
 pig ext install pg_duckdb -p /usr/lib/postgresql/16/bin/pg_config    # specify a pg16 pg_config  
 ```
 
-**Install a specific Version**
+**Install a Specific Version**
 
 You can also install PostgreSQL kernel packages with:
 
@@ -552,8 +574,8 @@ repo_modules:   # Available Modules: 22
 
 **Pigsty Management**
 
-The **pig** can also be used as a [**CLI**](https://pigsty.io/docs/pig/sty) tool for PostgreSQL & [Pigsty](https://pigsty.io/) — the battery-include free PostgreSQL RDS.
-Which brings HA, PITR, Monitoring, IaC, and all the extensions to your PostgreSQL cluster.
+The **pig** can also be used as a [**CLI**](https://pigsty.io/docs/pig/sty) tool for PostgreSQL & [Pigsty](https://pigsty.io/), a free battery-included PostgreSQL RDS.
+It brings HA, PITR, Monitoring, IaC, and all extensions to your PostgreSQL cluster.
 
 ```bash
 pig sty init     # install pigsty to ~/pigsty 

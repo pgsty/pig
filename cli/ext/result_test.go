@@ -338,6 +338,22 @@ func TestExtensionToSummaryNil(t *testing.T) {
 }
 
 func TestExtensionToSummary(t *testing.T) {
+	origPostgres := Postgres
+	origOSCode := config.OSCode
+	origOSArch := config.OSArch
+	origOSType := config.OSType
+	defer func() {
+		Postgres = origPostgres
+		config.OSCode = origOSCode
+		config.OSArch = origOSArch
+		config.OSType = origOSType
+	}()
+
+	Postgres = nil
+	config.OSCode = "a23"
+	config.OSArch = "amd64"
+	config.OSType = config.DistroMAC
+
 	ext := &Extension{
 		Name:     "test_ext",
 		Pkg:      "test_pkg",
@@ -356,9 +372,8 @@ func TestExtensionToSummary(t *testing.T) {
 	if summary.Name != "test_ext" {
 		t.Errorf("expected name=test_ext, got %v", summary.Name)
 	}
-	if summary.Status != "not_avail" {
-		// Since catalog is not initialized, status should be not_avail
-		t.Logf("status is %v (expected not_avail when catalog unavailable)", summary.Status)
+	if summary.Status != "available" {
+		t.Fatalf("expected status=available on unsupported OS fallback, got %v", summary.Status)
 	}
 }
 
@@ -3410,16 +3425,40 @@ func TestRmExtensionsAliasLookup(t *testing.T) {
 	}
 
 	config.OSType = config.DistroDEB
+	installFakePackageManager(t, "apt-get")
 	result := RmExtensions(17, []string{"pg17"}, true)
 	if result == nil {
 		t.Fatal("expected non-nil result")
+	}
+	if !result.Success {
+		t.Fatalf("expected success=true with fake apt-get, got code=%d message=%q", result.Code, result.Message)
 	}
 	data, ok := result.Data.(*ExtensionRmData)
 	if !ok {
 		t.Fatal("expected ExtensionRmData type")
 	}
-	if len(data.Packages) == 0 {
-		t.Log("alias was resolved but package list empty due to processing")
+	expectedPackages := []string{
+		"postgresql-17",
+		"postgresql-client-17",
+		"postgresql-plpython3-17",
+		"postgresql-plperl-17",
+		"postgresql-pltcl-17",
+	}
+	if len(data.Packages) != len(expectedPackages) {
+		t.Fatalf("expected %d resolved packages, got %d (%v)", len(expectedPackages), len(data.Packages), data.Packages)
+	}
+	for i, expected := range expectedPackages {
+		if data.Packages[i] != expected {
+			t.Fatalf("unexpected package at index %d: want %q got %q (all: %v)", i, expected, data.Packages[i], data.Packages)
+		}
+	}
+	if len(data.Removed) != len(expectedPackages) {
+		t.Fatalf("expected %d removed packages, got %d (%v)", len(expectedPackages), len(data.Removed), data.Removed)
+	}
+	for i, expected := range expectedPackages {
+		if data.Removed[i] != expected {
+			t.Fatalf("unexpected removed package at index %d: want %q got %q (all: %v)", i, expected, data.Removed[i], data.Removed)
+		}
 	}
 }
 
@@ -3448,9 +3487,13 @@ func TestUpgradeExtensionsWithCatalog(t *testing.T) {
 	// Test with EL OS
 	config.OSType = config.DistroEL
 	config.OSVersion = "9"
+	installFakePackageManager(t, "dnf")
 	result := UpgradeExtensions(17, []string{"pgvector"}, true)
 	if result == nil {
 		t.Fatal("expected non-nil result")
+	}
+	if !result.Success {
+		t.Fatalf("expected success=true with fake dnf, got code=%d message=%q", result.Code, result.Message)
 	}
 	data, ok := result.Data.(*ExtensionUpdateData)
 	if !ok {
@@ -3459,8 +3502,11 @@ func TestUpgradeExtensionsWithCatalog(t *testing.T) {
 	if data.PgVersion != 17 {
 		t.Errorf("expected pg_version=17, got %d", data.PgVersion)
 	}
-	if len(data.Packages) == 0 {
-		t.Log("packages resolved but command failed (expected without sudo)")
+	if len(data.Packages) != 1 || data.Packages[0] != "pgvector_17" {
+		t.Fatalf("expected resolved packages [pgvector_17], got %v", data.Packages)
+	}
+	if len(data.Updated) != 1 || data.Updated[0] != "pgvector_17" {
+		t.Fatalf("expected updated packages [pgvector_17], got %v", data.Updated)
 	}
 }
 
@@ -3521,9 +3567,13 @@ func TestImportExtensionsResultExtensionNotFound(t *testing.T) {
 	// Save and restore original state
 	origCatalog := Catalog
 	origOSType := config.OSType
+	origOSCode := config.OSCode
+	origOSArch := config.OSArch
 	defer func() {
 		Catalog = origCatalog
 		config.OSType = origOSType
+		config.OSCode = origOSCode
+		config.OSArch = origOSArch
 	}()
 
 	// Setup empty catalog
@@ -3533,26 +3583,33 @@ func TestImportExtensionsResultExtensionNotFound(t *testing.T) {
 		ExtPkgMap:  map[string]*Extension{},
 		AliasMap:   map[string]string{},
 	}
-	// Set OS type to ensure validateTool doesn't fail unexpectedly
+	installFakePackageManager(t, "apt-get")
 	config.OSType = config.DistroDEB
+	config.OSCode = "u22"
+	config.OSArch = "amd64"
 
-	result := ImportExtensionsResult(17, []string{"nonexistent_ext"}, "/tmp/test")
+	result := ImportExtensionsResult(17, []string{"nonexistent_ext"}, t.TempDir())
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
 	if result.Success {
 		t.Error("expected success=false when extension not found")
 	}
+	if result.Code != output.CodeExtensionNoPackage {
+		t.Fatalf("expected CodeExtensionNoPackage, got code=%d message=%q", result.Code, result.Message)
+	}
 	data, ok := result.Data.(*ImportResultData)
 	if !ok {
-		// validateTool may fail on non-Linux, check if we got an error result
-		t.Logf("result data type: %T, code: %d, message: %s", result.Data, result.Code, result.Message)
-		return
+		t.Fatalf("expected *ImportResultData, got %T", result.Data)
 	}
-	// On systems without apt-get, the test may fail at validateTool
-	// So we only check Failed if we got the expected data type
-	if len(data.Failed) == 0 && len(data.Requested) > 0 {
-		t.Logf("Warning: failed list empty but may be expected on this OS")
+	if len(data.Requested) != 1 || data.Requested[0] != "nonexistent_ext" {
+		t.Fatalf("unexpected requested list: %v", data.Requested)
+	}
+	if len(data.Failed) != 1 || data.Failed[0] != "nonexistent_ext" {
+		t.Fatalf("unexpected failed list: %v", data.Failed)
+	}
+	if len(data.Packages) != 0 {
+		t.Fatalf("expected no resolved packages, got %v", data.Packages)
 	}
 }
 
@@ -3610,9 +3667,16 @@ func TestScanExtensionsResultNoPostgres(t *testing.T) {
 func TestGetExtensionAvailabilityGlobalMode(t *testing.T) {
 	// Save and restore original state
 	origCatalog := Catalog
+	origOSCode := config.OSCode
+	origOSArch := config.OSArch
 	defer func() {
 		Catalog = origCatalog
+		config.OSCode = origOSCode
+		config.OSArch = origOSArch
 	}()
+
+	config.OSCode = "el9"
+	config.OSArch = "amd64"
 
 	// Setup catalog with a lead extension
 	ext := &Extension{
@@ -3620,10 +3684,9 @@ func TestGetExtensionAvailabilityGlobalMode(t *testing.T) {
 		Pkg:     "postgis",
 		Lead:    true,
 		Contrib: false,
-		RpmPkg:  "postgis36_$v",
-		DebPkg:  "postgresql-$v-postgis-3",
-		RpmPg:   []string{"17", "16"},
-		DebPg:   []string{"17", "16"},
+		Extra: map[string]interface{}{
+			"matrix": []interface{}{"el9i:17:A:f:1:P:3.5.0"},
+		},
 	}
 	Catalog = &ExtensionCatalog{
 		Extensions: []*Extension{ext},
@@ -3643,8 +3706,15 @@ func TestGetExtensionAvailabilityGlobalMode(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ExtensionAvailData type")
 	}
-	// Should have some packages in global mode
-	t.Logf("global availability returned %d packages", data.PackageCount)
+	if data.PackageCount != 1 || len(data.Packages) != 1 {
+		t.Fatalf("expected exactly 1 available package, got count=%d packages=%v", data.PackageCount, data.Packages)
+	}
+	if data.Packages[0].Pkg != "postgis" {
+		t.Fatalf("expected package name postgis, got %q", data.Packages[0].Pkg)
+	}
+	if ver := data.Packages[0].Versions["17"]; ver != "3.5.0" {
+		t.Fatalf("expected pg17 version=3.5.0, got %q", ver)
+	}
 }
 
 func TestGetExtensionAvailabilityMultipleExtensions(t *testing.T) {
@@ -3671,12 +3741,18 @@ func TestGetExtensionAvailabilityMultipleExtensions(t *testing.T) {
 	if !result.Success {
 		t.Errorf("expected success=true for existing extensions")
 	}
-	// Should return array for multiple extensions
 	dataSlice, ok := result.Data.([]*ExtensionAvailData)
 	if !ok {
-		t.Log("data type is not []*ExtensionAvailData, might be single extension")
-	} else if len(dataSlice) != 2 {
-		t.Errorf("expected 2 results, got %d", len(dataSlice))
+		t.Fatalf("expected []*ExtensionAvailData, got %T", result.Data)
+	}
+	if len(dataSlice) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(dataSlice))
+	}
+	if dataSlice[0] == nil || dataSlice[1] == nil {
+		t.Fatalf("expected non-nil availability entries, got %v", dataSlice)
+	}
+	if dataSlice[0].Extension != "postgis" || dataSlice[1].Extension != "pgvector" {
+		t.Fatalf("unexpected extension order/content: [%s, %s]", dataSlice[0].Extension, dataSlice[1].Extension)
 	}
 }
 
@@ -3725,14 +3801,25 @@ func TestLinkPostgresResultUnlinkKeywords(t *testing.T) {
 }
 
 func TestLinkPostgresResultPgPrefix(t *testing.T) {
-	// Test pg17, pg18 format handling
+	origOSType := config.OSType
+	defer func() {
+		config.OSType = origOSType
+	}()
+	config.OSType = "unsupported-test-os"
+
 	result := LinkPostgresResult("pg17")
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	// Should recognize pg17 as version 17
-	// Will fail on non-Linux but should process correctly
-	t.Logf("pg17 result: success=%v, message=%s", result.Success, result.Message)
+	if result.Success {
+		t.Fatal("expected failure on unsupported OS type")
+	}
+	if result.Code != output.CodeExtensionUnsupportedOS {
+		t.Fatalf("expected CodeExtensionUnsupportedOS, got code=%d message=%q", result.Code, result.Message)
+	}
+	if !strings.Contains(result.Message, "unsupported OS distribution") {
+		t.Fatalf("expected unsupported OS message, got %q", result.Message)
+	}
 }
 
 func TestLinkPostgresResultVersionRange(t *testing.T) {
