@@ -5,12 +5,12 @@
 [![Version: v1.2.1](https://img.shields.io/badge/version-v1.2.1-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.2.1)
 [![Pigsty: v4.2.0](https://img.shields.io/badge/Pigsty-v4.2.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 451](https://img.shields.io/badge/extensions-451-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
+[![Extensions: 461](https://img.shields.io/badge/extensions-461-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pgsty/pig)
 
-[**pig**](https://pgext.cloud/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pgext.cloud/os) (EL/Debian/Ubuntu) Linux.
+[**pig**](https://pigsty.io/docs/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pgext.cloud/os) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13 ~ 18 along with [451 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 13 ~ 18 along with [461 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
 
 All commands support structured output (`-o yaml/json`) with self-describing schema, making it an **Agent-Friendly** PostgreSQL CLI tool.
 Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the available extensions.
@@ -42,7 +42,7 @@ $ pig ext install pg18              # install PostgreSQL 18 kernels with native 
 $ pig ext install pg_duckdb -v 18   # install the pg_duckdb extension (for current pg18)
 ```
 
-That's it, All set! Check the [advanced usage](#advanced-usage) for details and [the full list 451 available extensions](https://pgext.cloud/list).
+That's it, All set! Check the [advanced usage](#advanced-usage) for details and [the full list 461 available extensions](https://pgext.cloud/list).
 
 [![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
 
@@ -312,7 +312,7 @@ pig ext install pg_duckdb -p /usr/lib/postgresql/16/bin/pg_config    # specify a
 You can also install PostgreSQL kernel packages with:
 
 ```bash
-pig ext install pgvector=0.8.0 # install pgvector 0.8.0
+pig ext install pgvector=0.8.2 # install pgvector 0.8.2
 pig ext install pg16=16.5      # install PostgreSQL 16 with a specific minor version
 ```
 
@@ -363,7 +363,7 @@ vagrant@meta:~$ pig ext avail
 ✓ Found 294 packages available on u24.arm64
 
 Extension Availability on u24.aarch64 : https://pgext.cloud/os/u24.aarch64
-Showing 318 packages with 451 extensions  (green = PIGSTY, blue = PGDG)
+Showing 318 packages with 461 extensions  (green = PIGSTY, blue = PGDG)
 
 Pkg                     18          17          16          15          14          13
 timescaledb             2.25.1      2.25.1      2.25.1      2.25.1      2.19.3
@@ -638,7 +638,7 @@ $ pig build pkg timescaledb  # now you can build extension with pig!
 [![Author: RuohangFeng](https://img.shields.io/badge/Author-Ruohang_Feng-steelblue?style=flat)](https://blog.vonng.com/en/about)
 [![About: @Vonng](https://img.shields.io/badge/%40Vonng-steelblue?style=flat)](https://vonng.com/en/)
 [![Mail: rh@vonng.com](https://img.shields.io/badge/rh%40vonng.com-steelblue?style=flat)](mailto:rh@vonng.com)
-[![Copyright: 2018-2025 rh@vonng.com](https://img.shields.io/badge/Copyright-2025_(rh%40vonng.com)-red?logo=c&color=steelblue)](https://github.com/Vonng)
+[![Copyright: 2018-2026 rh@vonng.com](https://img.shields.io/badge/Copyright-2026_(rh%40vonng.com)-red?logo=c&color=steelblue)](https://github.com/Vonng)
 [![License: Apache](https://img.shields.io/badge/License-Apache--2.0-steelblue?style=flat&logo=opensourceinitiative&logoColor=green)](https://github.com/pgsty/pig/blob/main/LICENSE)
 
 [![pig-meme](https://github.com/user-attachments/assets/4c2310a0-7551-4233-875f-18d0bd87a03e)](https://medium.com/@fengruohang/the-idea-way-to-deliver-postgresql-extensions-35646464bb71)
