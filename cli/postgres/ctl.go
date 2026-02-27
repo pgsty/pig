@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
+Copyright 2018-2026 Ruohang Feng <rh@vonng.com>
 
 pg_ctl operations: init, start, stop, restart, reload, status, promote
 */

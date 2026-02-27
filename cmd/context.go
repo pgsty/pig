@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
+Copyright 2018-2026 Ruohang Feng <rh@vonng.com>
 
 Command layer for pig context - environment context snapshot for AI agents.
 Business logic is delegated to cli/context package.

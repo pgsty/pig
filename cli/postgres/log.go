@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
+Copyright 2018-2026 Ruohang Feng <rh@vonng.com>
 
 PostgreSQL log operations: list, tail, cat, less, grep
 All operations use the default log directory: /pg/log/postgres

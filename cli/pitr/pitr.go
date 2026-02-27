@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
+Copyright 2018-2026 Ruohang Feng <rh@vonng.com>
 
 Package pitr provides orchestrated Point-In-Time Recovery functionality.
 It coordinates Patroni, PostgreSQL, and pgBackRest to perform PITR safely.

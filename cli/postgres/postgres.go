@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2025 Ruohang Feng <rh@vonng.com>
+Copyright 2018-2026 Ruohang Feng <rh@vonng.com>
 
 Package postgres provides PostgreSQL server management functionality.
 This package handles pg_ctl operations, log management, connection management,

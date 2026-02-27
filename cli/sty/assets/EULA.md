@@ -312,7 +312,7 @@ To the fullest extent permitted by law:
 
 ------------------------------------------------------------------------------
 
-Copyright © 2018‑2025 Pigsty. All Rights Reserved.
+Copyright © 2018‑2026 Pigsty. All Rights Reserved.
 
 For any questions regarding this EULA, please contact the Licensor for
 further information.
