@@ -34,7 +34,7 @@ var SpecialSourceMapping = map[string][]string{
 		"postgresql-15.14.tar.gz",
 		"postgresql-16.10.tar.gz",
 		"postgresql-17.6.tar.gz",
-		"postgresql-18.0.tar.gz",
+		"postgresql-18.3.tar.gz",
 	},
 }
 
