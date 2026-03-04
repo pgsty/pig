@@ -144,8 +144,8 @@ Description:
   pig ext ins pg16                           # install postgresql 16 kernel packages
   pig ext install pg15-core                  # install postgresql 15 core packages
   pig ext install pg14-main -y               # install pg 14 + essential extensions (vector, repack, wal2json)
-  pig ext install pg13-devel --yes           # install pg 13 devel packages (auto-confirm)
-  pig ext install pg12-mini                  # install postgresql 12 minimal packages
+  pig ext install pg14-devel --yes           # install pg 14 devel packages (auto-confirm)
+  pig ext install pg14-mini                  # install postgresql 14 minimal packages
   pig ext install pgsql-common               # install common utils such as patroni pgbouncer pgbackrest,...
   pig ext add postgis --plan                 # preview install plan without executing
   pig ext add postgis -o json --plan         # plan output in JSON format

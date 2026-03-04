@@ -2,7 +2,7 @@
 
 [![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
 [![Doc: pig](https://img.shields.io/badge/Docs-pig-slategray?style=flat)](https://pigsty.io/docs/pig)
-[![Version: v1.2.1](https://img.shields.io/badge/version-v1.2.1-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.2.1)
+[![Version: v1.3.1](https://img.shields.io/badge/version-v1.3.1-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.3.1)
 [![Pigsty: v4.2.0](https://img.shields.io/badge/Pigsty-v4.2.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 461](https://img.shields.io/badge/extensions-461-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
@@ -10,7 +10,7 @@
 
 [**pig**](https://pigsty.io/docs/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pgext.cloud/os) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 13 ~ 18 along with [461 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 14 ~ 18 along with [461 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
 
 All commands support structured output (`-o yaml/json`) with self-describing schema, making it an **Agent-Friendly** PostgreSQL CLI tool.
 Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the available extensions.
@@ -22,7 +22,7 @@ Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the a
 
 ## Get Started
 
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18,17,16,15,14,13-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://pigsty.io/docs/pgsql)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18,17,16,15,14-%233E668F?style=flat&logo=postgresql&labelColor=3E668F&logoColor=white)](https://pigsty.io/docs/pgsql)
 [![Linux](https://img.shields.io/badge/Linux-amd64/arm64-%23FCC624?style=flat&logo=linux&labelColor=FCC624&logoColor=black)](https://pigsty.io/docs/ref/linux)
 [![EL Support: 8/9/10](https://img.shields.io/badge/EL-8/9/10-red?style=flat&logo=redhat&logoColor=red)](https://pigsty.io/docs/ref/linux#el)
 [![Debian Support: 12/13](https://img.shields.io/badge/Debian-12/13-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pigsty.io/docs/ref/linux#debian)
@@ -184,7 +184,7 @@ pig ext install pg17             # install PostgreSQL 17 kernels (all except tes
 pig ext install pg16-mini        # install PostgreSQL 16 kernels with minimal packages
 pig ext install pg15 -y          # install PostgreSQL 15 kernels with auto-confirm
 pig ext install pg14=14.3        # install PostgreSQL 14 kernels with a specific minor version
-pig ext install pg13=13.10       # install PostgreSQL 13 kernels
+pig ext install pg14=14.10       # install PostgreSQL 14 kernels
 
 pig install pg17 --plan          # preview translated native install command
 pig install postgis -v 17 -o json --plan   # preview in structured JSON output
@@ -387,15 +387,15 @@ vagrant@meta:~$ pig ext avail
 Extension Availability on u24.aarch64 : https://pgext.cloud/os/u24.aarch64
 Showing 318 packages with 461 extensions  (green = PIGSTY, blue = PGDG)
 
-Pkg                     18          17          16          15          14          13
+Pkg                     18          17          16          15          14      
 timescaledb             2.25.1      2.25.1      2.25.1      2.25.1      2.19.3
 timescaledb_toolkit     1.22.0      1.22.0      1.22.0      1.22.0      1.19.0
-pg_timeseries           0.2.0       0.2.0       0.2.0       0.2.0       0.2.0       0.2.0
-periods                 1.2.3       1.2.3       1.2.3       1.2.3       1.2.3       1.2.3
-temporal_tables         1.2.2       1.2.2       1.2.2       1.2.2       1.2.2       1.2.2
-emaj                    4.7.1       4.7.1       4.7.1       4.7.1       4.7.1       4.7.1
-table_version           1.11.1      1.11.1      1.11.1      1.11.1      1.11.1      1.11.1
-pg_cron                 1.6.7       1.6.7       1.6.7       1.6.7       1.6.7       1.6.7
+pg_timeseries           0.2.0       0.2.0       0.2.0       0.2.0       0.2.0   
+periods                 1.2.3       1.2.3       1.2.3       1.2.3       1.2.3   
+temporal_tables         1.2.2       1.2.2       1.2.2       1.2.2       1.2.2   
+emaj                    4.7.1       4.7.1       4.7.1       4.7.1       4.7.1   
+table_version           1.11.1      1.11.1      1.11.1      1.11.1      1.11.1  
+pg_cron                 1.6.7       1.6.7       1.6.7       1.6.7       1.6.7   
 ...
 ```
 
@@ -480,37 +480,37 @@ citus (citus) - Distributed PostgreSQL as an extension
 Latest: 14.0.0 | 70/84 avail, PG16, PG17, PG18
 Details: https://pgext.cloud/e/citus  (green = PIGSTY, blue = PGDG)
 
-╭──────────────┬──────────────┬──────────────┬──────────────┬──────────────┬──────────────┬──────────────╮
-│ OS \ PG      │      18      │      17      │      16      │      15      │      14      │      13      │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ el8.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │    11.3.0    │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ el8.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │    11.3.0    │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ el9.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │    11.3.0    │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ el9.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │    11.3.0    │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ el10.x86_64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │              │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ el10.aarch64 │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │              │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ d12.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ d12.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ d13.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │              │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ d13.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │              │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ u22.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ u22.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ u24.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
-├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
-│ u24.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │              │
-╰──────────────┴──────────────┴──────────────┴──────────────┴──────────────┴──────────────┴──────────────╯
+╭──────────────┬──────────────┬──────────────┬──────────────┬──────────────┬──────────────╮
+│ OS \ PG      │      18      │      17      │      16      │      15      │      14      │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el8.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el8.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el9.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el9.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el10.x86_64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ el10.aarch64 │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ d12.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ d12.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ d13.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ d13.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ u22.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ u22.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ u24.x86_64   │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ u24.aarch64  │    14.0.0    │    14.0.0    │    14.0.0    │    13.2.0    │    13.0.0    │
+╰──────────────┴──────────────┴──────────────┴──────────────┴──────────────┴──────────────╯
 ````
 
 **List Repo**
@@ -552,7 +552,7 @@ repo_modules:   # Available Modules: 22
   - beta      : pgdg19-beta, pgdg-beta
   - click     : clickhouse
   - docker    : docker-ce
-  - extra     : pgdg-extras, pgdg13-nonfree, pgdg14-nonfree, pgdg15-nonfree, pgdg16-nonfree, pgdg17-nonfree, pgdg18-nonfree, timescaledb, citus
+  - extra     : pgdg-extras, pgdg14-nonfree, pgdg15-nonfree, pgdg16-nonfree, pgdg17-nonfree, pgdg18-nonfree, timescaledb, citus
   - gitlab    : gitlab-ee, gitlab-ce
   - grafana   : grafana
   - groonga   : groonga
@@ -567,7 +567,7 @@ repo_modules:   # Available Modules: 22
   - node      : base, updates, extras, epel, centos-sclo, centos-sclo-rh, baseos, appstream, powertools, crb, security, backports
   - percona   : percona
   - pgdg      : pgdg
-  - pgsql     : pigsty-pgsql, pgdg-common, pgdg13, pgdg14, pgdg15, pgdg16, pgdg17, pgdg18, pgdg
+  - pgsql     : pigsty-pgsql, pgdg-common, pgdg14, pgdg15, pgdg16, pgdg17, pgdg18, pgdg
   - pigsty    : pigsty-infra, pigsty-pgsql
   - redis     : redis
 ```
@@ -644,13 +644,13 @@ $ pig build pkg timescaledb  # now you can build extension with pig!
 
 |   Code   | Distribution                      |  `x86_64`  | `aarch64`  |
 |:--------:|-----------------------------------|:----------:|:----------:|
-| **el10** | RHEL 10 / Rocky10 / Alma10  / ... | PG 18 - 13 | PG 18 - 13 |
-| **el9**  | RHEL 9 / Rocky9 / Alma9  / ...    | PG 18 - 13 | PG 18 - 13 |
-| **el8**  | RHEL 8 / Rocky8 / Alma8 / ...     | PG 18 - 13 | PG 18 - 13 |
-| **u24**  | Ubuntu 24.04 (`noble`)            | PG 18 - 13 | PG 18 - 13 |
-| **u22**  | Ubuntu 22.04 (`jammy`)            | PG 18 - 13 | PG 18 - 13 |
-| **d13**  | Debian 13 (`trixie`)              | PG 18 - 13 | PG 18 - 13 |
-| **d12**  | Debian 12 (`bookworm`)            | PG 18 - 13 | PG 18 - 13 |
+| **el10** | RHEL 10 / Rocky10 / Alma10  / ... | PG 18 - 14 | PG 18 - 14 |
+| **el9**  | RHEL 9 / Rocky9 / Alma9  / ...    | PG 18 - 14 | PG 18 - 14 |
+| **el8**  | RHEL 8 / Rocky8 / Alma8 / ...     | PG 18 - 14 | PG 18 - 14 |
+| **u24**  | Ubuntu 24.04 (`noble`)            | PG 18 - 14 | PG 18 - 14 |
+| **u22**  | Ubuntu 22.04 (`jammy`)            | PG 18 - 14 | PG 18 - 14 |
+| **d13**  | Debian 13 (`trixie`)              | PG 18 - 14 | PG 18 - 14 |
+| **d12**  | Debian 12 (`bookworm`)            | PG 18 - 14 | PG 18 - 14 |
 
 
 --------
