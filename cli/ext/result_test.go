@@ -1625,13 +1625,13 @@ func TestAddExtensionsDefaultPgVersion(t *testing.T) {
 		t.Fatal("expected non-nil result")
 	}
 
-	// Should use PostgresLatestMajorVersion by default
+	// Should use PostgresLatestMajorVersion() by default
 	data, ok := result.Data.(*ExtensionAddData)
 	if !ok {
 		t.Fatal("expected data to be *ExtensionAddData")
 	}
-	if data.PgVersion != PostgresLatestMajorVersion {
-		t.Errorf("expected PgVersion=%d, got %d", PostgresLatestMajorVersion, data.PgVersion)
+	if data.PgVersion != PostgresLatestMajorVersion() {
+		t.Errorf("expected PgVersion=%d, got %d", PostgresLatestMajorVersion(), data.PgVersion)
 	}
 }
 
@@ -2270,13 +2270,13 @@ func TestRmExtensionsDefaultPgVersion(t *testing.T) {
 		t.Fatal("expected non-nil result")
 	}
 
-	// Should use PostgresLatestMajorVersion by default
+	// Should use PostgresLatestMajorVersion() by default
 	data, ok := result.Data.(*ExtensionRmData)
 	if !ok {
 		t.Fatal("expected data to be *ExtensionRmData")
 	}
-	if data.PgVersion != PostgresLatestMajorVersion {
-		t.Errorf("expected PgVersion=%d, got %d", PostgresLatestMajorVersion, data.PgVersion)
+	if data.PgVersion != PostgresLatestMajorVersion() {
+		t.Errorf("expected PgVersion=%d, got %d", PostgresLatestMajorVersion(), data.PgVersion)
 	}
 }
 
@@ -2466,13 +2466,13 @@ func TestUpgradeExtensionsDefaultPgVersion(t *testing.T) {
 		t.Fatal("expected non-nil result")
 	}
 
-	// Should use PostgresLatestMajorVersion by default
+	// Should use PostgresLatestMajorVersion() by default
 	data, ok := result.Data.(*ExtensionUpdateData)
 	if !ok {
 		t.Fatal("expected data to be *ExtensionUpdateData")
 	}
-	if data.PgVersion != PostgresLatestMajorVersion {
-		t.Errorf("expected PgVersion=%d, got %d", PostgresLatestMajorVersion, data.PgVersion)
+	if data.PgVersion != PostgresLatestMajorVersion() {
+		t.Errorf("expected PgVersion=%d, got %d", PostgresLatestMajorVersion(), data.PgVersion)
 	}
 }
 

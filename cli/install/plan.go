@@ -23,7 +23,7 @@ func BuildInstallPlan(pgVer int, names []string, yes bool, noTranslation bool) *
 	}
 
 	if pgVer == 0 {
-		pgVer = ext.PostgresLatestMajorVersion
+		pgVer = ext.PostgresLatestMajorVersion()
 	}
 
 	pkgMgr, err := detectInstallPackageManager()

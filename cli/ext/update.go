@@ -16,7 +16,7 @@ func UpgradeExtensions(pgVer int, names []string, yes bool) *output.Result {
 	// Safety: never auto-upgrade everything. Without explicit targets, do nothing.
 	if len(names) == 0 {
 		if pgVer == 0 {
-			pgVer = PostgresLatestMajorVersion
+			pgVer = PostgresLatestMajorVersion()
 		}
 		data := &ExtensionUpdateData{
 			PgVersion:   pgVer,

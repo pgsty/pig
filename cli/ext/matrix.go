@@ -230,7 +230,7 @@ func (m PkgMatrix) PGList() []int {
 	}
 	seen := make(map[int]bool)
 	for _, e := range m {
-		if e != nil && isActivePGMajor(e.PG) {
+		if e != nil && IsActivePGMajor(e.PG) {
 			seen[e.PG] = true
 		}
 	}

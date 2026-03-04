@@ -43,8 +43,8 @@ func prepareExtensionPkgOp(opts preparePkgOpOptions) (*preparedPkgOp, *output.Re
 
 	pgVer := opts.PgVersion
 	if pgVer == 0 {
-		logrus.Debugf("using latest postgres version: %d by default", PostgresLatestMajorVersion)
-		pgVer = PostgresLatestMajorVersion
+		logrus.Debugf("using latest postgres version: %d by default", PostgresLatestMajorVersion())
+		pgVer = PostgresLatestMajorVersion()
 	}
 
 	// Check OS support.

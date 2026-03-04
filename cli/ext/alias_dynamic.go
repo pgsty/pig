@@ -91,7 +91,7 @@ func parseCategoryAlias(alias string, targetPgVer int) (spec categoryAliasSpec, 
 			return categoryAliasSpec{}, false
 		}
 		if targetPgVer == 0 {
-			targetPgVer = PostgresLatestMajorVersion
+			targetPgVer = PostgresLatestMajorVersion()
 		}
 		return categoryAliasSpec{
 			category: category,
@@ -113,7 +113,7 @@ func parseCategoryAlias(alias string, targetPgVer int) (spec categoryAliasSpec, 
 	if err != nil {
 		return categoryAliasSpec{}, false
 	}
-	if !slices.Contains(PostgresActiveMajorVersions, ver) {
+	if !IsActivePGMajor(ver) {
 		return categoryAliasSpec{}, false
 	}
 
@@ -172,7 +172,7 @@ func buildCategoryPackageList(spec categoryAliasSpec, matrixOS, matrixArch strin
 	seen := make(map[string]struct{})
 	selectPG := spec.targetPG
 	if spec.isPgsql {
-		selectPG = PostgresLatestMajorVersion
+		selectPG = PostgresLatestMajorVersion()
 	}
 
 	for _, ext := range Catalog.Extensions {
@@ -272,11 +272,11 @@ func applyCategoryPackageSpecialCase(ext *Extension, pkgName string, pgVer int) 
 }
 
 func rewriteLatestCategoryPkgToTarget(pkg string, targetPG int) string {
-	if targetPG == PostgresLatestMajorVersion {
+	if targetPG == PostgresLatestMajorVersion() {
 		return pkg
 	}
 
-	latest := strconv.Itoa(PostgresLatestMajorVersion)
+	latest := strconv.Itoa(PostgresLatestMajorVersion())
 	target := strconv.Itoa(targetPG)
 
 	switch config.OSType {

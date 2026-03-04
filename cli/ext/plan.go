@@ -106,7 +106,7 @@ func BuildAddPlan(pgVer int, names []string, yes bool) *output.Plan {
 	}
 
 	if pgVer == 0 {
-		pgVer = PostgresLatestMajorVersion
+		pgVer = PostgresLatestMajorVersion()
 	}
 
 	resolved, notFound := resolvePlanExtensions(pgVer, names, true)
@@ -299,7 +299,7 @@ func BuildRmPlan(pgVer int, names []string, yes bool) *output.Plan {
 	}
 
 	if pgVer == 0 {
-		pgVer = PostgresLatestMajorVersion
+		pgVer = PostgresLatestMajorVersion()
 	}
 
 	resolved, notFound := resolvePlanExtensions(pgVer, names, false)

@@ -22,8 +22,8 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 	}
 
 	if pgVer == 0 {
-		logrus.Debugf("no PostgreSQL version specified, set target version to the latest major version: %d", PostgresLatestMajorVersion)
-		pgVer = PostgresLatestMajorVersion
+		logrus.Debugf("no PostgreSQL version specified, set target version to the latest major version: %d", PostgresLatestMajorVersion())
+		pgVer = PostgresLatestMajorVersion()
 	}
 
 	if importPath == "" {

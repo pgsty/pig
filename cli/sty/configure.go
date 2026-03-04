@@ -329,8 +329,8 @@ func validatePGVersion(ver string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid pg major version: %s", ver)
 	}
-	if !slices.Contains(ext.PostgresActiveMajorVersions, v) {
-		return 0, fmt.Errorf("invalid pg major version: %s (valid: %s)", ver, ext.PostgresActiveVersionString)
+	if !ext.IsActivePGMajor(v) {
+		return 0, fmt.Errorf("invalid pg major version: %s (valid: %s)", ver, ext.PostgresActiveVersionString())
 	}
 	return v, nil
 }

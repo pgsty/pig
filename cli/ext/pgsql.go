@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/utils"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -39,19 +41,41 @@ var (
 )
 
 var (
-	PostgresActiveMajorVersions    = []int{18, 17, 16, 15, 14}
-	PostgresActiveMajorVersionsAsc = []int{14, 15, 16, 17, 18}
-	PostgresLatestMajorVersion     = 18
-	PostgresActiveVersionString = formatActiveVersions()
+	// PostgresActiveMajorVersions is the single source of truth for active PG majors.
+	PostgresActiveMajorVersions = []int{18, 17, 16, 15, 14}
 	PostgresElSearchPath        = []string{"/usr/pgsql-%s/bin/pg_config"}
 	PostgresDEBSearchPath       = []string{"/usr/lib/postgresql/%s/bin/pg_config"}
 	PostgresMACSearchPath       = []string{"/opt/homebrew/opt/postgresql@%s/bin/pg_config"}
 )
 
-// formatActiveVersions returns a comma-separated string of active PG versions (ascending).
-func formatActiveVersions() string {
-	parts := make([]string, len(PostgresActiveMajorVersionsAsc))
-	for i, v := range PostgresActiveMajorVersionsAsc {
+// IsActivePGMajor checks whether the PostgreSQL major version is in active support window.
+func IsActivePGMajor(ver int) bool {
+	return slices.Contains(PostgresActiveMajorVersions, ver)
+}
+
+// PostgresLatestMajorVersion returns the maximum active PG major version.
+func PostgresLatestMajorVersion() int {
+	latest := 0
+	for _, v := range PostgresActiveMajorVersions {
+		if v > latest {
+			latest = v
+		}
+	}
+	return latest
+}
+
+// PostgresActiveMajorVersionsAsc returns active PG versions sorted ascending.
+func PostgresActiveMajorVersionsAsc() []int {
+	versions := append([]int(nil), PostgresActiveMajorVersions...)
+	sort.Ints(versions)
+	return versions
+}
+
+// PostgresActiveVersionString returns a comma-separated string of active PG versions (ascending).
+func PostgresActiveVersionString() string {
+	asc := PostgresActiveMajorVersionsAsc()
+	parts := make([]string, len(asc))
+	for i, v := range asc {
 		parts[i] = strconv.Itoa(v)
 	}
 	return strings.Join(parts, ",")

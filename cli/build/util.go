@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"pig/cli/ext"
 	"pig/internal/config"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -46,8 +45,8 @@ func parsePgVersions(pgVersions string) ([]int, error) {
 		}
 
 		// Validate active/supported PostgreSQL major versions
-		if !slices.Contains(ext.PostgresActiveMajorVersions, ver) {
-			return nil, fmt.Errorf("PG version %d is not supported (valid: %s)", ver, ext.PostgresActiveVersionString)
+		if !ext.IsActivePGMajor(ver) {
+			return nil, fmt.Errorf("PG version %d is not supported (valid: %s)", ver, ext.PostgresActiveVersionString())
 		}
 
 		if !seen[ver] {

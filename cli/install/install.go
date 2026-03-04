@@ -17,8 +17,8 @@ func InstallPackages(pgVer int, names []string, yes bool, noTranslation bool) er
 		return fmt.Errorf("no package names provided")
 	}
 	if pgVer == 0 {
-		logrus.Debugf("no PostgreSQL version specified, set target version to the latest major version: %d", ext.PostgresLatestMajorVersion)
-		pgVer = ext.PostgresLatestMajorVersion
+		logrus.Debugf("no PostgreSQL version specified, set target version to the latest major version: %d", ext.PostgresLatestMajorVersion())
+		pgVer = ext.PostgresLatestMajorVersion()
 	}
 
 	var installCmds []string

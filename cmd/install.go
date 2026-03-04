@@ -98,7 +98,7 @@ func installProbeVersion() (int, error) {
 	return probePostgresMajorVersion(pgMajorProbeOptions{
 		Version:        installPgVer,
 		PGConfig:       installPgConfig,
-		DefaultVersion: ext.PostgresLatestMajorVersion,
+		DefaultVersion: ext.PostgresLatestMajorVersion(),
 		BothSetError: func() error {
 			return fmt.Errorf("both pg version and pg_config path are specified, please specify only one")
 		},

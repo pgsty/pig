@@ -88,11 +88,6 @@ func CompactVersion(pgVers []string) string {
 	return fmt.Sprintf("%d-%d", filteredVers[0], filteredVers[len(filteredVers)-1])
 }
 
-// isActivePGMajor checks whether the PostgreSQL major version is in active support window.
-func isActivePGMajor(ver int) bool {
-	return slices.Contains(PostgresActiveMajorVersions, ver)
-}
-
 // filterActivePGVersionStrings keeps supported PG majors in input order, deduplicated.
 func filterActivePGVersionStrings(pgVers []string) []string {
 	filtered := make([]string, 0, len(pgVers))
@@ -103,7 +98,7 @@ func filterActivePGVersionStrings(pgVers []string) []string {
 			continue
 		}
 		verInt, err := strconv.Atoi(ver)
-		if err != nil || !isActivePGMajor(verInt) || seen[verInt] {
+		if err != nil || !IsActivePGMajor(verInt) || seen[verInt] {
 			continue
 		}
 		filtered = append(filtered, strconv.Itoa(verInt))
