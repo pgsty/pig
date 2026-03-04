@@ -22,6 +22,7 @@ func TestParsePGVersions(t *testing.T) {
 		{"Invalid number", "abc", nil, true},
 		{"Mixed valid and invalid", "14,abc,16", nil, true},
 		{"Version too low", "9", nil, true},
+		{"Version not supported", "13", nil, true},
 		{"Version too high", "25", nil, true},
 		{"Negative version", "-1", nil, true},
 	}

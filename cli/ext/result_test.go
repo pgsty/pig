@@ -3467,9 +3467,11 @@ func TestUpgradeExtensionsWithCatalog(t *testing.T) {
 	// Save and restore original state
 	origCatalog := Catalog
 	origOSType := config.OSType
+	origOSVersion := config.OSVersion
 	defer func() {
 		Catalog = origCatalog
 		config.OSType = origOSType
+		config.OSVersion = origOSVersion
 	}()
 
 	// Setup mock catalog
@@ -3514,9 +3516,11 @@ func TestUpgradeExtensionsAliasLookup(t *testing.T) {
 	// Save and restore original state
 	origCatalog := Catalog
 	origOSType := config.OSType
+	origOSVersion := config.OSVersion
 	defer func() {
 		Catalog = origCatalog
 		config.OSType = origOSType
+		config.OSVersion = origOSVersion
 	}()
 
 	// Setup mock catalog with alias

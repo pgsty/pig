@@ -330,7 +330,7 @@ func TestValidatePGVersion(t *testing.T) {
 		wantErr bool
 	}{
 		{input: "", want: 0},
-		{input: "13", want: 13},
+		{input: "14", want: 14},
 		{input: "18", want: 18},
 		{input: "12", wantErr: true},
 		{input: "abc", wantErr: true},

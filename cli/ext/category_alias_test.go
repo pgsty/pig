@@ -127,9 +127,8 @@ func TestResolveCategoryAliasPGAuditELRename(t *testing.T) {
 	ext := newTestCategoryExt(100, "pgaudit", "pgaudit", "SEC", []string{
 		"el9i:15:A:f:1:G:1.0",
 		"el9i:14:A:f:1:G:1.0",
-		"el9i:13:A:f:1:G:1.0",
 	})
-	ext.RpmPkg, ext.RpmRepo, ext.RpmPg = "pgaudit_$v", "PGDG", []string{"15", "14", "13"}
+	ext.RpmPkg, ext.RpmRepo, ext.RpmPg = "pgaudit_$v", "PGDG", []string{"15", "14"}
 
 	cleanup := withCategoryAliasTestEnv(t, config.DistroEL, "el9", "amd64", []*Extension{ext})
 	defer cleanup()
@@ -141,7 +140,6 @@ func TestResolveCategoryAliasPGAuditELRename(t *testing.T) {
 	}{
 		{15, "pg15-sec", "pgaudit17_15"},
 		{14, "pg14-sec", "pgaudit16_14"},
-		{13, "pg13-sec", "pgaudit15_13"},
 	}
 
 	for _, tc := range cases {
