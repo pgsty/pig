@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"pig/cli/ext"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"sort"
@@ -112,7 +113,7 @@ func buildELPgrxArgs(cargoBin string, versions []string) []string {
 	} else {
 		// Auto-detect installed versions
 		logrus.Info("Auto-detecting PostgreSQL installations for EL-based system")
-		for _, ver := range []string{"13", "14", "15", "16", "17", "18"} {
+		for _, ver := range ext.PostgresActiveVersionStrings() {
 			pgConfig := fmt.Sprintf("/usr/pgsql-%s/bin/pg_config", ver)
 			if _, err := os.Stat(pgConfig); err == nil {
 				args = append(args, fmt.Sprintf("--pg%s=%s", ver, pgConfig))
@@ -136,7 +137,7 @@ func buildDEBPgrxArgs(cargoBin string, versions []string) []string {
 	} else {
 		// Auto-detect installed versions
 		logrus.Info("Auto-detecting PostgreSQL installations for DEB-based system")
-		for _, ver := range []string{"13", "14", "15", "16", "17", "18"} {
+		for _, ver := range ext.PostgresActiveVersionStrings() {
 			pgConfig := fmt.Sprintf("/usr/lib/postgresql/%s/bin/pg_config", ver)
 			if _, err := os.Stat(pgConfig); err == nil {
 				args = append(args, fmt.Sprintf("--pg%s=%s", ver, pgConfig))
@@ -166,7 +167,7 @@ func buildMacPgrxArgs(cargoBin string, versions []string) []string {
 	} else {
 		// Auto-detect installed versions
 		logrus.Info("Auto-detecting PostgreSQL installations for macOS")
-		for _, ver := range []string{"13", "14", "15", "16", "17", "18"} {
+		for _, ver := range ext.PostgresActiveVersionStrings() {
 			pgConfig := findMacPGConfig(ver)
 			if pgConfig != "" {
 				args = append(args, fmt.Sprintf("--pg%s=%s", ver, pgConfig))

@@ -266,8 +266,6 @@ func applyCategoryPackageSpecialCase(ext *Extension, pkgName string, pgVer int) 
 			return "pgaudit17_15"
 		case 14:
 			return "pgaudit16_14"
-		case 13:
-			return "pgaudit15_13"
 		}
 	}
 	return pkgName

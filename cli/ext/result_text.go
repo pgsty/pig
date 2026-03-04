@@ -391,7 +391,7 @@ func (d *ExtensionAvailData) textGlobalAvailability() string {
 			return packages[i].ID < packages[j].ID
 		})
 
-		sb.WriteString(tabulateGlobalMatrix(packages, osCode, arch, []int{18, 17, 16, 15, 14, 13}))
+		sb.WriteString(tabulateGlobalMatrix(packages, osCode, arch, PostgresActiveMajorVersions))
 		return sb.String()
 	}
 

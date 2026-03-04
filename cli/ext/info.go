@@ -62,7 +62,7 @@ func (e *Extension) FormatInfo() string {
 	sb.WriteString("├──────────────┬───────────────────────────────────────────────────────────────────────────────┤\n")
 	sb.WriteString(fmt.Sprintf("│ Repository   │ %-77s │\n", e.Repo))
 	sb.WriteString(fmt.Sprintf("│ Version      │ %-77s │\n", e.Version))
-	sb.WriteString(fmt.Sprintf("│ PG Version   │ %-77s │\n", join(e.PgVer, ", ")))
+	sb.WriteString(fmt.Sprintf("│ PG Version   │ %-77s │\n", join(filterActivePGVersionStrings(e.PgVer), ", ")))
 	sb.WriteString(fmt.Sprintf("│ Schemas      │ %-77s │\n", truncate(join(e.Schemas, ", "), 77)))
 	sb.WriteString("├──────────────┴───────────────────────────────────────────────────────────────────────────────┤\n")
 
@@ -73,7 +73,7 @@ func (e *Extension) FormatInfo() string {
 		sb.WriteString(fmt.Sprintf("│ Package      │ %-77s │\n", e.RpmPkg))
 		sb.WriteString(fmt.Sprintf("│ Repository   │ %-77s │\n", e.RpmRepo))
 		sb.WriteString(fmt.Sprintf("│ Version      │ %-77s │\n", e.RpmVer))
-		sb.WriteString(fmt.Sprintf("│ PG Version   │ %-77s │\n", join(e.RpmPg, ", ")))
+		sb.WriteString(fmt.Sprintf("│ PG Version   │ %-77s │\n", join(filterActivePGVersionStrings(e.RpmPg), ", ")))
 		if len(e.RpmDeps) > 0 {
 			sb.WriteString(fmt.Sprintf("│ Dependency   │ %-77s │\n", truncate(join(e.RpmDeps, ", "), 77)))
 		}
@@ -87,7 +87,7 @@ func (e *Extension) FormatInfo() string {
 		sb.WriteString(fmt.Sprintf("│ Package      │ %-77s │\n", e.DebPkg))
 		sb.WriteString(fmt.Sprintf("│ Repository   │ %-77s │\n", e.DebRepo))
 		sb.WriteString(fmt.Sprintf("│ Version      │ %-77s │\n", e.DebVer))
-		sb.WriteString(fmt.Sprintf("│ PG Version   │ %-77s │\n", join(e.DebPg, ", ")))
+		sb.WriteString(fmt.Sprintf("│ PG Version   │ %-77s │\n", join(filterActivePGVersionStrings(e.DebPg), ", ")))
 		if len(e.DebDeps) > 0 {
 			sb.WriteString(fmt.Sprintf("│ Dependency   │ %-77s │\n", truncate(join(e.DebDeps, ", "), 77)))
 		}

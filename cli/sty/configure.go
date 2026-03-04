@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"pig/cli/ext"
 	"pig/cli/get"
 	"pig/internal/config"
 	"pig/internal/output"
@@ -32,8 +33,6 @@ const (
 	defaultNoProxy         = "localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16,*.pigsty,*.aliyun.com,mirrors.*,mirror.*,*.tsinghua.edu.cn"
 	defaultCheckTimeout    = 3 * time.Second
 )
-
-var validPGMajorVersions = []int{13, 14, 15, 16, 17, 18}
 
 var (
 	lookPathFn               = exec.LookPath
@@ -330,8 +329,8 @@ func validatePGVersion(ver string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid pg major version: %s", ver)
 	}
-	if !slices.Contains(validPGMajorVersions, v) {
-		return 0, fmt.Errorf("invalid pg major version: %s (valid: 13,14,15,16,17,18)", ver)
+	if !slices.Contains(ext.PostgresActiveMajorVersions, v) {
+		return 0, fmt.Errorf("invalid pg major version: %s (valid: %s)", ver, ext.PostgresActiveVersionString)
 	}
 	return v, nil
 }
@@ -827,7 +826,7 @@ func mutateTemplate(content string, opts mutationOptions) (string, []string, err
 	}
 
 	// Keep this branch for forward-compat parity with legacy configure logic.
-	// It becomes active once validPGMajorVersions includes 19+.
+	// It becomes active once PostgresActiveMajorVersions includes 19+.
 	if opts.PGVersion >= 19 {
 		content = strings.ReplaceAll(content, "node,infra,pgsql", "node,infra,pgsql,beta")
 	}

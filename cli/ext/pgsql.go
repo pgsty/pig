@@ -39,12 +39,32 @@ var (
 )
 
 var (
-	PostgresActiveMajorVersions = []int{18, 17, 16, 15, 14, 13}
-	PostgresLatestMajorVersion  = 18
+	PostgresActiveMajorVersions    = []int{18, 17, 16, 15, 14}
+	PostgresActiveMajorVersionsAsc = []int{14, 15, 16, 17, 18}
+	PostgresLatestMajorVersion     = 18
+	PostgresActiveVersionString = formatActiveVersions()
 	PostgresElSearchPath        = []string{"/usr/pgsql-%s/bin/pg_config"}
 	PostgresDEBSearchPath       = []string{"/usr/lib/postgresql/%s/bin/pg_config"}
 	PostgresMACSearchPath       = []string{"/opt/homebrew/opt/postgresql@%s/bin/pg_config"}
 )
+
+// formatActiveVersions returns a comma-separated string of active PG versions (ascending).
+func formatActiveVersions() string {
+	parts := make([]string, len(PostgresActiveMajorVersionsAsc))
+	for i, v := range PostgresActiveMajorVersionsAsc {
+		parts[i] = strconv.Itoa(v)
+	}
+	return strings.Join(parts, ",")
+}
+
+// PostgresActiveVersionStrings returns active versions as string slice (descending).
+func PostgresActiveVersionStrings() []string {
+	result := make([]string, len(PostgresActiveMajorVersions))
+	for i, v := range PostgresActiveMajorVersions {
+		result[i] = strconv.Itoa(v)
+	}
+	return result
+}
 
 // NewPostgresInstall hold the information of a PostgreSQL installation
 func NewPostgresInstall(pgConfigPath string) (*PostgresInstall, error) {

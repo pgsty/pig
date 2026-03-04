@@ -59,7 +59,7 @@ func (e *Extension) ToSummary(pgVer int) *ExtensionSummary {
 		Status:      status,
 		PackageName: e.PackageName(pgVer),
 		Description: e.EnDesc,
-		PgVer:       e.PgVer,
+		PgVer:       filterActivePGVersionStrings(e.PgVer),
 	}
 }
 
@@ -98,7 +98,7 @@ func (e *Extension) ToInfoData() *ExtensionInfoData {
 		Requires:   e.Requires,
 		RequiredBy: requiredBy,
 		SeeAlso:    e.SeeAlso,
-		PgVer:      e.PgVer,
+		PgVer:      filterActivePGVersionStrings(e.PgVer),
 		Schemas:    e.Schemas,
 		Comment:    e.Comment,
 	}
@@ -109,7 +109,7 @@ func (e *Extension) ToInfoData() *ExtensionInfoData {
 			Package:    e.RpmPkg,
 			Repository: e.RpmRepo,
 			Version:    e.RpmVer,
-			PgVer:      e.RpmPg,
+			PgVer:      filterActivePGVersionStrings(e.RpmPg),
 			Deps:       e.RpmDeps,
 		}
 	}
@@ -120,7 +120,7 @@ func (e *Extension) ToInfoData() *ExtensionInfoData {
 			Package:    e.DebPkg,
 			Repository: e.DebRepo,
 			Version:    e.DebVer,
-			PgVer:      e.DebPg,
+			PgVer:      filterActivePGVersionStrings(e.DebPg),
 			Deps:       e.DebDeps,
 		}
 	}

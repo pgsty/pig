@@ -61,16 +61,14 @@ func (e *Extension) SummaryURL() string {
 	return fmt.Sprintf("https://pgext.cloud/e/%s", e.Name)
 }
 
-// CompactVersion returns the compact version string like 17-13
+// CompactVersion returns the compact version string like 18-14
 func CompactVersion(pgVers []string) string {
-	// Remove version "12" from the list
+	// Keep only supported PG major versions
 	filteredVers := []int{}
-	for _, ver := range pgVers {
-		if ver != "12" {
-			verInt, err := strconv.Atoi(ver)
-			if err == nil {
-				filteredVers = append(filteredVers, verInt)
-			}
+	for _, ver := range filterActivePGVersionStrings(pgVers) {
+		verInt, err := strconv.Atoi(ver)
+		if err == nil {
+			filteredVers = append(filteredVers, verInt)
 		}
 	}
 	// If no versions left after filtering, return empty string
@@ -88,6 +86,30 @@ func CompactVersion(pgVers []string) string {
 
 	// Return the range in "min-max" format
 	return fmt.Sprintf("%d-%d", filteredVers[0], filteredVers[len(filteredVers)-1])
+}
+
+// isActivePGMajor checks whether the PostgreSQL major version is in active support window.
+func isActivePGMajor(ver int) bool {
+	return slices.Contains(PostgresActiveMajorVersions, ver)
+}
+
+// filterActivePGVersionStrings keeps supported PG majors in input order, deduplicated.
+func filterActivePGVersionStrings(pgVers []string) []string {
+	filtered := make([]string, 0, len(pgVers))
+	seen := make(map[int]bool)
+	for _, ver := range pgVers {
+		ver = strings.TrimSpace(ver)
+		if ver == "" {
+			continue
+		}
+		verInt, err := strconv.Atoi(ver)
+		if err != nil || !isActivePGMajor(verInt) || seen[verInt] {
+			continue
+		}
+		filtered = append(filtered, strconv.Itoa(verInt))
+		seen[verInt] = true
+	}
+	return filtered
 }
 
 // Availability returns the availability hint string according to the extension availability
@@ -423,16 +445,16 @@ func splitAndTrim(s string) []string {
 // DistroBadCase is a map of bad cases for extensions
 var DistroBadCase = map[string]map[string][]int{
 	"el8.amd64":  {"pg_duckdb": {}, "pg_mooncake": {}},
-	"el8.arm64":  {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}, "pg_duckdb": {}, "pg_mooncake": {}, "pg_dbms_metadata": {15}},
+	"el8.arm64":  {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14}, "pg_duckdb": {}, "pg_mooncake": {}, "pg_dbms_metadata": {15}},
 	"el9.amd64":  {},
-	"el9.arm64":  {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}},
+	"el9.arm64":  {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14}},
 	"el10.amd64": {},
-	"el10.arm64": {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14, 13}},
+	"el10.arm64": {"pg_dbms_job": {}, "jdbc_fdw": {}, "pllua": {15, 14}},
 
 	"u22.amd64": {},
 	"u22.arm64": {},
-	"u24.amd64": {"pg_partman": {13}},
-	"u24.arm64": {"pg_partman": {13}, "timeseries": {13}},
+	"u24.amd64": {},
+	"u24.arm64": {},
 
 	"d11.amd64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}},
 	"d11.arm64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}},
@@ -444,7 +466,7 @@ var DistroBadCase = map[string]map[string][]int{
 
 // RpmRenameMap is a map of RPM package rename rules
 var RpmRenameMap = map[string]map[int]string{
-	"pgaudit": {15: "pgaudit17_15*", 14: "pgaudit17_14*", 13: "pgaudit17_13*"},
+	"pgaudit": {15: "pgaudit17_15*", 14: "pgaudit17_14*"},
 }
 
 // Available check if the extension is available for the given pg version
@@ -484,20 +506,14 @@ func (e *Extension) Available(pgVer int) bool {
 
 // GetPGVersions returns sorted list of supported PostgreSQL versions as integers
 func (e *Extension) GetPGVersions() []int {
-	seen := make(map[int]bool)
 	var versions []int
-	for _, v := range e.PgVer {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
+	for _, v := range filterActivePGVersionStrings(e.PgVer) {
 		ver, err := strconv.Atoi(v)
 		if err != nil {
 			continue
 		}
-		if ver >= 10 && ver <= 99 && !seen[ver] {
+		if ver >= 10 && ver <= 99 {
 			versions = append(versions, ver)
-			seen[ver] = true
 		}
 	}
 
