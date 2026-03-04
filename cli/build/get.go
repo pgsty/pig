@@ -30,10 +30,10 @@ var SpecialSourceMapping = map[string][]string{
 
 	// Multi-version PostgreSQL source packages
 	"libfepgutils": {
-		"postgresql-14.19.tar.gz",
-		"postgresql-15.14.tar.gz",
-		"postgresql-16.10.tar.gz",
-		"postgresql-17.6.tar.gz",
+		"postgresql-14.22.tar.gz",
+		"postgresql-15.17.tar.gz",
+		"postgresql-16.13.tar.gz",
+		"postgresql-17.9.tar.gz",
 		"postgresql-18.3.tar.gz",
 	},
 }
