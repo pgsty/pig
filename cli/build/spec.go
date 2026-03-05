@@ -321,7 +321,7 @@ func syncSpec(spec *specConfig, force bool, mirror bool) error {
 
 	// 4. Incremental sync via rsync
 	logrus.Debugf("sync changes to %s", targetDir)
-	rsyncCmd := []string{"rsync", "-az", tempExtractDir + "/", targetDir + "/"}
+	rsyncCmd := []string{"rsync", "-az", "--keep-dirlinks", tempExtractDir + "/", targetDir + "/"}
 	if err := utils.Command(rsyncCmd); err != nil {
 		return fmt.Errorf("failed to rsync: %w", err)
 	}
