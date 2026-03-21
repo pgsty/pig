@@ -27,6 +27,8 @@ var SpecialSourceMapping = map[string][]string{
 	"pgedge":      {"postgresql-17.9.tar.gz", "spock-5.0.5.tar.gz"},
 	"hunspell":    {"hunspell-1.0.tar.gz"},
 	"libfq":       {"libfq-0.6.1.tar.gz"},
+	"pdu":         {"pdu-3.0.25.12.tar.gz"},
+	"pgdog":       {"pgdog-0.1.32.tar.gz"},
 
 	// Multi-version PostgreSQL source packages
 	"libfepgutils": {

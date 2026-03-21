@@ -23,6 +23,16 @@ func TestGetSourceFilesSpecialSourceMapping(t *testing.T) {
 			pkg:      "agentsgraph",
 			expected: []string{"agensgraph-2.16.0.tar.gz"},
 		},
+		{
+			name:     "pdu alias",
+			pkg:      "pdu",
+			expected: []string{"pdu-3.0.25.12.tar.gz"},
+		},
+		{
+			name:     "pgdog alias",
+			pkg:      "pgdog",
+			expected: []string{"pgdog-0.1.32.tar.gz"},
+		},
 	}
 
 	for _, tt := range tests {
