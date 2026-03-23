@@ -325,7 +325,7 @@ func (d *ExtensionAvailData) textSingleExtension() string {
 				}
 				sb.WriteString(", " + strings.Join(pgStrs, ", "))
 			}
-			sb.WriteString(fmt.Sprintf("\nDetails: https://pgext.cloud/e/%s  %s\n\n", e.Name, colorLegend()))
+			sb.WriteString(fmt.Sprintf("\nDetails: https://pigsty.io/ext/e/%s  %s\n\n", e.Name, colorLegend()))
 			sb.WriteString(matrix.TabulateAvailability())
 			return sb.String()
 		}
@@ -384,7 +384,7 @@ func (d *ExtensionAvailData) textGlobalAvailability() string {
 		}
 
 		osName := osFullName(osCode, arch)
-		sb.WriteString(fmt.Sprintf("\nExtension Availability on %s : https://pgext.cloud/os/%s\n", osName, osName))
+		sb.WriteString(fmt.Sprintf("\nExtension Availability on %s : https://pigsty.io/ext/os/%s\n", osName, osName))
 		sb.WriteString(fmt.Sprintf("Showing %d packages with %d extensions  %s\n\n", len(packages), len(Catalog.Extensions), colorLegend()))
 
 		sort.Slice(packages, func(i, j int) bool {

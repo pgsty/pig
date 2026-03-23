@@ -56,9 +56,9 @@ type Extension struct {
 	Mtime       string                 `csv:"mtime"`       // Last modify time
 }
 
-// SummaryURL returns the URL to the pgext.cloud catalog summary page
+// SummaryURL returns the URL to the Pigsty extension catalog summary page
 func (e *Extension) SummaryURL() string {
-	return fmt.Sprintf("https://pgext.cloud/e/%s", e.Name)
+	return fmt.Sprintf("https://pigsty.io/ext/e/%s", e.Name)
 }
 
 // CompactVersion returns the compact version string like 18-14

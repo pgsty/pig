@@ -1,19 +1,19 @@
 # PIG - Postgres Install Genius
 
-[![Website: pgext.cloud](https://img.shields.io/badge/Website-pgext.cloud-slategray?style=flat&logo=cilium&logoColor=white)](https://pgext.cloud)
+[![Website: pigsty.io/ext](https://img.shields.io/badge/Website-pigsty.io%2Fext-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/ext/)
 [![Doc: pig](https://img.shields.io/badge/Docs-pig-slategray?style=flat)](https://pigsty.io/docs/pig)
 [![Version: v1.3.2](https://img.shields.io/badge/version-v1.3.2-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.3.2)
 [![Pigsty: v4.2.2](https://img.shields.io/badge/Pigsty-v4.2.2-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 461](https://img.shields.io/badge/extensions-461-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pgext.cloud/list)
+[![Extensions: 461](https://img.shields.io/badge/extensions-461-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pgsty/pig)
 
-[**pig**](https://pigsty.io/docs/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pgext.cloud/os) (EL/Debian/Ubuntu) Linux.
+[**pig**](https://pigsty.io/docs/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pigsty.io/ext/os/) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 14 ~ 18 along with [461 extensions](https://pgext.cloud/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 14 ~ 18 along with [461 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
 
 All commands support structured output (`-o yaml/json`) with self-describing schema, making it an **Agent-Friendly** PostgreSQL CLI tool.
-Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the available extensions.
+Also check the [**Pigsty Extension Catalog**](https://pigsty.io/ext/) to get details about the available extensions.
 
 [![PostgreSQL Extension Ecosystem](https://pigsty.io/img/pigsty/ecosystem.jpg)](https://medium.com/@fengruohang/postgres-is-eating-the-database-world-157c204dcfc4)
 
@@ -28,13 +28,13 @@ Also check the [**PGEXT.CLOUD**](https://pgext.cloud) to get details about the a
 [![Debian Support: 12/13](https://img.shields.io/badge/Debian-12/13-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pigsty.io/docs/ref/linux#debian)
 [![Ubuntu Support: 22/24](https://img.shields.io/badge/Ubuntu-22/24-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://pigsty.io/docs/ref/linux#ubuntu)
 
-[**Install**](https://pgext.cloud/pig/install) the `pig` package first, (you can also use the `apt` / `yum` or just copy the binary)
+[**Install**](https://pigsty.io/docs/pig/install/) the `pig` package first, (you can also use the `apt` / `yum` or just copy the binary)
 
 ```bash
 curl -fsSL https://repo.pigsty.io/pig | bash
 ```
 
-Then you're ready to go. For example, install the [`pg_duckdb`](https://pgext.cloud/e/pg_duckdb) extension:
+Then you're ready to go. For example, install the [`pg_duckdb`](https://pigsty.io/ext/e/pg_duckdb) extension:
 
 ```bash
 $ pig repo add pigsty pgdg -u       # add pgdg & pigsty repo, then update repo cache
@@ -42,7 +42,7 @@ $ pig ext install pg18              # install PostgreSQL 18 kernels with native 
 $ pig ext install pg_duckdb -v 18   # install the pg_duckdb extension (for current pg18)
 ```
 
-That's it. All set! Check the [advanced usage](#advanced-usage) for details and the [full list of 461 available extensions](https://pgext.cloud/list).
+That's it. All set! Check the [advanced usage](#advanced-usage) for details and the [full list of 461 available extensions](https://pigsty.io/ext/list/).
 
 [![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
 
@@ -161,7 +161,7 @@ pig build pkg   [extname...]     # get+dep+ext, build extension in one-pass
 
 **Radical Repo Admin**
 
-The default `pig repo add pigsty pgdg` will add the [`PGDG`](https://pgext.cloud/repo/pgdg) repo and [`PIGSTY`](https://pgext.cloud/repo/pgsql) repo to your system.
+The default `pig repo add pigsty pgdg` will add the [`PGDG`](https://pigsty.io/docs/repo/pgdg/) repo and [`PIGSTY`](https://pigsty.io/docs/repo/pgsql/) repo to your system.
 The following command backup and overwrites your existing repo configuration, then adds all required repos.
 
 ```bash
@@ -384,7 +384,7 @@ $ pig ext avail                      # show all packages availability on current
 vagrant@meta:~$ pig ext avail
 ✓ Found 294 packages available on u24.arm64
 
-Extension Availability on u24.aarch64 : https://pgext.cloud/os/u24.aarch64
+Extension Availability on u24.aarch64 : https://pigsty.io/ext/os/u24.aarch64
 Showing 318 packages with 461 extensions  (green = PIGSTY, blue = PGDG)
 
 Pkg                     18          17          16          15          14      
@@ -418,7 +418,7 @@ $ pig ext info pg_duckdb
 │ License      │ MIT                                                                           │
 │ Language     │ C++                                                                           │
 │ Website      │ https://github.com/duckdb/pg_duckdb                                           │
-│ Details      │ https://pgext.cloud/e/pg_duckdb                                               │
+│ Details      │ https://pigsty.io/ext/e/pg_duckdb                                             │
 │ Source       │ pg_duckdb-1.1.1.tar.gz                                                        │
 ├──────────────┴───────────────────────────────────────────────────────────────────────────────┤
 │ Properties                                                                                   │
@@ -478,7 +478,7 @@ $ pig ext avail citus
 
 citus (citus) - Distributed PostgreSQL as an extension
 Latest: 14.0.0 | 70/84 avail, PG16, PG17, PG18
-Details: https://pgext.cloud/e/citus  (green = PIGSTY, blue = PGDG)
+Details: https://pigsty.io/ext/e/citus  (green = PIGSTY, blue = PGDG)
 
 ╭──────────────┬──────────────┬──────────────┬──────────────┬──────────────┬──────────────╮
 │ OS \ PG      │      18      │      17      │      16      │      15      │      14      │

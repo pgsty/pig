@@ -39,7 +39,7 @@ var rootCmd = &cobra.Command{
   pig install pg_duckdb       # install certain postgresql extension
   pig install pgactive -v 18  # install extension for specifc pg major
 
-  check https://pgext.cloud for details
+  check https://pigsty.io/ext/ for details
 `,
 	Annotations: map[string]string{
 		"flags.output.choices": "text,yaml,json,json-pretty",
