@@ -8,6 +8,7 @@ package utils
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -89,4 +90,27 @@ func ReadFileAsDBSU(path, dbsu string) (string, error) {
 	// Use DBSUCommandOutput for privilege escalation
 	logrus.Debugf("reading file via privilege escalation")
 	return DBSUCommandOutput(dbsu, []string{"cat", path})
+}
+
+// WriteFileAsDBSU writes content to a file using DBSU privilege escalation.
+// Execution strategy:
+//   - If current user is DBSU: write directly with os.WriteFile
+//   - Otherwise: pipe content through tee via buildDBSUCmd
+func WriteFileAsDBSU(path, content, dbsu string) error {
+	if dbsu == "" {
+		dbsu = GetDBSU("")
+	}
+
+	logrus.Debugf("WriteFileAsDBSU: path=%s, dbsu=%s, isDBSU=%v", path, dbsu, IsDBSU(dbsu))
+
+	if IsDBSU(dbsu) {
+		logrus.Debugf("writing file directly as DBSU")
+		return os.WriteFile(path, []byte(content), 0600)
+	}
+
+	logrus.Debugf("writing file via privilege escalation")
+	cmd := buildDBSUCmd(dbsu, []string{"tee", path})
+	cmd.Stdin = strings.NewReader(content)
+	cmd.Stdout = io.Discard
+	return cmd.Run()
 }

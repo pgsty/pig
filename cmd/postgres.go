@@ -131,6 +131,9 @@ Database Maintenance:
   pig pg freeze   [db] [-a] [-t table]      vacuum freeze tables
   pig pg repack   [db] [-a] [-t table]      repack tables (online rebuild)
 
+Tuning:
+  pig pg tune     [-p profile] [-n]        generate optimized parameters
+
 Utilities:
   pig pg log <list|tail|cat|less|grep>      view PostgreSQL logs
 `,
@@ -420,6 +423,7 @@ func init() {
 	registerPgConnectionCommands()
 	registerPgMaintenanceCommands()
 	registerPgServiceCommands()
+	registerPgTuneCommands()
 }
 
 func registerPgControlCommands() {

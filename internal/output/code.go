@@ -107,6 +107,11 @@ const (
 	// Promote-specific state errors (13_06_xx - State category)
 	CodePgAlreadyPrimary           = MODULE_PG + CAT_STATE + 7  // Instance is already primary (promote unnecessary)
 	CodePgReplicationNotConfigured = MODULE_PG + CAT_CONFIG + 1 // Replication not configured (cannot determine role)
+
+	// Tune command codes (13_01_1x - Param, 13_05_1x - Resource, 13_08_1x - Operation)
+	CodePgTuneInvalidProfile = MODULE_PG + CAT_PARAM + 10     // Invalid tune profile
+	CodePgTuneInvalidRatio   = MODULE_PG + CAT_PARAM + 11     // Invalid shmem-ratio value
+	CodePgTuneDetectFailed   = MODULE_PG + CAT_RESOURCE + 10  // Hardware detection failed
 )
 
 // pgBackRest module specific codes (MODULE_PB = 140000)
