@@ -24,7 +24,7 @@ var updateCmd = &cobra.Command{
   
   pig update 				    # update pig to the latest version
   pig update [-v version]       # update pig to given version
-  pig update -v 1.3.3 		    # update pig to version 1.3.3
+  pig update -v 1.3.4 		    # update pig to version 1.3.4
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleSty, "pig update", args, map[string]interface{}{

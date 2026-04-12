@@ -2957,7 +2957,7 @@ func TestLinkResultDataOmitEmpty(t *testing.T) {
 func TestReloadResultDataJSONSerialization(t *testing.T) {
 	data := &ReloadResultData{
 		SourceURL:      "https://pigsty.io/ext/data/extension.csv",
-		ExtensionCount: 445,
+		ExtensionCount: 503,
 		CatalogPath:    "/home/user/.pig/extension.csv",
 		DownloadedAt:   "2026-02-02T15:04:05Z",
 		DurationMs:     1500,
@@ -2976,8 +2976,8 @@ func TestReloadResultDataJSONSerialization(t *testing.T) {
 	if result["source_url"] != "https://pigsty.io/ext/data/extension.csv" {
 		t.Errorf("expected source_url='https://pigsty.io/ext/data/extension.csv', got %v", result["source_url"])
 	}
-	if int(result["extension_count"].(float64)) != 445 {
-		t.Errorf("expected extension_count=445, got %v", result["extension_count"])
+	if int(result["extension_count"].(float64)) != 503 {
+		t.Errorf("expected extension_count=503, got %v", result["extension_count"])
 	}
 	if result["catalog_path"] != "/home/user/.pig/extension.csv" {
 		t.Errorf("expected catalog_path='/home/user/.pig/extension.csv', got %v", result["catalog_path"])
@@ -2990,7 +2990,7 @@ func TestReloadResultDataJSONSerialization(t *testing.T) {
 func TestReloadResultDataYAMLSerialization(t *testing.T) {
 	data := &ReloadResultData{
 		SourceURL:      "https://pigsty.cc/ext/data/extension.csv",
-		ExtensionCount: 440,
+		ExtensionCount: 503,
 		CatalogPath:    "/root/.pig/extension.csv",
 		DownloadedAt:   "2026-02-02T10:00:00Z",
 		DurationMs:     2000,
@@ -3006,8 +3006,8 @@ func TestReloadResultDataYAMLSerialization(t *testing.T) {
 		t.Fatalf("failed to unmarshal YAML: %v", err)
 	}
 
-	if result.ExtensionCount != 440 {
-		t.Errorf("expected ExtensionCount=440, got %v", result.ExtensionCount)
+	if result.ExtensionCount != 503 {
+		t.Errorf("expected ExtensionCount=503, got %v", result.ExtensionCount)
 	}
 	if result.DurationMs != 2000 {
 		t.Errorf("expected DurationMs=2000, got %v", result.DurationMs)
@@ -3327,7 +3327,7 @@ func TestLinkResultDataUnlinkSerialization(t *testing.T) {
 func TestReloadCatalogResultDataSerialization(t *testing.T) {
 	data := &ReloadResultData{
 		SourceURL:      "https://pigsty.io/ext/data/extension.csv",
-		ExtensionCount: 450,
+		ExtensionCount: 503,
 		CatalogPath:    "/home/user/.pig/extension.csv",
 		DownloadedAt:   "2026-02-02T10:00:00Z",
 		DurationMs:     1500,
@@ -3342,7 +3342,7 @@ func TestReloadCatalogResultDataSerialization(t *testing.T) {
 	if !strings.Contains(jsonStr, `"source_url"`) {
 		t.Errorf("JSON missing source_url field: %s", jsonStr)
 	}
-	if !strings.Contains(jsonStr, `"extension_count":450`) {
+	if !strings.Contains(jsonStr, `"extension_count":503`) {
 		t.Errorf("JSON missing extension_count field: %s", jsonStr)
 	}
 	if !strings.Contains(jsonStr, `"duration_ms":1500`) {
@@ -3358,7 +3358,7 @@ func TestReloadCatalogResultDataSerialization(t *testing.T) {
 	if !strings.Contains(yamlStr, "source_url:") {
 		t.Errorf("YAML missing source_url field: %s", yamlStr)
 	}
-	if !strings.Contains(yamlStr, "extension_count: 450") {
+	if !strings.Contains(yamlStr, "extension_count: 503") {
 		t.Errorf("YAML missing extension_count field: %s", yamlStr)
 	}
 }
@@ -4357,7 +4357,7 @@ func TestReloadResultDataTextNil(t *testing.T) {
 func TestReloadResultDataTextWithData(t *testing.T) {
 	d := &ReloadResultData{
 		SourceURL:      "https://pigsty.io/ext/data/extension.csv",
-		ExtensionCount: 451,
+		ExtensionCount: 503,
 		CatalogPath:    "/root/.pig/extension.csv",
 		DurationMs:     350,
 	}
@@ -4365,7 +4365,7 @@ func TestReloadResultDataTextWithData(t *testing.T) {
 	if !strings.Contains(text, "pigsty.io") {
 		t.Error("expected source URL in output")
 	}
-	if !strings.Contains(text, "451") {
+	if !strings.Contains(text, "503") {
 		t.Error("expected extension count in output")
 	}
 	if !strings.Contains(text, "/root/.pig/extension.csv") {

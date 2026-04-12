@@ -22,7 +22,7 @@ builds:
       - -s -w
       - -extldflags "-static"
       - -X 'pig/internal/config.PigVersion={{.Version}}'
-      - -X 'pig/internal/config.PigstyVersion=3.6.0'
+      - -X 'pig/internal/config.PigstyVersion=4.3.0'
       - -X 'pig/internal/config.Branch={{.Branch}}'
       - -X 'pig/internal/config.Revision={{.ShortCommit}}'
       - -X 'pig/internal/config.BuildDate={{.Date}}'
