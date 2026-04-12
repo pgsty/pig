@@ -17,7 +17,7 @@ import (
 
 func SetupPgrx(pgrxVersion string, pgVersions string) error {
 	if pgrxVersion == "" {
-		pgrxVersion = "0.16.1"
+		pgrxVersion = "0.17.0"
 	}
 	cargoBin := config.HomeDir + "/.cargo/bin/cargo"
 
