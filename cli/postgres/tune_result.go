@@ -80,7 +80,7 @@ func TuneResult(cfg *Config, opts *TuneOptions) *output.Result {
 	data := &TuneResultData{
 		Profile:   prof.Name,
 		PgVersion: pgVersion,
-		Hardware:  TuneHardwareInfo{CPU: spec.CPU, MemMB: spec.MemMB, DiskGB: spec.DiskGB},
+		Hardware:  TuneHardwareInfo(spec),
 		Params:    make(map[string]string, len(params)),
 	}
 	for _, p := range params {

@@ -58,12 +58,10 @@ func WriteAutoConf(path, dbsu string, params map[string]string, headerComment st
 	// Read existing content. If file is missing, initialize from scratch.
 	// If existing file exists but read fails, abort instead of clobbering it.
 	content, readErr := utils.ReadFileAsDBSU(path, dbsu)
-	existingLines := []string{}
+	var existingLines []string
 	if readErr != nil {
 		if _, statErr := os.Stat(path); statErr != nil {
-			if os.IsNotExist(statErr) {
-				existingLines = []string{}
-			} else {
+			if !os.IsNotExist(statErr) {
 				return fmt.Errorf("cannot access existing file %s: %w", path, statErr)
 			}
 		} else {
