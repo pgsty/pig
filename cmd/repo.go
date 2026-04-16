@@ -140,9 +140,17 @@ var repoSetCmd = &cobra.Command{
   (Beware that system repo management require sudo/root privilege)
 	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		repoRemove = true
-		repoUpdate = true
-		return repoAddCmd.RunE(cmd, args)
+		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
+			result := output.Fail(output.CodeRepoUnsupportedOS,
+				fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
+			return handleAuxResult(result)
+		}
+		if len(args) == 0 {
+			args = []string{"all"}
+		}
+		modules := repo.ExpandModuleArgs(args)
+		result := repo.AddRepos(modules, repoRegion, true, true)
+		return handleAuxResult(result)
 	},
 }
 

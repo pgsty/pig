@@ -82,37 +82,52 @@ func GetAllDatabases(cfg *Config) ([]string, error) {
 
 // maintTask represents a maintenance task configuration
 type maintTask struct {
-	command   string // SQL command name (VACUUM, ANALYZE)
-	options   string // SQL options string (e.g., "(VERBOSE, FREEZE)")
-	taskName  string // Display name for logging
-	schema    string // Target schema (optional)
-	table     string // Target table (optional)
+	command  string // SQL command name (VACUUM, ANALYZE)
+	options  string // SQL options string (e.g., "(VERBOSE, FREEZE)")
+	taskName string // Display name for logging
+	schema   string // Target schema (optional)
+	table    string // Target table (optional)
 }
 
-// runMaintTask executes a maintenance task on a single database
-func runMaintTask(cfg *Config, dbname string, task *maintTask) error {
-	var sql string
+func joinSQLParts(parts ...string) string {
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		segments = append(segments, part)
+	}
+	return strings.Join(segments, " ")
+}
+
+func buildMaintSQL(task *maintTask) string {
+	if task == nil {
+		return ""
+	}
+
+	baseCommand := joinSQLParts(task.command, task.options)
 	if task.table != "" {
-		// Specific table
 		table := task.table
 		if task.schema != "" {
 			table = task.schema + "." + task.table
 		}
-		sql = fmt.Sprintf("%s %s %s", task.command, task.options, table)
-	} else if task.schema != "" {
-		// All tables in schema (need to iterate via DO block)
-		// Schema name is pre-validated by validateMaintOptions() using ValidateIdentifier()
-		// Use quote_literal for defense-in-depth against SQL injection
-		sql = fmt.Sprintf(`DO $$ DECLARE r RECORD; BEGIN
-FOR r IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname = quote_literal('%s')::name
-LOOP EXECUTE '%s %s ' || quote_ident(r.schemaname) || '.' || quote_ident(r.tablename);
-END LOOP; END $$`, utils.EscapeSQLString(task.schema), task.command, task.options)
-	} else {
-		// Entire database
-		sql = fmt.Sprintf("%s %s", task.command, task.options)
+		return joinSQLParts(baseCommand, table)
 	}
 
-	return RunPsqlMaintenance(cfg, dbname, sql)
+	if task.schema != "" {
+		return fmt.Sprintf(`DO $$ DECLARE r RECORD; BEGIN
+FOR r IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname = '%s'
+LOOP EXECUTE '%s ' || quote_ident(r.schemaname) || '.' || quote_ident(r.tablename);
+END LOOP; END $$`, utils.EscapeSQLString(task.schema), utils.EscapeSQLString(baseCommand))
+	}
+
+	return baseCommand
+}
+
+// runMaintTask executes a maintenance task on a single database
+func runMaintTask(cfg *Config, dbname string, task *maintTask) error {
+	return RunPsqlMaintenance(cfg, dbname, buildMaintSQL(task))
 }
 
 // runMaintAllDatabases executes a maintenance task on all databases
