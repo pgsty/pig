@@ -12,16 +12,31 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// SpecialSourceMapping defines special case mappings for non-extension packages
+// SpecialSourceMapping defines authoritative source bundles for packages that
+// need manual overrides or supplemental source artifacts beyond catalog Source.
 var SpecialSourceMapping = map[string][]string{
-	"scws":        {"scws-1.2.3.tar.bz2"},
-	"openhalodb":  {"openhalodb-1.0.tar.gz"},
-	"cloudberry":  {"apache-cloudberry-2.0.0-incubating-src.tar.gz"},
+	"scws":       {"scws-1.2.3.tar.bz2"},
+	"openhalodb": {"openhalodb-1.0.tar.gz"},
+	"cloudberry": {
+		"apache-cloudberry-2.1.0-incubating-src.tar.gz",
+		"psutil-5.7.0.tar.gz",
+		"PyGreSQL-5.2.tar.gz",
+		"PyYAML-5.4.1.tar.gz",
+		"cloudberry-2.1.0-rpm-patches.tar.gz",
+		"apache-cloudberry-backup-2.1.0-incubating-src.tar.gz",
+		"apache-cloudberry-pxf-2.1.0-incubating-src.tar.gz",
+		"cloudberry-pxf-2.1.0-rpm-patches.tar.gz",
+	},
+	"cloudberry-backup": {"apache-cloudberry-backup-2.1.0-incubating-src.tar.gz"},
+	"cloudberry-pxf": {
+		"apache-cloudberry-pxf-2.1.0-incubating-src.tar.gz",
+		"cloudberry-pxf-2.1.0-rpm-patches.tar.gz",
+	},
 	"babelfishpg": {"babelfishpg-17.8-5.5.0.tar.gz"},
 	"babelfish":   {"babelfishpg-17.8-5.5.0.tar.gz"},
 	"antlr4":      {"antlr4-cpp-runtime-4.13.2-source.zip"},
-	"oriolepg":    {"oriolepg-17.16.tar.gz"},
-	"orioledb":    {"orioledb-beta14.tar.gz"},
+	"oriolepg":    {"postgres-patches17_18.tar.gz"},
+	"orioledb":    {"orioledb-beta15.tar.gz"},
 	"agensgraph":  {"agensgraph-2.16.0.tar.gz"},
 	"agentsgraph": {"agensgraph-2.16.0.tar.gz"},
 	"pgedge":      {"postgresql-17.9.tar.gz", "spock-5.0.5.tar.gz"},
@@ -29,6 +44,20 @@ var SpecialSourceMapping = map[string][]string{
 	"libfq":       {"libfq-0.6.1.tar.gz"},
 	"pdu":         {"pdu-3.0.25.12.tar.gz"},
 	"pgdog":       {"pgdog-0.1.32.tar.gz"},
+	"inchi":       {"inchi-1.07.3.tar.gz"},
+	"graphblas":   {"graphblas-10.2.0.tar.gz"},
+	"lagraph":     {"lagraph-1.2.1.tar.gz"},
+	"rdkit": {
+		"rdkit_202503.6.orig.tar.xz",
+		"better-enums-0.11.3-enum.h",
+		"rapidjson-1.1.0.tar.gz",
+		"inchi-1.07.3.tar.gz",
+	},
+	"onesparse": {
+		"onesparse-1.0.0.tar.gz",
+		"graphblas-10.2.0.tar.gz",
+		"lagraph-1.2.1.tar.gz",
+	},
 
 	// Multi-version PostgreSQL source packages
 	"libfepgutils": {
@@ -100,22 +129,47 @@ func DownloadSources(packages []string, force bool, mirror bool) error {
 
 // Get source files for a package
 func getSourceFiles(pkg string) []string {
-	// 1. Try as extension
-	if ext, err := ResolvePackage(pkg); err == nil && ext.Source != "" {
-		return splitAndCleanSources(ext.Source)
+	// 1. Prefer authoritative special bundles, even for extension packages, so
+	// stale catalog Source entries can be overridden with the exact build set.
+	if ext, err := ResolvePackage(pkg); err == nil {
+		if special := getSpecialSources(pkg, ext.Name, ext.Pkg); len(special) > 0 {
+			return special
+		}
+		if ext.Source != "" {
+			return splitAndCleanSources(ext.Source)
+		}
 	}
 
 	// 2. Check special mapping
-	if mapped, exists := SpecialSourceMapping[pkg]; exists {
-		var sources []string
-		for _, item := range mapped {
-			sources = append(sources, splitAndCleanSources(item)...)
-		}
-		return dedupeSources(sources)
+	if special := getSpecialSources(pkg); len(special) > 0 {
+		return special
 	}
 
 	// 3. Treat as filename
 	return []string{pkg}
+}
+
+func getSpecialSources(keys ...string) []string {
+	var sources []string
+	seenKeys := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, seen := seenKeys[key]; seen {
+			continue
+		}
+		seenKeys[key] = struct{}{}
+		mapped, exists := SpecialSourceMapping[key]
+		if !exists {
+			continue
+		}
+		for _, item := range mapped {
+			sources = append(sources, splitAndCleanSources(item)...)
+		}
+	}
+	return dedupeSources(sources)
 }
 
 // splitAndCleanSources splits source field by whitespace and removes empty items.

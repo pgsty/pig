@@ -33,6 +33,35 @@ func TestGetSourceFilesSpecialSourceMapping(t *testing.T) {
 			pkg:      "pgdog",
 			expected: []string{"pgdog-0.1.32.tar.gz"},
 		},
+		{
+			name: "cloudberry bundle",
+			pkg:  "cloudberry",
+			expected: []string{
+				"apache-cloudberry-2.1.0-incubating-src.tar.gz",
+				"psutil-5.7.0.tar.gz",
+				"PyGreSQL-5.2.tar.gz",
+				"PyYAML-5.4.1.tar.gz",
+				"cloudberry-2.1.0-rpm-patches.tar.gz",
+				"apache-cloudberry-backup-2.1.0-incubating-src.tar.gz",
+				"apache-cloudberry-pxf-2.1.0-incubating-src.tar.gz",
+				"cloudberry-pxf-2.1.0-rpm-patches.tar.gz",
+			},
+		},
+		{
+			name:     "rdkit authoritative bundle",
+			pkg:      "rdkit",
+			expected: []string{"rdkit_202503.6.orig.tar.xz", "better-enums-0.11.3-enum.h", "rapidjson-1.1.0.tar.gz", "inchi-1.07.3.tar.gz"},
+		},
+		{
+			name:     "orioledb overrides stale catalog source",
+			pkg:      "orioledb",
+			expected: []string{"orioledb-beta15.tar.gz"},
+		},
+		{
+			name:     "onesparse alias bundle",
+			pkg:      "one_sparse",
+			expected: []string{"onesparse-1.0.0.tar.gz", "graphblas-10.2.0.tar.gz", "lagraph-1.2.1.tar.gz"},
+		},
 	}
 
 	for _, tt := range tests {
