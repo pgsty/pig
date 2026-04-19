@@ -36,7 +36,7 @@ Environment Setup:
   pig build repo                   # init build repo (=repo set -ru)
   pig build tool  [mini|full|...]  # init build toolset
   pig build rust  [-y]             # install Rust toolchain
-  pig build pgrx  [-v <ver>]       # install & init pgrx (0.17.0)
+  pig build pgrx  [-v <ver>]       # install & init pgrx (0.18.0)
   pig build proxy [id@host:port ]  # init build proxy (optional)
 
 Package Building:
@@ -233,7 +233,7 @@ var buildPkgCmd = &cobra.Command{
 
 func init() {
 	// Parse build flags
-	buildPgrxCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", "0.17.0", "pgrx version to install")
+	buildPgrxCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", "0.18.0", "pgrx version to install")
 	buildRustCmd.PersistentFlags().BoolVarP(&buildRustYes, "yes", "y", false, "enforce rust re-installation")
 
 	// Add pgrx specific flags

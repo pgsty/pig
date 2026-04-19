@@ -318,7 +318,7 @@ func (b *ExtensionBuilder) checkRustEnvironment() {
 		return
 	}
 
-	// Parse version from output (e.g., "cargo-pgrx 0.17.0" -> "0.17.0")
+	// Parse version from output (e.g., "cargo-pgrx 0.18.0" -> "0.18.0")
 	versionOutput := strings.TrimSpace(string(output))
 	fields := strings.Fields(versionOutput)
 	if len(fields) == 0 {
