@@ -187,10 +187,10 @@ func TestLoadAliasMapArchOverridesStillApply(t *testing.T) {
 	ec := &ExtensionCatalog{}
 	ec.LoadAliasMap(config.OSType)
 
-	if got := ec.AliasMap["patroni"]; got != "patroni-4.1.1 patroni-etcd-4.1.1" {
+	if got := ec.AliasMap["patroni"]; got != "patroni-4.1.2 patroni-etcd-4.1.2" {
 		t.Fatalf("unexpected patroni alias after arch override: %q", got)
 	}
-	if got := ec.AliasMap["pgsql-common"]; got != "patroni-4.1.1 patroni-etcd-4.1.1 pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager" {
+	if got := ec.AliasMap["pgsql-common"]; got != "patroni-4.1.2 patroni-etcd-4.1.2 pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager" {
 		t.Fatalf("unexpected pgsql-common alias after arch override: %q", got)
 	}
 }
