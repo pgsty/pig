@@ -39,6 +39,10 @@ var buildTools = map[string][]string{
 		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
 		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "libxslt1-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
 	},
+	"u26": {
+		"make", "cmake", "ninja-build", "pkg-config", "lld", "git", "lz4", "unzip", "ncdu", "rsync", "vray", "jq", "debhelper", "devscripts", "fakeroot",
+		"libreadline-dev", "zlib1g-dev", "libxml2-dev", "libxslt1-dev", "liblz4-dev", "libzstd-dev", "libkrb5-dev", "postgresql-all", "postgresql-server-dev-all",
+	},
 }
 
 // InstallBuildTools will install build dependencies for different distributions

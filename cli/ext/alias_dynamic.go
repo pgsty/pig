@@ -142,7 +142,7 @@ func resolveCategoryAliasMatrixTarget() (osCode, arch string, allowMetadataFallb
 		}
 	case config.DistroDEB:
 		switch config.OSCode {
-		case "d12", "d13", "u22", "u24":
+		case "d12", "d13", "u22", "u24", "u26":
 			return config.OSCode, arch, false
 		default:
 			return "d13", arch, true

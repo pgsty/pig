@@ -23,9 +23,10 @@ func TestRepoAvailable(t *testing.T) {
 
 		// Ubuntu Tests
 		{name: "ubuntu u22 amd64 match", repo: Repository{Releases: []int{22}, Arch: []string{"x86_64"}}, code: "u22", arch: "amd64", expected: true},
-		{name: "ubuntu u20 arm64 match", repo: Repository{Releases: []int{20}, Arch: []string{"aarch64"}}, code: "u20", arch: "arm64", expected: true},
+		{name: "ubuntu u26 arm64 match", repo: Repository{Releases: []int{26}, Arch: []string{"aarch64"}}, code: "u26", arch: "arm64", expected: true},
 		{name: "ubuntu u22 wrong arch", repo: Repository{Releases: []int{22}, Arch: []string{"x86_64"}}, code: "u22", arch: "arm64", expected: false},
-		{name: "ubuntu multi-arch match", repo: Repository{Releases: []int{20, 22}, Arch: []string{"x86_64", "aarch64"}}, code: "u20", arch: "arm64", expected: true},
+		{name: "ubuntu multi-arch match", repo: Repository{Releases: []int{22, 26}, Arch: []string{"x86_64", "aarch64"}}, code: "u26", arch: "arm64", expected: true},
+		{name: "ubuntu u20 no longer matches newer repo windows", repo: Repository{Releases: []int{22, 24, 26}, Arch: []string{"x86_64", "aarch64"}}, code: "u20", arch: "arm64", expected: false},
 
 		// Debian Tests
 		{name: "debian d11 amd64 match", repo: Repository{Releases: []int{11}, Arch: []string{"x86_64"}}, code: "d11", arch: "amd64", expected: true},

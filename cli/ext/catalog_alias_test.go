@@ -90,6 +90,39 @@ func TestLoadAliasMapRequestedAliasesU22(t *testing.T) {
 	}
 }
 
+func TestLoadAliasMapRequestedAliasesU26(t *testing.T) {
+	cleanup := withAliasMapTestEnv(t, config.DistroDEB, "u26", "amd64")
+	defer cleanup()
+
+	ec := &ExtensionCatalog{}
+	ec.LoadAliasMap(config.OSType)
+
+	expect := map[string]string{
+		"docker":         "docker-ce docker-compose-plugin",
+		"kafka":          "kafka kafka-exporter",
+		"kubernetes":     "kubeadm kubelet kubectl",
+		"java-runtime":   "openjdk-17-jdk",
+		"kube-runtime":   "containerd.io",
+		"agensgraph":     "agensgraph-$v",
+		"agens":          "agensgraph-$v",
+		"pgedge":         "pgedge-$v pgedge-$v-spock pgedge-$v-lolor pgedge-$v-snowflake",
+		"orioledb":       "oriolepg-17-orioledb oriolepg-17",
+		"vtraces":        "victoria-traces",
+		"hunspell":       "postgresql-$v-hunspell-cs-cz,postgresql-$v-hunspell-de-de,postgresql-$v-hunspell-en-us,postgresql-$v-hunspell-fr,postgresql-$v-hunspell-ne-np,postgresql-$v-hunspell-nl-nl,postgresql-$v-hunspell-nn-no,postgresql-$v-hunspell-ru-ru,postgresql-$v-hunspell-ru-ru-aot",
+		"ansible":        ansibleComboDEB,
+		"node-bootstrap": nodeBootstrapComboU22,
+	}
+
+	for key, want := range expect {
+		if got := ec.AliasMap[key]; got != want {
+			t.Fatalf("unexpected alias for %s: want %q, got %q", key, want, got)
+		}
+	}
+	if ec.AliasMap["ansible"] == ec.AliasMap["node-bootstrap"] {
+		t.Fatalf("ansible should be a lean combo and must differ from node-bootstrap, got %q", ec.AliasMap["ansible"])
+	}
+}
+
 func TestLoadAliasMapOSOverrides(t *testing.T) {
 	tests := []struct {
 		name   string

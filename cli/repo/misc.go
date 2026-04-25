@@ -56,6 +56,8 @@ func GetMajorVersionFromCode(code string) int {
 		return 22
 	case "noble":
 		return 24
+	case "resolute":
+		return 26
 	}
 
 	// Handle Debian codenames

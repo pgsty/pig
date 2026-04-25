@@ -370,7 +370,7 @@ func (d *ExtensionAvailData) textGlobalAvailability() string {
 
 		if !validOSCodes[osCode] {
 			sb.WriteString(fmt.Sprintf("\nNote: Current OS '%s' is not a supported Linux distribution.\n", osCode))
-			sb.WriteString("Supported OS: el8, el9, el10, d12, d13, u22, u24\n")
+			sb.WriteString("Supported OS: el8, el9, el10, d12, d13, u22, u24, u26\n")
 			sb.WriteString("Showing matrix for el9.x86_64 as example:\n")
 			osCode, arch = "el9", "amd64"
 		}

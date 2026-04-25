@@ -54,7 +54,7 @@ func (r *Repository) InferOS() string {
 
 	for _, rel := range r.Releases {
 		switch rel {
-		case 11, 12, 13, 20, 22, 24:
+		case 11, 12, 13, 20, 22, 24, 26:
 			return config.DistroDEB
 		case 7, 8, 9, 10:
 			return config.DistroEL

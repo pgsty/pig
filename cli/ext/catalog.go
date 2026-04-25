@@ -200,6 +200,11 @@ var OSAliasOverride = map[string]map[string]string{
 		"ansible":        ansibleComboDEB,
 		"node-bootstrap": nodeBootstrapComboU22,
 	},
+	"u26": {
+		"java-runtime":   "openjdk-17-jdk",
+		"ansible":        ansibleComboDEB,
+		"node-bootstrap": nodeBootstrapComboU22,
+	},
 }
 
 // ArchAliasOverride contains package name overrides for specific OS+arch combinations
@@ -288,7 +293,7 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			}
 		}
 		ec.AliasMap = pkgMap
-	case "deb", "d10", "d11", "d12", "d13", "u20", "u22", "u24":
+	case "deb", "d10", "d11", "d12", "d13", "u22", "u24", "u26":
 		pkgMap := map[string]string{
 			"postgresql":          "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v postgresql-server-dev-$v",
 			"pgsql-common":        "patroni python3-etcd pgbouncer pgbackrest pg-exporter pgbackrest-exporter vip-manager",

@@ -573,7 +573,7 @@ func checkAutoModeWarnings(requestedMode string) []string {
 		}
 	case "ubuntu":
 		if version == "20" {
-			warnings = append(warnings, "mode=meta on Ubuntu 20.04 (EOL 2025-04-23), consider Ubuntu 22.04/24.04")
+			warnings = append(warnings, "mode=meta on Ubuntu 20.04 (EOL 2025-04-23), consider Ubuntu 22.04/24.04/26.04")
 		}
 	}
 	if vendor == "" {

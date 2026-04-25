@@ -450,6 +450,8 @@ var DistroBadCase = map[string]map[string][]int{
 	"u22.arm64": {},
 	"u24.amd64": {},
 	"u24.arm64": {},
+	"u26.amd64": {},
+	"u26.arm64": {},
 
 	"d11.amd64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}},
 	"d11.arm64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}},

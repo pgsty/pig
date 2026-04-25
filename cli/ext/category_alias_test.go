@@ -219,7 +219,7 @@ func TestResolveCategoryAliasFallbackDEB(t *testing.T) {
 	extRepoPigsty := newTestCategoryExt(120, "pigsty_ext", "pigsty_ext", "LANG", nil)
 	extRepoPigsty.DebPkg, extRepoPigsty.DebRepo, extRepoPigsty.DebPg = "postgresql-$v-pigsty-ext", "PIGSTY", []string{"18"}
 
-	cleanup := withCategoryAliasTestEnv(t, config.DistroDEB, "u26", "amd64", []*Extension{
+	cleanup := withCategoryAliasTestEnv(t, config.DistroDEB, "u28", "amd64", []*Extension{
 		extMatrix, extMatrixPigsty, extRepoPGDG, extRepoPigsty,
 	})
 	defer cleanup()
@@ -240,6 +240,31 @@ func TestResolveCategoryAliasFallbackDEB(t *testing.T) {
 	}
 	if slices.Contains(res.Packages, "postgresql-18-pigsty-ext") {
 		t.Fatalf("pigsty package should be filtered out: %v", res.Packages)
+	}
+}
+
+func TestResolveCategoryAliasKnownU26UsesNativeMatrix(t *testing.T) {
+	extMatrix := newTestCategoryExt(100, "matrix_ext", "matrix_ext", "LANG", []string{"u26i:18:A:f:1:G:1.0"})
+	extMatrix.DebPkg, extMatrix.DebRepo, extMatrix.DebPg = "postgresql-$v-matrix-ext", "PGDG", []string{"18"}
+
+	extRepoPGDG := newTestCategoryExt(110, "repo_ext", "repo_ext", "LANG", nil)
+	extRepoPGDG.DebPkg, extRepoPGDG.DebRepo, extRepoPGDG.DebPg = "postgresql-$v-repo-ext", "PGDG", []string{"18"}
+
+	cleanup := withCategoryAliasTestEnv(t, config.DistroDEB, "u26", "amd64", []*Extension{
+		extMatrix, extRepoPGDG,
+	})
+	defer cleanup()
+
+	res := ResolveExtensionPackages(18, []string{"pg18-lang"}, false)
+	if len(res.NotFound) > 0 || len(res.NoPackage) > 0 {
+		t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
+	}
+
+	if !slices.Contains(res.Packages, "postgresql-18-matrix-ext") {
+		t.Fatalf("expected native u26 matrix package in %v", res.Packages)
+	}
+	if slices.Contains(res.Packages, "postgresql-18-repo-ext") {
+		t.Fatalf("known u26 should not fall back to repo metadata when matrix is present: %v", res.Packages)
 	}
 }
 

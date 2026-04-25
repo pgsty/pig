@@ -135,7 +135,7 @@ var repoSetCmd = &cobra.Command{
   pig repo set node,pgsql           # use pgdg + pigsty repo
   pig repo set node,pgdg            # use pgdg and node repo only
   pig repo set node,pigsty          # use pgdg and node repo only
-  pig repo set node,infra,mssql     # use wiltondb/babelfish repo
+  pig repo set node,infra,docker    # enable docker-ce repo alongside base repos
 
   (Beware that system repo management require sudo/root privilege)
 	`,
@@ -236,7 +236,7 @@ var repoCacheCmd = &cobra.Command{
   pig repo cache                    # create /tmp/pkg.tgz offline package from /www/pigsty
   pig repo cache -f                 # force overwrite existing package
   pig repo cache -d /srv            # overwrite default content dir /www to /srv
-  pig repo cache pigsty mssql       # create the tarball with both pigsty & mssql repo
+  pig repo cache pigsty docker      # create the tarball with both pigsty & docker repo
   pig repo c -f                     # the simplest use case to make offline package
 
   (Beware that system repo management require sudo/root privilege)
@@ -259,7 +259,7 @@ var repoCreateCmd = &cobra.Command{
 	Annotations:  ancsAnn("pig repo create", "action", "stable", "restricted", true, "low", "none", "root", 5000),
 	Example: `
   pig repo create                    # create repo on /www/pigsty
-  pig repo create /www/mssql /www/b  # create repo on multiple locations
+  pig repo create /www/pigsty /www/b # create repo on multiple locations
 
   (Beware that system repo management require sudo/root privilege)
 `,

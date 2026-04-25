@@ -120,6 +120,45 @@ func TestDebianRepoComponentMapping(t *testing.T) {
 	}
 }
 
+func TestUbuntuRepoReleasePolicy(t *testing.T) {
+	var repos []Repository
+	if err := yaml.Unmarshal(embedRepoData, &repos); err != nil {
+		t.Fatalf("failed to parse embedded repo catalog: %v", err)
+	}
+
+	assertReleases := func(name, desc, distro, arch string, want []int) {
+		t.Helper()
+		for _, r := range repos {
+			if r.Name == name && r.Description == desc && r.InferOS() == distro && slicesContains(r.Arch, arch) {
+				if compactIntArray(r.Releases) != compactIntArray(want) {
+					t.Fatalf("%s/%s/%s releases = %v, want %v", name, desc, arch, r.Releases, want)
+				}
+				return
+			}
+		}
+		t.Fatalf("repo %s/%s/%s/%s not found", name, desc, distro, arch)
+	}
+
+	assertReleases("base", "Ubuntu Basic", "deb", "x86_64", []int{22, 24, 26})
+	assertReleases("base", "Ubuntu Basic", "deb", "aarch64", []int{22, 24, 26})
+	assertReleases("pgdg", "PGDG", "deb", "x86_64", []int{11, 12, 13, 22, 24, 26})
+	assertReleases("haproxyu", "Haproxy Ubuntu", "deb", "x86_64", []int{24, 26})
+	assertReleases("timescaledb", "TimescaleDB", "deb", "x86_64", []int{11, 12, 13, 22, 24})
+	assertReleases("clickhouse", "ClickHouse", "deb", "x86_64", []int{11, 12, 13, 22, 24, 26})
+	assertReleases("mysql", "MySQL", "deb", "x86_64", []int{11, 12, 22, 24})
+
+	for _, r := range repos {
+		if r.Name == "wiltondb" && r.InferOS() == "deb" {
+			t.Fatalf("wiltondb should not be present in deb repo catalog anymore: %+v", r)
+		}
+		if r.Name == "percona" && r.Description == "Percona TDE" && r.InferOS() == "deb" {
+			if _, ok := r.BaseURL["origin"]; ok {
+				t.Fatalf("percona deb repo should not carry origin mirror metadata anymore: %+v", r.BaseURL)
+			}
+		}
+	}
+}
+
 func aptComponents(repoURL string) []string {
 	fields := strings.Fields(repoURL)
 	if len(fields) < 3 {

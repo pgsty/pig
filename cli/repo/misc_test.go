@@ -20,6 +20,8 @@ func TestGetMajorVersionFromCode(t *testing.T) {
 		// Ubuntu Tests
 		{name: "ubuntu focal", code: "focal", expected: 20},
 		{name: "ubuntu jammy", code: "jammy", expected: 22},
+		{name: "ubuntu noble", code: "noble", expected: 24},
+		{name: "ubuntu resolute", code: "resolute", expected: 26},
 		{name: "invalid ubuntu codename", code: "invalid", expected: -1},
 
 		// Debian Tests

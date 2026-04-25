@@ -58,8 +58,8 @@ const (
 
 // Standard OS display order and valid codes
 var (
-	osDisplayOrder = []string{"el8", "el9", "el10", "d12", "d13", "u22", "u24"}
-	validOSCodes   = map[string]bool{"el8": true, "el9": true, "el10": true, "d12": true, "d13": true, "u22": true, "u24": true}
+	osDisplayOrder = []string{"el8", "el9", "el10", "d12", "d13", "u22", "u24", "u26"}
+	validOSCodes   = map[string]bool{"el8": true, "el9": true, "el10": true, "d12": true, "d13": true, "u22": true, "u24": true, "u26": true}
 )
 
 /********************
