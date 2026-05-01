@@ -5,12 +5,12 @@
 [![Version: v1.4.1](https://img.shields.io/badge/version-v1.4.1-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.4.1)
 [![Pigsty: v4.3.0](https://img.shields.io/badge/Pigsty-v4.3.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 508](https://img.shields.io/badge/extensions-508-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
+[![Extensions: 510](https://img.shields.io/badge/extensions-510-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pgsty/pig)
 
 [**pig**](https://pigsty.io/docs/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pigsty.io/ext/os/) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 14 ~ 18 along with [508 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 14 ~ 18 along with [510 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
 
 All commands support structured output (`-o yaml/json`) with self-describing schema, making it an **Agent-Friendly** PostgreSQL CLI tool.
 Also check the [**Pigsty Extension Catalog**](https://pigsty.io/ext/) to get details about the available extensions.
@@ -42,7 +42,7 @@ $ pig ext install pg18              # install PostgreSQL 18 kernels with native 
 $ pig ext install pg_duckdb -v 18   # install the pg_duckdb extension (for current pg18)
 ```
 
-That's it. All set! Check the [advanced usage](#advanced-usage) for details and the [full list of 508 available extensions](https://pigsty.io/ext/list/).
+That's it. All set! Check the [advanced usage](#advanced-usage) for details and the [full list of 510 available extensions](https://pigsty.io/ext/list/).
 
 [![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
 
@@ -384,10 +384,10 @@ vagrant@meta:~$ pig ext avail
 ✓ Found 297 packages available on u24.arm64
 
 Extension Availability on u24.aarch64 : https://pigsty.io/ext/os/u24.aarch64
-Showing 340 packages with 508 extensions  (green = PIGSTY, blue = PGDG)
+Showing 340 packages with 510 extensions  (green = PIGSTY, blue = PGDG)
 
 Pkg                     18          17          16          15          14      
-timescaledb             2.25.2      2.25.2      2.25.2      2.25.2      2.19.3
+timescaledb             2.26.4      2.26.4      2.26.4      2.26.4      2.26.4
 timescaledb_toolkit     1.22.0      1.22.0      1.22.0      1.22.0      1.19.0
 pg_timeseries           0.2.0       0.2.0       0.2.0       0.2.0       0.2.0   
 periods                 1.2.3       1.2.3       1.2.3       1.2.3       1.2.3   
@@ -640,13 +640,14 @@ $ pig build pkg timescaledb  # now you can build extension with pig!
 
 ## Compatibility
 
-`pig` runs on: RHEL 8/9/10, Ubuntu 22.04/24.04, and Debian 12/13 and [compatible OS](https://pigsty.io/docs/ref/linux)
+`pig` runs on: RHEL 8/9/10, Ubuntu 22.04/24.04/26.04, and Debian 12/13 and [compatible OS](https://pigsty.io/docs/ref/linux)
 
 |   Code   | Distribution                      |  `x86_64`  | `aarch64`  |
 |:--------:|-----------------------------------|:----------:|:----------:|
 | **el10** | RHEL 10 / Rocky10 / Alma10  / ... | PG 18 - 14 | PG 18 - 14 |
 | **el9**  | RHEL 9 / Rocky9 / Alma9  / ...    | PG 18 - 14 | PG 18 - 14 |
 | **el8**  | RHEL 8 / Rocky8 / Alma8 / ...     | PG 18 - 14 | PG 18 - 14 |
+| **u22**  | Ubuntu 26.04 (`resolute`)         | PG 18 - 14 | PG 18 - 14 |
 | **u24**  | Ubuntu 24.04 (`noble`)            | PG 18 - 14 | PG 18 - 14 |
 | **u22**  | Ubuntu 22.04 (`jammy`)            | PG 18 - 14 | PG 18 - 14 |
 | **d13**  | Debian 13 (`trixie`)              | PG 18 - 14 | PG 18 - 14 |
