@@ -76,23 +76,24 @@ func TestGetSourceFilesSpecialSourceMapping(t *testing.T) {
 
 func TestGetSourceFilesSpecialSourceMappingPgedge(t *testing.T) {
 	got := getSourceFiles("pgedge")
-	if len(got) != 2 {
-		t.Fatalf("getSourceFiles(%q) should return 2 files, got %v", "pgedge", got)
+	want := []string{"postgresql-18.3.tar.gz", "spock-5.0.6.tar.gz"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("getSourceFiles(%q) = %v, expected %v", "pgedge", got, want)
 	}
 
 	hasPostgresSource := false
 	hasSpockSource := false
 	for _, src := range got {
-		if strings.HasPrefix(src, "postgresql-17.") && strings.HasSuffix(src, ".tar.gz") {
+		if strings.HasPrefix(src, "postgresql-18.") && strings.HasSuffix(src, ".tar.gz") {
 			hasPostgresSource = true
 		}
-		if strings.HasPrefix(src, "spock-") && strings.HasSuffix(src, ".tar.gz") {
+		if strings.HasPrefix(src, "spock-5.0.6") && strings.HasSuffix(src, ".tar.gz") {
 			hasSpockSource = true
 		}
 	}
 
 	if !hasPostgresSource || !hasSpockSource {
-		t.Fatalf("pgedge sources should include both postgres-17 and spock tarballs, got %v", got)
+		t.Fatalf("pgedge sources should include both postgres-18 and spock tarballs, got %v", got)
 	}
 }
 

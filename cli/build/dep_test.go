@@ -9,7 +9,7 @@ import (
 )
 
 func TestParseDebBuildDependsMultiline(t *testing.T) {
-	control := `Source: pgedge-17
+	control := `Source: pgedge-18
 Section: database
 Build-Depends:
  autoconf,
@@ -101,7 +101,7 @@ func TestExpandDebPGVersionDeps(t *testing.T) {
 
 func TestInferRPMPGMajorFromSpec(t *testing.T) {
 	spec := `%global sname pgedge
-%global pgmajorversion 17
+%global pgmajorversion 18
 Name: %{sname}_%{pgmajorversion}
 `
 
@@ -112,8 +112,8 @@ Name: %{sname}_%{pgmajorversion}
 	}
 
 	got := inferRPMPGMajorFromSpec(specFile)
-	if got != "17" {
-		t.Fatalf("inferRPMPGMajorFromSpec = %q, want %q", got, "17")
+	if got != "18" {
+		t.Fatalf("inferRPMPGMajorFromSpec = %q, want %q", got, "18")
 	}
 }
 

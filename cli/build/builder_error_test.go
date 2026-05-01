@@ -210,10 +210,10 @@ func TestBuildSourceForLog(t *testing.T) {
 			name: "keep multiple sources as one raw string",
 			ext: &ext.Extension{
 				Name:    "pgedge",
-				Version: "5.0.5",
-				Source:  "postgresql-17.7.tar.gz spock-5.0.5.tar.gz",
+				Version: "18.3",
+				Source:  "postgresql-18.3.tar.gz spock-5.0.6.tar.gz",
 			},
-			want: "postgresql-17.7.tar.gz spock-5.0.5.tar.gz",
+			want: "postgresql-18.3.tar.gz spock-5.0.6.tar.gz",
 		},
 		{
 			name: "empty when Source is missing",
