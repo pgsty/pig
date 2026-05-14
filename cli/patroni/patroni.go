@@ -18,6 +18,40 @@ const DefaultConfigPath = "/etc/patroni/patroni.yml"
 // DefaultDBSU is the default database superuser
 const DefaultDBSU = "postgres"
 
+// GetClusterName returns the cluster scope name read from `scope:` in the
+// patroni config file. Required for patronictl subcommands that take a
+// positional CLUSTER_NAME (restart, reinit, switchover, failover); the
+// `-c <config>` flag alone does NOT supply scope to those subcommands.
+//
+// Falls back to reading via DBSU when the config file isn't world-readable
+// (typical Pigsty layout: /pg/conf/<scope>.yml is postgres:postgres 0640).
+func GetClusterName(dbsu string) (string, error) {
+	content, err := os.ReadFile(DefaultConfigPath)
+	if err != nil {
+		if dbsu == "" {
+			dbsu = DefaultDBSU
+		}
+		text, dbsuErr := utils.DBSUCommandOutput(dbsu, []string{"cat", DefaultConfigPath})
+		if dbsuErr != nil {
+			return "", fmt.Errorf("cannot read %s (direct: %v; as %s: %v)", DefaultConfigPath, err, dbsu, dbsuErr)
+		}
+		content = []byte(text)
+	}
+
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "scope:") {
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "scope:"))
+			rest = strings.Trim(rest, "\"'")
+			if rest == "" {
+				return "", fmt.Errorf("scope: key in %s has empty value", DefaultConfigPath)
+			}
+			return rest, nil
+		}
+	}
+	return "", fmt.Errorf("scope: key not found in %s", DefaultConfigPath)
+}
+
 // runPatronictl executes patronictl with given arguments as DBSU
 func runPatronictl(dbsu string, args []string) error {
 	binPath, err := exec.LookPath("patronictl")
@@ -168,32 +202,37 @@ type RestartOptions struct {
 	Pending bool   // only restart members with pending restart
 }
 
+// buildRestartArgs builds the positional + flag args for `patronictl restart`.
+// patronictl restart requires CLUSTER_NAME as the first positional argument
+// (the `-c <config>` flag does NOT supply scope here, unlike pause/resume/list).
+func buildRestartArgs(cluster string, opts *RestartOptions) []string {
+	args := []string{"restart", cluster}
+
+	if opts == nil {
+		return args
+	}
+	if opts.Role != "" {
+		args = append(args, "--role", opts.Role)
+	}
+	if opts.Member != "" {
+		args = append(args, opts.Member)
+	}
+	if opts.Force {
+		args = append(args, "--force")
+	}
+	if opts.Pending {
+		args = append(args, "--pending")
+	}
+	return args
+}
+
 // Restart restarts PostgreSQL via patronictl restart
 func Restart(dbsu string, opts *RestartOptions) error {
-	args := []string{"restart"}
-
-	if opts != nil {
-		// Add role filter if specified
-		if opts.Role != "" {
-			args = append(args, "--role", opts.Role)
-		}
-
-		// Add member name if specified (positional argument after cluster)
-		// patronictl restart <cluster> [member]
-		// Since we use -c config, cluster name is auto-detected
-		if opts.Member != "" {
-			args = append(args, opts.Member)
-		}
-
-		if opts.Force {
-			args = append(args, "--force")
-		}
-		if opts.Pending {
-			args = append(args, "--pending")
-		}
+	cluster, err := GetClusterName(dbsu)
+	if err != nil {
+		return fmt.Errorf("restart: %w", err)
 	}
-
-	return runPatronictl(dbsu, args)
+	return runPatronictl(dbsu, buildRestartArgs(cluster, opts))
 }
 
 // ReinitOptions holds options for patronictl reinit
@@ -203,23 +242,35 @@ type ReinitOptions struct {
 	Wait   bool   // wait for reinit to complete
 }
 
-// Reinit reinitializes a cluster member via patronictl reinit
-func Reinit(dbsu string, opts *ReinitOptions) error {
-	if opts == nil || opts.Member == "" {
-		return fmt.Errorf("member name is required for reinit")
+// buildReinitArgs builds the positional + flag args for `patronictl reinit`.
+// Required positional layout: reinit CLUSTER_NAME MEMBER_NAME.
+func buildReinitArgs(cluster string, opts *ReinitOptions) []string {
+	args := []string{"reinit", cluster}
+	if opts == nil {
+		return args
 	}
-
-	args := []string{"reinit"}
-	args = append(args, opts.Member)
-
+	if opts.Member != "" {
+		args = append(args, opts.Member)
+	}
 	if opts.Force {
 		args = append(args, "--force")
 	}
 	if opts.Wait {
 		args = append(args, "--wait")
 	}
+	return args
+}
 
-	return runPatronictl(dbsu, args)
+// Reinit reinitializes a cluster member via patronictl reinit
+func Reinit(dbsu string, opts *ReinitOptions) error {
+	if opts == nil || opts.Member == "" {
+		return fmt.Errorf("member name is required for reinit")
+	}
+	cluster, err := GetClusterName(dbsu)
+	if err != nil {
+		return fmt.Errorf("reinit: %w", err)
+	}
+	return runPatronictl(dbsu, buildReinitArgs(cluster, opts))
 }
 
 // SwitchoverOptions holds options for patronictl switchover
@@ -310,26 +361,35 @@ func buildSwitchoverCommand(opts *SwitchoverOptions) string {
 	return strings.Join(args, " ")
 }
 
+// buildSwitchoverArgs builds the args for `patronictl switchover`.
+// Required positional layout: switchover CLUSTER_NAME [--leader X --candidate Y ...].
+func buildSwitchoverArgs(cluster string, opts *SwitchoverOptions) []string {
+	args := []string{"switchover", cluster}
+	if opts == nil {
+		return args
+	}
+	if opts.Leader != "" {
+		args = append(args, "--leader", opts.Leader)
+	}
+	if opts.Candidate != "" {
+		args = append(args, "--candidate", opts.Candidate)
+	}
+	if opts.Force {
+		args = append(args, "--force")
+	}
+	if opts.Scheduled != "" {
+		args = append(args, "--scheduled", opts.Scheduled)
+	}
+	return args
+}
+
 // Switchover performs a planned switchover via patronictl switchover
 func Switchover(dbsu string, opts *SwitchoverOptions) error {
-	args := []string{"switchover"}
-
-	if opts != nil {
-		if opts.Leader != "" {
-			args = append(args, "--leader", opts.Leader)
-		}
-		if opts.Candidate != "" {
-			args = append(args, "--candidate", opts.Candidate)
-		}
-		if opts.Force {
-			args = append(args, "--force")
-		}
-		if opts.Scheduled != "" {
-			args = append(args, "--scheduled", opts.Scheduled)
-		}
+	cluster, err := GetClusterName(dbsu)
+	if err != nil {
+		return fmt.Errorf("switchover: %w", err)
 	}
-
-	return runPatronictl(dbsu, args)
+	return runPatronictl(dbsu, buildSwitchoverArgs(cluster, opts))
 }
 
 // FailoverOptions holds options for patronictl failover
@@ -399,18 +459,27 @@ func buildFailoverCommand(opts *FailoverOptions) string {
 	return strings.Join(args, " ")
 }
 
+// buildFailoverArgs builds the args for `patronictl failover`.
+// Required positional layout: failover CLUSTER_NAME [--candidate Y ...].
+func buildFailoverArgs(cluster string, opts *FailoverOptions) []string {
+	args := []string{"failover", cluster}
+	if opts == nil {
+		return args
+	}
+	if opts.Candidate != "" {
+		args = append(args, "--candidate", opts.Candidate)
+	}
+	if opts.Force {
+		args = append(args, "--force")
+	}
+	return args
+}
+
 // Failover performs an unplanned failover via patronictl failover
 func Failover(dbsu string, opts *FailoverOptions) error {
-	args := []string{"failover"}
-
-	if opts != nil {
-		if opts.Candidate != "" {
-			args = append(args, "--candidate", opts.Candidate)
-		}
-		if opts.Force {
-			args = append(args, "--force")
-		}
+	cluster, err := GetClusterName(dbsu)
+	if err != nil {
+		return fmt.Errorf("failover: %w", err)
 	}
-
-	return runPatronictl(dbsu, args)
+	return runPatronictl(dbsu, buildFailoverArgs(cluster, opts))
 }
