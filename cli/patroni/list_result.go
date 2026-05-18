@@ -9,13 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"pig/internal/output"
-	"pig/internal/utils"
-
-	"gopkg.in/yaml.v3"
 )
 
 // PtListResultData contains Patroni cluster member list in a simplified, agent-friendly format.
@@ -67,25 +63,20 @@ type PatroniListEntry struct {
 	LagInMB *int   `json:"Lag in MB"`
 }
 
-// PatroniYAMLConfig represents the minimal config needed to extract scope (cluster name).
-type PatroniYAMLConfig struct {
-	Scope string `yaml:"scope"`
-}
-
 // ListResult creates a structured result for pt list command.
 // It executes patronictl list -f json and returns parsed cluster member data.
-func ListResult(dbsu string) *output.Result {
-	binPath, err := exec.LookPath("patronictl")
+func ListResult(dbsu string, cluster string) *output.Result {
+	binPath, err := patroniLookPath("patronictl")
 	if err != nil {
 		return output.Fail(output.CodePtNotFound, "patronictl not found in PATH")
 	}
-	if _, err := os.Stat(DefaultConfigPath); err != nil && os.IsNotExist(err) {
+	if _, err := patroniStat(DefaultConfigPath); err != nil && os.IsNotExist(err) {
 		return output.Fail(output.CodePtConfigNotFound,
 			fmt.Sprintf("Patroni config not found: %s", DefaultConfigPath))
 	}
 
-	args := []string{binPath, "-c", DefaultConfigPath, "list", "-f", "json"}
-	jsonOutput, err := utils.DBSUCommandOutput(dbsu, args)
+	args := buildListResultArgs(binPath, cluster)
+	jsonOutput, err := patroniDBSUCommandOutput(dbsu, args)
 	if err != nil {
 		if isPermissionDenied(err, jsonOutput) {
 			return output.Fail(output.CodePtPermDenied, "Permission denied executing patronictl list").
@@ -111,9 +102,21 @@ func ListResult(dbsu string) *output.Result {
 	}
 
 	// Try to get cluster name from config
-	data.Cluster = getClusterName(dbsu)
+	if cluster != "" {
+		data.Cluster = cluster
+	} else {
+		data.Cluster = getClusterName(dbsu)
+	}
 
 	return output.OK("Patroni cluster members retrieved", data)
+}
+
+func buildListResultArgs(binPath string, cluster string) []string {
+	args := []string{binPath, "-c", DefaultConfigPath, "list"}
+	if cluster != "" {
+		args = append(args, cluster)
+	}
+	return append(args, "-f", "json")
 }
 
 // parsePatroniListJSON parses the JSON output from patronictl list -f json.
@@ -144,29 +147,60 @@ func parsePatroniListJSON(jsonStr string) (*PtListResultData, error) {
 // getClusterName reads the cluster name (scope) from the Patroni config file.
 // Returns empty string if the config file cannot be read or parsed.
 func getClusterName(dbsu string) string {
-	content, err := os.ReadFile(DefaultConfigPath)
+	cluster, err := GetClusterName(dbsu)
 	if err != nil {
-		// Try reading with DBSU privileges
-		if dbsu == "" {
-			dbsu = utils.GetDBSU("")
-		}
-		contentStr, err := utils.DBSUCommandOutput(dbsu, []string{"cat", DefaultConfigPath})
-		if err != nil {
-			return ""
-		}
-		content = []byte(contentStr)
+		return ""
 	}
-	return parseClusterNameFromYAML(string(content))
+	return cluster
 }
 
-// parseClusterNameFromYAML extracts the scope field from Patroni YAML config content.
-func parseClusterNameFromYAML(content string) string {
-	if content == "" {
+// parseClusterNameFromConfig extracts a simple top-level `scope:` scalar.
+// It intentionally does not implement full YAML; uncommon forms such as block
+// scalars and anchors are rejected by validateResolvedClusterName.
+func parseClusterNameFromConfig(content string) (string, error) {
+	if strings.TrimSpace(content) == "" {
+		return "", fmt.Errorf("%w in %s", errClusterScopeMissing, DefaultConfigPath)
+	}
+
+	for _, line := range strings.Split(content, "\n") {
+		if !strings.HasPrefix(line, "scope:") {
+			continue
+		}
+		cluster := cleanScopeValue(strings.TrimPrefix(line, "scope:"))
+		if cluster == "" {
+			return "", fmt.Errorf("%w in %s", errClusterScopeEmpty, DefaultConfigPath)
+		}
+		if err := validateResolvedClusterName(cluster); err != nil {
+			return "", err
+		}
+		return cluster, nil
+	}
+	return "", fmt.Errorf("%w in %s", errClusterScopeMissing, DefaultConfigPath)
+}
+
+func cleanScopeValue(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
 		return ""
 	}
-	var cfg PatroniYAMLConfig
-	if err := yaml.Unmarshal([]byte(content), &cfg); err != nil {
-		return ""
+
+	quote := value[0]
+	if quote == '"' || quote == '\'' {
+		if end := strings.IndexByte(value[1:], quote); end >= 0 {
+			end++
+			inner := value[1:end]
+			rest := strings.TrimSpace(value[end+1:])
+			if rest == "" || strings.HasPrefix(rest, "#") {
+				return inner
+			}
+		}
+		return value
 	}
-	return cfg.Scope
+
+	for i := 1; i < len(value); i++ {
+		if value[i] == '#' && (value[i-1] == ' ' || value[i-1] == '\t') {
+			return strings.TrimSpace(value[:i])
+		}
+	}
+	return value
 }

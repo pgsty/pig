@@ -26,30 +26,25 @@ const DefaultDBSU = "postgres"
 // Falls back to reading via DBSU when the config file isn't world-readable
 // (typical Pigsty layout: /pg/conf/<scope>.yml is postgres:postgres 0640).
 func GetClusterName(dbsu string) (string, error) {
-	content, err := os.ReadFile(DefaultConfigPath)
+	content, err := patroniReadFile(DefaultConfigPath)
 	if err != nil {
 		if dbsu == "" {
 			dbsu = DefaultDBSU
 		}
-		text, dbsuErr := utils.DBSUCommandOutput(dbsu, []string{"cat", DefaultConfigPath})
+		text, dbsuErr := patroniDBSUCommandOutput(dbsu, []string{"cat", DefaultConfigPath})
 		if dbsuErr != nil {
-			return "", fmt.Errorf("cannot read %s (direct: %v; as %s: %v)", DefaultConfigPath, err, dbsu, dbsuErr)
+			return "", newClusterConfigReadError(
+				fmt.Errorf("cannot read %s (direct: %v; as %s: %v)", DefaultConfigPath, err, dbsu, dbsuErr),
+			)
 		}
 		content = []byte(text)
 	}
 
-	for _, line := range strings.Split(string(content), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "scope:") {
-			rest := strings.TrimSpace(strings.TrimPrefix(line, "scope:"))
-			rest = strings.Trim(rest, "\"'")
-			if rest == "" {
-				return "", fmt.Errorf("scope: key in %s has empty value", DefaultConfigPath)
-			}
-			return rest, nil
-		}
+	cluster, err := parseClusterNameFromConfig(string(content))
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("scope: key not found in %s", DefaultConfigPath)
+	return cluster, nil
 }
 
 // runPatronictl executes patronictl with given arguments as DBSU
@@ -68,16 +63,35 @@ func runPatronictl(dbsu string, args []string) error {
 	return utils.DBSUCommand(dbsu, cmdArgs)
 }
 
-// List runs patronictl list with -e -t flags
-func List(dbsu string, watch bool, interval float64) error {
-	args := []string{"list", "-e", "-t"}
+func buildListArgs(cluster string, watch bool, interval float64) []string {
+	args := []string{"list"}
+	if cluster != "" {
+		args = append(args, cluster)
+	}
+	args = append(args, "-e", "-t")
 	if watch {
 		args = append(args, "-W")
 	}
 	if interval > 0 {
 		args = append(args, "-w", fmt.Sprintf("%g", interval))
 	}
-	return runPatronictl(dbsu, args)
+	return args
+}
+
+// List runs patronictl list with -e -t flags.
+func List(dbsu string, cluster string, watch bool, interval float64) error {
+	return patroniRunPatronictl(dbsu, buildListArgs(cluster, watch, interval))
+}
+
+func resolveClusterName(dbsu string, op string) (string, error) {
+	cluster, err := patroniGetClusterName(dbsu)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", op, err)
+	}
+	if err := validateResolvedClusterName(cluster); err != nil {
+		return "", fmt.Errorf("%s: %w", op, err)
+	}
+	return cluster, nil
 }
 
 // ConfigEdit opens interactive config editor
@@ -228,11 +242,11 @@ func buildRestartArgs(cluster string, opts *RestartOptions) []string {
 
 // Restart restarts PostgreSQL via patronictl restart
 func Restart(dbsu string, opts *RestartOptions) error {
-	cluster, err := GetClusterName(dbsu)
+	cluster, err := resolveClusterName(dbsu, "restart")
 	if err != nil {
-		return fmt.Errorf("restart: %w", err)
+		return err
 	}
-	return runPatronictl(dbsu, buildRestartArgs(cluster, opts))
+	return patroniRunPatronictl(dbsu, buildRestartArgs(cluster, opts))
 }
 
 // ReinitOptions holds options for patronictl reinit
@@ -266,11 +280,11 @@ func Reinit(dbsu string, opts *ReinitOptions) error {
 	if opts == nil || opts.Member == "" {
 		return fmt.Errorf("member name is required for reinit")
 	}
-	cluster, err := GetClusterName(dbsu)
+	cluster, err := resolveClusterName(dbsu, "reinit")
 	if err != nil {
-		return fmt.Errorf("reinit: %w", err)
+		return err
 	}
-	return runPatronictl(dbsu, buildReinitArgs(cluster, opts))
+	return patroniRunPatronictl(dbsu, buildReinitArgs(cluster, opts))
 }
 
 // SwitchoverOptions holds options for patronictl switchover
@@ -385,11 +399,11 @@ func buildSwitchoverArgs(cluster string, opts *SwitchoverOptions) []string {
 
 // Switchover performs a planned switchover via patronictl switchover
 func Switchover(dbsu string, opts *SwitchoverOptions) error {
-	cluster, err := GetClusterName(dbsu)
+	cluster, err := resolveClusterName(dbsu, "switchover")
 	if err != nil {
-		return fmt.Errorf("switchover: %w", err)
+		return err
 	}
-	return runPatronictl(dbsu, buildSwitchoverArgs(cluster, opts))
+	return patroniRunPatronictl(dbsu, buildSwitchoverArgs(cluster, opts))
 }
 
 // FailoverOptions holds options for patronictl failover
@@ -477,9 +491,9 @@ func buildFailoverArgs(cluster string, opts *FailoverOptions) []string {
 
 // Failover performs an unplanned failover via patronictl failover
 func Failover(dbsu string, opts *FailoverOptions) error {
-	cluster, err := GetClusterName(dbsu)
+	cluster, err := resolveClusterName(dbsu, "failover")
 	if err != nil {
-		return fmt.Errorf("failover: %w", err)
+		return err
 	}
-	return runPatronictl(dbsu, buildFailoverArgs(cluster, opts))
+	return patroniRunPatronictl(dbsu, buildFailoverArgs(cluster, opts))
 }

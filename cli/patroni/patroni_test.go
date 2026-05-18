@@ -1,6 +1,7 @@
 package patroni
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -158,6 +159,133 @@ func TestPatronictlPositionalContract(t *testing.T) {
 		if len(args) < 2 || args[1] != cluster {
 			t.Errorf("%s: cluster name must appear at args[1], got %v", name, args)
 		}
+	}
+}
+
+func TestPatroniOperationWrappersUseResolvedClusterName(t *testing.T) {
+	patroniTestDepsMu.Lock()
+	oldGetClusterName := patroniGetClusterName
+	oldRunPatronictl := patroniRunPatronictl
+	t.Cleanup(func() {
+		patroniGetClusterName = oldGetClusterName
+		patroniRunPatronictl = oldRunPatronictl
+		patroniTestDepsMu.Unlock()
+	})
+
+	var gotResolveDBSU string
+	patroniGetClusterName = func(dbsu string) (string, error) {
+		gotResolveDBSU = dbsu
+		return "pg-nms", nil
+	}
+
+	tests := []struct {
+		name string
+		run  func() error
+		want []string
+	}{
+		{
+			name: "restart",
+			run:  func() error { return Restart("postgres", &RestartOptions{Member: "pg-nms-1", Force: true}) },
+			want: []string{"restart", "pg-nms", "pg-nms-1", "--force"},
+		},
+		{
+			name: "reinit",
+			run:  func() error { return Reinit("postgres", &ReinitOptions{Member: "pg-nms-2", Force: true}) },
+			want: []string{"reinit", "pg-nms", "pg-nms-2", "--force"},
+		},
+		{
+			name: "switchover",
+			run:  func() error { return Switchover("postgres", &SwitchoverOptions{Candidate: "pg-nms-2", Force: true}) },
+			want: []string{"switchover", "pg-nms", "--candidate", "pg-nms-2", "--force"},
+		},
+		{
+			name: "failover",
+			run:  func() error { return Failover("postgres", &FailoverOptions{Candidate: "pg-nms-2", Force: true}) },
+			want: []string{"failover", "pg-nms", "--candidate", "pg-nms-2", "--force"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			var gotRunDBSU string
+			gotResolveDBSU = ""
+			patroniRunPatronictl = func(dbsu string, args []string) error {
+				gotRunDBSU = dbsu
+				got = append([]string(nil), args...)
+				return nil
+			}
+			if err := tt.run(); err != nil {
+				t.Fatalf("%s returned error: %v", tt.name, err)
+			}
+			if gotResolveDBSU != "postgres" {
+				t.Fatalf("%s resolved cluster with dbsu=%q, want postgres", tt.name, gotResolveDBSU)
+			}
+			if gotRunDBSU != "postgres" {
+				t.Fatalf("%s ran patronictl with dbsu=%q, want postgres", tt.name, gotRunDBSU)
+			}
+			if !argsHasInOrder(got, tt.want...) {
+				t.Fatalf("%s args = %v, want subsequence %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestListWrapperUsesOptionalCluster(t *testing.T) {
+	patroniTestDepsMu.Lock()
+	oldRunPatronictl := patroniRunPatronictl
+	t.Cleanup(func() {
+		patroniRunPatronictl = oldRunPatronictl
+		patroniTestDepsMu.Unlock()
+	})
+
+	var captured []string
+	patroniRunPatronictl = func(dbsu string, args []string) error {
+		captured = append([]string(nil), args...)
+		return nil
+	}
+
+	if err := List("postgres", "pg-meta", true, 3); err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if !argsHasInOrder(captured, "list", "pg-meta", "-e", "-t", "-W", "-w", "3") {
+		t.Fatalf("captured args = %v, want list pg-meta -e -t -W -w 3", captured)
+	}
+}
+
+func TestGetClusterNameUsesDBSUFallbackHook(t *testing.T) {
+	patroniTestDepsMu.Lock()
+	oldReadFile := patroniReadFile
+	oldDBSUCommandOutput := patroniDBSUCommandOutput
+	t.Cleanup(func() {
+		patroniReadFile = oldReadFile
+		patroniDBSUCommandOutput = oldDBSUCommandOutput
+		patroniTestDepsMu.Unlock()
+	})
+
+	var gotDBSU string
+	var gotArgs []string
+	patroniReadFile = func(name string) ([]byte, error) {
+		return nil, errors.New("permission denied")
+	}
+	patroniDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+		gotDBSU = dbsu
+		gotArgs = append([]string(nil), args...)
+		return "scope: pg-fallback\n", nil
+	}
+
+	cluster, err := GetClusterName("dba")
+	if err != nil {
+		t.Fatalf("GetClusterName returned error: %v", err)
+	}
+	if cluster != "pg-fallback" {
+		t.Fatalf("cluster = %q, want pg-fallback", cluster)
+	}
+	if gotDBSU != "dba" {
+		t.Fatalf("DBSU fallback dbsu = %q, want dba", gotDBSU)
+	}
+	if !argsHasInOrder(gotArgs, "cat", DefaultConfigPath) {
+		t.Fatalf("DBSU fallback args = %v, want cat %s", gotArgs, DefaultConfigPath)
 	}
 }
 

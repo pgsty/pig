@@ -140,45 +140,75 @@ func TestPtSwitchoverResultData_Text_MinimalFields(t *testing.T) {
 // SwitchoverResult Precondition Tests
 // ============================================================================
 
-func TestSwitchoverResult_NilOpts(t *testing.T) {
-	// SwitchoverResult with nil opts should return NeedForce error
-	// (since Force is false when opts is nil)
-	// Note: This test may return CodePtNotFound if patronictl is not installed,
-	// which is also acceptable behavior.
-	result := SwitchoverResult("postgres", nil)
-	if result == nil {
-		t.Fatal("SwitchoverResult should never return nil")
+func TestSwitchoverResultUsesResolvedClusterName(t *testing.T) {
+	var captured []string
+	stubPatroniResultDeps(t, "pg-nms", nil, &captured)
+
+	result := SwitchoverResult("postgres", &SwitchoverOptions{
+		Force:     true,
+		Candidate: "pg-nms-2",
+	})
+	if !result.Success {
+		t.Fatalf("SwitchoverResult should succeed with stubbed deps, got code=%d detail=%q", result.Code, result.Detail)
 	}
-	if result.Success {
-		t.Error("SwitchoverResult with nil opts should not succeed")
+	assertArgPrefix(t, captured, []string{"/usr/bin/patronictl", "-c", DefaultConfigPath, "switchover", "pg-nms", "--force"})
+	assertContains(t, captured, "--candidate")
+	assertContains(t, captured, "pg-nms-2")
+}
+
+func TestSwitchoverResultRequiresForce(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *SwitchoverOptions
+	}{
+		{name: "nil opts", opts: nil},
+		{name: "force false", opts: &SwitchoverOptions{Force: false}},
 	}
-	// Accept either CodePtNotFound (patronictl missing) or CodePtSwitchoverNeedForce
-	if result.Code != output.CodePtNotFound &&
-		result.Code != output.CodePtConfigNotFound &&
-		result.Code != output.CodePtSwitchoverNeedForce {
-		t.Errorf("Expected CodePtNotFound, CodePtConfigNotFound, or CodePtSwitchoverNeedForce, got %d", result.Code)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var captured []string
+			stubPatroniResultDeps(t, "pg-nms", nil, &captured)
+
+			result := SwitchoverResult("postgres", tt.opts)
+			if result.Code != output.CodePtSwitchoverNeedForce {
+				t.Fatalf("code = %d, want %d", result.Code, output.CodePtSwitchoverNeedForce)
+			}
+			if captured != nil {
+				t.Fatalf("patronictl should not execute without --force, captured=%v", captured)
+			}
+		})
 	}
 }
 
-func TestSwitchoverResult_ForceNotSet(t *testing.T) {
-	// With Force=false, should return CodePtSwitchoverNeedForce
-	// (unless patronictl or config is missing, which takes priority)
-	opts := &SwitchoverOptions{Force: false}
-	result := SwitchoverResult("postgres", opts)
-	if result == nil {
-		t.Fatal("SwitchoverResult should never return nil")
+func TestSwitchoverResultRejectsInvalidResolvedClusterName(t *testing.T) {
+	tests := []struct {
+		name    string
+		cluster string
+		code    int
+	}{
+		{name: "empty", cluster: "", code: output.CodePtScopeMissing},
+		{name: "whitespace", cluster: "   ", code: output.CodePtScopeMissing},
+		{name: "flag-like", cluster: "--force", code: output.CodePtConfigResolveFailed},
+		{name: "internal whitespace", cluster: "pg test", code: output.CodePtConfigResolveFailed},
 	}
-	if result.Success {
-		t.Error("SwitchoverResult without --force should not succeed")
-	}
-	// Accept precondition errors (patronictl/config missing) or NeedForce
-	validCodes := map[int]bool{
-		output.CodePtNotFound:            true,
-		output.CodePtConfigNotFound:      true,
-		output.CodePtSwitchoverNeedForce: true,
-	}
-	if !validCodes[result.Code] {
-		t.Errorf("Expected a precondition or NeedForce error, got code %d", result.Code)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var captured []string
+			stubPatroniResultDeps(t, tt.cluster, nil, &captured)
+
+			result := SwitchoverResult("postgres", &SwitchoverOptions{Force: true})
+			if result.Success {
+				t.Fatal("SwitchoverResult should fail for invalid resolved cluster")
+			}
+			if result.Code != tt.code {
+				t.Fatalf("code = %d, want %d", result.Code, tt.code)
+			}
+			if captured != nil {
+				t.Fatalf("patronictl should not execute for invalid cluster, captured=%v", captured)
+			}
+		})
 	}
 }
 
@@ -188,7 +218,8 @@ func TestSwitchoverResult_ForceNotSet(t *testing.T) {
 
 func TestBuildSwitchoverResultArgs_BasicForce(t *testing.T) {
 	opts := &SwitchoverOptions{Force: true}
-	args := buildSwitchoverResultArgs("/usr/bin/patronictl", opts)
+	args := buildSwitchoverResultArgs("/usr/bin/patronictl", "pg-nms", opts)
+	assertArgPrefix(t, args, []string{"/usr/bin/patronictl", "-c", DefaultConfigPath, "switchover", "pg-nms", "--force"})
 	assertContains(t, args, "--force")
 }
 
@@ -197,7 +228,7 @@ func TestBuildSwitchoverResultArgs_WithLeader(t *testing.T) {
 		Force:  true,
 		Leader: "pg-test-1",
 	}
-	args := buildSwitchoverResultArgs("/usr/bin/patronictl", opts)
+	args := buildSwitchoverResultArgs("/usr/bin/patronictl", "pg-nms", opts)
 	assertContains(t, args, "--leader")
 	assertContains(t, args, "pg-test-1")
 }
@@ -207,7 +238,7 @@ func TestBuildSwitchoverResultArgs_WithCandidate(t *testing.T) {
 		Force:     true,
 		Candidate: "pg-test-2",
 	}
-	args := buildSwitchoverResultArgs("/usr/bin/patronictl", opts)
+	args := buildSwitchoverResultArgs("/usr/bin/patronictl", "pg-nms", opts)
 	assertContains(t, args, "--candidate")
 	assertContains(t, args, "pg-test-2")
 }
@@ -217,7 +248,7 @@ func TestBuildSwitchoverResultArgs_WithScheduled(t *testing.T) {
 		Force:     true,
 		Scheduled: "2024-06-01T12:00:00",
 	}
-	args := buildSwitchoverResultArgs("/usr/bin/patronictl", opts)
+	args := buildSwitchoverResultArgs("/usr/bin/patronictl", "pg-nms", opts)
 	assertContains(t, args, "--scheduled")
 	assertContains(t, args, "2024-06-01T12:00:00")
 }
@@ -229,7 +260,7 @@ func TestBuildSwitchoverResultArgs_AllOptions(t *testing.T) {
 		Force:     true,
 		Scheduled: "2024-06-01T12:00:00",
 	}
-	args := buildSwitchoverResultArgs("/usr/bin/patronictl", opts)
+	args := buildSwitchoverResultArgs("/usr/bin/patronictl", "pg-nms", opts)
 	assertContains(t, args, "--force")
 	assertContains(t, args, "--leader")
 	assertContains(t, args, "pg-test-1")
@@ -345,4 +376,16 @@ func assertContains(t *testing.T, args []string, expected string) {
 		}
 	}
 	t.Errorf("args %v does not contain %q", args, expected)
+}
+
+func assertArgPrefix(t *testing.T, args []string, expected []string) {
+	t.Helper()
+	if len(args) < len(expected) {
+		t.Fatalf("args %v shorter than expected prefix %v", args, expected)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Fatalf("args[%d] = %q, want %q; args=%v", i, args[i], want, args)
+		}
+	}
 }

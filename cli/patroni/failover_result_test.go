@@ -151,41 +151,44 @@ func TestPtFailoverResultData_Text_MinimalFields(t *testing.T) {
 // FailoverResult Precondition Tests
 // ============================================================================
 
-func TestFailoverResult_NilOpts(t *testing.T) {
-	result := FailoverResult("postgres", nil)
-	if result == nil {
-		t.Fatal("FailoverResult should never return nil")
+func TestFailoverResultUsesResolvedClusterName(t *testing.T) {
+	var captured []string
+	stubPatroniResultDeps(t, "pg-nms", nil, &captured)
+
+	result := FailoverResult("postgres", &FailoverOptions{
+		Force:     true,
+		Candidate: "pg-nms-2",
+	})
+	if !result.Success {
+		t.Fatalf("FailoverResult should succeed with stubbed deps, got code=%d detail=%q", result.Code, result.Detail)
 	}
-	if result.Success {
-		t.Error("FailoverResult with nil opts should not succeed")
-	}
-	// Accept either CodePtNotFound (patronictl missing), CodePtConfigNotFound, or CodePtFailoverNeedForce
-	validCodes := map[int]bool{
-		output.CodePtNotFound:           true,
-		output.CodePtConfigNotFound:     true,
-		output.CodePtFailoverNeedForce:  true,
-	}
-	if !validCodes[result.Code] {
-		t.Errorf("Expected a precondition or NeedForce error, got code %d", result.Code)
-	}
+	assertArgPrefixStr(t, captured, []string{"/usr/bin/patronictl", "-c", DefaultConfigPath, "failover", "pg-nms", "--force"})
+	assertContainsStr(t, captured, "--candidate")
+	assertContainsStr(t, captured, "pg-nms-2")
 }
 
-func TestFailoverResult_ForceNotSet(t *testing.T) {
-	opts := &FailoverOptions{Force: false}
-	result := FailoverResult("postgres", opts)
-	if result == nil {
-		t.Fatal("FailoverResult should never return nil")
+func TestFailoverResultRequiresForce(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *FailoverOptions
+	}{
+		{name: "nil opts", opts: nil},
+		{name: "force false", opts: &FailoverOptions{Force: false}},
 	}
-	if result.Success {
-		t.Error("FailoverResult without --force should not succeed")
-	}
-	validCodes := map[int]bool{
-		output.CodePtNotFound:          true,
-		output.CodePtConfigNotFound:    true,
-		output.CodePtFailoverNeedForce: true,
-	}
-	if !validCodes[result.Code] {
-		t.Errorf("Expected a precondition or NeedForce error, got code %d", result.Code)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var captured []string
+			stubPatroniResultDeps(t, "pg-nms", nil, &captured)
+
+			result := FailoverResult("postgres", tt.opts)
+			if result.Code != output.CodePtFailoverNeedForce {
+				t.Fatalf("code = %d, want %d", result.Code, output.CodePtFailoverNeedForce)
+			}
+			if captured != nil {
+				t.Fatalf("patronictl should not execute without --force, captured=%v", captured)
+			}
+		})
 	}
 }
 
@@ -195,7 +198,8 @@ func TestFailoverResult_ForceNotSet(t *testing.T) {
 
 func TestBuildFailoverResultArgs_BasicForce(t *testing.T) {
 	opts := &FailoverOptions{Force: true}
-	args := buildFailoverResultArgs("/usr/bin/patronictl", opts)
+	args := buildFailoverResultArgs("/usr/bin/patronictl", "pg-nms", opts)
+	assertArgPrefixStr(t, args, []string{"/usr/bin/patronictl", "-c", DefaultConfigPath, "failover", "pg-nms", "--force"})
 	assertContainsStr(t, args, "--force")
 	assertContainsStr(t, args, "failover")
 	assertContainsStr(t, args, "-c")
@@ -207,13 +211,13 @@ func TestBuildFailoverResultArgs_WithCandidate(t *testing.T) {
 		Force:     true,
 		Candidate: "pg-test-2",
 	}
-	args := buildFailoverResultArgs("/usr/bin/patronictl", opts)
+	args := buildFailoverResultArgs("/usr/bin/patronictl", "pg-nms", opts)
 	assertContainsStr(t, args, "--candidate")
 	assertContainsStr(t, args, "pg-test-2")
 }
 
 func TestBuildFailoverResultArgs_NilOpts(t *testing.T) {
-	args := buildFailoverResultArgs("/usr/bin/patronictl", nil)
+	args := buildFailoverResultArgs("/usr/bin/patronictl", "pg-nms", nil)
 	assertContainsStr(t, args, "--force")
 	assertContainsStr(t, args, "failover")
 	// Should not contain candidate
@@ -226,7 +230,7 @@ func TestBuildFailoverResultArgs_NilOpts(t *testing.T) {
 
 func TestBuildFailoverResultArgs_NoCandidate(t *testing.T) {
 	opts := &FailoverOptions{Force: true}
-	args := buildFailoverResultArgs("/usr/bin/patronictl", opts)
+	args := buildFailoverResultArgs("/usr/bin/patronictl", "pg-nms", opts)
 	for _, a := range args {
 		if a == "--candidate" {
 			t.Error("empty candidate should not include --candidate")
@@ -504,4 +508,16 @@ func assertContainsStr(t *testing.T, args []string, expected string) {
 		}
 	}
 	t.Errorf("args %v does not contain %q", args, expected)
+}
+
+func assertArgPrefixStr(t *testing.T, args []string, expected []string) {
+	t.Helper()
+	if len(args) < len(expected) {
+		t.Fatalf("args %v shorter than expected prefix %v", args, expected)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Fatalf("args[%d] = %q, want %q; args=%v", i, args[i], want, args)
+		}
+	}
 }

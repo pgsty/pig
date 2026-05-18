@@ -8,11 +8,9 @@ package patroni
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"pig/internal/output"
-	"pig/internal/utils"
 )
 
 // PtFailoverResultData contains failover execution result in an agent-friendly format.
@@ -46,13 +44,13 @@ func (d *PtFailoverResultData) Text() string {
 // interactive confirmation prompts.
 func FailoverResult(dbsu string, opts *FailoverOptions) *output.Result {
 	// 1. Check patronictl existence
-	binPath, err := exec.LookPath("patronictl")
+	binPath, err := patroniLookPath("patronictl")
 	if err != nil {
 		return output.Fail(output.CodePtNotFound, "patronictl not found in PATH")
 	}
 
 	// 2. Check config file existence
-	if _, err := os.Stat(DefaultConfigPath); os.IsNotExist(err) {
+	if _, err := patroniStat(DefaultConfigPath); os.IsNotExist(err) {
 		return output.Fail(output.CodePtConfigNotFound,
 			fmt.Sprintf("Patroni config not found: %s", DefaultConfigPath))
 	}
@@ -63,11 +61,18 @@ func FailoverResult(dbsu string, opts *FailoverOptions) *output.Result {
 			"failover requires --force (-f) flag in structured output mode")
 	}
 
-	// 4. Build command arguments
-	args := buildFailoverResultArgs(binPath, opts)
+	// 4. Resolve cluster name and build command arguments
+	cluster, err := patroniGetClusterName(dbsu)
+	if err != nil {
+		return clusterNameErrorResult(err)
+	}
+	if err := validateResolvedClusterName(cluster); err != nil {
+		return clusterNameErrorResult(err)
+	}
+	args := buildFailoverResultArgs(binPath, cluster, opts)
 
 	// 5. Execute and capture output
-	cmdOutput, err := utils.DBSUCommandOutput(dbsu, args)
+	cmdOutput, err := patroniDBSUCommandOutput(dbsu, args)
 
 	data := &PtFailoverResultData{
 		Command:   strings.Join(args, " "),
@@ -91,8 +96,8 @@ func FailoverResult(dbsu string, opts *FailoverOptions) *output.Result {
 
 // buildFailoverResultArgs builds the patronictl failover command arguments
 // for structured output mode (always includes --force).
-func buildFailoverResultArgs(binPath string, opts *FailoverOptions) []string {
-	args := []string{binPath, "-c", DefaultConfigPath, "failover", "--force"}
+func buildFailoverResultArgs(binPath string, cluster string, opts *FailoverOptions) []string {
+	args := []string{binPath, "-c", DefaultConfigPath, "failover", cluster, "--force"}
 	if opts == nil {
 		return args
 	}

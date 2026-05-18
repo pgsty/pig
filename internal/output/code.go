@@ -109,9 +109,9 @@ const (
 	CodePgReplicationNotConfigured = MODULE_PG + CAT_CONFIG + 1 // Replication not configured (cannot determine role)
 
 	// Tune command codes (13_01_1x - Param, 13_05_1x - Resource, 13_08_1x - Operation)
-	CodePgTuneInvalidProfile = MODULE_PG + CAT_PARAM + 10     // Invalid tune profile
-	CodePgTuneInvalidRatio   = MODULE_PG + CAT_PARAM + 11     // Invalid shmem-ratio value
-	CodePgTuneDetectFailed   = MODULE_PG + CAT_RESOURCE + 10  // Hardware detection failed
+	CodePgTuneInvalidProfile = MODULE_PG + CAT_PARAM + 10    // Invalid tune profile
+	CodePgTuneInvalidRatio   = MODULE_PG + CAT_PARAM + 11    // Invalid shmem-ratio value
+	CodePgTuneDetectFailed   = MODULE_PG + CAT_RESOURCE + 10 // Hardware detection failed
 )
 
 // pgBackRest module specific codes (MODULE_PB = 140000)
@@ -162,7 +162,10 @@ const (
 	CodePtNotRunning = MODULE_PT + CAT_STATE + 1 // Patroni is not running
 
 	// Configuration errors (15_07_xx - Config category)
-	CodePtConfigNotFound = MODULE_PT + CAT_CONFIG + 1 // Patroni config file not found
+	CodePtConfigNotFound      = MODULE_PT + CAT_CONFIG + 1 // Patroni config file not found
+	CodePtScopeMissing        = MODULE_PT + CAT_CONFIG + 2 // Patroni cluster scope missing from config
+	CodePtConfigResolveFailed = MODULE_PT + CAT_CONFIG + 3 // Patroni cluster scope resolution failed
+	CodePtConfigReadFailed    = MODULE_PT + CAT_CONFIG + 4 // Patroni config read failed
 
 	// Parameter errors (15_01_xx - Param category)
 	CodePtSwitchoverNeedForce = MODULE_PT + CAT_PARAM + 1 // switchover requires --force in structured output mode
@@ -176,8 +179,9 @@ const (
 	CodePtFailoverFailed   = MODULE_PT + CAT_OPERATION + 6 // patronictl failover execution failed
 
 	// Parameter errors (15_01_xx - Param category)
-	CodePtFailoverNeedForce   = MODULE_PT + CAT_PARAM + 2 // failover requires --force in structured output mode
-	CodePtInvalidConfigAction = MODULE_PT + CAT_PARAM + 3 // invalid pt config action
+	CodePtFailoverNeedForce    = MODULE_PT + CAT_PARAM + 2 // failover requires --force in structured output mode
+	CodePtInvalidConfigAction  = MODULE_PT + CAT_PARAM + 3 // invalid pt config action
+	CodePtWatchModeUnsupported = MODULE_PT + CAT_PARAM + 4 // watch mode is unsupported in structured output
 )
 
 // PITR module specific codes (MODULE_PITR = 160000)

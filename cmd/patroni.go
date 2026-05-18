@@ -22,7 +22,7 @@ var patroniCmd = &cobra.Command{
 	Long: `Manage Patroni cluster using patronictl commands.
 
 Cluster Operations (via patronictl):
-  pig pt list                      list cluster members
+  pig pt list [cluster]            list cluster members
   pig pt restart [member]          restart PostgreSQL (rolling restart)
   pig pt reload                    reload PostgreSQL config
   pig pt reinit <member>           reinitialize a member

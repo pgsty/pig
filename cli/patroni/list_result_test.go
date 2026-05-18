@@ -7,6 +7,8 @@ package patroni
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -319,36 +321,153 @@ func TestParsePatroniListJSON_RoleLowerCase(t *testing.T) {
 	}
 }
 
-func TestGetClusterName(t *testing.T) {
-	// Test with valid YAML config content
-	yamlContent := `scope: pg-test
-namespace: /service/
+func TestListResultUsesOptionalCluster(t *testing.T) {
+	patroniTestDepsMu.Lock()
+	oldLookPath := patroniLookPath
+	oldStat := patroniStat
+	oldDBSUCommandOutput := patroniDBSUCommandOutput
+	t.Cleanup(func() {
+		patroniLookPath = oldLookPath
+		patroniStat = oldStat
+		patroniDBSUCommandOutput = oldDBSUCommandOutput
+		patroniTestDepsMu.Unlock()
+	})
+
+	var captured []string
+	patroniLookPath = func(file string) (string, error) {
+		return "/usr/bin/patronictl", nil
+	}
+	patroniStat = func(name string) (os.FileInfo, error) {
+		return os.Stat(".")
+	}
+	patroniDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+		captured = append([]string(nil), args...)
+		return `[{"Member":"pg-meta-1","Host":"10.0.0.1","Role":"Leader","State":"running","TL":1,"Lag in MB":null}]`, nil
+	}
+
+	result := ListResult("postgres", "pg-meta")
+	if !result.Success {
+		t.Fatalf("ListResult should succeed with stubbed deps, got code=%d detail=%q", result.Code, result.Detail)
+	}
+	if !argsHasInOrder(captured, "/usr/bin/patronictl", "-c", DefaultConfigPath, "list", "pg-meta", "-f", "json") {
+		t.Fatalf("captured args = %v, want list pg-meta -f json", captured)
+	}
+	if argsHas(captured, "-t") {
+		t.Fatalf("structured list should not include -t, captured=%v", captured)
+	}
+	data, ok := result.Data.(*PtListResultData)
+	if !ok {
+		t.Fatalf("data type = %T, want *PtListResultData", result.Data)
+	}
+	if data.Cluster != "pg-meta" {
+		t.Fatalf("data.Cluster = %q, want pg-meta", data.Cluster)
+	}
+}
+
+func TestParseClusterNameFromConfig(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     string
+		wantCluster string
+		wantErr     error
+	}{
+		{
+			name: "top-level scope with inline comment",
+			content: `scope: pg-test # cluster scope
+bootstrap: [broken
+`,
+			wantCluster: "pg-test",
+		},
+		{
+			name: "quoted scope with inline comment",
+			content: `scope: "pg-test" # cluster scope
 name: pg-test-1
-`
-	name := parseClusterNameFromYAML(yamlContent)
-	if name != "pg-test" {
-		t.Errorf("expected 'pg-test', got '%s'", name)
+`,
+			wantCluster: "pg-test",
+		},
+		{
+			name: "quoted hash is rejected instead of truncated",
+			content: `scope: "pg-test#shard1"
+name: pg-test-1
+`,
+			wantErr: errClusterScopeInvalid,
+		},
+		{
+			name: "unquoted hash is rejected",
+			content: `scope: pg-test#shard1
+name: pg-test-1
+`,
+			wantErr: errClusterScopeInvalid,
+		},
+		{
+			name: "nested scope is ignored",
+			content: `bootstrap: [broken
+  scope: nested
+`,
+			wantErr: errClusterScopeMissing,
+		},
+		{
+			name: "valid yaml with nested scope reports top-level missing",
+			content: `bootstrap:
+  dcs:
+    scope: nested
+`,
+			wantErr: errClusterScopeMissing,
+		},
+		{
+			name: "explicit empty scope",
+			content: `scope: ""
+name: pg-test-1
+`,
+			wantErr: errClusterScopeEmpty,
+		},
+		{
+			name: "valid yaml rejects flag-like scope",
+			content: `scope: --force
+name: pg-test-1
+`,
+			wantErr: errClusterScopeInvalid,
+		},
+		{
+			name: "block scalar scope is rejected",
+			content: `scope: |
+  pg-test
+`,
+			wantErr: errClusterScopeInvalid,
+		},
+		{
+			name: "anchor scope is rejected",
+			content: `scope: &anchor pg-test
+`,
+			wantErr: errClusterScopeInvalid,
+		},
+		{
+			name: "internal whitespace is rejected",
+			content: `scope: pg test
+`,
+			wantErr: errClusterScopeInvalid,
+		},
 	}
 
-	// Test with empty content
-	name = parseClusterNameFromYAML("")
-	if name != "" {
-		t.Errorf("expected empty string, got '%s'", name)
-	}
-
-	// Test with YAML without scope field
-	yamlContent2 := `name: pg-test-1
-namespace: /service/
-`
-	name = parseClusterNameFromYAML(yamlContent2)
-	if name != "" {
-		t.Errorf("expected empty string, got '%s'", name)
-	}
-
-	// Test with invalid YAML
-	name = parseClusterNameFromYAML(":\n  :\n  invalid: [yaml")
-	if name != "" {
-		t.Errorf("expected empty string for invalid YAML, got '%s'", name)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cluster, err := parseClusterNameFromConfig(tt.content)
+			if tt.wantErr != nil {
+				if err == nil || !errors.Is(err, tt.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tt.wantErr)
+				}
+				if cluster != "" {
+					t.Fatalf("cluster = %q, want empty on error", cluster)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cluster != tt.wantCluster {
+				t.Fatalf("cluster = %q, want %q", cluster, tt.wantCluster)
+			}
+		})
 	}
 }
 

@@ -13,47 +13,49 @@ import (
 // Cluster Operations (via patronictl)
 // ============================================================================
 
-// patroniListCmd: pig pt list [-W] [-w interval]
+// patroniListCmd: pig pt list [cluster] [-W] [-w interval]
 var patroniListCmd = &cobra.Command{
-	Use:     "list",
+	Use:     "list [cluster]",
 	Aliases: []string{"ls", "l"},
 	Short:   "List cluster members",
-	Long:    `List Patroni cluster members using patronictl list with -e -t flags.`,
+	Args:    cobra.MaximumNArgs(1),
+	Long:    `List Patroni cluster members using patronictl list. Text mode uses -e -t flags; structured output uses -f json.`,
 	Example: `
   pig pt list              # List cluster members
+  pig pt list pg-meta      # List specific cluster
   pig pt list -o json      # Structured JSON output
   pig pt list -W           # Watch mode
   pig pt list -w 5         # Watch with 5s interval
-  pig pt list -w 0.5       # Watch with 0.5s interval`,
+  pig pt list pg-test -W -w 3  # Watch pg-test cluster, 3s refresh`,
 	Annotations: ancsAnn("pig patroni list", "query", "stable", "safe", true, "safe", "none", "dbsu", 2000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		watch, _ := cmd.Flags().GetBool("watch")
 		interval, _ := cmd.Flags().GetFloat64("interval")
 		dbsu := utils.GetDBSU(patroniDBSU)
+		cluster := ""
+		if len(args) > 0 {
+			cluster = args[0]
+		}
 
 		// Watch mode always uses passthrough (incompatible with structured output)
 		if watch || interval > 0 {
 			if config.IsStructuredOutput() {
-				return structuredParamError(
-					output.MODULE_PT,
-					"pig patroni list",
-					"watch mode is not supported in structured output",
-					"remove --watch/-W or --interval/-w when using -o json/-o yaml",
-					args,
-					map[string]interface{}{"watch": watch, "interval": interval},
+				return handleAuxResult(
+					output.Fail(output.CodePtWatchModeUnsupported, "watch mode is not supported in structured output").
+						WithDetail("remove --watch/-W or --interval/-w when using -o json/-o yaml"),
 				)
 			}
-			return patroni.List(dbsu, watch, interval)
+			return patroni.List(dbsu, cluster, watch, interval)
 		}
 
 		// Structured output
 		if config.IsStructuredOutput() {
-			result := patroni.ListResult(dbsu)
+			result := patroni.ListResult(dbsu, cluster)
 			return handleAuxResult(result)
 		}
 
 		// Default passthrough
-		return patroni.List(dbsu, false, 0)
+		return patroni.List(dbsu, cluster, false, 0)
 	},
 }
 
@@ -62,6 +64,7 @@ var patroniRestartCmd = &cobra.Command{
 	Use:     "restart [member]",
 	Aliases: []string{"reboot", "rt"},
 	Short:   "Restart PostgreSQL instance(s) via Patroni",
+	Args:    cobra.MaximumNArgs(1),
 	Annotations: mergeAnn(
 		ancsAnn("pig patroni restart", "action", "volatile", "unsafe", false, "high", "recommended", "dbsu", 30000),
 		map[string]string{
@@ -111,6 +114,7 @@ var patroniReloadCmd = &cobra.Command{
 	Use:         "reload",
 	Aliases:     []string{"rl", "hup"},
 	Short:       "Reload PostgreSQL configuration via Patroni",
+	Args:        cobra.NoArgs,
 	Annotations: ancsAnn("pig patroni reload", "action", "volatile", "restricted", true, "low", "none", "dbsu", 5000),
 	Long: `Reload PostgreSQL configuration for all cluster members.
 
@@ -162,6 +166,7 @@ var patroniSwitchoverCmd = &cobra.Command{
 	Use:     "switchover",
 	Aliases: []string{"sw"},
 	Short:   "Perform planned switchover",
+	Args:    cobra.NoArgs,
 	Long: `Perform a planned switchover to transfer leadership to another member.
 
 A switchover is a planned operation that gracefully transfers leadership
@@ -208,6 +213,7 @@ var patroniFailoverCmd = &cobra.Command{
 	Use:     "failover",
 	Aliases: []string{"fo"},
 	Short:   "Perform manual failover",
+	Args:    cobra.NoArgs,
 	Long: `Perform a manual failover when the leader is unavailable.
 
 Unlike switchover, failover is used when the current leader is unhealthy
@@ -254,6 +260,7 @@ var patroniPauseCmd = &cobra.Command{
 	Use:         "pause",
 	Aliases:     []string{"p"},
 	Short:       "Pause automatic failover",
+	Args:        cobra.NoArgs,
 	Annotations: ancsAnn("pig patroni pause", "action", "volatile", "restricted", true, "medium", "recommended", "dbsu", 5000),
 	Long:        `Pause automatic failover for the Patroni cluster.`,
 	Example: `
@@ -274,6 +281,7 @@ var patroniResumeCmd = &cobra.Command{
 	Use:         "resume",
 	Aliases:     []string{"r"},
 	Short:       "Resume automatic failover",
+	Args:        cobra.NoArgs,
 	Annotations: ancsAnn("pig patroni resume", "action", "volatile", "restricted", true, "low", "none", "dbsu", 5000),
 	Long:        `Resume automatic failover for the Patroni cluster.`,
 	Example: `
