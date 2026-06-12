@@ -285,7 +285,7 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 		for k, v := range pkgMapTmpl {
 			pkgMap[k] = v
 		}
-		for _, ver := range PostgresActiveMajorVersions {
+		for _, ver := range PostgresInstallableMajorVersions {
 			for k, v := range pkgMapTmpl {
 				key := strings.Replace(k, "pgsql", fmt.Sprintf("pg%d", ver), 1)
 				value := strings.Replace(v, "$v", fmt.Sprintf("%d", ver), -1)
@@ -355,7 +355,7 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 		for k, v := range pkgMapTmpl {
 			pkgMap[k] = v
 		}
-		for _, ver := range PostgresActiveMajorVersions {
+		for _, ver := range PostgresInstallableMajorVersions {
 			for k, v := range pkgMapTmpl {
 				key := strings.Replace(k, "pgsql", fmt.Sprintf("pg%d", ver), 1)
 				value := strings.Replace(v, "$v", fmt.Sprintf("%d", ver), -1)

@@ -80,6 +80,28 @@ func TestResolveExtensionPackagesWithVersionSpec(t *testing.T) {
 	}
 }
 
+func TestResolveExtensionPackagesPG19DirectExtension(t *testing.T) {
+	ext := &Extension{
+		Name:   "test_ext",
+		Pkg:    "test_pkg",
+		Lead:   true,
+		RpmPkg: "test_ext_$v",
+	}
+	cleanup := withResolveTestEnv(t, config.DistroEL, "9", newTestCatalog(ext))
+	defer cleanup()
+
+	res := ResolveExtensionPackages(19, []string{"test_ext"}, false)
+	if len(res.NotFound) != 0 || len(res.NoPackage) != 0 {
+		t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
+	}
+	if len(res.Packages) != 1 {
+		t.Fatalf("expected 1 package, got %d (%v)", len(res.Packages), res.Packages)
+	}
+	if res.Packages[0] != "test_ext_19" {
+		t.Fatalf("unexpected package: %s", res.Packages[0])
+	}
+}
+
 func TestResolveExtensionPackagesAlias(t *testing.T) {
 	ext := &Extension{
 		Name:   "dummy",

@@ -217,6 +217,18 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 	}
 	warnings = append(warnings, preflightWarnings...)
 
+	// Beta majors get a heads-up: the generic templates are not tuned for them.
+	if pgVer > ext.PostgresLatestMajorVersion() {
+		betaMode := fmt.Sprintf("pg%d", pgVer)
+		if mode != betaMode {
+			warn := fmt.Sprintf("PG%d is a beta major, template conf/%s.yml is not tuned for it", pgVer, mode)
+			if _, statErr := os.Stat(filepath.Join(home, "conf", betaMode+".yml")); statErr == nil {
+				warn = fmt.Sprintf("PG%d is a beta major, consider the dedicated template: pig sty conf -c %s", pgVer, betaMode)
+			}
+			warnings = append(warnings, warn)
+		}
+	}
+
 	outputPath := resolveOutputPath(home, opts.OutputFile)
 	templateBytes, err := os.ReadFile(templatePath)
 	if err != nil {
@@ -234,7 +246,7 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 	localeAvailable := detectLocaleAvailable(opts.LocaleAvailable)
 	proxy := buildProxyEnv(opts.UseProxy)
 
-	mutated, generated, err := mutateTemplate(string(templateBytes), mutationOptions{
+	mutated, generated, mutateWarnings, err := mutateTemplate(string(templateBytes), mutationOptions{
 		Mode:             mode,
 		PrimaryIP:        primaryIP,
 		Region:           region,
@@ -247,6 +259,7 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 	if err != nil {
 		return output.Fail(output.CodeStyConfigureFailed, err.Error())
 	}
+	warnings = append(warnings, mutateWarnings...)
 
 	var yamlCheck interface{}
 	if err := yaml.Unmarshal([]byte(mutated), &yamlCheck); err != nil {
@@ -329,8 +342,8 @@ func validatePGVersion(ver string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid pg major version: %s", ver)
 	}
-	if !ext.IsActivePGMajor(v) {
-		return 0, fmt.Errorf("invalid pg major version: %s (valid: %s)", ver, ext.PostgresActiveVersionString())
+	if !ext.IsInstallablePGMajor(v) {
+		return 0, fmt.Errorf("invalid pg major version: %s (valid: %s)", ver, ext.PostgresInstallableVersionString())
 	}
 	return v, nil
 }
@@ -793,7 +806,8 @@ type mutationOptions struct {
 	GeneratePassword bool
 }
 
-func mutateTemplate(content string, opts mutationOptions) (string, []string, error) {
+func mutateTemplate(content string, opts mutationOptions) (string, []string, []string, error) {
+	var warnings []string
 	if !strings.HasPrefix(opts.Mode, "build/") {
 		content = strings.ReplaceAll(content, defaultPrimaryIP, opts.PrimaryIP)
 	}
@@ -819,16 +833,24 @@ func mutateTemplate(content string, opts mutationOptions) (string, []string, err
 	if opts.PGVersion > 0 && opts.Mode != "mssql" && opts.Mode != "polar" {
 		content = upsertPGVersion(content, opts.PGVersion)
 		content = strings.ReplaceAll(content, "pg18-", fmt.Sprintf("pg%d-", opts.PGVersion))
+
+		// Beta majors beyond the stable window ship from the PGDG testing repos,
+		// which require the 'beta' repo module on top of the standard modules.
+		if opts.PGVersion > ext.PostgresLatestMajorVersion() {
+			var enabled bool
+			content, enabled = enableBetaRepoModule(content)
+			if !enabled {
+				warnings = append(warnings, fmt.Sprintf(
+					"beta repo module not enabled: no repo module list with 'pgsql' in template, add 'beta' to repo modules manually for PG%d packages", opts.PGVersion))
+			}
+		}
+	} else if opts.PGVersion > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"pg_version %d ignored: %s template pins its own kernel version", opts.PGVersion, opts.Mode))
 	}
 
 	if shouldSetLocale(opts.PGVersion, opts.Mode, opts.LocaleAvailable) {
 		content = insertLocaleSettings(content)
-	}
-
-	// Keep this branch for forward-compat parity with legacy configure logic.
-	// It becomes active once PostgresActiveMajorVersions includes 19+.
-	if opts.PGVersion >= 19 {
-		content = strings.ReplaceAll(content, "node,infra,pgsql", "node,infra,pgsql,beta")
 	}
 
 	generated := []string{}
@@ -836,11 +858,50 @@ func mutateTemplate(content string, opts mutationOptions) (string, []string, err
 		var err error
 		content, generated, err = replacePasswords(content)
 		if err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
 	}
 
-	return content, generated, nil
+	return content, generated, warnings, nil
+}
+
+// betaRepoModulesLine matches an uncommented (node_)repo_modules line and
+// captures: key+separator, opening quote, comma-separated module list,
+// closing quote, trailing whitespace/comment.
+var betaRepoModulesLine = regexp.MustCompile(`^([ \t]*(?:node_)?repo_modules[ \t]*:[ \t]*)(['"]?)([A-Za-z0-9_,\-]+)(['"]?)([ \t]*(?:#.*)?)$`)
+
+// enableBetaRepoModule inserts the beta module (PGDG testing repos) into every
+// repo module list that contains the pgsql module, right after it, regardless
+// of module order. Lines already listing beta are left untouched, so the
+// rewrite is idempotent (e.g. for conf/pg19.yml); commented lines are ignored.
+// It reports whether the resulting content enables the beta module.
+func enableBetaRepoModule(content string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	enabled := false
+	for i, line := range lines {
+		m := betaRepoModulesLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		modules := strings.Split(m[3], ",")
+		if slices.Contains(modules, "beta") {
+			enabled = true
+			continue
+		}
+		if !slices.Contains(modules, "pgsql") {
+			continue
+		}
+		rewritten := make([]string, 0, len(modules)+1)
+		for _, module := range modules {
+			rewritten = append(rewritten, module)
+			if module == "pgsql" {
+				rewritten = append(rewritten, "beta")
+			}
+		}
+		lines[i] = m[1] + m[2] + strings.Join(rewritten, ",") + m[4] + m[5]
+		enabled = true
+	}
+	return strings.Join(lines, "\n"), enabled
 }
 
 func removeProxyBlock(content string) string {

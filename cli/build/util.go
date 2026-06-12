@@ -44,9 +44,9 @@ func parsePgVersions(pgVersions string) ([]int, error) {
 			return nil, fmt.Errorf("invalid PG version: %s", v)
 		}
 
-		// Validate active/supported PostgreSQL major versions
-		if !ext.IsActivePGMajor(ver) {
-			return nil, fmt.Errorf("PG version %d is not supported (valid: %s)", ver, ext.PostgresActiveVersionString())
+		// Validate installable PostgreSQL major versions, including beta targets.
+		if !ext.IsInstallablePGMajor(ver) {
+			return nil, fmt.Errorf("PG version %d is not supported (valid: %s)", ver, ext.PostgresInstallableVersionString())
 		}
 
 		if !seen[ver] {

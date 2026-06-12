@@ -41,16 +41,23 @@ var (
 )
 
 var (
-	// PostgresActiveMajorVersions is the single source of truth for active PG majors.
+	// PostgresActiveMajorVersions is the stable support window used for defaults and catalog display.
 	PostgresActiveMajorVersions = []int{18, 17, 16, 15, 14}
-	PostgresElSearchPath        = []string{"/usr/pgsql-%s/bin/pg_config"}
-	PostgresDEBSearchPath       = []string{"/usr/lib/postgresql/%s/bin/pg_config"}
-	PostgresMACSearchPath       = []string{"/opt/homebrew/opt/postgresql@%s/bin/pg_config"}
+	// PostgresInstallableMajorVersions includes beta majors accepted by install/build/config commands.
+	PostgresInstallableMajorVersions = []int{19, 18, 17, 16, 15, 14}
+	PostgresElSearchPath             = []string{"/usr/pgsql-%s/bin/pg_config"}
+	PostgresDEBSearchPath            = []string{"/usr/lib/postgresql/%s/bin/pg_config"}
+	PostgresMACSearchPath            = []string{"/opt/homebrew/opt/postgresql@%s/bin/pg_config"}
 )
 
 // IsActivePGMajor checks whether the PostgreSQL major version is in active support window.
 func IsActivePGMajor(ver int) bool {
 	return slices.Contains(PostgresActiveMajorVersions, ver)
+}
+
+// IsInstallablePGMajor checks whether the PostgreSQL major version can be requested explicitly.
+func IsInstallablePGMajor(ver int) bool {
+	return slices.Contains(PostgresInstallableMajorVersions, ver)
 }
 
 // PostgresLatestMajorVersion returns the maximum active PG major version.
@@ -88,6 +95,23 @@ func PostgresActiveVersionStrings() []string {
 		result[i] = strconv.Itoa(v)
 	}
 	return result
+}
+
+// PostgresInstallableMajorVersionsAsc returns installable PG versions sorted ascending.
+func PostgresInstallableMajorVersionsAsc() []int {
+	versions := append([]int(nil), PostgresInstallableMajorVersions...)
+	sort.Ints(versions)
+	return versions
+}
+
+// PostgresInstallableVersionString returns a comma-separated string of installable PG versions.
+func PostgresInstallableVersionString() string {
+	asc := PostgresInstallableMajorVersionsAsc()
+	parts := make([]string, len(asc))
+	for i, v := range asc {
+		parts[i] = strconv.Itoa(v)
+	}
+	return strings.Join(parts, ",")
 }
 
 // NewPostgresInstall hold the information of a PostgreSQL installation
@@ -203,7 +227,7 @@ func DetectPostgres() error {
 	}
 
 	// Iterate over possible PostgreSQL major versions
-	for _, v := range PostgresActiveMajorVersions {
+	for _, v := range PostgresInstallableMajorVersions {
 		if _, exists := Installs[v]; exists {
 			continue
 		}
@@ -417,17 +441,34 @@ func FindPostgres(pgVersion int) (*PostgresInstall, error) {
 		}
 	}
 
-	// 4. Use the latest installed version
-	var latest *PostgresInstall
-	for _, pi := range Installs {
-		if latest == nil || pi.MajorVersion > latest.MajorVersion {
-			latest = pi
-		}
-	}
-	if latest != nil {
+	// 4. Use the latest installed version (stable majors take precedence over beta)
+	if latest := latestInstall(Installs); latest != nil {
 		Postgres = latest
 		return latest, nil
 	}
 
 	return nil, fmt.Errorf("no PostgreSQL installation found")
+}
+
+// latestInstall picks the default installation from a detected install map:
+// the highest major within the stable active window wins, so an explicitly
+// installed beta major (e.g. PG19) never becomes the implicit default unless
+// it is the only installation on the host.
+func latestInstall(installs map[int]*PostgresInstall) *PostgresInstall {
+	var latest, latestActive *PostgresInstall
+	for _, pi := range installs {
+		if pi == nil {
+			continue
+		}
+		if latest == nil || pi.MajorVersion > latest.MajorVersion {
+			latest = pi
+		}
+		if IsActivePGMajor(pi.MajorVersion) && (latestActive == nil || pi.MajorVersion > latestActive.MajorVersion) {
+			latestActive = pi
+		}
+	}
+	if latestActive != nil {
+		return latestActive
+	}
+	return latest
 }

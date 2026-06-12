@@ -100,6 +100,58 @@ func TestResolveCategoryAliasVisibleOnly(t *testing.T) {
 	}
 }
 
+func TestResolvePG19CategoryAliasUsesPG18PGDGTemplate(t *testing.T) {
+	extPGDG := newTestCategoryExt(100, "pg_cron", "pg_cron", "TIME", []string{"el9i:18:A:f:1:G:1.0"})
+	extPGDG.RpmPkg, extPGDG.RpmRepo, extPGDG.RpmPg = "pg_cron_$v", "PGDG", []string{"18"}
+
+	// Non-delimited $v pattern: must be rendered for the target version directly,
+	// not derived from the PG18 name via "_18" text rewriting.
+	extNonDelim := newTestCategoryExt(105, "dbt2", "dbt2", "TIME", []string{"el9i:18:A:f:1:G:0.61"})
+	extNonDelim.RpmPkg, extNonDelim.RpmRepo, extNonDelim.RpmPg = "dbt2-pg$v-extensions", "PGDG", []string{"18"}
+
+	extPigsty := newTestCategoryExt(110, "pg_task", "pg_task", "TIME", []string{"el9i:18:A:f:1:P:1.0"})
+	extPigsty.RpmPkg, extPigsty.RpmRepo, extPigsty.RpmPg = "pg_task_$v", "PIGSTY", []string{"18"}
+
+	extHidden := newTestCategoryExt(120, "pg_hidden", "pg_hidden", "TIME", []string{"el9i:18:A:t:1:G:1.0"})
+	extHidden.RpmPkg, extHidden.RpmRepo, extHidden.RpmPg = "pg_hidden_$v", "PGDG", []string{"18"}
+
+	cleanup := withCategoryAliasTestEnv(t, config.DistroEL, "el9", "amd64", []*Extension{
+		extPGDG, extNonDelim, extPigsty, extHidden,
+	})
+	defer cleanup()
+
+	res := ResolveExtensionPackages(19, []string{"pg19-time"}, false)
+	if len(res.NotFound) > 0 || len(res.NoPackage) > 0 {
+		t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
+	}
+	want := []string{"pg_cron_19", "dbt2-pg19-extensions"}
+	if !reflect.DeepEqual(res.Packages, want) {
+		t.Fatalf("resolved packages mismatch\nwant: %v\ngot:  %v", want, res.Packages)
+	}
+}
+
+func TestResolvePG19PgsqlCategoryAliasUsesPG18DEBTemplate(t *testing.T) {
+	extPGDG := newTestCategoryExt(100, "pg_cron", "pg_cron", "TIME", []string{"u24i:18:A:f:1:G:1.0"})
+	extPGDG.DebPkg, extPGDG.DebRepo, extPGDG.DebPg = "postgresql-$v-cron", "PGDG", []string{"18"}
+
+	extPigsty := newTestCategoryExt(110, "pg_task", "pg_task", "TIME", []string{"u24i:18:A:f:1:P:1.0"})
+	extPigsty.DebPkg, extPigsty.DebRepo, extPigsty.DebPg = "postgresql-$v-pg-task", "PIGSTY", []string{"18"}
+
+	cleanup := withCategoryAliasTestEnv(t, config.DistroDEB, "u24", "amd64", []*Extension{
+		extPGDG, extPigsty,
+	})
+	defer cleanup()
+
+	res := ResolveExtensionPackages(19, []string{"pgsql-time"}, false)
+	if len(res.NotFound) > 0 || len(res.NoPackage) > 0 {
+		t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
+	}
+	want := []string{"postgresql-19-cron"}
+	if !reflect.DeepEqual(res.Packages, want) {
+		t.Fatalf("resolved packages mismatch\nwant: %v\ngot:  %v", want, res.Packages)
+	}
+}
+
 func TestResolvePgsqlCategoryAliasUsesTemplateFromLatestVersion(t *testing.T) {
 	extAll := newTestCategoryExt(100, "pg_cron", "pg_cron", "TIME", []string{
 		"el9i:18:A:f:1:G:1.0",

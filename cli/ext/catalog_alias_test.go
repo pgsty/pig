@@ -57,6 +57,56 @@ func TestLoadAliasMapRequestedAliasesEL9(t *testing.T) {
 	}
 }
 
+func TestLoadAliasMapIncludesPG19BetaStaticAliases(t *testing.T) {
+	tests := []struct {
+		name   string
+		osType string
+		osCode string
+		want   map[string]string
+	}{
+		{
+			name:   "el",
+			osType: config.DistroEL,
+			osCode: "el9",
+			want: map[string]string{
+				"pg19":        "postgresql19 postgresql19-server postgresql19-libs postgresql19-contrib postgresql19-plperl postgresql19-plpython3 postgresql19-pltcl",
+				"pg19-mini":   "postgresql19 postgresql19-server postgresql19-libs postgresql19-contrib",
+				"pg19-devel":  "postgresql19-devel",
+				"pg19-basic":  "pg_repack_19 wal2json_19 pgvector_19",
+				"pgsql-devel": "postgresql$v-devel",
+			},
+		},
+		{
+			name:   "deb",
+			osType: config.DistroDEB,
+			osCode: "u24",
+			want: map[string]string{
+				"pg19":        "postgresql-19 postgresql-client-19 postgresql-plpython3-19 postgresql-plperl-19 postgresql-pltcl-19",
+				"pg19-mini":   "postgresql-19 postgresql-client-19",
+				"pg19-devel":  "postgresql-server-dev-19",
+				"pg19-basic":  "postgresql-19-repack postgresql-19-wal2json postgresql-19-pgvector",
+				"pgsql-devel": "postgresql-server-dev-$v",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup := withAliasMapTestEnv(t, tt.osType, tt.osCode, "amd64")
+			defer cleanup()
+
+			ec := &ExtensionCatalog{}
+			ec.LoadAliasMap(config.OSType)
+
+			for key, want := range tt.want {
+				if got := ec.AliasMap[key]; got != want {
+					t.Fatalf("unexpected alias for %s: want %q, got %q", key, want, got)
+				}
+			}
+		})
+	}
+}
+
 func TestLoadAliasMapRequestedAliasesU22(t *testing.T) {
 	cleanup := withAliasMapTestEnv(t, config.DistroDEB, "u22", "amd64")
 	defer cleanup()

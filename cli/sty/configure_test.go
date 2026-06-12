@@ -3,6 +3,7 @@ package sty
 import (
 	"os"
 	"path/filepath"
+	"pig/cli/ext"
 	"pig/internal/output"
 	"regexp"
 	"strings"
@@ -70,7 +71,7 @@ func TestMutateTemplateBasic(t *testing.T) {
     pg_conf: oltp.yml
     pg_packages: [ pg18-main ]
 `
-	got, _, err := mutateTemplate(content, mutationOptions{
+	got, _, _, err := mutateTemplate(content, mutationOptions{
 		Mode:            "meta",
 		PrimaryIP:       "192.168.10.10",
 		Region:          "china",
@@ -104,6 +105,202 @@ func TestMutateTemplateBasic(t *testing.T) {
 	}
 }
 
+func TestMutateTemplatePG19EnablesBetaRepoModule(t *testing.T) {
+	content := `all:
+  vars:
+    node_repo_modules: 'node,infra,pgsql'
+    pg_version: 18
+    pg_packages: [ pg18-main ]
+`
+	got, _, warnings, err := mutateTemplate(content, mutationOptions{
+		Mode:      "meta",
+		PGVersion: 19,
+	})
+	if err != nil {
+		t.Fatalf("mutateTemplate error: %v", err)
+	}
+	if !strings.Contains(got, "node_repo_modules: 'node,infra,pgsql,beta'") {
+		t.Fatalf("expected beta repo module for PG19, got:\n%s", got)
+	}
+	if !strings.Contains(got, "pg_version: 19") || !strings.Contains(got, "pg19-main") {
+		t.Fatalf("expected pg19 version and package alias replacement, got:\n%s", got)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+}
+
+func TestMutateTemplatePG19BetaRepoModuleIdempotent(t *testing.T) {
+	// node_repo_modules already has beta (like conf/pg19.yml), repo_modules does not:
+	// the former must stay single-beta, the latter must gain beta.
+	content := `all:
+  vars:
+    node_repo_modules: 'node,infra,pgsql,beta'
+    repo_modules: node,infra,pgsql
+    pg_version: 19
+    pg_packages: [ pg19-main ]
+`
+	got, _, warnings, err := mutateTemplate(content, mutationOptions{
+		Mode:      "pg19",
+		PGVersion: 19,
+	})
+	if err != nil {
+		t.Fatalf("mutateTemplate error: %v", err)
+	}
+	if strings.Contains(got, "beta,beta") {
+		t.Fatalf("beta repo module duplicated, got:\n%s", got)
+	}
+	if !strings.Contains(got, "node_repo_modules: 'node,infra,pgsql,beta'") {
+		t.Fatalf("expected node_repo_modules to keep single beta, got:\n%s", got)
+	}
+	if !strings.Contains(got, "repo_modules: node,infra,pgsql,beta") {
+		t.Fatalf("expected repo_modules to gain beta, got:\n%s", got)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+}
+
+func TestMutateTemplatePG19BetaRepoModuleOrderVariants(t *testing.T) {
+	// Module lists with non-standard order (supabase: node,pgsql,infra and
+	// build/oss: infra,node,pgsql) must still gain beta right after pgsql.
+	content := `all:
+  vars:
+    node_repo_modules: node,pgsql,infra   # supabase order
+    repo_modules: infra,node,pgsql
+    pg_version: 18
+    pg_packages: [ pg18-main ]
+`
+	got, _, warnings, err := mutateTemplate(content, mutationOptions{
+		Mode:      "supabase",
+		PGVersion: 19,
+	})
+	if err != nil {
+		t.Fatalf("mutateTemplate error: %v", err)
+	}
+	if !strings.Contains(got, "node_repo_modules: node,pgsql,beta,infra") {
+		t.Fatalf("expected beta inserted after pgsql in reordered list, got:\n%s", got)
+	}
+	if !strings.Contains(got, "repo_modules: infra,node,pgsql,beta") {
+		t.Fatalf("expected beta appended after pgsql, got:\n%s", got)
+	}
+	if !strings.Contains(got, "pg_version: 19") || !strings.Contains(got, "pg19-main") {
+		t.Fatalf("expected pg19 version and package alias replacement, got:\n%s", got)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+}
+
+func TestMutateTemplatePG19BetaRepoModuleMissingWarns(t *testing.T) {
+	// rich-style local-only repo modules: version rewrite still applies,
+	// but the beta module cannot be enabled and a warning must be raised.
+	content := `all:
+  vars:
+    node_repo_modules: local
+    pg_version: 18
+    pg_packages: [ pg18-main ]
+`
+	got, _, warnings, err := mutateTemplate(content, mutationOptions{
+		Mode:      "rich",
+		PGVersion: 19,
+	})
+	if err != nil {
+		t.Fatalf("mutateTemplate error: %v", err)
+	}
+	if strings.Contains(got, "beta") {
+		t.Fatalf("unexpected beta module injection, got:\n%s", got)
+	}
+	if !strings.Contains(got, "pg_version: 19") || !strings.Contains(got, "pg19-main") {
+		t.Fatalf("expected pg19 version and package alias replacement, got:\n%s", got)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "beta repo module not enabled") {
+		t.Fatalf("expected beta module warning, got: %v", warnings)
+	}
+}
+
+func TestMutateTemplatePG19BetaRepoModuleIgnoresComments(t *testing.T) {
+	// A commented-out module list must neither be rewritten nor suppress
+	// the missing-beta warning.
+	content := `all:
+  vars:
+    #node_repo_modules: 'node,infra,pgsql'
+    pg_version: 18
+`
+	got, _, warnings, err := mutateTemplate(content, mutationOptions{
+		Mode:      "meta",
+		PGVersion: 19,
+	})
+	if err != nil {
+		t.Fatalf("mutateTemplate error: %v", err)
+	}
+	if !strings.Contains(got, "#node_repo_modules: 'node,infra,pgsql'") {
+		t.Fatalf("expected commented module list untouched, got:\n%s", got)
+	}
+	if strings.Contains(got, "beta") {
+		t.Fatalf("unexpected beta injection into comment, got:\n%s", got)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "beta repo module not enabled") {
+		t.Fatalf("expected beta module warning, got: %v", warnings)
+	}
+}
+
+func TestMutateTemplatePG19SkipsPinnedKernelModes(t *testing.T) {
+	content := `all:
+  vars:
+    node_repo_modules: node,infra,pgsql
+    pg_version: 17
+`
+	for _, mode := range []string{"mssql", "polar"} {
+		got, _, warnings, err := mutateTemplate(content, mutationOptions{
+			Mode:      mode,
+			PGVersion: 19,
+		})
+		if err != nil {
+			t.Fatalf("mutateTemplate error for %s: %v", mode, err)
+		}
+		if strings.Contains(got, "beta") {
+			t.Fatalf("unexpected beta module for pinned-kernel mode %s, got:\n%s", mode, got)
+		}
+		if !strings.Contains(got, "pg_version: 17") {
+			t.Fatalf("expected pinned pg_version kept for %s, got:\n%s", mode, got)
+		}
+		if len(warnings) != 1 || !strings.Contains(warnings[0], "ignored") {
+			t.Fatalf("expected version-ignored warning for %s, got: %v", mode, warnings)
+		}
+	}
+}
+
+func TestMutateTemplateBetaSkippedOnceMajorIsStable(t *testing.T) {
+	// GA tripwire: once 19 enters the stable active window, -v 19 must no
+	// longer inject the beta repo module.
+	oldActive := ext.PostgresActiveMajorVersions
+	ext.PostgresActiveMajorVersions = []int{19, 18, 17, 16, 15}
+	defer func() { ext.PostgresActiveMajorVersions = oldActive }()
+
+	content := `all:
+  vars:
+    node_repo_modules: node,infra,pgsql
+    pg_version: 18
+`
+	got, _, warnings, err := mutateTemplate(content, mutationOptions{
+		Mode:      "meta",
+		PGVersion: 19,
+	})
+	if err != nil {
+		t.Fatalf("mutateTemplate error: %v", err)
+	}
+	if strings.Contains(got, "beta") {
+		t.Fatalf("beta module must not be injected for stable major, got:\n%s", got)
+	}
+	if !strings.Contains(got, "pg_version: 19") {
+		t.Fatalf("expected pg_version updated to 19, got:\n%s", got)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+}
+
 func TestMutateTemplateProxyInsertion(t *testing.T) {
 	content := `all:
   vars:
@@ -112,7 +309,7 @@ func TestMutateTemplateProxyInsertion(t *testing.T) {
       no_proxy: "localhost"
       http_proxy: "http://old-proxy"
 `
-	got, _, err := mutateTemplate(content, mutationOptions{
+	got, _, _, err := mutateTemplate(content, mutationOptions{
 		Mode:      "meta",
 		PrimaryIP: defaultPrimaryIP,
 		Region:    "default",
@@ -140,7 +337,7 @@ func TestMutateTemplateLocaleNeedsPgVersionLine(t *testing.T) {
   vars:
     region: default
 `
-	got, _, err := mutateTemplate(content, mutationOptions{
+	got, _, _, err := mutateTemplate(content, mutationOptions{
 		Mode:            "mssql",
 		PrimaryIP:       defaultPrimaryIP,
 		Region:          "default",
@@ -167,7 +364,7 @@ func TestMutateTemplatePasswordGeneration(t *testing.T) {
     etcd_root_password: Etcd.Root
     sample_token: DBUser.Meta
 `
-	got, generated, err := mutateTemplate(content, mutationOptions{
+	got, generated, _, err := mutateTemplate(content, mutationOptions{
 		Mode:             "meta",
 		PrimaryIP:        defaultPrimaryIP,
 		GeneratePassword: true,
@@ -239,6 +436,64 @@ func TestConfigureNativeEndToEndAbsoluteOutput(t *testing.T) {
 	}
 }
 
+func TestConfigureNativePG19SuggestsDedicatedTemplate(t *testing.T) {
+	tmp := t.TempDir()
+	confDir := filepath.Join(tmp, "conf")
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatalf("mkdir conf: %v", err)
+	}
+	meta := `all:
+  vars:
+    region: default
+    node_repo_modules: 'node,infra,pgsql'
+    pg_version: 18
+`
+	if err := os.WriteFile(filepath.Join(confDir, "meta.yml"), []byte(meta), 0644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(confDir, "pg19.yml"), []byte("all: {}\n"), 0644); err != nil {
+		t.Fatalf("write pg19 template: %v", err)
+	}
+
+	outPath := filepath.Join(tmp, "out.yml")
+	locale := false
+	result := ConfigureNative(ConfigureOptions{
+		PigstyHome:       tmp,
+		Mode:             "meta",
+		PrimaryIP:        "192.168.0.10",
+		PGVersion:        "19",
+		OutputFile:       outPath,
+		NonInteractive:   true,
+		CPUCount:         8,
+		LocaleAvailable:  &locale,
+		DisablePreflight: true,
+	})
+	if result == nil || !result.Success {
+		t.Fatalf("expected success result, got: %+v", result)
+	}
+	data, ok := result.Data.(*ConfigureData)
+	if !ok {
+		t.Fatalf("unexpected result data type: %T", result.Data)
+	}
+	suggested := false
+	for _, w := range data.Warnings {
+		if strings.Contains(w, "pig sty conf -c pg19") {
+			suggested = true
+		}
+	}
+	if !suggested {
+		t.Fatalf("expected pg19 template suggestion warning, got: %v", data.Warnings)
+	}
+
+	out, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !strings.Contains(string(out), "node_repo_modules: 'node,infra,pgsql,beta'") {
+		t.Fatalf("expected beta repo module in output, got:\n%s", out)
+	}
+}
+
 func TestConfigureNativeInvalidVersion(t *testing.T) {
 	tmp := t.TempDir()
 	confDir := filepath.Join(tmp, "conf")
@@ -251,7 +506,7 @@ func TestConfigureNativeInvalidVersion(t *testing.T) {
 
 	result := ConfigureNative(ConfigureOptions{
 		PigstyHome:       tmp,
-		PGVersion:        "19",
+		PGVersion:        "20",
 		DisablePreflight: true,
 	})
 	if result == nil || result.Success {
@@ -332,7 +587,9 @@ func TestValidatePGVersion(t *testing.T) {
 		{input: "", want: 0},
 		{input: "14", want: 14},
 		{input: "18", want: 18},
+		{input: "19", want: 19},
 		{input: "12", wantErr: true},
+		{input: "20", wantErr: true},
 		{input: "abc", wantErr: true},
 	}
 	for _, tt := range tests {

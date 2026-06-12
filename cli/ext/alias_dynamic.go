@@ -113,7 +113,7 @@ func parseCategoryAlias(alias string, targetPgVer int) (spec categoryAliasSpec, 
 	if err != nil {
 		return categoryAliasSpec{}, false
 	}
-	if !IsActivePGMajor(ver) {
+	if !IsInstallablePGMajor(ver) {
 		return categoryAliasSpec{}, false
 	}
 
@@ -170,8 +170,15 @@ func buildCategoryPackageList(spec categoryAliasSpec, matrixOS, matrixArch strin
 
 	pkgs := make([]string, 0, 16)
 	seen := make(map[string]struct{})
+
+	// betaTarget: the requested major is beyond the stable window (e.g. PG19
+	// beta) and has no catalog matrix data of its own yet.
+	betaTarget := spec.targetPG > PostgresLatestMajorVersion()
+	// Visibility is evaluated against the stable window: pgsql-* aliases follow
+	// the latest stable template, and beta targets borrow it, restricted to
+	// PGDG-origin entries (PGDG rebuilds its repo for beta majors, Pigsty does not).
 	selectPG := spec.targetPG
-	if spec.isPgsql {
+	if spec.isPgsql || betaTarget {
 		selectPG = PostgresLatestMajorVersion()
 	}
 
@@ -183,11 +190,13 @@ func buildCategoryPackageList(spec categoryAliasSpec, matrixOS, matrixArch strin
 			continue
 		}
 
-		if !isCategoryExtensionVisible(ext, selectPG, matrixOS, matrixArch, allowMetadataFallback) {
+		if !isCategoryExtensionVisible(ext, selectPG, matrixOS, matrixArch, allowMetadataFallback, betaTarget) {
 			continue
 		}
 
-		pkgName := ext.PackageName(selectPG)
+		// Package names are always rendered for the requested target version,
+		// regardless of which version the visibility check borrowed.
+		pkgName := ext.PackageName(spec.targetPG)
 		if pkgName == "" {
 			continue
 		}
@@ -196,10 +205,7 @@ func buildCategoryPackageList(spec categoryAliasSpec, matrixOS, matrixArch strin
 			pkgName = applyCategoryPackageSpecialCase(ext, pkgName, spec.targetPG)
 		}
 
-		for _, pkg := range ProcessPkgName(pkgName, selectPG) {
-			if spec.isPgsql {
-				pkg = rewriteLatestCategoryPkgToTarget(pkg, spec.targetPG)
-			}
+		for _, pkg := range ProcessPkgName(pkgName, spec.targetPG) {
 			if _, ok := seen[pkg]; ok {
 				continue
 			}
@@ -211,7 +217,7 @@ func buildCategoryPackageList(spec categoryAliasSpec, matrixOS, matrixArch strin
 	return pkgs
 }
 
-func isCategoryExtensionVisible(ext *Extension, pgVer int, matrixOS, matrixArch string, allowMetadataFallback bool) bool {
+func isCategoryExtensionVisible(ext *Extension, pgVer int, matrixOS, matrixArch string, allowMetadataFallback bool, pgdgOnly bool) bool {
 	if ext == nil {
 		return false
 	}
@@ -220,6 +226,9 @@ func isCategoryExtensionVisible(ext *Extension, pgVer int, matrixOS, matrixArch 
 	if matrix != nil {
 		if entry := matrix.Get(matrixOS, matrixArch, pgVer); entry != nil {
 			if entry.State != PkgAvail || entry.Hide {
+				return false
+			}
+			if pgdgOnly && entry.Org != OrgPGDG {
 				return false
 			}
 			// Unknown/new distro fallback mode should include PGDG-only packages.
@@ -269,22 +278,4 @@ func applyCategoryPackageSpecialCase(ext *Extension, pkgName string, pgVer int) 
 		}
 	}
 	return pkgName
-}
-
-func rewriteLatestCategoryPkgToTarget(pkg string, targetPG int) string {
-	if targetPG == PostgresLatestMajorVersion() {
-		return pkg
-	}
-
-	latest := strconv.Itoa(PostgresLatestMajorVersion())
-	target := strconv.Itoa(targetPG)
-
-	switch config.OSType {
-	case config.DistroEL:
-		return strings.ReplaceAll(pkg, "_"+latest, "_"+target)
-	case config.DistroDEB:
-		return strings.ReplaceAll(pkg, "-"+latest, "-"+target)
-	default:
-		return strings.ReplaceAll(pkg, latest, target)
-	}
 }
