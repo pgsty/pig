@@ -17,6 +17,7 @@ const (
 	MODULE_PITR   = 160000 // PITR recovery (MM=16)
 	MODULE_PE     = 170000 // pg_exporter (MM=17)
 	MODULE_CTX    = 180000 // Context (MM=18)
+	MODULE_FORK   = 190000 // PostgreSQL fork/clone operations (MM=19)
 	MODULE_STY    = 200000 // Pigsty management (MM=20)
 	MODULE_DO     = 210000 // Task orchestration (MM=21)
 	MODULE_CONFIG = 900000 // Configuration system (MM=90)
@@ -194,6 +195,23 @@ const (
 	CodePITRRestoreFailed  = MODULE_PITR + CAT_OPERATION + 2 // Restore failed (160802)
 	CodePITRStartFailed    = MODULE_PITR + CAT_OPERATION + 3 // Start PostgreSQL failed (160803)
 	CodePITRPostFailed     = MODULE_PITR + CAT_OPERATION + 4 // Post-restore steps failed (160804)
+)
+
+// Fork module specific codes (MODULE_FORK = 190000)
+const (
+	CodeForkInvalidArgs       = MODULE_FORK + CAT_PARAM + 1     // Invalid or missing arguments
+	CodeForkPermissionDenied  = MODULE_FORK + CAT_PERM + 1      // Permission denied
+	CodeForkDependencyMissing = MODULE_FORK + CAT_DEPEND + 1    // Required tool or capability missing
+	CodeForkSourceNotFound    = MODULE_FORK + CAT_RESOURCE + 1  // Source data directory or database not found
+	CodeForkDestExists        = MODULE_FORK + CAT_RESOURCE + 2  // Destination already exists
+	CodeForkPortInUse         = MODULE_FORK + CAT_STATE + 1     // Destination port is already in use
+	CodeForkPrecheckFailed    = MODULE_FORK + CAT_STATE + 2     // Pre-check failed
+	CodeForkBackupFailed      = MODULE_FORK + CAT_OPERATION + 1 // Backup API phase failed
+	CodeForkCopyFailed        = MODULE_FORK + CAT_OPERATION + 2 // Data copy failed
+	CodeForkConfigFailed      = MODULE_FORK + CAT_OPERATION + 3 // Fork configuration failed
+	CodeForkStartFailed       = MODULE_FORK + CAT_OPERATION + 4 // Forked instance start failed
+	CodeForkVerifyFailed      = MODULE_FORK + CAT_OPERATION + 5 // Post-fork verification failed
+	CodeForkDatabaseFailed    = MODULE_FORK + CAT_OPERATION + 6 // Database-level clone failed
 )
 
 // Context module specific codes (MODULE_CTX = 180000)

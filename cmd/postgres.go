@@ -424,6 +424,7 @@ func init() {
 	registerPgMaintenanceCommands()
 	registerPgServiceCommands()
 	registerPgTuneCommands()
+	registerPgForkCommands()
 }
 
 func registerPgControlCommands() {
@@ -548,4 +549,11 @@ func registerPgServiceCommands() {
 		pgSvcStatusCmd,
 	)
 	pgCmd.AddCommand(pgSvcCmd)
+}
+
+func registerPgForkCommands() {
+	pgCmd.AddCommand(
+		newPgForkCommand(),
+		newPgCloneCommand(),
+	)
 }

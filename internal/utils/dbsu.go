@@ -81,6 +81,16 @@ func DBSUCommandPreserveStdout(dbsu string, args []string) error {
 	return runDBSUCommand(dbsu, args, true)
 }
 
+// BuildDBSUCommand creates a command that runs as the database superuser.
+// Callers that need custom pipes or long-lived subprocesses can use this
+// instead of DBSUCommand.
+func BuildDBSUCommand(dbsu string, args []string) (*exec.Cmd, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("no command specified")
+	}
+	return buildDBSUCmd(dbsu, args), nil
+}
+
 func runDBSUCommand(dbsu string, args []string, preserveStdout bool) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no command specified")
