@@ -15,9 +15,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const DefaultPgrxVersion = "0.19.1"
+
 func SetupPgrx(pgrxVersion string, pgVersions string) error {
 	if pgrxVersion == "" {
-		pgrxVersion = "0.18.1"
+		pgrxVersion = DefaultPgrxVersion
 	}
 	cargoBin := config.HomeDir + "/.cargo/bin/cargo"
 
