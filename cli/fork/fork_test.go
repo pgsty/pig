@@ -414,6 +414,7 @@ func TestBuildDatabaseCloneSQL(t *testing.T) {
 	sql := BuildDatabaseCloneSQL(&DatabaseOptions{
 		SourceDB: "app",
 		DestDB:   "app_fork",
+		Owner:    "app_owner",
 	})
 
 	for _, want := range []string{
@@ -426,16 +427,197 @@ func TestBuildDatabaseCloneSQL(t *testing.T) {
 			t.Errorf("SQL missing %q:\n%s", want, sql)
 		}
 	}
+	if strings.Contains(sql, "OWNER") {
+		t.Fatalf("clone SQL should not include OWNER clause:\n%s", sql)
+	}
 }
 
-func TestBuildDatabaseCloneSQLCanSkipConnectionKill(t *testing.T) {
+func TestBuildDatabaseAlterOwnerSQL(t *testing.T) {
+	sql := BuildDatabaseAlterOwnerSQL("app_fork", "app_owner")
+	if sql != `ALTER DATABASE "app_fork" OWNER TO "app_owner";`+"\n" {
+		t.Fatalf("BuildDatabaseAlterOwnerSQL() = %q", sql)
+	}
+}
+
+func TestBuildDatabaseAlterOwnerSQLEmptyOwner(t *testing.T) {
+	if sql := BuildDatabaseAlterOwnerSQL("app_fork", ""); sql != "" {
+		t.Fatalf("BuildDatabaseAlterOwnerSQL empty owner = %q, want empty", sql)
+	}
+}
+
+func TestBuildDatabaseCloneSQLAlwaysTerminatesSourceConnections(t *testing.T) {
 	sql := BuildDatabaseCloneSQL(&DatabaseOptions{
 		SourceDB: "app",
 		DestDB:   "app_fork",
-		NoKill:   true,
 	})
-	if strings.Contains(sql, "pg_terminate_backend") {
-		t.Fatalf("SQL should not terminate connections when NoKill is set:\n%s", sql)
+	if !strings.Contains(sql, "pg_terminate_backend") {
+		t.Fatalf("SQL should terminate source connections:\n%s", sql)
+	}
+}
+
+func TestBuildDatabaseCloneSQLIncludesConnectionLimitWhenSet(t *testing.T) {
+	sql := BuildDatabaseCloneSQL(&DatabaseOptions{
+		SourceDB:     "app",
+		DestDB:       "app_fork",
+		ConnLimit:    12,
+		ConnLimitSet: true,
+	})
+	if !strings.Contains(sql, `CONNECTION LIMIT 12`) {
+		t.Fatalf("SQL should include connection limit:\n%s", sql)
+	}
+}
+
+func TestBuildDatabaseCloneSQLAllowsZeroConnectionLimit(t *testing.T) {
+	sql := BuildDatabaseCloneSQL(&DatabaseOptions{
+		SourceDB:     "app",
+		DestDB:       "app_fork",
+		ConnLimit:    0,
+		ConnLimitSet: true,
+	})
+	if !strings.Contains(sql, `CONNECTION LIMIT 0`) {
+		t.Fatalf("SQL should include zero connection limit:\n%s", sql)
+	}
+}
+
+func TestNextDatabaseCloneNameUsesFirstAvailableSuffix(t *testing.T) {
+	names := map[string]bool{
+		"app":   true,
+		"app_1": true,
+		"app_2": true,
+	}
+	if got := NextDatabaseCloneName("app", names); got != "app_3" {
+		t.Fatalf("NextDatabaseCloneName() = %q, want app_3", got)
+	}
+}
+
+func TestParseDatabaseNamesOneNamePerLine(t *testing.T) {
+	names := parseDatabaseNames("app\napp_1\npostgres\n")
+	if len(names) != 3 || names[0] != "app" || names[1] != "app_1" || names[2] != "postgres" {
+		t.Fatalf("parseDatabaseNames returned %#v", names)
+	}
+}
+
+func TestDatabasePreflightWarnings(t *testing.T) {
+	checks := DatabasePreflight{
+		ServerVersion:  170000,
+		FileCopyMethod: "copy",
+		DataDirectory:  "/pg/data",
+		FileSystem:     "ext4",
+		CloneMode:      CloneModeCopy,
+		Strategy:       "FILE_COPY",
+	}
+	warnings := checks.Warnings()
+	for _, want := range []string{
+		"PostgreSQL 18+",
+		"file_copy_method=clone",
+		"CoW clone",
+	} {
+		if !containsString(warnings, want) {
+			t.Fatalf("warnings %#v should contain %q", warnings, want)
+		}
+	}
+}
+
+func TestDatabasePreflightWarningsIncludeFileCopyMethodError(t *testing.T) {
+	checks := DatabasePreflight{
+		ServerVersion:       180000,
+		FileCopyMethodError: `ERROR: unrecognized configuration parameter "file_copy_method"`,
+		DataDirectory:       "/pg/data",
+		FileSystem:          "xfs",
+		CloneMode:           CloneModeCOW,
+		Strategy:            "FILE_COPY",
+	}
+	warnings := checks.Warnings()
+	if !containsString(warnings, "unrecognized configuration parameter") {
+		t.Fatalf("warnings %#v should include file_copy_method query error", warnings)
+	}
+}
+
+func TestDatabasePreflightWarningsDoNotWarnOnStrategyField(t *testing.T) {
+	checks := DatabasePreflight{
+		ServerVersion:  180000,
+		FileCopyMethod: "clone",
+		DataDirectory:  "/pg/data",
+		FileSystem:     "xfs",
+		CloneMode:      CloneModeCOW,
+		Strategy:       "WAL_LOG",
+	}
+	if warnings := checks.Warnings(); containsString(warnings, "strategy") {
+		t.Fatalf("strategy field should not create warnings: %#v", warnings)
+	}
+}
+
+func TestDatabasePreflightWarningsPassForPG18CloneCOW(t *testing.T) {
+	checks := DatabasePreflight{
+		ServerVersion:  180000,
+		FileCopyMethod: "clone",
+		DataDirectory:  "/pg/data",
+		FileSystem:     "xfs",
+		CloneMode:      CloneModeCOW,
+		Strategy:       "FILE_COPY",
+	}
+	if warnings := checks.Warnings(); len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %#v", warnings)
+	}
+}
+
+func TestNormalizeDatabaseAllowsGeneratedDestination(t *testing.T) {
+	n, err := NormalizeOptions(&Options{
+		Kind: KindDatabase,
+		Database: DatabaseOptions{
+			SourceDB: "app",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NormalizeOptions returned error: %v", err)
+	}
+	if n.Database.DestDB != "" {
+		t.Fatalf("DestDB = %q, want empty before database name resolution", n.Database.DestDB)
+	}
+}
+
+func TestNormalizeDatabaseRejectsTemplateSources(t *testing.T) {
+	for _, source := range []string{"template0", "template1"} {
+		_, err := NormalizeOptions(&Options{
+			Kind: KindDatabase,
+			Database: DatabaseOptions{
+				SourceDB: source,
+				DestDB:   source + "_1",
+			},
+		})
+		if err == nil {
+			t.Fatalf("NormalizeOptions should reject source %s", source)
+		}
+	}
+}
+
+func TestNormalizeDatabaseRejectsConnDBMatchingSource(t *testing.T) {
+	_, err := NormalizeOptions(&Options{
+		Kind: KindDatabase,
+		Database: DatabaseOptions{
+			SourceDB: "app",
+			DestDB:   "app_1",
+			ConnDB:   "app",
+		},
+	})
+	if err == nil {
+		t.Fatal("NormalizeOptions should reject conn db matching source db")
+	}
+}
+
+func TestNormalizeDatabaseUsesTemplate1WhenCloningPostgres(t *testing.T) {
+	n, err := NormalizeOptions(&Options{
+		Kind: KindDatabase,
+		Database: DatabaseOptions{
+			SourceDB: "postgres",
+			DestDB:   "postgres_1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NormalizeOptions returned error: %v", err)
+	}
+	if n.Database.ConnDB != "template1" {
+		t.Fatalf("ConnDB = %q, want template1", n.Database.ConnDB)
 	}
 }
 
@@ -475,6 +657,9 @@ func TestBuildDatabasePlan(t *testing.T) {
 	if !containsResource(plan.Affects, "database", "app_fork") {
 		t.Errorf("plan affects should include destination database app_fork: %#v", plan.Affects)
 	}
+	if !containsString(plan.Risks, "persistent reconnect") {
+		t.Errorf("plan risks should mention persistent reconnect: %#v", plan.Risks)
+	}
 }
 
 func TestForkErrorCodes(t *testing.T) {
@@ -511,6 +696,15 @@ func containsAction(actions []output.Action, text string) bool {
 func containsResource(resources []output.Resource, typ, name string) bool {
 	for _, resource := range resources {
 		if resource.Type == typ && resource.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if strings.Contains(value, want) {
 			return true
 		}
 	}

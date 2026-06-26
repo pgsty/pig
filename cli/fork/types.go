@@ -71,13 +71,18 @@ type InstanceOptions struct {
 }
 
 type DatabaseOptions struct {
-	SourceDB string
-	DestDB   string
-	ConnDB   string
-	Port     int
-	Kill     bool
-	NoKill   bool
-	Strategy string
+	SourceDB     string
+	DestDB       string
+	Owner        string
+	ConnDB       string
+	Port         int
+	ConnLimit    int
+	ConnLimitSet bool
+	Kill         bool
+	Preflight    DatabasePreflight
+	Warnings     []string
+	OwnerChanged bool
+	OwnerWarning string
 }
 
 type State struct {
@@ -88,17 +93,62 @@ type State struct {
 }
 
 type ResultData struct {
-	Kind            Kind    `json:"kind" yaml:"kind"`
-	Source          string  `json:"source" yaml:"source"`
-	Destination     string  `json:"destination" yaml:"destination"`
-	SourcePort      int     `json:"source_port,omitempty" yaml:"source_port,omitempty"`
-	DestinationPort int     `json:"destination_port,omitempty" yaml:"destination_port,omitempty"`
-	BackupMode      string  `json:"backup_mode,omitempty" yaml:"backup_mode,omitempty"`
-	CloneMode       string  `json:"clone_mode,omitempty" yaml:"clone_mode,omitempty"`
-	Started         bool    `json:"started" yaml:"started"`
-	ConnectCommand  string  `json:"connect_command,omitempty" yaml:"connect_command,omitempty"`
-	CleanupCommand  string  `json:"cleanup_command,omitempty" yaml:"cleanup_command,omitempty"`
-	Duration        float64 `json:"duration_seconds" yaml:"duration_seconds"`
+	Kind            Kind               `json:"kind" yaml:"kind"`
+	Source          string             `json:"source" yaml:"source"`
+	Destination     string             `json:"destination" yaml:"destination"`
+	SourcePort      int                `json:"source_port,omitempty" yaml:"source_port,omitempty"`
+	DestinationPort int                `json:"destination_port,omitempty" yaml:"destination_port,omitempty"`
+	BackupMode      string             `json:"backup_mode,omitempty" yaml:"backup_mode,omitempty"`
+	CloneMode       string             `json:"clone_mode,omitempty" yaml:"clone_mode,omitempty"`
+	Started         bool               `json:"started" yaml:"started"`
+	ConnectCommand  string             `json:"connect_command,omitempty" yaml:"connect_command,omitempty"`
+	CleanupCommand  string             `json:"cleanup_command,omitempty" yaml:"cleanup_command,omitempty"`
+	Duration        float64            `json:"duration_seconds" yaml:"duration_seconds"`
+	Preflight       *DatabasePreflight `json:"preflight,omitempty" yaml:"preflight,omitempty"`
+	Warnings        []string           `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+	OwnerRequested  string             `json:"owner_requested,omitempty" yaml:"owner_requested,omitempty"`
+	OwnerChanged    bool               `json:"owner_changed,omitempty" yaml:"owner_changed,omitempty"`
+	OwnerWarning    string             `json:"owner_warning,omitempty" yaml:"owner_warning,omitempty"`
+}
+
+type DatabasePreflight struct {
+	ServerVersion       int       `json:"server_version" yaml:"server_version"`
+	FileCopyMethod      string    `json:"file_copy_method,omitempty" yaml:"file_copy_method,omitempty"`
+	FileCopyMethodError string    `json:"file_copy_method_error,omitempty" yaml:"file_copy_method_error,omitempty"`
+	DataDirectory       string    `json:"data_directory,omitempty" yaml:"data_directory,omitempty"`
+	FileSystem          string    `json:"file_system,omitempty" yaml:"file_system,omitempty"`
+	CloneMode           CloneMode `json:"clone_mode,omitempty" yaml:"clone_mode,omitempty"`
+	Strategy            string    `json:"strategy" yaml:"strategy"`
+	FileSystemError     string    `json:"file_system_error,omitempty" yaml:"file_system_error,omitempty"`
+}
+
+func (p DatabasePreflight) Warnings() []string {
+	warnings := []string{}
+	if p.ServerVersion > 0 && p.ServerVersion < 180000 {
+		warnings = append(warnings, fmt.Sprintf("PostgreSQL 18+ is recommended for CoW database clone, current server_version_num=%d", p.ServerVersion))
+	}
+	if p.ServerVersion == 0 {
+		warnings = append(warnings, "PostgreSQL version could not be verified")
+	}
+	if !strings.EqualFold(p.FileCopyMethod, "clone") {
+		if p.FileCopyMethod == "" {
+			if p.FileCopyMethodError != "" {
+				warnings = append(warnings, fmt.Sprintf("file_copy_method=clone could not be verified: %s", p.FileCopyMethodError))
+			} else {
+				warnings = append(warnings, "file_copy_method=clone could not be verified")
+			}
+		} else {
+			warnings = append(warnings, fmt.Sprintf("file_copy_method=clone is recommended, current value is %s", p.FileCopyMethod))
+		}
+	}
+	if p.CloneMode != CloneModeCOW {
+		if p.FileSystemError != "" {
+			warnings = append(warnings, fmt.Sprintf("CoW clone support could not be verified for data_directory %s: %s", p.DataDirectory, p.FileSystemError))
+		} else {
+			warnings = append(warnings, fmt.Sprintf("CoW clone is not confirmed for data_directory %s on filesystem %s", p.DataDirectory, p.FileSystem))
+		}
+	}
+	return warnings
 }
 
 var forkNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
@@ -193,14 +243,25 @@ func firstFreePort(start int) int {
 
 func normalizeDatabase(opts *Options) error {
 	db := &opts.Database
+	db.SourceDB = strings.TrimSpace(db.SourceDB)
+	db.DestDB = strings.TrimSpace(db.DestDB)
+	db.Owner = strings.TrimSpace(db.Owner)
+	db.ConnDB = strings.TrimSpace(db.ConnDB)
 	if db.SourceDB == "" {
 		return fmt.Errorf("source database is required")
 	}
-	if db.DestDB == "" {
-		return fmt.Errorf("destination database is required")
+	if strings.EqualFold(db.SourceDB, "template0") || strings.EqualFold(db.SourceDB, "template1") {
+		return fmt.Errorf("source database %q is a system template; clone an existing user database instead", db.SourceDB)
 	}
 	if db.ConnDB == "" {
-		db.ConnDB = "postgres"
+		if strings.EqualFold(db.SourceDB, "postgres") {
+			db.ConnDB = "template1"
+		} else {
+			db.ConnDB = "postgres"
+		}
+	}
+	if strings.EqualFold(db.ConnDB, db.SourceDB) {
+		return fmt.Errorf("connection database must differ from source database %q", db.SourceDB)
 	}
 	if db.Port == 0 {
 		if port := os.Getenv("PG_PORT"); port != "" {
@@ -212,24 +273,9 @@ func normalizeDatabase(opts *Options) error {
 	if db.Port == 0 {
 		db.Port = 5432
 	}
-	if db.Strategy == "" {
-		db.Strategy = "FILE_COPY"
+	if db.ConnLimitSet && db.ConnLimit < -1 {
+		return fmt.Errorf("invalid connection limit %d (must be -1 or greater)", db.ConnLimit)
 	}
-	db.Strategy = strings.ToUpper(strings.ReplaceAll(db.Strategy, "-", "_"))
-	if db.Strategy != "FILE_COPY" && db.Strategy != "WAL_LOG" {
-		return fmt.Errorf("invalid database clone strategy %q (valid: FILE_COPY, WAL_LOG)", db.Strategy)
-	}
-	db.Kill = shouldKillDatabaseConnections(*db)
+	db.Kill = true
 	return nil
-}
-
-func shouldKillDatabaseConnections(db DatabaseOptions) bool {
-	if db.NoKill {
-		return false
-	}
-	sourceDB := strings.TrimSpace(db.SourceDB)
-	if sourceDB == "" {
-		return false
-	}
-	return !strings.EqualFold(sourceDB, "template0") && !strings.EqualFold(sourceDB, "template1")
 }

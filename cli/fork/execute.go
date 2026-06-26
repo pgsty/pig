@@ -55,6 +55,10 @@ func Plan(opts *Options) (*output.Plan, error) {
 		}
 		n.Instance.SourceData = sourceData
 		n.Instance.DestData = destData
+	} else if n.Kind == KindDatabase {
+		if err := prepareDatabaseClone(n); err != nil {
+			return nil, err
+		}
 	}
 	return BuildPlan(n, inferPlanState(n)), nil
 }
@@ -64,20 +68,34 @@ func Execute(opts *Options) error {
 	if err != nil {
 		return exitForkError(output.CodeForkInvalidArgs, err)
 	}
-	if !n.Yes {
-		message, keyword := "This will create a PostgreSQL instance fork and may replace the destination!", "FORK"
-		if n.Kind == KindDatabase {
-			message, keyword = "This will clone a PostgreSQL database and may terminate active source sessions!", "CLONE"
+	if n.Kind == KindDatabase {
+		if err := prepareDatabaseClone(n); err != nil {
+			var fe *ForkError
+			if errors.As(err, &fe) {
+				return &utils.ExitCodeError{Code: output.ExitCode(fe.Code), Err: fe}
+			}
+			return err
 		}
-		if err := pgbackrest.ConfirmWithCountdown(message, keyword); err != nil {
+		printDatabasePreflight(n.Database.Preflight, n.Database.Warnings)
+	}
+	if !n.Yes {
+		if n.Kind == KindDatabase {
+			if err := confirmDatabaseWarnings(n.Database.Warnings, "CLONE", 10); err != nil {
+				return exitForkError(output.CodeForkInvalidArgs, err)
+			}
+		} else if err := pgbackrest.ConfirmWithCountdown("This will create a PostgreSQL instance fork and may replace the destination!", "FORK"); err != nil {
 			return exitForkError(output.CodeForkInvalidArgs, err)
 		}
 	}
-	if _, err := executeNormalized(n); err != nil {
+	data, err := executeNormalized(n)
+	if err != nil {
 		if fe, ok := err.(*ForkError); ok {
 			return &utils.ExitCodeError{Code: output.ExitCode(fe.Code), Err: fe}
 		}
 		return err
+	}
+	if n.Kind == KindDatabase {
+		printDatabaseResult(data)
 	}
 	return nil
 }
@@ -86,6 +104,14 @@ func ExecuteResult(opts *Options) *output.Result {
 	n, err := NormalizeOptions(opts)
 	if err != nil {
 		return output.Fail(output.CodeForkInvalidArgs, err.Error())
+	}
+	if n.Kind == KindDatabase {
+		if err := prepareDatabaseClone(n); err != nil {
+			if fe, ok := err.(*ForkError); ok {
+				return output.Fail(fe.Code, fe.Error())
+			}
+			return output.Fail(output.CodeForkPrecheckFailed, err.Error())
+		}
 	}
 	data, err := executeNormalized(n)
 	if err != nil {
@@ -469,10 +495,129 @@ func executeDatabase(opts *Options) error {
 	}
 	sql := BuildDatabaseCloneSQL(&opts.Database)
 	args := []string{pg.Psql(), "-p", fmt.Sprintf("%d", opts.Database.Port), "-d", opts.Database.ConnDB, "-f"}
+	utils.PrintHint(append(args, "<clone-sql>"))
 	if err := runSQLFile(opts.DbSU, args, sql); err != nil {
 		return &ForkError{Code: output.CodeForkDatabaseFailed, Err: err}
 	}
+	if ownerSQL := BuildDatabaseAlterOwnerSQL(opts.Database.DestDB, opts.Database.Owner); ownerSQL != "" {
+		ownerArgs := []string{pg.Psql(), "-p", fmt.Sprintf("%d", opts.Database.Port), "-d", opts.Database.ConnDB, "-f"}
+		utils.PrintHint(append(ownerArgs, "<owner-sql>"))
+		if err := runSQLFile(opts.DbSU, ownerArgs, ownerSQL); err != nil {
+			opts.Database.OwnerChanged = false
+			opts.Database.OwnerWarning = err.Error()
+		} else {
+			opts.Database.OwnerChanged = true
+		}
+	}
 	return nil
+}
+
+type databaseInfo struct {
+	Name string
+}
+
+func prepareDatabaseClone(opts *Options) error {
+	if opts == nil || opts.Kind != KindDatabase {
+		return nil
+	}
+	pg, err := ext.FindPostgres(0)
+	if err != nil {
+		return &ForkError{Code: output.CodeForkDependencyMissing, Err: fmt.Errorf("postgresql not found: %w", err)}
+	}
+	preflight := DatabasePreflight{Strategy: "FILE_COPY"}
+	versionText, err := runPsqlQuery(opts.DbSU, pg.Psql(), opts.Database.Port, opts.Database.ConnDB, "SELECT current_setting('server_version_num')")
+	if err != nil {
+		return &ForkError{Code: output.CodeForkPrecheckFailed, Err: err}
+	}
+	version, err := strconv.Atoi(strings.TrimSpace(versionText))
+	if err != nil {
+		return &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("invalid server_version_num %q: %w", strings.TrimSpace(versionText), err)}
+	}
+	preflight.ServerVersion = version
+	if fileCopyMethod, err := runPsqlQuery(opts.DbSU, pg.Psql(), opts.Database.Port, opts.Database.ConnDB, "SHOW file_copy_method"); err == nil {
+		preflight.FileCopyMethod = strings.TrimSpace(fileCopyMethod)
+	} else {
+		preflight.FileCopyMethodError = err.Error()
+	}
+	if dataDirectory, err := runPsqlQuery(opts.DbSU, pg.Psql(), opts.Database.Port, opts.Database.ConnDB, "SHOW data_directory"); err == nil {
+		preflight.DataDirectory = strings.TrimSpace(dataDirectory)
+		cloneMode, fs, fsErr := detectCloneModeForPath(preflight.DataDirectory)
+		preflight.CloneMode = cloneMode
+		preflight.FileSystem = fs
+		if fsErr != nil {
+			preflight.FileSystemError = fsErr.Error()
+		}
+	} else {
+		preflight.FileSystemError = err.Error()
+	}
+	opts.Database.Preflight = preflight
+
+	databases, err := listDatabases(opts.DbSU, pg.Psql(), opts.Database.Port, opts.Database.ConnDB)
+	if err != nil {
+		return &ForkError{Code: output.CodeForkPrecheckFailed, Err: err}
+	}
+	existing := make(map[string]bool, len(databases))
+	sourceFound := false
+	for _, db := range databases {
+		existing[db.Name] = true
+		if db.Name == opts.Database.SourceDB {
+			sourceFound = true
+		}
+	}
+	if !sourceFound {
+		return &ForkError{Code: output.CodeForkSourceNotFound, Err: fmt.Errorf("source database does not exist: %s", opts.Database.SourceDB)}
+	}
+	if opts.Database.DestDB == "" {
+		opts.Database.DestDB = NextDatabaseCloneName(opts.Database.SourceDB, existing)
+	} else if existing[opts.Database.DestDB] {
+		return &ForkError{Code: output.CodeForkDestExists, Err: fmt.Errorf("destination database already exists: %s", opts.Database.DestDB)}
+	}
+	opts.Database.Warnings = opts.Database.Preflight.Warnings()
+	return nil
+}
+
+func listDatabases(dbsu, psql string, port int, connDB string) ([]databaseInfo, error) {
+	sql := "SELECT datname FROM pg_database ORDER BY datname"
+	out, err := runPsqlQuery(dbsu, psql, port, connDB, sql)
+	if err != nil {
+		return nil, err
+	}
+	names := parseDatabaseNames(out)
+	databases := make([]databaseInfo, 0, len(names))
+	for _, name := range names {
+		databases = append(databases, databaseInfo{
+			Name: name,
+		})
+	}
+	return databases, nil
+}
+
+func parseDatabaseNames(out string) []string {
+	if strings.TrimSpace(out) == "" {
+		return nil
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	names := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	return names
+}
+
+func runPsqlQuery(dbsu, psql string, port int, connDB string, sql string) (string, error) {
+	args := []string{
+		psql,
+		"-X",
+		"-qAt",
+		"-F", "\t",
+		"-v", "ON_ERROR_STOP=1",
+		"-p", fmt.Sprintf("%d", port),
+		"-d", connDB,
+		"-c", sql,
+	}
+	return utils.DBSUCommandOutput(dbsu, args)
 }
 
 func runSQLFile(dbsu string, args []string, sql string) error {
@@ -494,6 +639,33 @@ func runSQLFile(dbsu string, args []string, sql string) error {
 	}
 	args = append(args, path)
 	return utils.DBSUCommand(dbsu, args)
+}
+
+func confirmDatabaseWarnings(warnings []string, action string, seconds int) error {
+	if len(warnings) == 0 {
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "\n%sWARNING: preflight warnings above mean this may become a heavy production file copy.%s\n", utils.ColorYellow, utils.ColorReset)
+	fmt.Fprintln(os.Stderr, "Press Ctrl+C to cancel, or wait for countdown...")
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer func() {
+		signal.Stop(sigChan)
+		close(sigChan)
+	}()
+
+	for i := seconds; i > 0; i-- {
+		select {
+		case <-sigChan:
+			fmt.Fprintf(os.Stderr, "\n%s cancelled.\n", action)
+			return fmt.Errorf("%s cancelled by user", action)
+		case <-time.After(time.Second):
+			fmt.Fprintf(os.Stderr, "\rStarting %s in %d seconds... ", action, i)
+		}
+	}
+	fmt.Fprintln(os.Stderr)
+	return nil
 }
 
 func canConnect(dbsu string, port int) bool {
@@ -611,6 +783,24 @@ func requireCOW(state *State, force bool) error {
 	return fmt.Errorf("copy-on-write is not available on source filesystem %q; use --force to allow regular copy fallback", fs)
 }
 
+func detectCloneModeForPath(path string) (CloneMode, string, error) {
+	mount, fs := dfMountAndFS(path)
+	if mount == "" || fs == "" {
+		return CloneModeCopy, "", fmt.Errorf("unable to detect filesystem for %s", path)
+	}
+	switch strings.ToLower(fs) {
+	case "xfs":
+		if xfsReflinkEnabled(mount) {
+			return CloneModeCOW, fs, nil
+		}
+		return CloneModeCopy, fs, nil
+	case "btrfs", "bcachefs", "ocfs2", "apfs":
+		return CloneModeCOW, fs, nil
+	default:
+		return CloneModeCopy, fs, nil
+	}
+}
+
 func detectCloneMode(src, dst string) (CloneMode, string) {
 	dstParent := existingParent(filepath.Dir(dst))
 	srcMount, srcFS := dfMountAndFS(src)
@@ -684,16 +874,61 @@ func instanceResult(opts *Options, state *State, elapsed time.Duration) ResultDa
 
 func databaseResult(opts *Options, elapsed time.Duration) ResultData {
 	db := opts.Database
-	return ResultData{
+	warnings := append([]string{}, db.Warnings...)
+	preflight := db.Preflight
+	data := ResultData{
 		Kind:           KindDatabase,
 		Source:         db.SourceDB,
 		Destination:    db.DestDB,
 		SourcePort:     db.Port,
 		BackupMode:     "template",
-		CloneMode:      db.Strategy,
+		CloneMode:      "FILE_COPY",
 		Started:        true,
 		ConnectCommand: fmt.Sprintf("psql -p %d -d %s", db.Port, db.DestDB),
 		CleanupCommand: fmt.Sprintf("dropdb -p %d %s", db.Port, db.DestDB),
 		Duration:       elapsed.Seconds(),
+		Preflight:      &preflight,
+		Warnings:       warnings,
 	}
+	if db.Owner != "" {
+		data.OwnerRequested = db.Owner
+		data.OwnerChanged = db.OwnerChanged
+		data.OwnerWarning = db.OwnerWarning
+	}
+	return data
+}
+
+func printDatabasePreflight(preflight DatabasePreflight, warnings []string) {
+	utils.PrintSection("Database Clone Preflight")
+	fmt.Fprintf(os.Stderr, "PG Version:        %d\n", preflight.ServerVersion)
+	fmt.Fprintf(os.Stderr, "file_copy_method:  %s\n", valueOrUnknown(preflight.FileCopyMethod))
+	if preflight.FileCopyMethodError != "" {
+		fmt.Fprintf(os.Stderr, "file_copy_error:   %s\n", preflight.FileCopyMethodError)
+	}
+	fmt.Fprintf(os.Stderr, "strategy:          %s\n", preflight.Strategy)
+	fmt.Fprintf(os.Stderr, "data_directory:    %s\n", valueOrUnknown(preflight.DataDirectory))
+	fmt.Fprintf(os.Stderr, "filesystem:        %s\n", valueOrUnknown(preflight.FileSystem))
+	fmt.Fprintf(os.Stderr, "copy:              %s\n", valueOrUnknown(string(preflight.CloneMode)))
+	for _, warning := range warnings {
+		utils.PrintWarn("%s", warning)
+	}
+}
+
+func printDatabaseResult(data ResultData) {
+	fmt.Fprintf(os.Stderr, "%sDatabase cloned:%s %s\n", utils.ColorGreen, utils.ColorReset, data.Destination)
+	fmt.Fprintf(os.Stderr, "%sConnect:%s %s\n", utils.ColorCyan, utils.ColorReset, data.ConnectCommand)
+	if data.OwnerRequested != "" {
+		if data.OwnerChanged {
+			fmt.Fprintf(os.Stderr, "%sOwner:%s changed to %s\n", utils.ColorCyan, utils.ColorReset, data.OwnerRequested)
+		} else {
+			utils.PrintWarn("owner was not changed to %s: %s", data.OwnerRequested, data.OwnerWarning)
+		}
+	}
+}
+
+func valueOrUnknown(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
+	}
+	return value
 }

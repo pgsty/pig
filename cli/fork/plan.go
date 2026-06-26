@@ -92,9 +92,17 @@ func buildDatabasePlan(opts *Options, state *State) *output.Plan {
 		Step:        step,
 		Description: fmt.Sprintf("Create database %s from template %s", db.DestDB, db.SourceDB),
 	})
+	step++
+	if db.Owner != "" {
+		actions = append(actions, output.Action{
+			Step:        step,
+			Description: fmt.Sprintf("Best-effort alter database %s owner to %s", db.DestDB, db.Owner),
+		})
+	}
 
 	risks := []string{
 		"CREATE DATABASE from template requires no active connections on the source database",
+		"Applications with persistent reconnect may cause clone to fail; consider a maintenance window",
 	}
 	if db.Kill {
 		risks = append(risks, "Active source database sessions will be terminated")
@@ -102,15 +110,16 @@ func buildDatabasePlan(opts *Options, state *State) *output.Plan {
 	if state != nil && state.CloneMode == CloneModeCopy {
 		risks = append(risks, "Database copy may fall back to regular file copy if clone support is unavailable")
 	}
+	risks = append(risks, db.Warnings...)
 
 	return &output.Plan{
 		Command: BuildCommand(opts),
 		Actions: actions,
 		Affects: []output.Resource{
 			{Type: "database", Name: db.SourceDB, Impact: "read", Detail: fmt.Sprintf("port %d", db.Port)},
-			{Type: "database", Name: db.DestDB, Impact: "create", Detail: db.Strategy},
+			{Type: "database", Name: db.DestDB, Impact: "create", Detail: "FILE_COPY"},
 		},
-		Expected: fmt.Sprintf("Database %s cloned from %s using %s", db.DestDB, db.SourceDB, db.Strategy),
+		Expected: fmt.Sprintf("Database %s cloned from %s using FILE_COPY", db.DestDB, db.SourceDB),
 		Risks:    risks,
 	}
 }
@@ -142,9 +151,9 @@ func BuildCommand(opts *Options) string {
 			args = append(args, "-f")
 		}
 	case KindDatabase:
-		args = append(args, "clone", opts.Database.SourceDB, opts.Database.DestDB)
-		if opts.Database.NoKill {
-			args = append(args, "--no-kill")
+		args = append(args, "clone", opts.Database.SourceDB)
+		if opts.Database.DestDB != "" {
+			args = append(args, opts.Database.DestDB)
 		}
 		if opts.Database.Port != 0 && opts.Database.Port != 5432 {
 			args = append(args, "-p", fmt.Sprintf("%d", opts.Database.Port))
@@ -152,8 +161,11 @@ func BuildCommand(opts *Options) string {
 		if opts.Database.ConnDB != "" && opts.Database.ConnDB != "postgres" {
 			args = append(args, "--conn-db", quoteArg(opts.Database.ConnDB))
 		}
-		if opts.Database.Strategy != "" && opts.Database.Strategy != "FILE_COPY" {
-			args = append(args, "--strategy", opts.Database.Strategy)
+		if opts.Database.Owner != "" {
+			args = append(args, "--owner", quoteArg(opts.Database.Owner))
+		}
+		if opts.Database.ConnLimitSet {
+			args = append(args, "--conn-limit", fmt.Sprintf("%d", opts.Database.ConnLimit))
 		}
 	}
 	if opts.Yes {
@@ -169,29 +181,41 @@ func BuildDatabaseCloneSQL(opts *DatabaseOptions) string {
 	if opts == nil {
 		return ""
 	}
-	strategy := opts.Strategy
-	if strategy == "" {
-		strategy = "FILE_COPY"
-	}
-	strategy = strings.ToUpper(strings.ReplaceAll(strategy, "-", "_"))
 	var sb strings.Builder
 	sb.WriteString("\\set ON_ERROR_STOP on\n")
-	if shouldKillDatabaseConnections(*opts) {
-		sb.WriteString("SELECT pg_terminate_backend(pid)\n")
-		sb.WriteString("  FROM pg_stat_activity\n")
-		sb.WriteString(" WHERE datname = '")
-		sb.WriteString(EscapeSQLString(opts.SourceDB))
-		sb.WriteString("'\n")
-		sb.WriteString("   AND pid <> pg_backend_pid();\n")
-	}
+	sb.WriteString("SELECT pg_terminate_backend(pid)\n")
+	sb.WriteString("  FROM pg_stat_activity\n")
+	sb.WriteString(" WHERE datname = '")
+	sb.WriteString(EscapeSQLString(opts.SourceDB))
+	sb.WriteString("'\n")
+	sb.WriteString("   AND pid <> pg_backend_pid();\n")
 	sb.WriteString("CREATE DATABASE ")
 	sb.WriteString(QuoteIdentifier(opts.DestDB))
 	sb.WriteString(" WITH TEMPLATE ")
 	sb.WriteString(QuoteIdentifier(opts.SourceDB))
-	sb.WriteString(" STRATEGY ")
-	sb.WriteString(strategy)
+	sb.WriteString(" STRATEGY FILE_COPY")
+	if opts.ConnLimitSet {
+		sb.WriteString(" CONNECTION LIMIT ")
+		sb.WriteString(fmt.Sprintf("%d", opts.ConnLimit))
+	}
 	sb.WriteString(";\n")
 	return sb.String()
+}
+
+func BuildDatabaseAlterOwnerSQL(destDB, owner string) string {
+	if strings.TrimSpace(owner) == "" {
+		return ""
+	}
+	return fmt.Sprintf("ALTER DATABASE %s OWNER TO %s;\n", QuoteIdentifier(destDB), QuoteIdentifier(owner))
+}
+
+func NextDatabaseCloneName(source string, existing map[string]bool) string {
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s_%d", source, i)
+		if !existing[candidate] {
+			return candidate
+		}
+	}
 }
 
 func QuoteIdentifier(value string) string {
