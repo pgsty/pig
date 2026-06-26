@@ -263,17 +263,17 @@ func TestLoadAliasMapOSOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadAliasMapArchOverridesStillApply(t *testing.T) {
+func TestLoadAliasMapEl9Arm64UsesPinnedPatroniAliases(t *testing.T) {
 	cleanup := withAliasMapTestEnv(t, config.DistroEL, "el9", "arm64")
 	defer cleanup()
 
 	ec := &ExtensionCatalog{}
 	ec.LoadAliasMap(config.OSType)
 
-	if got := ec.AliasMap["patroni"]; got != "patroni-4.1.2 patroni-etcd-4.1.2" {
-		t.Fatalf("unexpected patroni alias after arch override: %q", got)
+	if got := ec.AliasMap["patroni"]; got != "patroni-4.1.3 patroni-etcd-4.1.3" {
+		t.Fatalf("unexpected patroni alias for el9 arm64: %q", got)
 	}
-	if got := ec.AliasMap["pgsql-common"]; got != "patroni-4.1.2 patroni-etcd-4.1.2 pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager" {
-		t.Fatalf("unexpected pgsql-common alias after arch override: %q", got)
+	if got := ec.AliasMap["pgsql-common"]; got != "patroni-4.1.3 patroni-etcd-4.1.3 pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager" {
+		t.Fatalf("unexpected pgsql-common alias for el9 arm64: %q", got)
 	}
 }
