@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"reflect"
 	"testing"
 
 	"pig/internal/config"
@@ -24,6 +25,30 @@ func withResolveTestEnv(t *testing.T, osType, osVersion string, catalog *Extensi
 	}
 }
 
+func withResolveAliasTestEnv(t *testing.T, osType, osVersion, osCode, osArch string, catalog *ExtensionCatalog) func() {
+	t.Helper()
+
+	oldOSType := config.OSType
+	oldOSVersion := config.OSVersion
+	oldOSCode := config.OSCode
+	oldOSArch := config.OSArch
+	oldCatalog := Catalog
+
+	config.OSType = osType
+	config.OSVersion = osVersion
+	config.OSCode = osCode
+	config.OSArch = osArch
+	Catalog = catalog
+
+	return func() {
+		config.OSType = oldOSType
+		config.OSVersion = oldOSVersion
+		config.OSCode = oldOSCode
+		config.OSArch = oldOSArch
+		Catalog = oldCatalog
+	}
+}
+
 func newTestCatalog(ext *Extension) *ExtensionCatalog {
 	return &ExtensionCatalog{
 		Extensions: []*Extension{ext},
@@ -33,6 +58,16 @@ func newTestCatalog(ext *Extension) *ExtensionCatalog {
 		ExtPkgMap: map[string]*Extension{
 			ext.Pkg: ext,
 		},
+		Dependency: map[string][]string{},
+		AliasMap:   map[string]string{},
+	}
+}
+
+func newEmptyTestCatalog() *ExtensionCatalog {
+	return &ExtensionCatalog{
+		Extensions: []*Extension{},
+		ExtNameMap: map[string]*Extension{},
+		ExtPkgMap:  map[string]*Extension{},
 		Dependency: map[string][]string{},
 		AliasMap:   map[string]string{},
 	}
@@ -206,5 +241,69 @@ func TestResolveExtensionPackagesKeepsFirstOwnerOnDuplicatePackage(t *testing.T)
 
 	if owner := res.PackageOwner["postgresql17"]; owner != "pg17" {
 		t.Fatalf("expected first owner pg17 for duplicated package postgresql17, got %q", owner)
+	}
+}
+
+func TestResolveOrioleDBAliasUsesTargetPGVersion(t *testing.T) {
+	tests := []struct {
+		name      string
+		osType    string
+		osVersion string
+		osCode    string
+		pgVer     int
+		want      []string
+	}{
+		{
+			name:      "el_pg16",
+			osType:    config.DistroEL,
+			osVersion: "9",
+			osCode:    "el9",
+			pgVer:     16,
+			want:      []string{"orioledb_16", "oriolepg_16"},
+		},
+		{
+			name:      "el_pg18",
+			osType:    config.DistroEL,
+			osVersion: "9",
+			osCode:    "el9",
+			pgVer:     18,
+			want:      []string{"orioledb_18", "oriolepg_18"},
+		},
+		{
+			name:      "deb_pg16",
+			osType:    config.DistroDEB,
+			osVersion: "24",
+			osCode:    "u24",
+			pgVer:     16,
+			want:      []string{"oriolepg-16-orioledb", "oriolepg-16"},
+		},
+		{
+			name:      "deb_pg18",
+			osType:    config.DistroDEB,
+			osVersion: "24",
+			osCode:    "u24",
+			pgVer:     18,
+			want:      []string{"oriolepg-18-orioledb", "oriolepg-18"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup := withResolveAliasTestEnv(t, tt.osType, tt.osVersion, tt.osCode, "amd64", newEmptyTestCatalog())
+			defer cleanup()
+
+			res := ResolveExtensionPackages(tt.pgVer, []string{"orioledb"}, false)
+			if len(res.NotFound) != 0 || len(res.NoPackage) != 0 {
+				t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
+			}
+			if !reflect.DeepEqual(res.Packages, tt.want) {
+				t.Fatalf("unexpected packages: want %v, got %v", tt.want, res.Packages)
+			}
+			for _, pkg := range res.Packages {
+				if res.PackageOwner[pkg] != "orioledb" {
+					t.Fatalf("unexpected owner for %s: %s", pkg, res.PackageOwner[pkg])
+				}
+			}
+		})
 	}
 }
