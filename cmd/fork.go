@@ -65,37 +65,6 @@ writes fork.json, and does not start the forked instance unless -r/--run is set.
 	return cmd
 }
 
-func newPgCloneCommand() *cobra.Command {
-	opts := &forkCLIOptions{}
-	cmd := &cobra.Command{
-		Use:               "clone <source-db> [dest-db]",
-		Short:             "Clone a PostgreSQL database with FILE_COPY",
-		Args:              cobra.RangeArgs(1, 2),
-		Annotations:       ancsAnn("pig postgres clone", "action", "volatile", "unsafe", false, "high", "recommended", "dbsu", 60000),
-		PersistentPreRunE: forkPreRun,
-		Long: `Clone a database inside the current PostgreSQL instance.
-
-This wraps CREATE DATABASE ... TEMPLATE ... STRATEGY FILE_COPY. It terminates
-existing source-database sessions immediately before cloning, matching Pigsty's
-pgsql-db clone workflow.`,
-		Example: `  pig pg clone app                      # clone app to app_1/app_2/...
-  pig pg clone app app_fork             # clone app to app_fork
-  pig pg clone app app_fork --owner dba # set owner on cloned database
-  pig pg clone app app_fork -p 5433     # clone on another local port
-  pig pg clone app app_fork --plan      # preview clone plan`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			destDB := ""
-			if len(args) > 1 {
-				destDB = args[1]
-			}
-			return runFork(cmd, buildDatabaseOptions(opts, args[0], destDB, cmd.Flags().Changed("conn-limit")))
-		},
-	}
-	addForkCommonFlags(cmd, opts)
-	addPgCloneFlags(cmd, opts)
-	return cmd
-}
-
 func forkPreRun(cmd *cobra.Command, args []string) error {
 	if err := initAll(); err != nil {
 		return err
@@ -119,13 +88,6 @@ func addPgForkFlags(cmd *cobra.Command, opts *forkCLIOptions) {
 	cmd.Flags().IntVarP(&opts.sourcePort, "src-port", "P", 0, "source PostgreSQL port (default: 5432 or $PG_PORT)")
 	cmd.Flags().StringVarP(&opts.sourceData, "src-data", "D", "", "source data directory (default: /pg/data or $PG_DATA)")
 	cmd.Flags().IntVarP(&opts.timeout, "timeout", "t", 0, "startup timeout in seconds")
-}
-
-func addPgCloneFlags(cmd *cobra.Command, opts *forkCLIOptions) {
-	cmd.Flags().IntVarP(&opts.dbPort, "port", "p", 0, "PostgreSQL port (default: 5432 or $PG_PORT)")
-	cmd.Flags().StringVar(&opts.connDB, "conn-db", "", "database used to run CREATE DATABASE (default: postgres, or template1 when cloning postgres)")
-	cmd.Flags().StringVar(&opts.owner, "owner", "", "best-effort owner change after clone")
-	cmd.Flags().IntVar(&opts.connLimit, "conn-limit", 0, "connection limit for cloned database (-1 = no limit, 0 = disallow)")
 }
 
 func buildInstanceOptions(cli *forkCLIOptions, name string) *forkpkg.Options {
