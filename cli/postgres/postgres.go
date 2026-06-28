@@ -197,6 +197,10 @@ func CheckPostgresRunningAsDBSU(dbsu, dataDir string) (bool, int) {
 		logrus.Debugf("cannot parse PID from postmaster.pid: %v", err)
 		return false, 0
 	}
+	if !postmasterPIDMatchesDataDir(pidContent, dataDir) {
+		logrus.Debugf("postmaster.pid belongs to another data directory")
+		return false, pid
+	}
 
 	// Check if process exists using kill -0 via DBSU privilege escalation
 	// This is necessary because current user may not have permission to signal the postgres process
@@ -208,6 +212,18 @@ func CheckPostgresRunningAsDBSU(dbsu, dataDir string) (bool, int) {
 
 	logrus.Debugf("PostgreSQL is running with PID %d", pid)
 	return true, pid
+}
+
+func postmasterPIDMatchesDataDir(pidContent, dataDir string) bool {
+	lines := strings.Split(pidContent, "\n")
+	if len(lines) < 2 {
+		return true
+	}
+	pidDataDir := strings.TrimSpace(lines[1])
+	if pidDataDir == "" {
+		return true
+	}
+	return filepath.Clean(pidDataDir) == filepath.Clean(dataDir)
 }
 
 // checkProcessRunningAsDBSU checks if a process is running using kill -0 as DBSU.

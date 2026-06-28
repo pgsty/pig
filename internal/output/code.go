@@ -212,6 +212,8 @@ const (
 	CodeForkStartFailed       = MODULE_FORK + CAT_OPERATION + 4 // Forked instance start failed
 	CodeForkVerifyFailed      = MODULE_FORK + CAT_OPERATION + 5 // Post-fork verification failed
 	CodeForkDatabaseFailed    = MODULE_FORK + CAT_OPERATION + 6 // Database-level clone failed
+	CodeForkStopFailed        = MODULE_FORK + CAT_OPERATION + 7 // Forked instance stop failed
+	CodeForkRemoveFailed      = MODULE_FORK + CAT_OPERATION + 8 // Forked instance removal failed
 )
 
 // Context module specific codes (MODULE_CTX = 180000)

@@ -2,48 +2,19 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
-	forkpkg "pig/cli/fork"
+	postgrescli "pig/cli/postgres"
 	"pig/internal/output"
 )
 
-func TestPgForkAndCloneCommandsAreRegistered(t *testing.T) {
+func TestPgForkCommandIsRegistered(t *testing.T) {
 	pgFork, _, err := rootCmd.Find([]string{"pg", "fork"})
 	if err != nil {
 		t.Fatalf("pg fork command not found: %v", err)
 	}
 	if pgFork == nil || pgFork.Name() != "fork" {
 		t.Fatalf("pg fork command = %v, want fork", pgFork)
-	}
-
-	pgClone, _, err := rootCmd.Find([]string{"pg", "clone"})
-	if err != nil {
-		t.Fatalf("pg clone command not found: %v", err)
-	}
-	if pgClone == nil || pgClone.Name() != "clone" {
-		t.Fatalf("pg clone command = %v, want clone", pgClone)
-	}
-}
-
-func TestPgCloneAcceptsOptionalDestinationDatabase(t *testing.T) {
-	pgClone, _, err := rootCmd.Find([]string{"pg", "clone"})
-	if err != nil {
-		t.Fatalf("pg clone command not found: %v", err)
-	}
-
-	for _, args := range [][]string{{"app"}, {"app", "app_1"}} {
-		if err := pgClone.Args(pgClone, args); err != nil {
-			t.Fatalf("pg clone Args(%v) returned error: %v", args, err)
-		}
-	}
-
-	if err := pgClone.Args(pgClone, nil); err == nil {
-		t.Fatal("pg clone should reject missing source database")
-	}
-	if err := pgClone.Args(pgClone, []string{"app", "app_1", "extra"}); err == nil {
-		t.Fatal("pg clone should reject extra positional arguments")
 	}
 }
 
@@ -54,7 +25,7 @@ func TestTopLevelForkIsNotRegistered(t *testing.T) {
 	}
 }
 
-func TestPgForkAndCloneSupportPlanAndDryRun(t *testing.T) {
+func TestPgForkSupportsPlanAndDryRun(t *testing.T) {
 	pgFork, _, err := rootCmd.Find([]string{"pg", "fork"})
 	if err != nil {
 		t.Fatalf("pg fork command not found: %v", err)
@@ -65,16 +36,23 @@ func TestPgForkAndCloneSupportPlanAndDryRun(t *testing.T) {
 	if pgFork.PersistentFlags().Lookup("dry-run") == nil {
 		t.Fatal("--dry-run alias not found on pg fork command")
 	}
+}
 
-	pgClone, _, err := rootCmd.Find([]string{"pg", "clone"})
-	if err != nil {
-		t.Fatalf("pg clone command not found: %v", err)
-	}
-	if pgClone.PersistentFlags().Lookup("plan") == nil {
-		t.Fatal("--plan flag not found on pg clone command")
-	}
-	if pgClone.PersistentFlags().Lookup("dry-run") == nil {
-		t.Fatal("--dry-run alias not found on pg clone command")
+func TestPgForkRegistersLifecycleSubcommands(t *testing.T) {
+	for _, args := range [][]string{
+		{"pg", "fork", "init"},
+		{"pg", "fork", "list"},
+		{"pg", "fork", "start"},
+		{"pg", "fork", "stop"},
+		{"pg", "fork", "rm"},
+	} {
+		cmd, _, err := rootCmd.Find(args)
+		if err != nil {
+			t.Fatalf("%v command not found: %v", args, err)
+		}
+		if cmd == nil || cmd.Name() != args[len(args)-1] {
+			t.Fatalf("%v resolved to %v", args, cmd)
+		}
 	}
 }
 
@@ -93,65 +71,104 @@ func TestPgForkExposesNamedForkFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pg fork command not found: %v", err)
 	}
-	for _, name := range []string{"list", "force", "run", "port", "data", "src-port", "src-data"} {
+	for _, name := range []string{"list", "force", "run", "src-data", "src-port", "dst-data", "dst-port"} {
 		if pgFork.Flags().Lookup(name) == nil {
 			t.Fatalf("pg fork should expose --%s", name)
 		}
 	}
-	for _, name := range []string{"no-start", "replace", "mode", "dst", "dst-port"} {
-		if pgFork.Flags().Lookup(name) != nil {
+	for _, name := range []string{"no-start", "replace", "mode", "data", "dst", "port"} {
+		if pgFork.LocalFlags().Lookup(name) != nil {
 			t.Fatalf("pg fork should not expose old --%s flag", name)
 		}
 	}
 }
 
-func TestPgCloneDoesNotExposeInstanceOnlyFlags(t *testing.T) {
-	pgClone, _, err := rootCmd.Find([]string{"pg", "clone"})
+func TestPgForkInitExposesCreateFlags(t *testing.T) {
+	pgForkInit, _, err := rootCmd.Find([]string{"pg", "fork", "init"})
 	if err != nil {
-		t.Fatalf("pg clone command not found: %v", err)
+		t.Fatalf("pg fork init command not found: %v", err)
 	}
-	for _, name := range []string{"no-start", "replace", "mode", "no-kill", "strategy", "tablespace"} {
-		if pgClone.Flags().Lookup(name) != nil {
-			t.Fatalf("pg clone should not expose --%s", name)
+	for _, name := range []string{"force", "run", "src-data", "src-port", "dst-data", "dst-port", "timeout"} {
+		if pgForkInit.Flags().Lookup(name) == nil {
+			t.Fatalf("pg fork init should expose --%s", name)
+		}
+	}
+	for _, name := range []string{"data", "dst", "port"} {
+		if pgForkInit.LocalFlags().Lookup(name) != nil {
+			t.Fatalf("pg fork init should not expose old --%s flag", name)
 		}
 	}
 }
 
-func TestPgCloneExposesMinimalCloneFlags(t *testing.T) {
-	pgClone, _, err := rootCmd.Find([]string{"pg", "clone"})
-	if err != nil {
-		t.Fatalf("pg clone command not found: %v", err)
-	}
-	for _, name := range []string{"owner", "conn-limit", "port", "conn-db"} {
-		if pgClone.Flags().Lookup(name) == nil {
-			t.Fatalf("pg clone should expose --%s", name)
+func TestPgForkLifecycleCommandsExposeDstEscapeHatch(t *testing.T) {
+	for _, args := range [][]string{
+		{"pg", "fork", "start"},
+		{"pg", "fork", "stop"},
+		{"pg", "fork", "rm"},
+	} {
+		cmd, _, err := rootCmd.Find(args)
+		if err != nil {
+			t.Fatalf("%v command not found: %v", args, err)
+		}
+		if cmd.Flags().Lookup("dst-data") == nil {
+			t.Fatalf("%v should expose --dst-data for unmanaged forks", args)
+		}
+		if cmd.LocalFlags().Lookup("dst") != nil {
+			t.Fatalf("%v should not expose old --dst flag", args)
 		}
 	}
 }
 
-func TestPgCloneConnLimitHelpMentionsUnlimited(t *testing.T) {
-	pgClone, _, err := rootCmd.Find([]string{"pg", "clone"})
+func TestPgForkStartExposesDestinationPortOverride(t *testing.T) {
+	pgForkStart, _, err := rootCmd.Find([]string{"pg", "fork", "start"})
 	if err != nil {
-		t.Fatalf("pg clone command not found: %v", err)
+		t.Fatalf("pg fork start command not found: %v", err)
 	}
-	flag := pgClone.Flags().Lookup("conn-limit")
-	if flag == nil {
-		t.Fatal("pg clone should expose --conn-limit")
+	if pgForkStart.Flags().Lookup("dst-port") == nil {
+		t.Fatal("pg fork start should expose --dst-port")
 	}
-	if !strings.Contains(flag.Usage, "-1 = no limit") {
-		t.Fatalf("--conn-limit usage = %q, want -1 semantics", flag.Usage)
+	if pgForkStart.LocalFlags().Lookup("port") != nil {
+		t.Fatal("pg fork start should not expose old --port flag")
+	}
+}
+
+func TestBuildInstanceOptionsUsesForkSourceAndDestinationFlags(t *testing.T) {
+	oldPgData := pgConfig.PgData
+	pgConfig.PgData = "/pg/data-parent"
+	t.Cleanup(func() {
+		pgConfig.PgData = oldPgData
+	})
+
+	opts := buildInstanceOptions(&forkCLIOptions{
+		sourceData: "/pg/data-source",
+		sourcePort: 15431,
+		destData:   "/tmp/dev-fork",
+		destPort:   15432,
+	}, "dev")
+
+	if opts.Instance.SourceData != "/pg/data-source" {
+		t.Fatalf("SourceData = %q, want fork --src-data override", opts.Instance.SourceData)
+	}
+	if opts.Instance.SourcePort != 15431 {
+		t.Fatalf("SourcePort = %d, want 15431", opts.Instance.SourcePort)
+	}
+	if opts.Instance.DestData != "/tmp/dev-fork" {
+		t.Fatalf("DestData = %q, want /tmp/dev-fork", opts.Instance.DestData)
+	}
+	if opts.Instance.DestPort != 15432 {
+		t.Fatalf("DestPort = %d, want 15432", opts.Instance.DestPort)
 	}
 }
 
 func TestForkListStatusUsesMinimalState(t *testing.T) {
 	tests := []struct {
 		name string
-		info forkpkg.ForkInfo
+		info postgrescli.ForkInfo
 		want string
 	}{
-		{"orphan", forkpkg.ForkInfo{Orphan: true}, "orphan"},
-		{"normal fork", forkpkg.ForkInfo{Target: forkpkg.ForkEndpoint{Started: false}}, "forked"},
-		{"started at creation time", forkpkg.ForkInfo{Target: forkpkg.ForkEndpoint{Started: true}}, "forked"},
+		{"orphan", postgrescli.ForkInfo{Orphan: true}, "orphan"},
+		{"normal fork", postgrescli.ForkInfo{Target: postgrescli.ForkEndpoint{Started: false}}, "forked"},
+		{"started at creation time", postgrescli.ForkInfo{Target: postgrescli.ForkEndpoint{Started: true}}, "forked"},
 	}
 
 	for _, tt := range tests {
@@ -164,7 +181,7 @@ func TestForkListStatusUsesMinimalState(t *testing.T) {
 }
 
 func TestForkErrorResultPreservesForkErrorCode(t *testing.T) {
-	result := forkErrorResult(&forkpkg.ForkError{
+	result := forkErrorResult(&postgrescli.ForkError{
 		Code: output.CodeForkInvalidArgs,
 		Err:  fmt.Errorf("unsafe destination data directory: /"),
 	})
