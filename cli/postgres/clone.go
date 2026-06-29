@@ -22,6 +22,15 @@ const (
 	DatabaseCloneModeCopy    DatabaseCloneMode = "copy"
 )
 
+const (
+	maxPostgresIdentifierBytes = 63
+	minPostgresCloneVersion    = 140000
+	fileCopyStrategyVersion    = 150000
+	fileCopyMethodCloneVersion = 180000
+	cloneStrategyDefault       = "DEFAULT"
+	cloneStrategyFileCopy      = "FILE_COPY"
+)
+
 type CloneOptions struct {
 	DbSU         string
 	Plan         bool
@@ -52,11 +61,15 @@ type ClonePreflight struct {
 
 func (p ClonePreflight) Warnings() []string {
 	warnings := []string{}
-	if p.ServerVersion > 0 && p.ServerVersion < 180000 {
-		warnings = append(warnings, fmt.Sprintf("PostgreSQL 18+ is recommended for CoW database clone, current server_version_num=%d", p.ServerVersion))
-	}
 	if p.ServerVersion == 0 {
 		warnings = append(warnings, "PostgreSQL version could not be verified")
+	}
+	if p.ServerVersion > 0 && p.ServerVersion < fileCopyStrategyVersion {
+		warnings = append(warnings, fmt.Sprintf("PostgreSQL 15+ supports STRATEGY FILE_COPY; current server_version_num=%d will use default template copy", p.ServerVersion))
+	}
+	if p.ServerVersion > 0 && p.ServerVersion < fileCopyMethodCloneVersion {
+		warnings = append(warnings, fmt.Sprintf("PostgreSQL 18+ is required for file_copy_method=clone / CoW database clone; current server_version_num=%d will use regular database copy", p.ServerVersion))
+		return warnings
 	}
 	if !strings.EqualFold(p.FileCopyMethod, "clone") {
 		if p.FileCopyMethod == "" {
@@ -132,12 +145,28 @@ func NormalizeCloneOptions(opts *CloneOptions) (*CloneOptions, error) {
 	if strings.EqualFold(n.SourceDB, "template0") || strings.EqualFold(n.SourceDB, "template1") {
 		return nil, fmt.Errorf("source database %q is a system template; clone an existing user database instead", n.SourceDB)
 	}
+	if err := validatePostgresIdentifier("source database", n.SourceDB); err != nil {
+		return nil, err
+	}
+	if n.DestDB != "" {
+		if err := validatePostgresIdentifier("destination database", n.DestDB); err != nil {
+			return nil, err
+		}
+	}
+	if n.Owner != "" {
+		if err := validatePostgresIdentifier("owner", n.Owner); err != nil {
+			return nil, err
+		}
+	}
 	if n.ConnDB == "" {
 		if strings.EqualFold(n.SourceDB, "postgres") {
 			n.ConnDB = "template1"
 		} else {
 			n.ConnDB = "postgres"
 		}
+	}
+	if err := validatePostgresIdentifier("connection database", n.ConnDB); err != nil {
+		return nil, err
 	}
 	if strings.EqualFold(n.ConnDB, n.SourceDB) {
 		return nil, fmt.Errorf("connection database must differ from source database %q", n.SourceDB)
@@ -219,6 +248,7 @@ func BuildClonePlan(opts *CloneOptions) *output.Plan {
 	if opts == nil {
 		return &output.Plan{Command: "pig pg clone"}
 	}
+	strategy := cloneStrategyForVersion(opts.Preflight.ServerVersion)
 	actions := []output.Action{
 		{Step: 1, Description: fmt.Sprintf("Terminate existing connections to %s", opts.SourceDB)},
 		{Step: 2, Description: fmt.Sprintf("Create database %s from template %s", opts.DestDB, opts.SourceDB)},
@@ -245,9 +275,9 @@ func BuildClonePlan(opts *CloneOptions) *output.Plan {
 		Actions: actions,
 		Affects: []output.Resource{
 			{Type: "database", Name: opts.SourceDB, Impact: "read", Detail: fmt.Sprintf("port %d", opts.Port)},
-			{Type: "database", Name: opts.DestDB, Impact: "create", Detail: "FILE_COPY"},
+			{Type: "database", Name: opts.DestDB, Impact: "create", Detail: strategy},
 		},
-		Expected: fmt.Sprintf("Database %s cloned from %s using FILE_COPY", opts.DestDB, opts.SourceDB),
+		Expected: fmt.Sprintf("Database %s cloned from %s using %s", opts.DestDB, opts.SourceDB, strategy),
 		Risks:    risks,
 	}
 }
@@ -297,7 +327,9 @@ func BuildDatabaseCloneSQL(opts *CloneOptions) string {
 	sb.WriteString(QuoteIdentifier(opts.DestDB))
 	sb.WriteString(" WITH TEMPLATE ")
 	sb.WriteString(QuoteIdentifier(opts.SourceDB))
-	sb.WriteString(" STRATEGY FILE_COPY")
+	if cloneSQLUsesStrategy(opts.Preflight.ServerVersion) {
+		sb.WriteString(" STRATEGY FILE_COPY")
+	}
 	if opts.ConnLimitSet {
 		sb.WriteString(" CONNECTION LIMIT ")
 		sb.WriteString(fmt.Sprintf("%d", opts.ConnLimit))
@@ -315,11 +347,47 @@ func BuildDatabaseAlterOwnerSQL(destDB, owner string) string {
 
 func NextDatabaseCloneName(source string, existing map[string]bool) string {
 	for i := 1; ; i++ {
-		candidate := fmt.Sprintf("%s_%d", source, i)
+		suffix := fmt.Sprintf("_%d", i)
+		candidate := trimIdentifierToBytes(source, maxPostgresIdentifierBytes-len(suffix)) + suffix
 		if !existing[candidate] {
 			return candidate
 		}
 	}
+}
+
+func validatePostgresIdentifier(kind, value string) error {
+	if len(value) > maxPostgresIdentifierBytes {
+		return fmt.Errorf("%s %q is %d bytes; PostgreSQL identifiers are limited to %d bytes", kind, value, len(value), maxPostgresIdentifierBytes)
+	}
+	return nil
+}
+
+func trimIdentifierToBytes(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(value) <= maxBytes {
+		return value
+	}
+	end := 0
+	for i := range value {
+		if i > maxBytes {
+			break
+		}
+		end = i
+	}
+	return value[:end]
+}
+
+func cloneSQLUsesStrategy(serverVersion int) bool {
+	return serverVersion == 0 || serverVersion >= fileCopyStrategyVersion
+}
+
+func cloneStrategyForVersion(serverVersion int) string {
+	if serverVersion > 0 && serverVersion < fileCopyStrategyVersion {
+		return cloneStrategyDefault
+	}
+	return cloneStrategyFileCopy
 }
 
 func QuoteIdentifier(value string) string {
@@ -386,7 +454,7 @@ func prepareClone(opts *CloneOptions) error {
 	if err != nil {
 		return &CloneError{Code: output.CodeForkDependencyMissing, Err: fmt.Errorf("postgresql not found: %w", err)}
 	}
-	preflight := ClonePreflight{Strategy: "FILE_COPY"}
+	preflight := ClonePreflight{Strategy: cloneStrategyFileCopy, CloneMode: DatabaseCloneModeCopy}
 	versionText, err := runPsqlQuery(opts.DbSU, pg.Psql(), opts.Port, opts.ConnDB, "SELECT current_setting('server_version_num')")
 	if err != nil {
 		return &CloneError{Code: output.CodeForkPrecheckFailed, Err: err}
@@ -395,22 +463,30 @@ func prepareClone(opts *CloneOptions) error {
 	if err != nil {
 		return &CloneError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("invalid server_version_num %q: %w", strings.TrimSpace(versionText), err)}
 	}
-	preflight.ServerVersion = version
-	if fileCopyMethod, err := runPsqlQuery(opts.DbSU, pg.Psql(), opts.Port, opts.ConnDB, "SHOW file_copy_method"); err == nil {
-		preflight.FileCopyMethod = strings.TrimSpace(fileCopyMethod)
-	} else {
-		preflight.FileCopyMethodError = err.Error()
+	if version < minPostgresCloneVersion {
+		return &CloneError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("PostgreSQL 14+ is required for database clone, current server_version_num=%d", version)}
 	}
+	preflight.ServerVersion = version
+	preflight.Strategy = cloneStrategyForVersion(version)
 	if dataDirectory, err := runPsqlQuery(opts.DbSU, pg.Psql(), opts.Port, opts.ConnDB, "SHOW data_directory"); err == nil {
 		preflight.DataDirectory = strings.TrimSpace(dataDirectory)
-		cloneMode, fs, fsErr := detectDatabaseCloneMode(preflight.DataDirectory)
-		preflight.CloneMode = cloneMode
-		preflight.FileSystem = fs
-		if fsErr != nil {
-			preflight.FileSystemError = fsErr.Error()
-		}
 	} else {
 		preflight.FileSystemError = err.Error()
+	}
+	if version >= fileCopyMethodCloneVersion {
+		if fileCopyMethod, err := runPsqlQuery(opts.DbSU, pg.Psql(), opts.Port, opts.ConnDB, "SHOW file_copy_method"); err == nil {
+			preflight.FileCopyMethod = strings.TrimSpace(fileCopyMethod)
+		} else {
+			preflight.FileCopyMethodError = err.Error()
+		}
+		if preflight.DataDirectory != "" {
+			cloneMode, fs, fsErr := detectDatabaseCloneMode(preflight.DataDirectory)
+			preflight.CloneMode = cloneMode
+			preflight.FileSystem = fs
+			if fsErr != nil {
+				preflight.FileSystemError = fsErr.Error()
+			}
+		}
 	}
 	opts.Preflight = preflight
 
@@ -431,6 +507,9 @@ func prepareClone(opts *CloneOptions) error {
 	}
 	if opts.DestDB == "" {
 		opts.DestDB = NextDatabaseCloneName(opts.SourceDB, existing)
+		if err := validatePostgresIdentifier("destination database", opts.DestDB); err != nil {
+			return &CloneError{Code: output.CodeForkInvalidArgs, Err: err}
+		}
 	} else if existing[opts.DestDB] {
 		return &CloneError{Code: output.CodeForkDestExists, Err: fmt.Errorf("destination database already exists: %s", opts.DestDB)}
 	}
@@ -477,7 +556,14 @@ func runPsqlQuery(dbsu, psql string, port int, connDB string, sql string) (strin
 		"-d", connDB,
 		"-c", sql,
 	}
-	return utils.DBSUCommandOutput(dbsu, args)
+	out, err := utils.DBSUCommandOutput(dbsu, args)
+	if err != nil {
+		if msg := strings.TrimSpace(out); msg != "" {
+			return out, fmt.Errorf("%w: %s", err, msg)
+		}
+		return out, err
+	}
+	return out, nil
 }
 
 func runCloneSQLFile(dbsu string, args []string, sql string) error {
@@ -555,7 +641,7 @@ func cloneResult(opts *CloneOptions, elapsed time.Duration) CloneResult {
 		Destination:    opts.DestDB,
 		SourcePort:     opts.Port,
 		BackupMode:     "template",
-		CloneMode:      "FILE_COPY",
+		CloneMode:      cloneStrategyForVersion(preflight.ServerVersion),
 		Started:        true,
 		ConnectCommand: utils.ShellQuoteArgs([]string{"psql", "-p", fmt.Sprintf("%d", opts.Port), "-d", opts.DestDB}),
 		CleanupCommand: utils.ShellQuoteArgs([]string{"dropdb", "-p", fmt.Sprintf("%d", opts.Port), opts.DestDB}),

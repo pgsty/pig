@@ -1,9 +1,13 @@
 package postgres
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"pig/internal/config"
 	"pig/internal/output"
 )
 
@@ -77,6 +81,28 @@ func TestBuildDatabaseCloneSQLAllowsZeroConnectionLimit(t *testing.T) {
 	}
 }
 
+func TestBuildDatabaseCloneSQLOmitsStrategyBeforePG15(t *testing.T) {
+	sql := BuildDatabaseCloneSQL(&CloneOptions{
+		SourceDB:  "app",
+		DestDB:    "app_fork",
+		Preflight: ClonePreflight{ServerVersion: 140000},
+	})
+	if strings.Contains(sql, "STRATEGY") {
+		t.Fatalf("PG14 clone SQL should use default template copy without STRATEGY:\n%s", sql)
+	}
+}
+
+func TestBuildDatabaseCloneSQLIncludesStrategyFromPG15(t *testing.T) {
+	sql := BuildDatabaseCloneSQL(&CloneOptions{
+		SourceDB:  "app",
+		DestDB:    "app_fork",
+		Preflight: ClonePreflight{ServerVersion: 150000},
+	})
+	if !strings.Contains(sql, "STRATEGY FILE_COPY") {
+		t.Fatalf("PG15+ clone SQL should include STRATEGY FILE_COPY:\n%s", sql)
+	}
+}
+
 func TestNextDatabaseCloneNameUsesFirstAvailableSuffix(t *testing.T) {
 	names := map[string]bool{
 		"app":   true,
@@ -85,6 +111,23 @@ func TestNextDatabaseCloneNameUsesFirstAvailableSuffix(t *testing.T) {
 	}
 	if got := NextDatabaseCloneName("app", names); got != "app_3" {
 		t.Fatalf("NextDatabaseCloneName() = %q, want app_3", got)
+	}
+}
+
+func TestNextDatabaseCloneNameKeepsGeneratedNameWithinPostgresLimit(t *testing.T) {
+	const postgresIdentifierLimit = 63
+	source := strings.Repeat("a", 63)
+	names := map[string]bool{source: true}
+
+	got := NextDatabaseCloneName(source, names)
+	if len(got) > postgresIdentifierLimit {
+		t.Fatalf("NextDatabaseCloneName() length = %d, want <= %d: %q", len(got), postgresIdentifierLimit, got)
+	}
+	if !strings.HasSuffix(got, "_1") {
+		t.Fatalf("NextDatabaseCloneName() = %q, want _1 suffix", got)
+	}
+	if got == source {
+		t.Fatalf("NextDatabaseCloneName() should not return source name %q", source)
 	}
 }
 
@@ -97,18 +140,37 @@ func TestParseDatabaseNamesOneNamePerLine(t *testing.T) {
 
 func TestClonePreflightWarnings(t *testing.T) {
 	checks := ClonePreflight{
-		ServerVersion:  170000,
-		FileCopyMethod: "copy",
-		DataDirectory:  "/pg/data",
-		FileSystem:     "ext4",
-		CloneMode:      DatabaseCloneModeCopy,
-		Strategy:       "FILE_COPY",
+		ServerVersion: 170000,
+		DataDirectory: "/pg/data",
+		FileSystem:    "ext4",
+		CloneMode:     DatabaseCloneModeCopy,
+		Strategy:      "FILE_COPY",
 	}
 	warnings := checks.Warnings()
 	for _, want := range []string{
 		"PostgreSQL 18+",
-		"file_copy_method=clone",
-		"CoW clone",
+		"regular database copy",
+	} {
+		if !containsCloneString(warnings, want) {
+			t.Fatalf("warnings %#v should contain %q", warnings, want)
+		}
+	}
+	if containsCloneString(warnings, "file_copy_method=clone could not be verified") {
+		t.Fatalf("PG15-17 warnings should not report file_copy_method as a query failure: %#v", warnings)
+	}
+}
+
+func TestClonePreflightWarningsIncludePG14DefaultCopy(t *testing.T) {
+	checks := ClonePreflight{
+		ServerVersion: 140000,
+		Strategy:      "DEFAULT",
+		CloneMode:     DatabaseCloneModeCopy,
+	}
+	warnings := checks.Warnings()
+	for _, want := range []string{
+		"PostgreSQL 15+",
+		"default template copy",
+		"PostgreSQL 18+",
 	} {
 		if !containsCloneString(warnings, want) {
 			t.Fatalf("warnings %#v should contain %q", warnings, want)
@@ -207,6 +269,23 @@ func TestNormalizeCloneUsesTemplate1WhenCloningPostgres(t *testing.T) {
 	}
 }
 
+func TestNormalizeCloneRejectsOverlongIdentifiers(t *testing.T) {
+	const postgresIdentifierLimit = 63
+	overlong := strings.Repeat("a", postgresIdentifierLimit+1)
+	tests := []CloneOptions{
+		{SourceDB: overlong, DestDB: "app_1"},
+		{SourceDB: "app", DestDB: overlong},
+		{SourceDB: "app", DestDB: "app_1", ConnDB: overlong},
+		{SourceDB: "app", DestDB: "app_1", Owner: overlong},
+	}
+
+	for _, tt := range tests {
+		if _, err := NormalizeCloneOptions(&tt); err == nil {
+			t.Fatalf("NormalizeCloneOptions(%+v) should reject overlong identifier", tt)
+		}
+	}
+}
+
 func TestQuoteIdentifierEscapesDoubleQuotes(t *testing.T) {
 	got := QuoteIdentifier(`a"b`)
 	want := `"a""b"`
@@ -296,6 +375,29 @@ func TestClonePsqlFileHintShellQuotesConnectionDatabase(t *testing.T) {
 	want := "/usr/bin/psql -X -p 5432 -d 'postgres maint' -f <clone-sql>"
 	if got != want {
 		t.Fatalf("clonePsqlFileHint() = %q, want %q", got, want)
+	}
+}
+
+func TestRunPsqlQueryIncludesCapturedOutputOnFailure(t *testing.T) {
+	originalUser := config.CurrentUser
+	config.CurrentUser = "pigtest"
+	t.Cleanup(func() {
+		config.CurrentUser = originalUser
+	})
+
+	diag := `psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.65535" failed: No such file or directory`
+	psql := filepath.Join(t.TempDir(), "psql")
+	script := fmt.Sprintf("#!/bin/sh\ncat >&2 <<'EOF'\n%s\nEOF\nexit 2\n", diag)
+	if err := os.WriteFile(psql, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake psql: %v", err)
+	}
+
+	_, err := runPsqlQuery("pigtest", psql, 65535, "postgres", "SELECT 1")
+	if err == nil {
+		t.Fatal("runPsqlQuery should fail when psql exits non-zero")
+	}
+	if !strings.Contains(err.Error(), diag) {
+		t.Fatalf("error %q should include captured psql output %q", err.Error(), diag)
 	}
 }
 
