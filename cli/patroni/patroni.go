@@ -1,9 +1,11 @@
 package patroni
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"pig/internal/output"
@@ -188,15 +190,16 @@ func Status(dbsu string) error {
 	return utils.DBSUCommand(dbsu, cmdArgs)
 }
 
-// Log views patroni logs using journalctl
-func Log(follow bool, lines string) error {
+// Log views patroni logs using journalctl.
+func Log(follow bool, lines int) error {
+	if lines <= 0 {
+		return fmt.Errorf("lines must be positive")
+	}
 	args := []string{"-u", "patroni"}
 	if follow {
 		args = append(args, "-f")
 	}
-	if lines != "" {
-		args = append(args, "-n", lines)
-	}
+	args = append(args, "-n", strconv.Itoa(lines))
 
 	cmdArgs := append([]string{"journalctl"}, args...)
 	utils.PrintHint(cmdArgs)
@@ -206,6 +209,27 @@ func Log(follow bool, lines string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// LogJSONL outputs recent patroni journal lines as JSONL.
+func LogJSONL(lines int) error {
+	if lines <= 0 {
+		return fmt.Errorf("lines must be positive")
+	}
+	args := []string{"-u", "patroni", "-n", strconv.Itoa(lines), "--no-pager"}
+	logrus.Debugf("journalctl %s", strings.Join(args, " "))
+	cmd := exec.Command("journalctl", args...)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if errText := strings.TrimSpace(stderr.String()); errText != "" {
+			return fmt.Errorf("%w: %s", err, errText)
+		}
+		return err
+	}
+	return utils.PrintLogMessagesJSONL("patroni", stdout.String())
 }
 
 // RestartOptions holds options for patronictl restart
@@ -256,6 +280,72 @@ type ReinitOptions struct {
 	Wait   bool   // wait for reinit to complete
 }
 
+// BuildReinitPlan builds a structured execution plan for reinitializing a Patroni member.
+func BuildReinitPlan(opts *ReinitOptions) *output.Plan {
+	if opts == nil {
+		opts = &ReinitOptions{}
+	}
+	nextOpts := *opts
+	nextOpts.Force = true
+	member := opts.Member
+	if member == "" {
+		member = "required-member"
+	}
+	return &output.Plan{
+		Command:      buildReinitCommand(opts),
+		Boundary:     "pt:patroni-cluster",
+		Confirmation: "required",
+		Actions: []output.Action{
+			{Step: 1, Description: "Validate target Patroni member"},
+			{Step: 2, Description: "Execute patronictl reinit for the target member"},
+			{Step: 3, Description: "Wait for reinitialization if requested, then verify cluster state"},
+		},
+		Affects: []output.Resource{
+			{Type: "node", Name: member, Impact: "rebuild", Detail: "target member data is discarded and resynced"},
+			{Type: "cluster", Name: "patroni", Impact: "replica rejoin", Detail: "operation is coordinated through Patroni"},
+		},
+		Expected: "Target Patroni member is rebuilt from the leader and rejoins the cluster",
+		Risks: []string{
+			"Target member data is removed before rebuild.",
+			"Replica capacity is reduced while reinitialization is running.",
+			"This primitive does not choose backup sources or pgBackRest restore targets.",
+		},
+		Preconditions: []output.Check{
+			{Name: "member", Status: "required", Detail: member},
+			{Name: "patronictl", Status: "required", Detail: "available on PATH"},
+			{Name: "patroni config", Status: "required", Detail: DefaultConfigPath},
+		},
+		Verifications: []output.Check{
+			{Name: "cluster list", Status: "manual", Detail: "pig pt list"},
+			{Name: "member status", Status: "manual", Detail: "target member should be running as replica"},
+		},
+		NextActions: []output.NextAction{
+			{Command: buildReinitExecuteCommand(&nextOpts), Reason: "execute member rebuild after explicit confirmation", Required: true},
+			{Command: "pig pt list", Reason: "verify member state after reinit", Required: false},
+		},
+	}
+}
+
+func buildReinitExecuteCommand(opts *ReinitOptions) string {
+	args := []string{"pig", "pt", "reinit"}
+	if opts != nil && opts.Member != "" {
+		args = append(args, opts.Member)
+	}
+	if opts != nil && opts.Force {
+		args = append(args, "--force")
+	}
+	if opts != nil && opts.Wait {
+		args = append(args, "--wait")
+	}
+	return strings.Join(args, " ")
+}
+
+func buildReinitCommand(opts *ReinitOptions) string {
+	args := []string{buildReinitExecuteCommand(opts)}
+	args = append(args, "--plan")
+	return strings.Join(args, " ")
+}
+
 // buildReinitArgs builds the positional + flag args for `patronictl reinit`.
 // Required positional layout: reinit CLUSTER_NAME MEMBER_NAME.
 func buildReinitArgs(cluster string, opts *ReinitOptions) []string {
@@ -301,6 +391,8 @@ func BuildSwitchoverPlan(opts *SwitchoverOptions) *output.Plan {
 	if opts == nil {
 		opts = &SwitchoverOptions{}
 	}
+	nextOpts := *opts
+	nextOpts.Force = true
 	actions := []output.Action{
 		{Step: 1, Description: "Validate switchover parameters"},
 		{Step: 2, Description: "Execute patronictl switchover"},
@@ -347,11 +439,27 @@ func BuildSwitchoverPlan(opts *SwitchoverOptions) *output.Plan {
 	}
 
 	return &output.Plan{
-		Command:  buildSwitchoverCommand(opts),
-		Actions:  actions,
-		Affects:  affects,
-		Expected: expected,
-		Risks:    risks,
+		Command:      buildSwitchoverCommand(opts),
+		Boundary:     "pt:patroni-cluster",
+		Confirmation: "required",
+		Actions:      actions,
+		Affects:      affects,
+		Expected:     expected,
+		Risks:        risks,
+		Preconditions: []output.Check{
+			{Name: "patronictl", Status: "required", Detail: "available on PATH"},
+			{Name: "patroni config", Status: "required", Detail: DefaultConfigPath},
+			{Name: "leader", Status: "planned", Detail: valueOrAuto(opts.Leader)},
+			{Name: "candidate", Status: "planned", Detail: valueOrAuto(opts.Candidate)},
+		},
+		Verifications: []output.Check{
+			{Name: "cluster list", Status: "manual", Detail: "pig pt list"},
+			{Name: "local role", Status: "manual", Detail: "pig pg role on affected members"},
+		},
+		NextActions: []output.NextAction{
+			{Command: buildSwitchoverCommand(&nextOpts), Reason: "execute planned Patroni switchover after explicit confirmation", Required: true},
+			{Command: "pig pt list", Reason: "verify Patroni cluster roles after switchover", Required: false},
+		},
 	}
 }
 
@@ -418,6 +526,8 @@ func BuildFailoverPlan(opts *FailoverOptions) *output.Plan {
 	if opts == nil {
 		opts = &FailoverOptions{}
 	}
+	nextOpts := *opts
+	nextOpts.Force = true
 	actions := []output.Action{
 		{Step: 1, Description: "Validate failover parameters and candidate availability"},
 		{Step: 2, Description: "Execute patronictl failover to promote candidate"},
@@ -451,11 +561,27 @@ func BuildFailoverPlan(opts *FailoverOptions) *output.Plan {
 	}
 
 	return &output.Plan{
-		Command:  buildFailoverCommand(opts),
-		Actions:  actions,
-		Affects:  affects,
-		Expected: expected,
-		Risks:    risks,
+		Command:      buildFailoverCommand(opts),
+		Boundary:     "pt:patroni-cluster",
+		Confirmation: "required",
+		Actions:      actions,
+		Affects:      affects,
+		Expected:     expected,
+		Risks:        risks,
+		Preconditions: []output.Check{
+			{Name: "patronictl", Status: "required", Detail: "available on PATH"},
+			{Name: "patroni config", Status: "required", Detail: DefaultConfigPath},
+			{Name: "candidate", Status: "planned", Detail: valueOrAuto(opts.Candidate)},
+			{Name: "leader health", Status: "operator-check", Detail: "only use failover when the current leader is unavailable or unsafe"},
+		},
+		Verifications: []output.Check{
+			{Name: "cluster list", Status: "manual", Detail: "pig pt list"},
+			{Name: "application writes", Status: "manual", Detail: "verify clients reconnect to the new leader"},
+		},
+		NextActions: []output.NextAction{
+			{Command: buildFailoverCommand(&nextOpts), Reason: "execute emergency Patroni failover after explicit confirmation", Required: true},
+			{Command: "pig pt list", Reason: "verify Patroni cluster roles after failover", Required: false},
+		},
 	}
 }
 
@@ -471,6 +597,13 @@ func buildFailoverCommand(opts *FailoverOptions) string {
 		args = append(args, "--force")
 	}
 	return strings.Join(args, " ")
+}
+
+func valueOrAuto(value string) string {
+	if value == "" {
+		return "auto"
+	}
+	return value
 }
 
 // buildFailoverArgs builds the args for `patronictl failover`.

@@ -50,6 +50,22 @@ func TestStyConfHasNoNativeFlag(t *testing.T) {
 	}
 }
 
+func TestStyConfOutputFileFlagKeepsGlobalOutputFlag(t *testing.T) {
+	flag := pigstyConfCmd.Flags().Lookup("output-file")
+	if flag == nil {
+		t.Fatal("expected --output-file flag on pig sty conf")
+	}
+	if flag.Shorthand != "O" {
+		t.Fatalf("expected shorthand -O for output-file, got -%s", flag.Shorthand)
+	}
+	if local := pigstyConfCmd.Flags().Lookup("output"); local != nil {
+		t.Fatalf("did not expect local --output flag on pig sty conf, got %+v", local)
+	}
+	if inherited := pigstyConfCmd.InheritedFlags().Lookup("output"); inherited == nil {
+		t.Fatal("expected inherited global --output flag on pig sty conf")
+	}
+}
+
 func TestStyConfDefaultsToNativeRoute(t *testing.T) {
 	restore := saveStyConfState(t)
 	defer restore()

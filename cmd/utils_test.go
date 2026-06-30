@@ -40,7 +40,7 @@ func TestRunLegacyStructuredCapturesCommandOutput(t *testing.T) {
 	}
 
 	var payload map[string]interface{}
-	if err := json.Unmarshal(bytesTrimSpace(raw), &payload); err != nil {
+	if err := json.Unmarshal(trimJSONSpace(raw), &payload); err != nil {
 		t.Fatalf("invalid json output: %v, raw=%q", err, string(raw))
 	}
 
@@ -60,22 +60,6 @@ func TestRunLegacyStructuredCapturesCommandOutput(t *testing.T) {
 	}
 }
 
-func TestStyConfOutputFileFlagKeepsGlobalOutputFlag(t *testing.T) {
-	flag := pigstyConfCmd.Flags().Lookup("output-file")
-	if flag == nil {
-		t.Fatal("expected --output-file flag on pig sty conf")
-	}
-	if flag.Shorthand != "O" {
-		t.Fatalf("expected shorthand -O for output-file, got -%s", flag.Shorthand)
-	}
-	if local := pigstyConfCmd.Flags().Lookup("output"); local != nil {
-		t.Fatalf("did not expect local --output flag on pig sty conf, got %+v", local)
-	}
-	if inherited := pigstyConfCmd.InheritedFlags().Lookup("output"); inherited == nil {
-		t.Fatal("expected inherited global --output flag on pig sty conf")
-	}
-}
-
-func bytesTrimSpace(b []byte) []byte {
+func trimJSONSpace(b []byte) []byte {
 	return []byte(strings.TrimSpace(string(b)))
 }

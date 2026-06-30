@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"pig/cli/ext"
+	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
 
@@ -31,14 +32,6 @@ type Kind string
 
 const (
 	KindInstance Kind = "instance"
-)
-
-type Mode string
-
-const (
-	ModeAuto Mode = "auto"
-	ModeHot  Mode = "hot"
-	ModeCold Mode = "cold"
 )
 
 type BackupMode string
@@ -58,15 +51,17 @@ const (
 )
 
 type Options struct {
-	Kind     Kind
-	Mode     Mode
-	DbSU     string
-	Plan     bool
-	Yes      bool
+	Kind Kind
+	DbSU string
+	Plan bool
+	Yes  bool
+	// Run is kept for compatibility with the old --run/-r naming. New callers
+	// should set Start.
 	Run      bool
 	Start    bool
 	NoStart  bool
 	Replace  bool
+	Progress bool
 	Instance InstanceOptions
 }
 
@@ -89,6 +84,7 @@ type State struct {
 
 type ResultData struct {
 	Kind            Kind    `json:"kind" yaml:"kind"`
+	Name            string  `json:"name,omitempty" yaml:"name,omitempty"`
 	Source          string  `json:"source" yaml:"source"`
 	Destination     string  `json:"destination" yaml:"destination"`
 	SourcePort      int     `json:"source_port,omitempty" yaml:"source_port,omitempty"`
@@ -96,8 +92,13 @@ type ResultData struct {
 	BackupMode      string  `json:"backup_mode,omitempty" yaml:"backup_mode,omitempty"`
 	CloneMode       string  `json:"clone_mode,omitempty" yaml:"clone_mode,omitempty"`
 	Started         bool    `json:"started" yaml:"started"`
+	Already         bool    `json:"already,omitempty" yaml:"already,omitempty"`
 	ConnectCommand  string  `json:"connect_command,omitempty" yaml:"connect_command,omitempty"`
+	StartCommand    string  `json:"start_command,omitempty" yaml:"start_command,omitempty"`
+	StopCommand     string  `json:"stop_command,omitempty" yaml:"stop_command,omitempty"`
 	CleanupCommand  string  `json:"cleanup_command,omitempty" yaml:"cleanup_command,omitempty"`
+	PigVersion      string  `json:"pig_version,omitempty" yaml:"pig_version,omitempty"`
+	PigRevision     string  `json:"pig_revision,omitempty" yaml:"pig_revision,omitempty"`
 	Duration        float64 `json:"duration_seconds" yaml:"duration_seconds"`
 }
 
@@ -112,13 +113,22 @@ type ForkInfo struct {
 	Copy      ForkCopyInfo   `json:"copy" yaml:"copy"`
 	Backup    ForkBackupInfo `json:"backup" yaml:"backup"`
 	Commands  ForkCommands   `json:"commands" yaml:"commands"`
+	Pig       PigBuildInfo   `json:"pig,omitempty" yaml:"pig,omitempty"`
 	Orphan    bool           `json:"orphan,omitempty" yaml:"orphan,omitempty"`
+}
+
+type PigBuildInfo struct {
+	Version  string `json:"version,omitempty" yaml:"version,omitempty"`
+	Branch   string `json:"branch,omitempty" yaml:"branch,omitempty"`
+	Revision string `json:"revision,omitempty" yaml:"revision,omitempty"`
+	BuiltAt  string `json:"built_at,omitempty" yaml:"built_at,omitempty"`
 }
 
 type ForkEndpoint struct {
 	Data    string `json:"data" yaml:"data"`
 	Port    int    `json:"port,omitempty" yaml:"port,omitempty"`
 	Started bool   `json:"started,omitempty" yaml:"started,omitempty"`
+	PID     int    `json:"pid,omitempty" yaml:"pid,omitempty"`
 }
 
 type ForkCopyInfo struct {
@@ -154,6 +164,7 @@ type ForkTargetOptions struct {
 	Force      bool
 	StopBefore bool
 	Yes        bool
+	Progress   bool
 }
 
 func (e *ForkError) Error() string {
@@ -179,23 +190,24 @@ var forkCheckPostgresRunning = CheckPostgresRunningAsDBSU
 var forkReadFileAsDBSU = utils.ReadFileAsDBSU
 var forkWriteFileAsDBSU = utils.WriteFileAsDBSU
 var forkPortFree = isPortFree
+var forkLstat = os.Lstat
+var forkStopPostgres = Stop
+var forkProbeSourceDataDir = probeSourceDataDir
+var forkConfirmCountdown = confirmForkWithCountdown
 var forkXFSInfoOutput = func(bin, mount string) ([]byte, error) {
 	return exec.Command(bin, mount).Output()
 }
 
+// NormalizeOptions fills in defaults (DBSU, source/destination data dirs and
+// ports, managed vs unmanaged destination) and validates the fork options. It
+// returns a copy and never mutates the caller's Options.
 func NormalizeOptions(opts *Options) (*Options, error) {
 	if opts == nil {
 		return nil, fmt.Errorf("fork options are required")
 	}
 	n := *opts
 	n.DbSU = utils.GetDBSU(n.DbSU)
-	if n.Mode == "" {
-		n.Mode = ModeAuto
-	}
-	if n.Mode != ModeAuto && n.Mode != ModeHot && n.Mode != ModeCold {
-		return nil, fmt.Errorf("invalid fork mode %q (valid: auto, hot, cold)", n.Mode)
-	}
-	n.Start = n.Run && !n.NoStart
+	n.Start = (n.Start || n.Run) && !n.NoStart
 
 	switch n.Kind {
 	case KindInstance:
@@ -247,7 +259,11 @@ func normalizeInstance(opts *Options) error {
 		inst.Managed = false
 	}
 	if inst.DestPort == 0 {
-		inst.DestPort = firstFreePortAvoiding(15432, reservedManagedForkPorts(opts.DbSU, inst.DestData))
+		port, err := firstFreePortAvoiding(15432, reservedManagedForkPorts(opts.DbSU, inst.DestData))
+		if err != nil {
+			return err
+		}
+		inst.DestPort = port
 	}
 	if !validPort(inst.DestPort) {
 		return fmt.Errorf("invalid destination port %d (must be 1-65535)", inst.DestPort)
@@ -258,42 +274,171 @@ func normalizeInstance(opts *Options) error {
 	return nil
 }
 
+// Plan returns the dry-run execution plan for a fork without making any changes.
+// It probes the source and destination read-only so the plan reflects the copy
+// strategy (hot/cold, CoW/regular) execution will actually use.
 func Plan(opts *Options) (*output.Plan, error) {
 	n, err := NormalizeOptions(opts)
 	if err != nil {
 		return nil, &ForkError{Code: output.CodeForkInvalidArgs, Err: err}
 	}
-	if n.Kind == KindInstance {
-		sourceData, destData, err := validateForkDataPaths(n.Instance.SourceData, n.Instance.DestData)
-		if err != nil {
-			return nil, &ForkError{Code: output.CodeForkInvalidArgs, Err: err}
-		}
-		n.Instance.SourceData = sourceData
-		n.Instance.DestData = destData
+	state, err := prepareNormalized(n)
+	if err != nil {
+		return nil, err
 	}
-	return BuildPlan(n, inferPlanState(n)), nil
+	return BuildPlan(n, state), nil
 }
 
+// Execute runs a fork for the interactive (text) path: it prechecks, prints a
+// summary, optionally waits out a countdown when falling back to a regular copy,
+// performs the copy/configure/start, and prints a connection hint.
 func Execute(opts *Options) error {
 	n, err := NormalizeOptions(opts)
 	if err != nil {
 		return exitForkError(output.CodeForkInvalidArgs, err)
 	}
-	if !n.Yes {
-		if err := confirmForkWithCountdown("This will create a PostgreSQL instance fork and may replace the destination!", "FORK"); err != nil {
-			return exitForkError(output.CodeForkInvalidArgs, err)
-		}
-	}
-	_, err = executeNormalized(n)
+	n.Progress = true
+	start := time.Now()
+	state, err := prepareNormalized(n)
 	if err != nil {
 		if fe, ok := err.(*ForkError); ok {
 			return &utils.ExitCodeError{Code: output.ExitCode(fe.Code), Err: fe}
 		}
 		return err
 	}
+	fmt.Fprint(os.Stderr, forkExecutionSummary(n, state))
+	if reason := forkCountdownReason(state); reason != "" {
+		if !n.Yes {
+			if err := forkConfirmCountdown(reason, "FORK"); err != nil {
+				return exitForkError(output.CodeForkInvalidArgs, err)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "Confirmation wait: skipped by --yes/--force.")
+		}
+	}
+	fmt.Fprintln(os.Stderr, "Starting fork execution...")
+	data, err := executePrepared(n, state, start)
+	if err != nil {
+		if fe, ok := err.(*ForkError); ok {
+			return &utils.ExitCodeError{Code: output.ExitCode(fe.Code), Err: fe}
+		}
+		return err
+	}
+	fmt.Fprint(os.Stderr, ForkCreateHint(data))
 	return nil
 }
 
+func forkCountdownReason(state *State) string {
+	if state != nil && state.CloneMode == CloneModeCopy {
+		return "Copy-on-write is not available; regular copy fallback may consume full data directory space."
+	}
+	return ""
+}
+
+func ForkConnectionHint(data ResultData) string {
+	if !data.Started || data.DestinationPort == 0 {
+		return ""
+	}
+	connect := data.ConnectCommand
+	if connect == "" {
+		connect = forkConnectCommand(data.DestinationPort)
+	}
+	return fmt.Sprintf("Fork is running on port %d\nConnect: %s\n", data.DestinationPort, connect)
+}
+
+func ForkCreateHint(data ResultData) string {
+	if data.Destination == "" {
+		return ForkConnectionHint(data)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Created: %s (%s)\n", forkResultName(data), data.Destination)
+	if data.DestinationPort != 0 {
+		fmt.Fprintf(&b, "Port: %d\n", data.DestinationPort)
+	}
+	if data.Started {
+		fmt.Fprintln(&b, "State: running")
+		if connect := forkResultConnectCommand(data); connect != "" {
+			fmt.Fprintf(&b, "Connect: %s\n", connect)
+		}
+		if data.StopCommand != "" {
+			fmt.Fprintf(&b, "Stop: %s\n", data.StopCommand)
+		}
+	} else {
+		fmt.Fprintln(&b, "State: stopped")
+		if data.StartCommand != "" {
+			fmt.Fprintf(&b, "Start: %s\n", data.StartCommand)
+		}
+	}
+	if data.CleanupCommand != "" {
+		fmt.Fprintf(&b, "Remove: %s\n", data.CleanupCommand)
+	}
+	return b.String()
+}
+
+func ForkActionHint(action string, data ResultData) string {
+	switch action {
+	case "fork start":
+		status := "Started"
+		if data.Already {
+			status = "Already running"
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "%s: %s (%s)\n", status, forkResultName(data), data.Destination)
+		if data.DestinationPort != 0 {
+			fmt.Fprintf(&b, "Port: %d\n", data.DestinationPort)
+		}
+		if connect := forkResultConnectCommand(data); connect != "" {
+			fmt.Fprintf(&b, "Connect: %s\n", connect)
+		}
+		return b.String()
+	case "fork stop":
+		status := "Stopped"
+		if data.Already {
+			status = "Already stopped"
+		}
+		return fmt.Sprintf("%s: %s (%s)\n", status, forkResultName(data), data.Destination)
+	case "fork remove":
+		return fmt.Sprintf("Removed: %s (%s)\n", forkResultName(data), data.Destination)
+	default:
+		return ForkConnectionHint(data)
+	}
+}
+
+func forkResultConnectCommand(data ResultData) string {
+	if !data.Started || data.DestinationPort == 0 {
+		return ""
+	}
+	if data.ConnectCommand != "" {
+		return data.ConnectCommand
+	}
+	return forkConnectCommand(data.DestinationPort)
+}
+
+func forkResultName(data ResultData) string {
+	if data.Name != "" {
+		return data.Name
+	}
+	if data.Destination != "" {
+		return strings.TrimPrefix(filepath.Base(data.Destination), "data-")
+	}
+	return "fork"
+}
+
+func forkConnectCommand(port int) string {
+	return utils.ShellQuoteArgs([]string{"psql", "-p", strconv.Itoa(port), "-d", "postgres"})
+}
+
+func currentPigBuildInfo() PigBuildInfo {
+	return PigBuildInfo{
+		Version:  config.PigVersion,
+		Branch:   config.Branch,
+		Revision: config.Revision,
+		BuiltAt:  config.BuildDate,
+	}
+}
+
+// ExecuteResult runs a fork for the structured-output (JSON/YAML) path, returning
+// a Result instead of printing. The countdown confirmation is always skipped here.
 func ExecuteResult(opts *Options) *output.Result {
 	n, err := NormalizeOptions(opts)
 	if err != nil {
@@ -307,6 +452,69 @@ func ExecuteResult(opts *Options) *output.Result {
 		return output.Fail(output.CodeForkPrecheckFailed, err.Error())
 	}
 	return output.OK("instance fork completed", data)
+}
+
+func forkExecutionSummary(opts *Options, state *State) string {
+	if opts == nil || opts.Kind != KindInstance {
+		return ""
+	}
+	inst := opts.Instance
+	backup := BackupModeUnknown
+	clone := CloneModeUnknown
+	fs := ""
+	if state != nil {
+		if state.BackupMode != "" {
+			backup = state.BackupMode
+		}
+		if state.CloneMode != "" {
+			clone = state.CloneMode
+		}
+		fs = state.FS
+	}
+	var b strings.Builder
+	fmt.Fprintln(&b, "PostgreSQL fork summary")
+	fmt.Fprintln(&b, "Precheck: OK")
+	sourceStatus := "not running"
+	if backup == BackupModeHot {
+		sourceStatus = "verified"
+	}
+	targetStatus := "unmanaged"
+	if inst.Managed {
+		targetStatus = "managed"
+	}
+	startRequested := opts.Start || opts.Run
+	afterCopy := "leave stopped"
+	if startRequested {
+		afterCopy = "start fork"
+	}
+	backupLabel := string(backup)
+	switch backup {
+	case BackupModeHot:
+		backupLabel = "hot backup"
+	case BackupModeCold:
+		backupLabel = "cold copy"
+	}
+	copyLabel := string(clone)
+	switch clone {
+	case CloneModeCOW:
+		copyLabel = "CoW clone"
+	case CloneModeCopy:
+		copyLabel = "regular copy"
+	}
+	if fs != "" {
+		copyLabel = fmt.Sprintf("%s (%s)", copyLabel, fs)
+	}
+	if clone == CloneModeCopy {
+		copyLabel += "; may use full data directory space"
+	}
+	fmt.Fprintf(&b, "Source: %s @ %d (%s)\n", inst.SourceData, inst.SourcePort, sourceStatus)
+	fmt.Fprintf(&b, "Target: %s @ %d (%s)\n", inst.DestData, inst.DestPort, targetStatus)
+	fmt.Fprintf(&b, "After copy: %s\n", afterCopy)
+	fmt.Fprintf(&b, "Backup: %s\n", backupLabel)
+	fmt.Fprintf(&b, "Copy: %s\n", copyLabel)
+	fmt.Fprintf(&b, "Pig: %s %s/%s %s %s %s\n", config.PigVersion, config.GOOS, config.GOARCH, config.Branch, config.Revision, config.BuildDate)
+	fmt.Fprintf(&b, "Command: %s\n", BuildCommand(opts))
+	return b.String()
 }
 
 func BuildPlan(opts *Options, state *State) *output.Plan {
@@ -323,6 +531,7 @@ func BuildPlan(opts *Options, state *State) *output.Plan {
 
 func buildInstancePlan(opts *Options, state *State) *output.Plan {
 	inst := opts.Instance
+	startRequested := opts.Start || opts.Run
 	backupMode := BackupModeHot
 	cloneMode := CloneModeCopy
 	if state != nil {
@@ -352,7 +561,7 @@ func buildInstancePlan(opts *Options, state *State) *output.Plan {
 		output.Action{Step: step + 1, Description: "Prepare forked instance configuration"},
 	)
 	step += 2
-	if opts.Start {
+	if startRequested {
 		actions = append(actions, output.Action{Step: step, Description: "Start forked PostgreSQL instance"})
 		step++
 		actions = append(actions, output.Action{Step: step, Description: "Verify forked instance is reachable"})
@@ -362,7 +571,7 @@ func buildInstancePlan(opts *Options, state *State) *output.Plan {
 	if cloneMode == CloneModeCOW {
 		risks = append(risks, "Copy-on-write forks share physical blocks until either side writes")
 	} else {
-		risks = append(risks, "Execution requires verified CoW support; use --force to allow regular copy fallback")
+		risks = append(risks, "Regular copy fallback may consume full data directory space")
 	}
 	if backupMode == BackupModeCold {
 		risks = append(risks, "Cold copy requires the source instance to be stopped")
@@ -400,8 +609,8 @@ func BuildCommand(opts *Options) string {
 		if opts.Instance.DestPort != 0 && opts.Instance.DestPort != 15432 {
 			args = append(args, "-p", fmt.Sprintf("%d", opts.Instance.DestPort))
 		}
-		if opts.Run {
-			args = append(args, "-r")
+		if opts.Start || opts.Run {
+			args = append(args, "--start")
 		}
 		if opts.Replace {
 			args = append(args, "-f")
@@ -431,7 +640,7 @@ func BuildForkInfo(opts *Options, state *State) ForkInfo {
 		Target: ForkEndpoint{
 			Data:    inst.DestData,
 			Port:    inst.DestPort,
-			Started: opts.Start,
+			Started: opts.Start || opts.Run,
 		},
 		Copy: ForkCopyInfo{
 			Method: "reflink_auto",
@@ -441,10 +650,11 @@ func BuildForkInfo(opts *Options, state *State) ForkInfo {
 			Mode: string(BackupModeUnknown),
 		},
 		Commands: ForkCommands{
-			Connect: utils.ShellQuoteArgs([]string{"psql", "-p", strconv.Itoa(inst.DestPort)}),
-			Stop:    utils.ShellQuoteArgs([]string{"pg_ctl", "-D", inst.DestData, "stop"}),
-			Remove:  utils.ShellQuoteArgs([]string{"rm", "-rf", "--", inst.DestData}),
+			Connect: forkConnectCommand(inst.DestPort),
+			Stop:    forkStopCommand(inst),
+			Remove:  forkRemoveCommand(inst),
 		},
+		Pig: currentPigBuildInfo(),
 	}
 	if state != nil {
 		info.Copy.Actual = string(state.CloneMode)
@@ -460,27 +670,8 @@ func WriteForkInfoAs(dbsu, dataDir string, info ForkInfo) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.CreateTemp("", "pig-fork-info-*.json")
-	if err != nil {
-		return err
-	}
-	path := file.Name()
-	defer os.Remove(path)
-	if _, err := file.Write(payload); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(path, 0644); err != nil {
-		return err
-	}
 	dest := filepath.Join(dataDir, "fork.json")
-	if err := utils.DBSUCommand(dbsu, []string{"cp", path, dest}); err != nil {
-		return err
-	}
-	return utils.DBSUCommand(dbsu, []string{"chmod", "0644", dest})
+	return forkWriteFileAsDBSU(dest, string(payload), dbsu)
 }
 
 func marshalForkInfo(info ForkInfo) ([]byte, error) {
@@ -492,38 +683,30 @@ func marshalForkInfo(info ForkInfo) ([]byte, error) {
 	return payload, nil
 }
 
-func ScanForks(root string) ([]ForkInfo, error) {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []ForkInfo{}, nil
-		}
-		return nil, err
+func forkStopCommand(inst InstanceOptions) string {
+	if inst.Managed {
+		return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "stop", inst.Name})
 	}
-	forks := make([]ForkInfo, 0)
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "data-") {
-			continue
-		}
-		dataDir := filepath.Join(root, entry.Name())
-		info, err := readForkInfo(dataDir)
-		if err != nil {
-			name := strings.TrimPrefix(entry.Name(), "data-")
-			info = ForkInfo{
-				Kind:    "pg_fork",
-				Version: 1,
-				Name:    name,
-				Managed: true,
-				Target:  ForkEndpoint{Data: dataDir},
-				Orphan:  true,
-			}
-		}
-		forks = append(forks, info)
-	}
-	sort.Slice(forks, func(i, j int) bool { return forks[i].Name < forks[j].Name })
-	return forks, nil
+	return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "stop", "-d", inst.DestData})
 }
 
+func forkStartCommand(inst InstanceOptions) string {
+	if inst.Managed {
+		return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "start", inst.Name})
+	}
+	return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "start", "-d", inst.DestData})
+}
+
+func forkRemoveCommand(inst InstanceOptions) string {
+	if inst.Managed {
+		return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "rm", inst.Name, "--stop"})
+	}
+	return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "rm", "-d", inst.DestData, "--stop"})
+}
+
+// ScanForksAs enumerates managed forks under root (the data-* directories) as the
+// database superuser, reading each fork.json. Directories without valid metadata
+// are returned as orphan entries. The result is sorted by fork name.
 func ScanForksAs(dbsu, root string) ([]ForkInfo, error) {
 	dbsu = utils.GetDBSU(dbsu)
 	out, err := forkDBSUCommandOutput(dbsu, []string{"find", "-H", root, "-mindepth", "1", "-maxdepth", "1", "-type", "d", "-name", "data-*", "-print"})
@@ -556,29 +739,6 @@ func ScanForksAs(dbsu, root string) ([]ForkInfo, error) {
 	}
 	sort.Slice(forks, func(i, j int) bool { return forks[i].Name < forks[j].Name })
 	return forks, nil
-}
-
-func readForkInfo(dataDir string) (ForkInfo, error) {
-	payload, err := os.ReadFile(filepath.Join(dataDir, "fork.json"))
-	if err != nil {
-		return ForkInfo{}, err
-	}
-	var info ForkInfo
-	if err := json.Unmarshal(payload, &info); err != nil {
-		return ForkInfo{}, err
-	}
-	if info.Target.Data == "" {
-		info.Target.Data = dataDir
-	}
-	if info.Name == "" {
-		info.Name = strings.TrimPrefix(filepath.Base(dataDir), "data-")
-	}
-	if !info.Managed {
-		if managedDataDir, err := ManagedForkDataDir(info.Name); err == nil && filepath.Clean(info.Target.Data) == managedDataDir {
-			info.Managed = true
-		}
-	}
-	return info, nil
 }
 
 func ManagedForkDataDir(name string) (string, error) {
@@ -634,6 +794,8 @@ func completeForkInfoDefaults(info *ForkInfo, dataDir string) {
 	}
 }
 
+// StartFork starts a previously created fork resolved by name or --dst-data. It is
+// idempotent: an already-running fork returns success without restarting.
 func StartFork(opts ForkTargetOptions) (ResultData, error) {
 	dbsu := utils.GetDBSU(opts.DbSU)
 	dataDir, err := ResolveForkTarget(opts)
@@ -649,21 +811,32 @@ func StartFork(opts ForkTargetOptions) (ResultData, error) {
 		port = info.Target.Port
 	}
 	if port == 0 {
-		port = firstFreePortAvoiding(15432, reservedManagedForkPorts(dbsu, dataDir))
+		port, err = firstFreePortAvoiding(15432, reservedManagedForkPorts(dbsu, dataDir))
+		if err != nil {
+			return ResultData{}, &ForkError{Code: output.CodeForkPortInUse, Err: err}
+		}
 	}
 	if !validPort(port) {
 		return ResultData{}, &ForkError{Code: output.CodeForkInvalidArgs, Err: fmt.Errorf("invalid destination port %d (must be 1-65535)", port)}
 	}
-	if running, _ := CheckPostgresRunningAsDBSU(dbsu, dataDir); running {
+	if running, _ := forkCheckPostgresRunning(dbsu, dataDir); running {
+		if opts.DestPort != 0 && info.Target.Port != 0 && opts.DestPort != info.Target.Port {
+			return ResultData{}, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("fork is already running on port %d; stop it before changing destination port to %d", info.Target.Port, opts.DestPort)}
+		}
+		if info.Target.Port != 0 {
+			port = info.Target.Port
+		}
 		info.Target.Started = true
-		_ = WriteForkInfoAs(dbsu, dataDir, info)
-		return ResultData{Kind: KindInstance, Destination: dataDir, DestinationPort: port, Started: true, ConnectCommand: utils.ShellQuoteArgs([]string{"psql", "-p", strconv.Itoa(port)})}, nil
+		if err := WriteForkInfoAs(dbsu, dataDir, info); err != nil {
+			return ResultData{}, &ForkError{Code: output.CodeForkConfigFailed, Err: err}
+		}
+		return ResultData{Kind: KindInstance, Name: info.Name, Destination: dataDir, DestinationPort: port, Started: true, Already: true, ConnectCommand: forkConnectCommand(port)}, nil
 	}
-	if forkPortReservedByManagedFork(dbsu, port, dataDir) {
-		return ResultData{}, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("destination port is reserved by another managed fork: %d", port)}
+	if owner, ok := managedForkPortOwner(dbsu, port, dataDir); ok {
+		return ResultData{}, &ForkError{Code: output.CodeForkPortInUse, Err: forkPortReservedError(port, owner)}
 	}
 	if !forkPortFree(port) {
-		return ResultData{}, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("destination port is in use: %d", port)}
+		return ResultData{}, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("destination port is in use: %d\nHint: choose another destination port with -p/--dst-port", port)}
 	}
 	if opts.DestPort != 0 {
 		if err := configureInstance(dbsu, dataDir, port); err != nil {
@@ -672,17 +845,21 @@ func StartFork(opts ForkTargetOptions) (ResultData, error) {
 	}
 	cfg := &Config{PgData: dataDir, DbSU: dbsu}
 	if err := Start(cfg, &StartOptions{Timeout: opts.Timeout, LogFile: filepath.Join(dataDir, "log", "fork.log")}); err != nil {
-		return ResultData{}, &ForkError{Code: output.CodeForkStartFailed, Err: err}
+		return ResultData{}, forkSubprocessError(output.CodeForkStartFailed, err)
+	}
+	info.Target.Port = port
+	info.Target.Started = true
+	if err := WriteForkInfoAs(dbsu, dataDir, info); err != nil {
+		return ResultData{}, &ForkError{Code: output.CodeForkConfigFailed, Err: err}
 	}
 	if err := verifyInstance(dbsu, port); err != nil {
 		return ResultData{}, &ForkError{Code: output.CodeForkVerifyFailed, Err: err}
 	}
-	info.Target.Port = port
-	info.Target.Started = true
-	_ = WriteForkInfoAs(dbsu, dataDir, info)
-	return ResultData{Kind: KindInstance, Destination: dataDir, DestinationPort: port, Started: true, ConnectCommand: utils.ShellQuoteArgs([]string{"psql", "-p", strconv.Itoa(port)})}, nil
+	return ResultData{Kind: KindInstance, Name: info.Name, Destination: dataDir, DestinationPort: port, Started: true, ConnectCommand: forkConnectCommand(port)}, nil
 }
 
+// StopFork stops a running fork resolved by name or --dst-data. It is idempotent:
+// an already-stopped fork returns success.
 func StopFork(opts ForkTargetOptions) (ResultData, error) {
 	dbsu := utils.GetDBSU(opts.DbSU)
 	dataDir, err := ResolveForkTarget(opts)
@@ -693,20 +870,27 @@ func StopFork(opts ForkTargetOptions) (ResultData, error) {
 	if err != nil {
 		return ResultData{}, err
 	}
-	if running, _ := CheckPostgresRunningAsDBSU(dbsu, dataDir); !running {
+	if running, _ := forkCheckPostgresRunning(dbsu, dataDir); !running {
 		info.Target.Started = false
-		_ = WriteForkInfoAs(dbsu, dataDir, info)
-		return ResultData{Kind: KindInstance, Destination: dataDir, DestinationPort: info.Target.Port, Started: false}, nil
+		if err := WriteForkInfoAs(dbsu, dataDir, info); err != nil {
+			return ResultData{}, &ForkError{Code: output.CodeForkConfigFailed, Err: err}
+		}
+		return ResultData{Kind: KindInstance, Name: info.Name, Destination: dataDir, DestinationPort: info.Target.Port, Started: false, Already: true}, nil
 	}
 	cfg := &Config{PgData: dataDir, DbSU: dbsu}
-	if err := Stop(cfg, &StopOptions{Mode: opts.StopMode, Timeout: opts.Timeout}); err != nil {
-		return ResultData{}, &ForkError{Code: output.CodeForkStopFailed, Err: err}
+	if err := forkStopPostgres(cfg, &StopOptions{Mode: opts.StopMode, Timeout: opts.Timeout}); err != nil {
+		return ResultData{}, forkSubprocessError(output.CodeForkStopFailed, err)
 	}
 	info.Target.Started = false
-	_ = WriteForkInfoAs(dbsu, dataDir, info)
-	return ResultData{Kind: KindInstance, Destination: dataDir, DestinationPort: info.Target.Port, Started: false}, nil
+	if err := WriteForkInfoAs(dbsu, dataDir, info); err != nil {
+		return ResultData{}, &ForkError{Code: output.CodeForkConfigFailed, Err: err}
+	}
+	return ResultData{Kind: KindInstance, Name: info.Name, Destination: dataDir, DestinationPort: info.Target.Port, Started: false}, nil
 }
 
+// RemoveFork removes a fork's data directory, resolved by name (managed) or
+// --dst-data (unmanaged). A running fork is refused unless StopBefore is set, and
+// removal waits out a confirmation countdown unless Yes or Force is set.
 func RemoveFork(opts ForkTargetOptions) (ResultData, error) {
 	dbsu := utils.GetDBSU(opts.DbSU)
 	dataDir, err := ResolveForkTarget(opts)
@@ -721,25 +905,33 @@ func RemoveFork(opts ForkTargetOptions) (ResultData, error) {
 		}
 		info = orphan
 	}
-	running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
+	if err := validateForkRemovalRoute(opts, dataDir, info); err != nil {
+		return ResultData{}, &ForkError{Code: output.CodeForkInvalidArgs, Err: err}
+	}
+	running, pid := forkCheckPostgresRunning(dbsu, dataDir)
 	if running {
-		if !opts.StopBefore || !opts.Force {
-			return ResultData{}, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("fork is running (PID: %d): %s; use --stop -f to stop and remove it", pid, dataDir)}
-		}
-		cfg := &Config{PgData: dataDir, DbSU: dbsu}
-		if err := Stop(cfg, &StopOptions{Mode: opts.StopMode, Timeout: opts.Timeout}); err != nil {
-			return ResultData{}, &ForkError{Code: output.CodeForkStopFailed, Err: err}
+		if !opts.StopBefore {
+			return ResultData{}, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("fork is running (PID: %d): %s\nHint: use --stop to stop and remove it; add -f or -y only to skip the confirmation wait", pid, dataDir)}
 		}
 	}
 	if !opts.Yes && !opts.Force {
-		if err := confirmForkWithCountdown(fmt.Sprintf("This will remove PostgreSQL fork %s", dataDir), "REMOVE"); err != nil {
+		if err := forkConfirmCountdown(fmt.Sprintf("This will remove PostgreSQL fork %s", dataDir), "REMOVE"); err != nil {
 			return ResultData{}, &ForkError{Code: output.CodeForkInvalidArgs, Err: err}
 		}
+	}
+	if running {
+		cfg := &Config{PgData: dataDir, DbSU: dbsu}
+		if err := forkStopPostgres(cfg, &StopOptions{Mode: opts.StopMode, Timeout: opts.Timeout}); err != nil {
+			return ResultData{}, forkSubprocessError(output.CodeForkStopFailed, err)
+		}
+	}
+	if opts.Progress {
+		fmt.Fprintf(os.Stderr, "%s$ %s%s\n", utils.ColorBlue, forkRemoveCommand(InstanceOptions{Name: info.Name, DestData: dataDir, Managed: info.Managed}), utils.ColorReset)
 	}
 	if err := removeForkDataDir(dbsu, dataDir); err != nil {
 		return ResultData{}, &ForkError{Code: output.CodeForkRemoveFailed, Err: err}
 	}
-	return ResultData{Kind: KindInstance, Destination: dataDir, DestinationPort: info.Target.Port, Started: false}, nil
+	return ResultData{Kind: KindInstance, Name: info.Name, Destination: dataDir, DestinationPort: info.Target.Port, Started: false}, nil
 }
 
 func requireForkInfo(dbsu, dataDir string) (ForkInfo, error) {
@@ -757,7 +949,66 @@ func requireForkInfo(dbsu, dataDir string) (ForkInfo, error) {
 	if info.Kind != "pg_fork" {
 		return ForkInfo{}, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("invalid fork kind %q in %s/fork.json", info.Kind, dataDir)}
 	}
+	if !forkDataDirMatches(dbsu, info.Target.Data, dataDir) {
+		return ForkInfo{}, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("fork metadata target %s does not match data directory %s", info.Target.Data, dataDir)}
+	}
 	return info, nil
+}
+
+func validateForkRemovalRoute(opts ForkTargetOptions, dataDir string, info ForkInfo) error {
+	if opts.DestData != "" {
+		if info.Managed {
+			name := info.Name
+			if name == "" {
+				name = filepath.Base(dataDir)
+			}
+			return fmt.Errorf("managed fork %q must be removed by name, not --dst-data", name)
+		}
+		return validateUnmanagedForkRemovalPath(dataDir)
+	}
+	if opts.Name == "" {
+		return nil
+	}
+	if !info.Managed {
+		return fmt.Errorf("fork %q is unmanaged; use --dst-data to remove it", opts.Name)
+	}
+	if info.Name != "" && info.Name != opts.Name {
+		return fmt.Errorf("fork metadata name %q does not match requested fork %q", info.Name, opts.Name)
+	}
+	managedDataDir, err := ManagedForkDataDir(opts.Name)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(dataDir) != managedDataDir {
+		return fmt.Errorf("managed fork path invariant violated: %s", dataDir)
+	}
+	return nil
+}
+
+func validateUnmanagedForkRemovalPath(dataDir string) error {
+	info, err := forkLstat(dataDir)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to remove symlink fork data directory: %s", dataDir)
+	}
+	return nil
+}
+
+func forkDataDirMatches(dbsu, metadataDataDir, dataDir string) bool {
+	if metadataDataDir == "" || dataDir == "" {
+		return false
+	}
+	if filepath.Clean(metadataDataDir) == filepath.Clean(dataDir) {
+		return true
+	}
+	left, leftErr := resolvePathAsDBSU(dbsu, metadataDataDir)
+	right, rightErr := resolvePathAsDBSU(dbsu, dataDir)
+	if leftErr != nil || rightErr != nil || left == "" || right == "" {
+		return false
+	}
+	return filepath.Clean(left) == filepath.Clean(right)
 }
 
 func forcedManagedOrphanInfo(dbsu string, opts ForkTargetOptions, dataDir string) (ForkInfo, bool) {
@@ -787,7 +1038,6 @@ func removeForkDataDir(dbsu, dataDir string) error {
 		return err
 	}
 	args := []string{"rm", "-rf", "--", dataDir}
-	fmt.Fprintf(os.Stderr, "%s$ %s%s\n", utils.ColorBlue, utils.ShellQuoteArgs(args), utils.ColorReset)
 	return forkDBSUCommand(dbsu, args)
 }
 
@@ -802,14 +1052,27 @@ func validateForkRemovalPath(dataDir string) error {
 	return nil
 }
 
-func executeNormalized(opts *Options) (ResultData, error) {
-	start := time.Now()
+func prepareNormalized(opts *Options) (*State, error) {
 	switch opts.Kind {
 	case KindInstance:
-		state, err := precheckInstance(opts)
-		if err != nil {
-			return ResultData{}, err
-		}
+		return precheckInstance(opts)
+	default:
+		return nil, &ForkError{Code: output.CodeForkInvalidArgs, Err: fmt.Errorf("invalid fork kind %q", opts.Kind)}
+	}
+}
+
+func executeNormalized(opts *Options) (ResultData, error) {
+	start := time.Now()
+	state, err := prepareNormalized(opts)
+	if err != nil {
+		return ResultData{}, err
+	}
+	return executePrepared(opts, state, start)
+}
+
+func executePrepared(opts *Options, state *State, start time.Time) (ResultData, error) {
+	switch opts.Kind {
+	case KindInstance:
 		if err := executeInstance(opts, state); err != nil {
 			return ResultData{}, err
 		}
@@ -824,9 +1087,22 @@ func exitForkError(code int, err error) error {
 	return &utils.ExitCodeError{Code: output.ExitCode(code), Err: fe}
 }
 
+// forkSubprocessError wraps a subprocess failure in a ForkError carrying the given
+// fork code. The fork code (not the subprocess exit code) drives the final process
+// exit status, so the inner utils.ExitCodeError is unwrapped to avoid the command
+// layer rendering a doubled "command exited with code N: command exited with code M"
+// message.
+func forkSubprocessError(code int, err error) *ForkError {
+	var exitErr *utils.ExitCodeError
+	if errors.As(err, &exitErr) && exitErr.Err != nil {
+		err = exitErr.Err
+	}
+	return &ForkError{Code: code, Err: err}
+}
+
 func confirmForkWithCountdown(warning, action string) error {
 	fmt.Fprintf(os.Stderr, "\n%sWARNING: %s%s\n", utils.ColorYellow, warning, utils.ColorReset)
-	fmt.Fprintln(os.Stderr, "Press Ctrl+C to cancel, or wait for countdown...")
+	fmt.Fprintln(os.Stderr, "Press Ctrl+C within 5 seconds to cancel; use -f or -y to skip this wait.")
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -841,25 +1117,22 @@ func confirmForkWithCountdown(warning, action string) error {
 			fmt.Fprintf(os.Stderr, "\n%s cancelled.\n", action)
 			return fmt.Errorf("%s cancelled by user", action)
 		case <-time.After(time.Second):
-			fmt.Fprintf(os.Stderr, "\rStarting %s in %d seconds... ", action, i)
+			fmt.Fprint(os.Stderr, countdownTickMessage(i))
 		}
 	}
 	fmt.Fprintln(os.Stderr)
 	return nil
 }
 
-func inferPlanState(opts *Options) *State {
-	state := &State{CloneMode: CloneModeUnknown}
-	if opts == nil {
-		return state
+func countdownTickMessage(seconds int) string {
+	return fmt.Sprintf("\rProceeding in %d seconds... ", seconds)
+}
+
+func forkProgress(opts *Options, message string) {
+	if opts == nil || !opts.Progress || message == "" {
+		return
 	}
-	switch opts.Mode {
-	case ModeCold:
-		state.BackupMode = BackupModeCold
-	default:
-		state.BackupMode = BackupModeHot
-	}
-	return state
+	fmt.Fprintf(os.Stderr, "Step: %s\n", message)
 }
 
 func precheckInstance(opts *Options) (*State, error) {
@@ -874,74 +1147,86 @@ func precheckInstance(opts *Options) (*State, error) {
 
 	exists, initialized := CheckDataDirAsDBSU(opts.DbSU, inst.SourceData)
 	if !exists || !initialized {
-		return nil, &ForkError{Code: output.CodeForkSourceNotFound, Err: fmt.Errorf("source data directory is not initialized: %s", inst.SourceData)}
+		return nil, &ForkError{Code: output.CodeForkSourceNotFound, Err: fmt.Errorf("source data directory is not initialized: %s\nHint: pass a valid source with -D/--src-data, or initialize the source before forking", inst.SourceData)}
 	}
 
 	if destExists, _ := CheckDataDirAsDBSU(opts.DbSU, inst.DestData); destExists {
 		if running, pid := CheckPostgresRunningAsDBSU(opts.DbSU, inst.DestData); running {
-			return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("destination fork is running (PID: %d): %s; stop it before replacing", pid, inst.DestData)}
+			return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("destination fork is running (PID: %d): %s\nHint: stop it with `%s`, or remove it with `%s` before replacing", pid, inst.DestData, forkStopCommand(inst), forkRemoveCommand(inst))}
 		}
 		if !opts.Replace {
-			return nil, &ForkError{Code: output.CodeForkDestExists, Err: fmt.Errorf("destination data directory exists: %s (use --replace)", inst.DestData)}
+			return nil, &ForkError{Code: output.CodeForkDestExists, Err: fmt.Errorf("destination data directory exists: %s\nHint: use -f/--force to replace a stopped fork, or remove it with `%s`", inst.DestData, forkRemoveCommand(inst))}
 		}
 	}
 
-	if forkPortReservedByManagedFork(opts.DbSU, inst.DestPort, inst.DestData) {
-		return nil, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("destination port is reserved by another managed fork: %d", inst.DestPort)}
+	if owner, ok := managedForkPortOwner(opts.DbSU, inst.DestPort, inst.DestData); ok {
+		return nil, &ForkError{Code: output.CodeForkPortInUse, Err: forkPortReservedError(inst.DestPort, owner)}
 	}
 	if !forkPortFree(inst.DestPort) {
-		return nil, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("destination port is in use: %d", inst.DestPort)}
+		return nil, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("destination port is in use: %d\nHint: choose another destination port with -p/--dst-port", inst.DestPort)}
 	}
 
-	running := canConnect(opts.DbSU, inst.SourcePort)
-	if opts.Mode == ModeHot && !running {
-		return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("source instance is not reachable on port %d; use --mode cold if it is stopped", inst.SourcePort)}
+	// Auto-detect the copy mode: take a hot backup if the source is reachable,
+	// otherwise fall back to a cold copy. A data directory that still holds a
+	// postmaster.pid but is not reachable on the given port is ambiguous (it may be
+	// running on another port), so refuse rather than risk copying a live instance.
+	running, err := sourcePortMatchesDataDir(opts.DbSU, inst.SourcePort, inst.SourceData)
+	if err != nil {
+		return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: err}
 	}
-	if (opts.Mode == ModeCold || (opts.Mode == ModeAuto && !running)) && hasPostmasterPID(opts.DbSU, inst.SourceData) {
-		return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("source data directory has postmaster.pid; refusing cold copy of a possibly running instance")}
+	if !running && hasPostmasterPID(opts.DbSU, inst.SourceData) {
+		return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("source instance is not reachable on port %d while %s has postmaster.pid; check --src-port/-P or stop the source before cold copy", inst.SourcePort, inst.SourceData)}
 	}
 
 	mode := BackupModeHot
-	if opts.Mode == ModeCold || (opts.Mode == ModeAuto && !running) {
+	if !running {
 		mode = BackupModeCold
 	}
 	cloneMode, fs := detectCloneModeAs(opts.DbSU, inst.SourceData, inst.DestData)
-	state := &State{BackupMode: mode, CloneMode: cloneMode, FS: fs}
-	if err := requireCOW(state, opts.Replace); err != nil {
-		return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: err}
-	}
-	return state, nil
+	return &State{BackupMode: mode, CloneMode: cloneMode, FS: fs}, nil
 }
 
 func executeInstance(opts *Options, state *State) error {
 	inst := opts.Instance
 	if state.BackupMode == BackupModeCold {
-		if err := coldCopy(opts.DbSU, inst.SourceData, inst.DestData); err != nil {
-			return &ForkError{Code: output.CodeForkCopyFailed, Err: err}
+		forkProgress(opts, "copying stopped source data directory")
+		if err := copyDataDir(opts.DbSU, inst.SourceData, inst.DestData); err != nil {
+			return forkSubprocessError(output.CodeForkCopyFailed, err)
 		}
 	} else {
+		forkProgress(opts, "copying source data directory under PostgreSQL backup")
 		if err := hotCopy(opts.DbSU, inst); err != nil {
 			return err
 		}
 	}
 
+	forkProgress(opts, "configuring fork")
 	if err := configureInstance(opts.DbSU, inst.DestData, inst.DestPort); err != nil {
 		return &ForkError{Code: output.CodeForkConfigFailed, Err: err}
 	}
 
-	if opts.Start {
-		cfg := &Config{PgData: inst.DestData, DbSU: opts.DbSU}
-		if err := Start(cfg, forkStartOptions(inst)); err != nil {
-			return &ForkError{Code: output.CodeForkStartFailed, Err: err}
-		}
-		if err := verifyInstance(opts.DbSU, inst.DestPort); err != nil {
-			return &ForkError{Code: output.CodeForkVerifyFailed, Err: err}
-		}
-		state.Started = true
-	}
+	forkProgress(opts, "writing fork metadata")
 	info := BuildForkInfo(opts, state)
 	if err := WriteForkInfoAs(opts.DbSU, inst.DestData, info); err != nil {
 		return &ForkError{Code: output.CodeForkConfigFailed, Err: err}
+	}
+
+	if opts.Start {
+		forkProgress(opts, "starting fork")
+		cfg := &Config{PgData: inst.DestData, DbSU: opts.DbSU}
+		if err := Start(cfg, forkStartOptions(inst)); err != nil {
+			return forkSubprocessError(output.CodeForkStartFailed, err)
+		}
+		state.Started = true
+		forkProgress(opts, "updating fork metadata")
+		info = BuildForkInfo(opts, state)
+		if err := WriteForkInfoAs(opts.DbSU, inst.DestData, info); err != nil {
+			return &ForkError{Code: output.CodeForkConfigFailed, Err: err}
+		}
+		forkProgress(opts, "verifying fork connection")
+		if err := verifyInstance(opts.DbSU, inst.DestPort); err != nil {
+			return &ForkError{Code: output.CodeForkVerifyFailed, Err: err}
+		}
 	}
 	return nil
 }
@@ -951,10 +1236,6 @@ func forkStartOptions(inst InstanceOptions) *StartOptions {
 		Timeout: inst.Timeout,
 		LogFile: filepath.Join(inst.DestData, "log", "fork.log"),
 	}
-}
-
-func coldCopy(dbsu, src, dst string) error {
-	return copyDataDir(dbsu, src, dst)
 }
 
 func hotCopy(dbsu string, inst InstanceOptions) error {
@@ -984,11 +1265,11 @@ func hotCopy(dbsu string, inst InstanceOptions) error {
 	if err := runHotBackupCopy(session, label, copyFn); err != nil {
 		var copyErr copyPhaseError
 		if errors.As(err, &copyErr) {
-			return &ForkError{Code: output.CodeForkCopyFailed, Err: copyErr.Err}
+			return forkSubprocessError(output.CodeForkCopyFailed, copyErr.Err)
 		}
 		return &ForkError{Code: output.CodeForkBackupFailed, Err: err}
 	}
-	if err := validateCopiedDataDir(dbsu, inst.DestData); err != nil {
+	if err := forkDBSUCommand(dbsu, []string{"test", "-f", filepath.Join(inst.DestData, "PG_VERSION")}); err != nil {
 		return &ForkError{Code: output.CodeForkCopyFailed, Err: err}
 	}
 	return nil
@@ -1009,10 +1290,6 @@ func copyDataDir(dbsu, src, dst string) error {
 		}
 	}
 	return nil
-}
-
-func validateCopiedDataDir(dbsu, dst string) error {
-	return utils.DBSUCommand(dbsu, []string{"test", "-f", filepath.Join(dst, "PG_VERSION")})
 }
 
 type backupSession interface {
@@ -1243,12 +1520,31 @@ func verifyInstance(dbsu string, port int) error {
 }
 
 func canConnect(dbsu string, port int) bool {
+	_, err := forkProbeSourceDataDir(dbsu, port)
+	return err == nil
+}
+
+func sourcePortMatchesDataDir(dbsu string, port int, sourceData string) (bool, error) {
+	probedDataDir, err := forkProbeSourceDataDir(dbsu, port)
+	if err != nil {
+		return false, nil
+	}
+	if !forkDataDirMatches(dbsu, probedDataDir, sourceData) {
+		return true, fmt.Errorf("source port %d data directory %s does not match source data directory %s\nHint: pass matching -D/--src-data and -P/--src-port, or omit both to use the default source", port, probedDataDir, sourceData)
+	}
+	return true, nil
+}
+
+func probeSourceDataDir(dbsu string, port int) (string, error) {
 	pg, err := ext.FindPostgres(0)
 	if err != nil {
-		return false
+		return "", err
 	}
-	_, err = utils.DBSUCommandOutput(dbsu, forkPsqlProbeArgs(pg.Psql(), port))
-	return err == nil
+	out, err := forkDBSUCommandOutput(dbsu, []string{pg.Psql(), "-X", "-qAt", "-v", "ON_ERROR_STOP=1", "-p", fmt.Sprintf("%d", port), "-d", "postgres", "-c", "SHOW data_directory"})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
 }
 
 func forkPsqlProbeArgs(psql string, port int) []string {
@@ -1259,24 +1555,27 @@ func validPort(port int) bool {
 	return port >= 1 && port <= 65535
 }
 
-func firstFreePort(start int) int {
-	return firstFreePortAvoiding(start, nil)
-}
-
-func firstFreePortAvoiding(start int, reserved map[int]bool) int {
+func firstFreePortAvoiding(start int, reserved map[int]bool) (int, error) {
+	if !validPort(start) {
+		return 0, fmt.Errorf("invalid destination port search start %d (must be 1-65535)", start)
+	}
+	end := start + 999
+	if end > 65535 {
+		end = 65535
+	}
 	for port := start; port < start+1000 && port <= 65535; port++ {
 		if reserved[port] {
 			continue
 		}
 		if forkPortFree(port) {
-			return port
+			return port, nil
 		}
 	}
-	return start
+	return 0, fmt.Errorf("no free destination port available in range %d-%d", start, end)
 }
 
 func reservedManagedForkPorts(dbsu, excludeDataDir string) map[int]bool {
-	if _, err := os.Stat("/pg"); err != nil {
+	if _, err := forkLstat("/pg"); err != nil {
 		return nil
 	}
 	forks, err := ScanForksAs(dbsu, "/pg")
@@ -1284,10 +1583,10 @@ func reservedManagedForkPorts(dbsu, excludeDataDir string) map[int]bool {
 		logrus.Debugf("scan managed forks for port reservation failed: %v", err)
 		return nil
 	}
-	return reservedForkPorts(forks, excludeDataDir)
+	return reservedForkPortsAs(dbsu, forks, excludeDataDir)
 }
 
-func reservedForkPorts(forks []ForkInfo, excludeDataDir string) map[int]bool {
+func reservedForkPortsAs(dbsu string, forks []ForkInfo, excludeDataDir string) map[int]bool {
 	reserved := make(map[int]bool)
 	exclude := ""
 	if excludeDataDir != "" {
@@ -1298,7 +1597,7 @@ func reservedForkPorts(forks []ForkInfo, excludeDataDir string) map[int]bool {
 		if !validPort(port) {
 			continue
 		}
-		if exclude != "" && filepath.Clean(fork.Target.Data) == exclude {
+		if exclude != "" && forkDataDirMatches(dbsu, fork.Target.Data, exclude) {
 			continue
 		}
 		reserved[port] = true
@@ -1310,7 +1609,44 @@ func forkPortReservedByManagedFork(dbsu string, port int, dataDir string) bool {
 	if !validPort(port) {
 		return false
 	}
-	return reservedManagedForkPorts(dbsu, dataDir)[port]
+	_, ok := managedForkPortOwner(dbsu, port, dataDir)
+	return ok
+}
+
+func managedForkPortOwner(dbsu string, port int, excludeDataDir string) (ForkInfo, bool) {
+	if !validPort(port) {
+		return ForkInfo{}, false
+	}
+	if _, err := forkLstat("/pg"); err != nil {
+		return ForkInfo{}, false
+	}
+	forks, err := ScanForksAs(dbsu, "/pg")
+	if err != nil {
+		logrus.Debugf("scan managed forks for port owner failed: %v", err)
+		return ForkInfo{}, false
+	}
+	for _, fork := range forks {
+		if fork.Target.Port != port {
+			continue
+		}
+		if excludeDataDir != "" && forkDataDirMatches(dbsu, fork.Target.Data, excludeDataDir) {
+			continue
+		}
+		return fork, true
+	}
+	return ForkInfo{}, false
+}
+
+func forkPortReservedError(port int, owner ForkInfo) error {
+	name := owner.Name
+	if name == "" {
+		name = "unknown"
+	}
+	data := owner.Target.Data
+	if data == "" {
+		data = "unknown data directory"
+	}
+	return fmt.Errorf("destination port %d is reserved by managed fork %s (%s)\nHint: run `pig pg fork list`, or choose another destination port with -p/--dst-port", port, name, data)
 }
 
 func isPortFree(port int) bool {
@@ -1405,40 +1741,6 @@ func pathContains(parent, child string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func requireCOW(state *State, force bool) error {
-	if state != nil && state.CloneMode == CloneModeCOW {
-		return nil
-	}
-	fs := "unknown"
-	if state != nil && state.FS != "" {
-		fs = state.FS
-	}
-	if force {
-		return nil
-	}
-	return fmt.Errorf("copy-on-write is not available on source filesystem %q; use --force to allow regular copy fallback", fs)
-}
-
-func detectCloneMode(src, dst string) (CloneMode, string) {
-	dstParent := existingParent(filepath.Dir(dst))
-	srcMount, srcFS := dfMountAndFS(src)
-	dstMount, _ := dfMountAndFS(dstParent)
-	if srcMount == "" || dstMount == "" || srcMount != dstMount {
-		return CloneModeCopy, srcFS
-	}
-	switch strings.ToLower(srcFS) {
-	case "xfs":
-		if xfsReflinkEnabled(srcMount) {
-			return CloneModeCOW, srcFS
-		}
-		return CloneModeCopy, srcFS
-	case "btrfs", "bcachefs", "ocfs2":
-		return CloneModeCOW, srcFS
-	default:
-		return CloneModeCopy, srcFS
-	}
-}
-
 func detectCloneModeAs(dbsu, src, dst string) (CloneMode, string) {
 	dstParent := existingParentAs(dbsu, filepath.Dir(dst))
 	srcMount, srcFS := dfMountAndFSAs(dbsu, src)
@@ -1470,16 +1772,6 @@ func xfsReflinkEnabled(mount string) bool {
 		logrus.Debugf("xfs reflink probe failed: bin=%s mount=%s err=%v", bin, mount, err)
 	}
 	return false
-}
-
-func existingParent(path string) string {
-	for path != "" && path != "." && path != "/" {
-		if stat, err := os.Stat(path); err == nil && stat.IsDir() {
-			return path
-		}
-		path = filepath.Dir(path)
-	}
-	return "/"
 }
 
 func existingParentAs(dbsu, path string) string {
@@ -1528,6 +1820,7 @@ func instanceResult(opts *Options, state *State, elapsed time.Duration) ResultDa
 	inst := opts.Instance
 	return ResultData{
 		Kind:            KindInstance,
+		Name:            inst.Name,
 		Source:          inst.SourceData,
 		Destination:     inst.DestData,
 		SourcePort:      inst.SourcePort,
@@ -1535,8 +1828,12 @@ func instanceResult(opts *Options, state *State, elapsed time.Duration) ResultDa
 		BackupMode:      string(state.BackupMode),
 		CloneMode:       string(state.CloneMode),
 		Started:         state.Started,
-		ConnectCommand:  utils.ShellQuoteArgs([]string{"psql", "-p", strconv.Itoa(inst.DestPort)}),
-		CleanupCommand:  utils.ShellQuoteArgs([]string{"pg_ctl", "-D", inst.DestData, "stop"}) + "; " + utils.ShellQuoteArgs([]string{"rm", "-rf", "--", inst.DestData}),
+		ConnectCommand:  forkConnectCommand(inst.DestPort),
+		StartCommand:    forkStartCommand(inst),
+		StopCommand:     forkStopCommand(inst),
+		CleanupCommand:  forkRemoveCommand(inst),
+		PigVersion:      config.PigVersion,
+		PigRevision:     config.Revision,
 		Duration:        elapsed.Seconds(),
 	}
 }

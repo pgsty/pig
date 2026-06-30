@@ -28,6 +28,16 @@ var (
 	outputFormat string   // output format: text, yaml, json
 )
 
+const (
+	legacyModuleBuild = output.MODULE_BUILD
+	legacyModuleDo    = output.MODULE_DO
+	legacyModuleExt   = output.MODULE_EXT
+	legacyModulePb    = output.MODULE_PB
+	legacyModulePg    = output.MODULE_PG
+	legacyModuleSty   = output.MODULE_STY
+	legacyModulePt    = output.MODULE_PT
+)
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "pig",
@@ -51,6 +61,14 @@ var rootCmd = &cobra.Command{
 		applyStructuredOutputSilence(cmd)
 		return nil
 	},
+}
+
+func commandModulePreRun(cmd *cobra.Command, args []string) error {
+	if err := initAll(); err != nil {
+		return err
+	}
+	applyStructuredOutputSilence(cmd)
+	return nil
 }
 
 func initAll() error {
@@ -311,6 +329,10 @@ func init() {
 		&cobra.Group{ID: "pgext", Title: "PostgreSQL Extension Manager"},
 		&cobra.Group{ID: "pigsty", Title: "Pigsty Management Commands"},
 	)
+	registerPostgresCommand()
+	registerPatroniCommand()
+	registerPgBackRestCommand()
+
 	rootCmd.AddCommand(
 		contextCmd,
 		extCmd,

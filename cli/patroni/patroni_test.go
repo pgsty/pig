@@ -28,6 +28,17 @@ func argsHasInOrder(args []string, wants ...string) bool {
 	return i == len(wants)
 }
 
+func TestLogRejectsNonPositiveLines(t *testing.T) {
+	for _, n := range []int{0, -1} {
+		if err := Log(false, n); err == nil || !strings.Contains(err.Error(), "lines must be positive") {
+			t.Fatalf("Log(false, %d) = %v, want positive line count error", n, err)
+		}
+		if err := LogJSONL(n); err == nil || !strings.Contains(err.Error(), "lines must be positive") {
+			t.Fatalf("LogJSONL(%d) = %v, want positive line count error", n, err)
+		}
+	}
+}
+
 func TestBuildRestartArgs(t *testing.T) {
 	const cluster = "pg-nms"
 

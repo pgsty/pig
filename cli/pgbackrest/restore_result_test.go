@@ -7,6 +7,10 @@ package pgbackrest
 
 import (
 	"encoding/json"
+	"io"
+	"os"
+	"reflect"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -286,6 +290,239 @@ func TestDetermineTargetValue(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateRestoreOptionsRejectsDefaultOnlyTargetModifiers(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *RestoreOptions
+		want string
+	}{
+		{
+			name: "default promote",
+			opts: &RestoreOptions{Default: true, Promote: true},
+			want: "--promote",
+		},
+		{
+			name: "default exclusive",
+			opts: &RestoreOptions{Default: true, Exclusive: true},
+			want: "--exclusive",
+		},
+		{
+			name: "name exclusive",
+			opts: &RestoreOptions{Name: "restore_point", Exclusive: true},
+			want: "--exclusive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRestoreOptions(tt.opts)
+			if err == nil {
+				t.Fatal("ValidateRestoreOptions should reject invalid target modifier combination")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ValidateRestoreOptions error = %q, want it to mention %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateRestoreOptionsAcceptsTargetModifiersWithSupportedTargets(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *RestoreOptions
+	}{
+		{name: "time exclusive", opts: &RestoreOptions{Time: "2026-01-01 00:00:00+00", Exclusive: true}},
+		{name: "lsn exclusive", opts: &RestoreOptions{LSN: "0/7C82CB8", Exclusive: true}},
+		{name: "xid exclusive", opts: &RestoreOptions{XID: "12345", Exclusive: true}},
+		{name: "name promote", opts: &RestoreOptions{Name: "restore_point", Promote: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateRestoreOptions(tt.opts); err != nil {
+				t.Fatalf("ValidateRestoreOptions should accept combination: %v", err)
+			}
+		})
+	}
+}
+
+func TestBuildRestoreArgsIncludesTargetTimelineAndAction(t *testing.T) {
+	opts := &RestoreOptions{Time: "2026-01-01 00:00:00+00"}
+	setStringField(t, opts, "TargetTimeline", "current")
+	setStringField(t, opts, "TargetAction", "shutdown")
+
+	args := buildRestoreArgs(DefaultConfig(), opts, opts.Time)
+
+	if !containsArg(args, "--target-timeline=current") {
+		t.Fatalf("restore args should include target timeline, got %v", args)
+	}
+	if !containsArg(args, "--target-action=shutdown") {
+		t.Fatalf("restore args should include target action, got %v", args)
+	}
+}
+
+func TestBuildRestoreArgsAppendsExtraArgsAfterRestoreArgs(t *testing.T) {
+	opts := &RestoreOptions{
+		Time:           "2026-01-01 00:00:00+00",
+		Set:            "20260101-000000F",
+		TargetTimeline: "current",
+	}
+	setStringSliceField(t, opts, "ExtraArgs", []string{"--delta", "--process-max=4"})
+
+	args := buildRestoreArgs(DefaultConfig(), opts, opts.Time)
+	wantTail := []string{"--delta", "--process-max=4"}
+	if len(args) < len(wantTail) {
+		t.Fatalf("restore args too short: got %v", args)
+	}
+	if gotTail := args[len(args)-len(wantTail):]; !reflect.DeepEqual(gotTail, wantTail) {
+		t.Fatalf("extra args should be appended at the end, got tail %v from %v", gotTail, args)
+	}
+	if !containsArg(args, "--set=20260101-000000F") || !containsArg(args, "--target-timeline=current") {
+		t.Fatalf("restore args should retain built restore args before extra args, got %v", args)
+	}
+}
+
+func TestValidateRestoreOptionsRejectsInvalidTimelineAndAction(t *testing.T) {
+	t.Run("invalid timeline", func(t *testing.T) {
+		opts := &RestoreOptions{Time: "2026-01-01 00:00:00+00"}
+		setStringField(t, opts, "TargetTimeline", "branch-two")
+
+		err := ValidateRestoreOptions(opts)
+		if err == nil || !strings.Contains(err.Error(), "timeline") {
+			t.Fatalf("ValidateRestoreOptions error = %v, want timeline validation", err)
+		}
+	})
+
+	t.Run("invalid action", func(t *testing.T) {
+		opts := &RestoreOptions{Time: "2026-01-01 00:00:00+00"}
+		setStringField(t, opts, "TargetAction", "resume")
+
+		err := ValidateRestoreOptions(opts)
+		if err == nil || !strings.Contains(err.Error(), "target action") {
+			t.Fatalf("ValidateRestoreOptions error = %v, want target action validation", err)
+		}
+	})
+}
+
+func setStringField(t *testing.T, target interface{}, fieldName, value string) {
+	t.Helper()
+	field := reflect.ValueOf(target).Elem().FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("%T should expose %s", target, fieldName)
+	}
+	if !field.CanSet() {
+		t.Fatalf("%T.%s is not settable", target, fieldName)
+	}
+	field.SetString(value)
+}
+
+func setStringSliceField(t *testing.T, target interface{}, fieldName string, value []string) {
+	t.Helper()
+	field := reflect.ValueOf(target).Elem().FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("%T should expose %s", target, fieldName)
+	}
+	if !field.CanSet() {
+		t.Fatalf("%T.%s is not settable", target, fieldName)
+	}
+	field.Set(reflect.ValueOf(value))
+}
+
+func containsArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPrintPostRestoreHintsDefaultDoesNotSuggestPromote(t *testing.T) {
+	output := capturePgBackRestStderr(t, func() {
+		printPostRestoreHints(DefaultConfig(), &RestoreOptions{
+			Default: true,
+			DataDir: "/tmp/pig-pitr-restore",
+		})
+	})
+
+	if !strings.Contains(output, "pg_ctl -D /tmp/pig-pitr-restore start") {
+		t.Fatalf("default restore hints should include custom pg_ctl start, got:\n%s", output)
+	}
+	if strings.Contains(output, "promote") {
+		t.Fatalf("default restore hints should not suggest manual promote, got:\n%s", output)
+	}
+}
+
+func TestPrintPostRestoreHintsDefaultDataDirRenumbersStanzaStep(t *testing.T) {
+	output := capturePgBackRestStderr(t, func() {
+		printPostRestoreHints(DefaultConfig(), &RestoreOptions{Default: true})
+	})
+
+	if !strings.Contains(output, "3. Re-create stanza if needed:") {
+		t.Fatalf("default restore hints should renumber stanza step to 3, got:\n%s", output)
+	}
+	if strings.Contains(output, "4. Re-create stanza if needed:") {
+		t.Fatalf("default restore hints should not skip from step 2 to 4, got:\n%s", output)
+	}
+}
+
+func TestPrintPostRestoreHintsManualTargetSuggestsPromote(t *testing.T) {
+	output := capturePgBackRestStderr(t, func() {
+		printPostRestoreHints(DefaultConfig(), &RestoreOptions{
+			Time:    "2026-01-31 01:00:00",
+			DataDir: "/tmp/pig-pitr-restore",
+		})
+	})
+
+	if !strings.Contains(output, "pg_ctl -D /tmp/pig-pitr-restore promote") {
+		t.Fatalf("manual target restore hints should suggest promote, got:\n%s", output)
+	}
+}
+
+func TestDestructiveConfirmationRequiresExplicitYes(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{input: "yes", want: true},
+		{input: "YES", want: true},
+		{input: " yes \n", want: true},
+		{input: "", want: false},
+		{input: "y", want: false},
+		{input: "restore", want: false},
+		{input: "no", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := isDestructiveConfirmationAccepted(tt.input); got != tt.want {
+				t.Fatalf("isDestructiveConfirmationAccepted(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func capturePgBackRestStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stderr = w
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close stderr pipe: %v", err)
+	}
+	os.Stderr = oldStderr
+	defer r.Close()
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("failed to read stderr pipe: %v", err)
+	}
+	return string(data)
 }
 
 // containsStr is a helper to check if a string contains a substring.

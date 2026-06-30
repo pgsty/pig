@@ -8,7 +8,10 @@ package postgres
 
 import (
 	"bytes"
+	"encoding/csv"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +21,66 @@ import (
 
 	"pig/internal/utils"
 )
+
+var csvLogFieldNames = []string{
+	"log_time",
+	"user_name",
+	"database_name",
+	"process_id",
+	"connection_from",
+	"session_id",
+	"session_line_num",
+	"command_tag",
+	"session_start_time",
+	"virtual_transaction_id",
+	"transaction_id",
+	"error_severity",
+	"sql_state_code",
+	"message",
+	"detail",
+	"hint",
+	"internal_query",
+	"internal_query_pos",
+	"context",
+	"query",
+	"query_pos",
+	"location",
+	"application_name",
+	"backend_type",
+	"leader_pid",
+	"query_id",
+}
+
+var openLogFileForRead = openLogFileWithSudoFallback
+
+func openLogFileWithSudoFallback(logFile string) (io.ReadCloser, error) {
+	f, err := os.Open(logFile)
+	if err == nil {
+		return f, nil
+	}
+	if !os.IsPermission(err) {
+		return nil, err
+	}
+
+	var cmd *exec.Cmd
+	if os.Geteuid() == 0 {
+		cmd = exec.Command("cat", logFile)
+	} else {
+		cmd = exec.Command("sudo", "cat", logFile)
+	}
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if fallbackErr := cmd.Run(); fallbackErr != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail != "" {
+			return nil, fmt.Errorf("cannot read log file %s: %w: %s", logFile, fallbackErr, detail)
+		}
+		return nil, fmt.Errorf("cannot read log file %s: %w", logFile, fallbackErr)
+	}
+	return io.NopCloser(bytes.NewReader(out.Bytes())), nil
+}
 
 func resolveRequestedLogFile(logDir string, file string) (string, error) {
 	if file == "" {
@@ -150,6 +213,9 @@ func logListWithSudo(logDir string) error {
 
 // LogTail tails the latest log file (follow mode)
 func LogTail(logDir, file string, lines int) error {
+	if lines <= 0 {
+		return fmt.Errorf("lines must be positive")
+	}
 	var logFile string
 	if file != "" {
 		var err error
@@ -163,10 +229,6 @@ func LogTail(logDir, file string, lines int) error {
 		if err != nil {
 			return err
 		}
-	}
-
-	if lines <= 0 {
-		lines = 50
 	}
 
 	cmdArgs := []string{"tail", "-n", strconv.Itoa(lines), "-f", logFile}
@@ -176,6 +238,9 @@ func LogTail(logDir, file string, lines int) error {
 
 // LogCat outputs log file content
 func LogCat(logDir, file string, lines int) error {
+	if lines <= 0 {
+		return fmt.Errorf("lines must be positive")
+	}
 	var logFile string
 	if file != "" {
 		var err error
@@ -191,13 +256,80 @@ func LogCat(logDir, file string, lines int) error {
 		}
 	}
 
-	if lines <= 0 {
-		lines = 100
-	}
-
 	cmdArgs := []string{"tail", "-n", strconv.Itoa(lines), logFile}
 	PrintHint(cmdArgs)
 	return RunWithSudoFallback(cmdArgs)
+}
+
+// LogShowJSONL outputs the latest PostgreSQL CSV log records as JSONL.
+func LogShowJSONL(logDir, file string, lines int) error {
+	logFile, err := resolveLogSelection(logDir, file)
+	if err != nil {
+		return err
+	}
+	return writeCSVLogJSONL(os.Stdout, logFile, lines)
+}
+
+func resolveLogSelection(logDir, file string) (string, error) {
+	if file != "" {
+		return resolveRequestedLogFile(logDir, file)
+	}
+	return getLatestLogFile(logDir)
+}
+
+func writeCSVLogJSONL(w io.Writer, logFile string, lines int) error {
+	if lines <= 0 {
+		return fmt.Errorf("lines must be positive")
+	}
+
+	f, err := openLogFileForRead(logFile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	reader := csv.NewReader(f)
+	reader.FieldsPerRecord = -1
+
+	var records [][]string
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("parse csv log %s: %w", logFile, err)
+		}
+		records = append(records, record)
+		if len(records) > lines {
+			copy(records, records[1:])
+			records = records[:lines]
+		}
+	}
+
+	for _, record := range records {
+		row := csvLogRecordToMap(record)
+		data, err := json.Marshal(row)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w, string(data)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func csvLogRecordToMap(record []string) map[string]string {
+	row := map[string]string{"component": "postgres"}
+	for i, value := range record {
+		if i < len(csvLogFieldNames) {
+			row[csvLogFieldNames[i]] = value
+			continue
+		}
+		row[fmt.Sprintf("field_%d", i+1)] = value
+	}
+	return row
 }
 
 // LogLess opens the latest log file in less

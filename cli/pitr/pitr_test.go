@@ -3,10 +3,14 @@ package pitr
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"pig/cli/pgbackrest"
 	"pig/internal/output"
 	"pig/internal/utils"
 )
@@ -82,6 +86,78 @@ func TestBuildPlanSkipPatroniNoRestart(t *testing.T) {
 	}
 }
 
+func TestBuildPlanCustomDataDirSideRestoreDoesNotManagePatroni(t *testing.T) {
+	state := &SystemState{
+		PatroniActive: true,
+		SideRestore:   true,
+		PGRunning:     false,
+		DataDir:       "/tmp/pitr-restore",
+		DbSU:          "postgres",
+	}
+	opts := &Options{
+		Default:     true,
+		DataDir:     "/tmp/pitr-restore",
+		SkipPatroni: true,
+		NoRestart:   true,
+	}
+
+	plan := BuildPlan(state, opts)
+	if containsAction(plan.Actions, "Stop Patroni service") {
+		t.Fatal("side restore plan should not stop Patroni")
+	}
+	if containsAction(plan.Actions, "Ensure PostgreSQL is stopped") {
+		t.Fatal("side restore plan should not stop PostgreSQL only because Patroni is active")
+	}
+	for _, res := range plan.Affects {
+		if res.Type == "service" && (res.Name == "patroni" || res.Name == "postgresql") {
+			t.Fatalf("side restore plan should not affect live services, got %+v", res)
+		}
+	}
+}
+
+func TestPrintExecutionPlanSideRestoreShowsPatroniLeftRunning(t *testing.T) {
+	state := &SystemState{
+		PatroniActive: true,
+		SideRestore:   true,
+		DataDir:       "/tmp/pitr-restore",
+		DbSU:          "postgres",
+	}
+	opts := &Options{Default: true, DataDir: "/tmp/pitr-restore"}
+
+	output := capturePITRStderr(t, func() {
+		printExecutionPlan(state, opts)
+	})
+
+	if !strings.Contains(output, "Patroni Service: ") || !strings.Contains(output, "left running for custom data dir") {
+		t.Fatalf("side restore plan should show active Patroni left running, got:\n%s", output)
+	}
+	if strings.Contains(output, "Stop Patroni service") {
+		t.Fatalf("side restore plan should not stop Patroni, got:\n%s", output)
+	}
+}
+
+func TestBuildPlanIncludesRecoveryWaitForAutoPromoteTargets(t *testing.T) {
+	state := &SystemState{
+		DataDir: "/pg/data",
+		DbSU:    "postgres",
+	}
+
+	plan := BuildPlan(state, &Options{Default: true})
+	if !containsAction(plan.Actions, "Wait for PostgreSQL recovery to complete") {
+		t.Fatalf("default PITR plan should include recovery completion wait, got %+v", plan.Actions)
+	}
+
+	plan = BuildPlan(state, &Options{Time: "2026-01-31 01:00:00"})
+	if containsAction(plan.Actions, "Wait for PostgreSQL recovery to complete") {
+		t.Fatalf("manual PITR target should not wait for promotion, got %+v", plan.Actions)
+	}
+
+	plan = BuildPlan(state, &Options{Time: "2026-01-31 01:00:00", Promote: true})
+	if !containsAction(plan.Actions, "Wait for PostgreSQL recovery to complete") {
+		t.Fatalf("auto-promote PITR plan should include recovery completion wait, got %+v", plan.Actions)
+	}
+}
+
 func TestBuildPlanNilInputs(t *testing.T) {
 	// Test nil state
 	plan := BuildPlan(nil, &Options{Default: true})
@@ -147,8 +223,21 @@ func TestBuildCommand(t *testing.T) {
 		},
 		{
 			name:     "with flags",
-			opts:     &Options{Default: true, SkipPatroni: true, NoRestart: true, Exclusive: true, Promote: true},
-			contains: []string{"--skip-patroni", "--no-restart", "-X", "-P"},
+			opts:     &Options{Default: true, SkipPatroni: true, NoRestart: true, Exclusive: true, Promote: true, ForceStop: true},
+			contains: []string{"--skip-patroni", "--no-restart", "-X", "-P", "--force-stop"},
+			excludes: []string{},
+		},
+		{
+			name: "with operational context",
+			opts: &Options{
+				Time:       "2026-01-31 01:00:00",
+				DataDir:    "/data/pg",
+				Stanza:     "pg-prod",
+				ConfigPath: "/etc/pgbackrest/custom.conf",
+				Repo:       "2",
+				DbSU:       "postgres",
+			},
+			contains: []string{"-t", `"2026-01-31 01:00:00"`, "-D", "/data/pg", "-s", "pg-prod", "-c", "/etc/pgbackrest/custom.conf", "-r", "2", "-U", "postgres"},
 			excludes: []string{},
 		},
 		{
@@ -506,6 +595,11 @@ func TestClassifyRestoreError(t *testing.T) {
 			want: output.CodePITRNoBackup,
 		},
 		{
+			name: "backup set invalid",
+			err:  fmt.Errorf("backup set 19000101-000000F is not valid"),
+			want: output.CodePITRNoBackup,
+		},
+		{
 			name: "generic restore failure",
 			err:  fmt.Errorf("restore command failed with exit code 28"),
 			want: output.CodePITRRestoreFailed,
@@ -546,6 +640,11 @@ func TestIsNoBackupError(t *testing.T) {
 		{
 			name:    "backup set not found",
 			message: "backup set 'foo' not found",
+			want:    true,
+		},
+		{
+			name:    "backup set invalid",
+			message: "backup set 19000101-000000F is not valid",
 			want:    true,
 		},
 		{
@@ -737,6 +836,317 @@ func TestPITRError_PreCheckReturnsTypedError(t *testing.T) {
 	}
 }
 
+func TestPITRError_PreCheckValidatesRestoreOptionsBeforeDataDir(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *Options
+		want string
+	}{
+		{name: "invalid lsn", opts: &Options{LSN: "BAD"}, want: "invalid LSN"},
+		{name: "invalid xid", opts: &Options{XID: "abc"}, want: "invalid XID"},
+		{name: "default promote", opts: &Options{Default: true, Promote: true}, want: "--promote"},
+		{name: "default exclusive", opts: &Options{Default: true, Exclusive: true}, want: "--exclusive"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := preCheck(tt.opts)
+			if err == nil {
+				t.Fatal("preCheck should fail")
+			}
+			pitrErr, ok := err.(*PITRError)
+			if !ok {
+				t.Fatalf("preCheck error should be *PITRError, got %T", err)
+			}
+			if pitrErr.Code != output.CodePITRInvalidArgs {
+				t.Fatalf("preCheck code = %d, want %d", pitrErr.Code, output.CodePITRInvalidArgs)
+			}
+			if !strings.Contains(pitrErr.Error(), tt.want) {
+				t.Fatalf("preCheck error = %q, want it to mention %q", pitrErr.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestValidatePITRDataDirAllowsExplicitUninitializedDirectory(t *testing.T) {
+	if err := validatePITRDataDir("/tmp/pitr-restore", true, true, false); err != nil {
+		t.Fatalf("explicit custom data dir should not require PG_VERSION: %v", err)
+	}
+	if err := validatePITRDataDir("/tmp/pitr-restore", true, false, false); err == nil {
+		t.Fatal("explicit custom data dir should still require the directory to exist")
+	}
+	if err := validatePITRDataDir("/pg/data", false, true, false); err == nil {
+		t.Fatal("default data dir should require PG_VERSION")
+	}
+}
+
+func TestValidatePITRDataDirOwnerRequiresDBSUForSideRestore(t *testing.T) {
+	err := validatePITRDataDirOwner("/tmp/pitr-restore", "postgres", "vagrant")
+	if err == nil {
+		t.Fatal("custom data dir owned by another user should fail")
+	}
+	if !strings.Contains(err.Error(), "owned by vagrant") {
+		t.Fatalf("error should mention current owner, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "chown postgres") {
+		t.Fatalf("error should suggest chown to dbsu, got %q", err.Error())
+	}
+
+	if err := validatePITRDataDirOwner("/tmp/pitr-restore", "postgres", "postgres"); err != nil {
+		t.Fatalf("custom data dir owned by dbsu should pass: %v", err)
+	}
+}
+
+func TestValidatePatroniPolicyRejectsSkipWhenActive(t *testing.T) {
+	err := validatePatroniPolicy(true, true, false)
+	if err == nil {
+		t.Fatal("active Patroni with --skip-patroni should be rejected")
+	}
+	if !strings.Contains(err.Error(), "patroni") {
+		t.Fatalf("error should mention patroni, got %q", err.Error())
+	}
+
+	if err := validatePatroniPolicy(false, true, false); err != nil {
+		t.Fatalf("inactive Patroni with --skip-patroni should be allowed: %v", err)
+	}
+	if err := validatePatroniPolicy(true, false, false); err != nil {
+		t.Fatalf("managed Patroni PITR should be allowed: %v", err)
+	}
+}
+
+func TestValidatePatroniPolicyAllowsCustomDataDirSideRestore(t *testing.T) {
+	if err := validatePatroniPolicy(true, true, true); err != nil {
+		t.Fatalf("explicit custom data dir side restore should allow --skip-patroni: %v", err)
+	}
+	if shouldManagePatroni(true, true) {
+		t.Fatal("explicit custom data dir side restore should not manage Patroni")
+	}
+	if !shouldManagePatroni(true, false) {
+		t.Fatal("default data dir PITR should manage active Patroni")
+	}
+	if shouldManagePatroni(false, false) {
+		t.Fatal("inactive Patroni should not be managed")
+	}
+}
+
+func TestValidateSideRestorePolicyRequiresNoRestart(t *testing.T) {
+	err := validateSideRestorePolicy(true, false)
+	if err == nil {
+		t.Fatal("custom data dir restore should require --no-restart")
+	}
+	if !strings.Contains(err.Error(), "--no-restart") {
+		t.Fatalf("error should tell the operator to use --no-restart, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "original port") {
+		t.Fatalf("error should explain restored config keeps the original port, got %q", err.Error())
+	}
+
+	if err := validateSideRestorePolicy(true, true); err != nil {
+		t.Fatalf("custom data dir with --no-restart should be allowed: %v", err)
+	}
+	if err := validateSideRestorePolicy(false, false); err != nil {
+		t.Fatalf("managed data dir should not require --no-restart: %v", err)
+	}
+}
+
+func TestValidatePITRTargetActionPolicyRequiresNoRestartForShutdown(t *testing.T) {
+	err := validatePITRTargetActionPolicy(&Options{Time: "2026-01-31 01:00:00", TargetAction: "shutdown"})
+	if err == nil {
+		t.Fatal("pitr target-action=shutdown should require --no-restart")
+	}
+	if !strings.Contains(err.Error(), "--no-restart") {
+		t.Fatalf("error should mention --no-restart, got %q", err.Error())
+	}
+
+	if err := validatePITRTargetActionPolicy(&Options{Time: "2026-01-31 01:00:00", TargetAction: "shutdown", NoRestart: true}); err != nil {
+		t.Fatalf("shutdown target action should be allowed with --no-restart: %v", err)
+	}
+	if err := validatePITRTargetActionPolicy(&Options{Time: "2026-01-31 01:00:00", TargetAction: "promote"}); err != nil {
+		t.Fatalf("promote target action should not require --no-restart: %v", err)
+	}
+}
+
+func TestValidatePgBackRestPreflightRequiresBackup(t *testing.T) {
+	info := []pgbackrest.PgBackRestInfo{{
+		Name:   "pg-meta",
+		Status: pgbackrest.StatusInfo{Code: 0, Message: "ok"},
+	}}
+	err := validatePgBackRestPreflight(info, &Options{Default: true})
+	if err == nil {
+		t.Fatal("preflight should reject stanza with no backups")
+	}
+	if !strings.Contains(err.Error(), "no backups") {
+		t.Fatalf("error should mention no backups, got %q", err.Error())
+	}
+}
+
+func TestValidatePgBackRestPreflightChecksBackupSet(t *testing.T) {
+	info := []pgbackrest.PgBackRestInfo{{
+		Name:   "pg-meta",
+		Status: pgbackrest.StatusInfo{Code: 0, Message: "ok"},
+		Backup: []pgbackrest.BackupInfo{
+			{Label: "20260629-115724F"},
+		},
+	}}
+	err := validatePgBackRestPreflight(info, &Options{Default: true, Set: "missing"})
+	if err == nil {
+		t.Fatal("preflight should reject missing backup set")
+	}
+	if !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("error should mention missing set, got %q", err.Error())
+	}
+}
+
+func TestShouldEscalateStopRequiresForceStop(t *testing.T) {
+	if shouldEscalateStop(&Options{}) {
+		t.Fatal("stop escalation should require explicit --force-stop")
+	}
+	if !shouldEscalateStop(&Options{ForceStop: true}) {
+		t.Fatal("stop escalation should be allowed with --force-stop")
+	}
+}
+
+func TestBuildRisksManagedPatroniSaysNotRejoined(t *testing.T) {
+	risks := buildRisks(&SystemState{PatroniActive: true, DataDir: "/pg/data"}, &Options{Default: true})
+	joined := strings.Join(risks, "\n")
+	if !strings.Contains(joined, "not restarted or rejoined by this command") {
+		t.Fatalf("managed Patroni risk should explain post-restore boundary, got %v", risks)
+	}
+}
+
+func TestRestoreOptionsFromPITRSuppressesNestedHints(t *testing.T) {
+	restoreOpts := restoreOptionsFromPITR(&Options{Default: true})
+	if !restoreOpts.SuppressHints {
+		t.Fatal("PITR should suppress nested pgBackRest post-restore hints")
+	}
+}
+
+func TestRestoreOptionsFromPITRPassesTimelineAndTargetAction(t *testing.T) {
+	opts := &Options{Time: "2026-01-01 00:00:00+00"}
+	setPITRStringField(t, opts, "TargetTimeline", "current")
+	setPITRStringField(t, opts, "TargetAction", "shutdown")
+
+	restoreOpts := restoreOptionsFromPITR(opts)
+
+	if got := getStringField(t, restoreOpts, "TargetTimeline"); got != "current" {
+		t.Fatalf("restore target timeline = %q, want current", got)
+	}
+	if got := getStringField(t, restoreOpts, "TargetAction"); got != "shutdown" {
+		t.Fatalf("restore target action = %q, want shutdown", got)
+	}
+}
+
+func TestRestoreOptionsFromPITRPassesExtraArgs(t *testing.T) {
+	opts := &Options{Default: true}
+	setPITRStringSliceField(t, opts, "ExtraArgs", []string{"--delta", "--process-max=4"})
+
+	restoreOpts := restoreOptionsFromPITR(opts)
+
+	if got := getStringSliceField(t, restoreOpts, "ExtraArgs"); !reflect.DeepEqual(got, []string{"--delta", "--process-max=4"}) {
+		t.Fatalf("restore extra args = %v, want [--delta --process-max=4]", got)
+	}
+}
+
+func setPITRStringField(t *testing.T, target interface{}, fieldName, value string) {
+	t.Helper()
+	field := reflect.ValueOf(target).Elem().FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("%T should expose %s", target, fieldName)
+	}
+	if !field.CanSet() {
+		t.Fatalf("%T.%s is not settable", target, fieldName)
+	}
+	field.SetString(value)
+}
+
+func setPITRStringSliceField(t *testing.T, target interface{}, fieldName string, value []string) {
+	t.Helper()
+	field := reflect.ValueOf(target).Elem().FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("%T should expose %s", target, fieldName)
+	}
+	if !field.CanSet() {
+		t.Fatalf("%T.%s is not settable", target, fieldName)
+	}
+	field.Set(reflect.ValueOf(value))
+}
+
+func getStringField(t *testing.T, target interface{}, fieldName string) string {
+	t.Helper()
+	field := reflect.ValueOf(target).Elem().FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("%T should expose %s", target, fieldName)
+	}
+	return field.String()
+}
+
+func getStringSliceField(t *testing.T, target interface{}, fieldName string) []string {
+	t.Helper()
+	field := reflect.ValueOf(target).Elem().FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("%T should expose %s", target, fieldName)
+	}
+	return field.Interface().([]string)
+}
+
+func TestShouldWaitForRecoveryComplete(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *Options
+		want bool
+	}{
+		{name: "nil", opts: nil, want: false},
+		{name: "default", opts: &Options{Default: true}, want: true},
+		{name: "promote", opts: &Options{Time: "2026-01-31 01:00:00", Promote: true}, want: true},
+		{name: "manual target", opts: &Options{Time: "2026-01-31 01:00:00"}, want: false},
+		{name: "immediate manual", opts: &Options{Immediate: true}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldWaitForRecoveryComplete(tt.opts); got != tt.want {
+				t.Fatalf("shouldWaitForRecoveryComplete() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRecoveryWaitTimeoutUsesOption(t *testing.T) {
+	if recoveryWaitTimeout(&Options{}) != pgRecoveryWaitTimeout {
+		t.Fatalf("empty options should use default timeout")
+	}
+	if recoveryWaitTimeout(&Options{Timeout: 300}) != 300*time.Second {
+		t.Fatalf("timeout option should be converted to seconds")
+	}
+	if recoveryWaitTimeout(&Options{Timeout: -1}) != pgRecoveryWaitTimeout {
+		t.Fatalf("negative timeout should fall back to default")
+	}
+}
+
+func TestWaitForRecoveryCompleteStopsWhenPrimary(t *testing.T) {
+	oldQuery := pitrQueryRecoveryState
+	oldSleep := pitrSleep
+	defer func() {
+		pitrQueryRecoveryState = oldQuery
+		pitrSleep = oldSleep
+	}()
+
+	calls := 0
+	pitrQueryRecoveryState = func(*SystemState) (bool, error) {
+		calls++
+		return calls < 3, nil
+	}
+	pitrSleep = func(time.Duration) {}
+
+	err := waitForRecoveryComplete(&SystemState{DataDir: "/pg/data", DbSU: "postgres"}, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecoveryComplete returned error: %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("waitForRecoveryComplete made %d checks, want 3", calls)
+	}
+}
+
 // TestPITRError_PostRestoreNilOnSuccess verifies postRestore returns nil on success
 func TestPITRError_PostRestoreNilOnSuccess(t *testing.T) {
 	opts := &Options{Default: true}
@@ -767,6 +1177,152 @@ func TestPITRError_PostRestoreWriteFailure(t *testing.T) {
 	if pitrErr.Code != output.CodePITRPostFailed {
 		t.Fatalf("postRestore should return CodePITRPostFailed, got %d", pitrErr.Code)
 	}
+}
+
+func TestPrintPostRestoreGuidanceUsesCustomDataDir(t *testing.T) {
+	output := capturePITRStderr(t, func() {
+		err := printPostRestoreGuidance(&Options{
+			Default:   true,
+			DataDir:   "/tmp/pig-pitr-restore",
+			NoRestart: true,
+		}, false)
+		if err != nil {
+			t.Fatalf("printPostRestoreGuidance failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "pg_ctl -D /tmp/pig-pitr-restore -o \"-p ") {
+		t.Fatalf("custom guidance should override port with pg_ctl -o, got:\n%s", output)
+	}
+	if !strings.Contains(output, "restored config keeps the original port") {
+		t.Fatalf("custom guidance should warn that restored config keeps the original port, got:\n%s", output)
+	}
+	if strings.Contains(output, "pig pg start") {
+		t.Fatalf("custom guidance should not suggest default pig pg start, got:\n%s", output)
+	}
+	if strings.Contains(output, "pg_ctl -D /tmp/pig-pitr-restore promote") {
+		t.Fatalf("default custom guidance should not suggest manual promote, got:\n%s", output)
+	}
+}
+
+func TestWithQuietStderrSuppressesHumanOutput(t *testing.T) {
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stderr = w
+	defer func() { os.Stderr = oldStderr }()
+
+	result := withQuietStderr(func() *output.Result {
+		fmt.Fprint(os.Stderr, "human progress")
+		return output.OK("ok", nil)
+	})
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close stderr pipe: %v", err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("failed to read stderr pipe: %v", err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("quiet stderr should suppress human output, got %q", string(data))
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("quiet stderr should return wrapped result, got %+v", result)
+	}
+}
+
+func TestCollectPostRestoreStateSkipsQueryWhenPostgresNotStarted(t *testing.T) {
+	oldQuery := pitrQueryPostRestoreState
+	defer func() {
+		pitrQueryPostRestoreState = oldQuery
+	}()
+
+	pitrQueryPostRestoreState = func(*SystemState) (*PostRestoreState, error) {
+		t.Fatal("post-restore SQL query should not run when PostgreSQL was not started")
+		return nil, nil
+	}
+
+	post := collectPostRestoreState(&SystemState{DataDir: "/pg/data", DbSU: "postgres"}, false)
+	if post == nil || !post.Queried {
+		t.Fatalf("post state should be present, got %+v", post)
+	}
+	if post.Running {
+		t.Fatalf("post state should not claim running when PostgreSQL was not started: %+v", post)
+	}
+	if post.InRecovery != nil {
+		t.Fatalf("post state should not include recovery state without SQL evidence: %+v", post)
+	}
+}
+
+func TestCollectPostRestoreStateUsesQueryWhenPostgresStarted(t *testing.T) {
+	oldCheck := pitrCheckPostgresRunningAsDBSU
+	oldQuery := pitrQueryPostRestoreState
+	defer func() {
+		pitrCheckPostgresRunningAsDBSU = oldCheck
+		pitrQueryPostRestoreState = oldQuery
+	}()
+
+	pitrCheckPostgresRunningAsDBSU = func(string, string) (bool, int) {
+		return true, 12345
+	}
+	inRecovery := false
+	pitrQueryPostRestoreState = func(*SystemState) (*PostRestoreState, error) {
+		return &PostRestoreState{
+			Queried:    true,
+			Running:    true,
+			InRecovery: &inRecovery,
+			CurrentLSN: "0/50001A0",
+			TimelineID: "4",
+		}, nil
+	}
+
+	post := collectPostRestoreState(&SystemState{DataDir: "/pg/data", DbSU: "postgres"}, true)
+	if post == nil {
+		t.Fatal("post state should be present")
+	}
+	if post.InRecovery == nil || *post.InRecovery {
+		t.Fatalf("post state should report primary recovery state, got %+v", post)
+	}
+	if post.CurrentLSN != "0/50001A0" || post.TimelineID != "4" {
+		t.Fatalf("post state should include LSN/timeline evidence, got %+v", post)
+	}
+}
+
+func TestPrintPostRestoreGuidanceDefaultDoesNotSuggestManualPromote(t *testing.T) {
+	output := capturePITRStderr(t, func() {
+		err := printPostRestoreGuidance(&Options{Default: true}, false)
+		if err != nil {
+			t.Fatalf("printPostRestoreGuidance failed: %v", err)
+		}
+	})
+
+	if strings.Contains(output, "pig pg promote") {
+		t.Fatalf("default PITR guidance should not suggest manual promote, got:\n%s", output)
+	}
+}
+
+func capturePITRStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stderr = w
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close stderr pipe: %v", err)
+	}
+	os.Stderr = oldStderr
+	defer r.Close()
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("failed to read stderr pipe: %v", err)
+	}
+	return string(data)
 }
 
 // TestPITRError_AllCodesInRange verifies all PITR codes are in 160000-169999

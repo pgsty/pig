@@ -22,13 +22,43 @@ type Resource struct {
 	Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
 }
 
+// Check represents a precondition or verification item in a plan/result.
+type Check struct {
+	Name   string `json:"name" yaml:"name"`
+	Status string `json:"status,omitempty" yaml:"status,omitempty"`
+	Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
+}
+
+// NextAction is a suggested follow-up command for users or agents.
+type NextAction struct {
+	Command  string `json:"command,omitempty" yaml:"command,omitempty"`
+	Reason   string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Required bool   `json:"required,omitempty" yaml:"required,omitempty"`
+}
+
+// OperationMeta describes a high-risk primitive operation without changing the Result envelope.
+type OperationMeta struct {
+	Module       string `json:"module,omitempty" yaml:"module,omitempty"`
+	Command      string `json:"command,omitempty" yaml:"command,omitempty"`
+	Boundary     string `json:"boundary,omitempty" yaml:"boundary,omitempty"`
+	Risk         string `json:"risk,omitempty" yaml:"risk,omitempty"`
+	Confirmation string `json:"confirmation,omitempty" yaml:"confirmation,omitempty"`
+	Executed     bool   `json:"executed" yaml:"executed"`
+	DryRun       bool   `json:"dry_run" yaml:"dry_run"`
+}
+
 // Plan represents an execution plan for a dangerous operation.
 type Plan struct {
-	Command  string     `json:"command" yaml:"command"`
-	Actions  []Action   `json:"actions" yaml:"actions"`
-	Affects  []Resource `json:"affects" yaml:"affects"`
-	Expected string     `json:"expected" yaml:"expected"`
-	Risks    []string   `json:"risks,omitempty" yaml:"risks,omitempty"`
+	Command       string       `json:"command" yaml:"command"`
+	Boundary      string       `json:"boundary,omitempty" yaml:"boundary,omitempty"`
+	Confirmation  string       `json:"confirmation,omitempty" yaml:"confirmation,omitempty"`
+	Actions       []Action     `json:"actions" yaml:"actions"`
+	Affects       []Resource   `json:"affects" yaml:"affects"`
+	Expected      string       `json:"expected" yaml:"expected"`
+	Risks         []string     `json:"risks,omitempty" yaml:"risks,omitempty"`
+	Preconditions []Check      `json:"preconditions,omitempty" yaml:"preconditions,omitempty"`
+	Verifications []Check      `json:"verifications,omitempty" yaml:"verifications,omitempty"`
+	NextActions   []NextAction `json:"next_actions,omitempty" yaml:"next_actions,omitempty"`
 }
 
 // Text returns a human-readable text representation of the Plan.
@@ -45,6 +75,16 @@ func (p *Plan) Text() string {
 	if p.Command != "" {
 		sb.WriteString("Command: ")
 		sb.WriteString(p.Command)
+		sb.WriteString("\n")
+	}
+	if p.Boundary != "" {
+		sb.WriteString("Boundary: ")
+		sb.WriteString(p.Boundary)
+		sb.WriteString("\n")
+	}
+	if p.Confirmation != "" {
+		sb.WriteString("Confirmation: ")
+		sb.WriteString(p.Confirmation)
 		sb.WriteString("\n")
 	}
 
@@ -83,6 +123,33 @@ func (p *Plan) Text() string {
 			sb.WriteString(risk)
 			sb.WriteString("\n")
 		}
+	}
+
+	writeChecks := func(title string, checks []Check) {
+		if len(checks) == 0 {
+			return
+		}
+		sb.WriteString("\n")
+		sb.WriteString(title)
+		sb.WriteString(":\n")
+		headers := []string{"Name", "Status", "Detail"}
+		rows := make([][]string, 0, len(checks))
+		for _, check := range checks {
+			rows = append(rows, []string{check.Name, check.Status, check.Detail})
+		}
+		sb.WriteString(RenderTable(headers, rows))
+	}
+	writeChecks("Preconditions", p.Preconditions)
+	writeChecks("Verifications", p.Verifications)
+
+	if len(p.NextActions) > 0 {
+		sb.WriteString("\nNext Actions:\n")
+		headers := []string{"Command", "Reason", "Required"}
+		rows := make([][]string, 0, len(p.NextActions))
+		for _, action := range p.NextActions {
+			rows = append(rows, []string{action.Command, action.Reason, fmt.Sprintf("%t", action.Required)})
+		}
+		sb.WriteString(RenderTable(headers, rows))
 	}
 
 	return strings.TrimRight(sb.String(), "\n")

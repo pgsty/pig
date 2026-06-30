@@ -1,11 +1,13 @@
 package pgbackrest
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/signal"
 	"regexp"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,10 +32,15 @@ type RestoreOptions struct {
 	Set string // Recover from specific backup set
 
 	// Other options
-	DataDir   string // Target data directory
-	Exclusive bool   // Stop before target (exclusive)
-	Promote   bool   // Promote after reaching target (target-action=promote)
-	Yes       bool   // Skip confirmation and countdown
+	DataDir        string // Target data directory
+	Exclusive      bool   // Stop before target (exclusive)
+	Promote        bool   // Promote after reaching target (target-action=promote)
+	TargetAction   string // Action at target: pause, promote, shutdown
+	TargetTimeline string // Timeline to recover along: latest, current, N, or 0xN
+	ExtraArgs      []string
+	Yes            bool // Skip confirmation and countdown
+
+	SuppressHints bool // Suppress post-restore hints when restore is orchestrated by another command
 }
 
 // Pre-compiled regex patterns for validation
@@ -42,6 +49,7 @@ var (
 	dateOnlyRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	timeOnlyRegex = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}$`)
 	dateTimeRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}`)
+	timelineRegex = regexp.MustCompile(`^(latest|current|[1-9][0-9]*|0x[0-9A-Fa-f]+)$`)
 )
 
 // Restore performs point-in-time recovery (PITR).
@@ -51,7 +59,7 @@ func Restore(cfg *Config, opts *RestoreOptions) error {
 		return err
 	}
 
-	if err := validateRestoreOptions(opts); err != nil {
+	if err := ValidateRestoreOptions(opts); err != nil {
 		return err
 	}
 
@@ -67,7 +75,7 @@ func Restore(cfg *Config, opts *RestoreOptions) error {
 
 	// Confirmation with signal handling
 	if !opts.Yes {
-		if err := ConfirmWithCountdown(
+		if err := ConfirmDestructive(
 			fmt.Sprintf("This will overwrite data in %s", getDataDir(effCfg, opts.DataDir)),
 			"restore",
 		); err != nil {
@@ -79,12 +87,18 @@ func Restore(cfg *Config, opts *RestoreOptions) error {
 		return err
 	}
 
-	printPostRestoreHints(effCfg, opts)
+	if !opts.SuppressHints {
+		printPostRestoreHints(effCfg, opts)
+	}
 	return nil
 }
 
-// validateRestoreOptions validates restore parameters.
-func validateRestoreOptions(opts *RestoreOptions) error {
+// ValidateRestoreOptions validates restore parameters.
+func ValidateRestoreOptions(opts *RestoreOptions) error {
+	if opts == nil {
+		return fmt.Errorf("restore options cannot be nil")
+	}
+
 	// Check mutually exclusive targets (Set is NOT a target, can be combined)
 	targets := 0
 	if opts.Default {
@@ -128,7 +142,26 @@ func validateRestoreOptions(opts *RestoreOptions) error {
 		logrus.Warnf("time format '%s' may not be recognized, proceeding anyway", opts.Time)
 	}
 
+	if opts.TargetTimeline != "" && !timelineRegex.MatchString(opts.TargetTimeline) {
+		return fmt.Errorf("invalid target timeline: %s (use latest, current, a positive integer, or 0xHEX)", opts.TargetTimeline)
+	}
+
+	action, err := restoreTargetAction(opts)
+	if err != nil {
+		return err
+	}
+	if action != "" && opts.Default {
+		return fmt.Errorf("--target-action/--promote cannot be used with --default")
+	}
+	if opts.Exclusive && opts.Time == "" && opts.LSN == "" && opts.XID == "" {
+		return fmt.Errorf("--exclusive requires --time, --lsn, or --xid")
+	}
+
 	return nil
+}
+
+func validateRestoreOptions(opts *RestoreOptions) error {
+	return ValidateRestoreOptions(opts)
 }
 
 // isValidTimeFormat checks if time string matches any known pattern.
@@ -195,9 +228,37 @@ func buildRestoreArgs(cfg *Config, opts *RestoreOptions, normalizedTime string) 
 	}
 	if opts.Promote {
 		args = append(args, "--target-action=promote")
+	} else if opts.TargetAction != "" {
+		args = append(args, "--target-action="+opts.TargetAction)
+	}
+	if opts.TargetTimeline != "" {
+		args = append(args, "--target-timeline="+opts.TargetTimeline)
+	}
+	if len(opts.ExtraArgs) > 0 {
+		args = append(args, opts.ExtraArgs...)
 	}
 
 	return args
+}
+
+func restoreTargetAction(opts *RestoreOptions) (string, error) {
+	if opts == nil {
+		return "", nil
+	}
+	if opts.TargetAction != "" {
+		switch opts.TargetAction {
+		case "pause", "promote", "shutdown":
+		default:
+			return "", fmt.Errorf("invalid target action: %s (use pause, promote, or shutdown)", opts.TargetAction)
+		}
+	}
+	if opts.Promote {
+		if opts.TargetAction != "" && opts.TargetAction != "promote" {
+			return "", fmt.Errorf("--promote conflicts with --target-action=%s", opts.TargetAction)
+		}
+		return "promote", nil
+	}
+	return opts.TargetAction, nil
 }
 
 // checkPostgresStopped verifies PostgreSQL is not running.
@@ -240,6 +301,33 @@ func getDataDir(cfg *Config, optDataDir string) string {
 		return pgData
 	}
 	return "/pg/data"
+}
+
+// ResolveDataDir returns the effective data directory for restore callers.
+func ResolveDataDir(cfg *Config, optDataDir string) string {
+	return getDataDir(cfg, optDataDir)
+}
+
+// ConfirmDestructive requires an explicit "yes" before destructive actions.
+func ConfirmDestructive(warning, action string) error {
+	fmt.Fprintf(os.Stderr, "\n%sWARNING: %s%s\n", utils.ColorYellow, warning, utils.ColorReset)
+	fmt.Fprintf(os.Stderr, "Type %syes%s to start %s: ", utils.ColorBold, utils.ColorReset, action)
+
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil && len(input) == 0 {
+		return fmt.Errorf("%s cancelled: %w", action, err)
+	}
+	if !isDestructiveConfirmationAccepted(input) {
+		fmt.Fprintf(os.Stderr, "\n%s cancelled.\n", action)
+		return fmt.Errorf("%s cancelled by user", action)
+	}
+	fmt.Fprintln(os.Stderr)
+	return nil
+}
+
+func isDestructiveConfirmationAccepted(input string) bool {
+	return strings.EqualFold(strings.TrimSpace(input), "yes")
 }
 
 // ConfirmWithCountdown shows a warning and countdown, returns error if cancelled.
@@ -294,8 +382,11 @@ func printRestorePlan(cfg *Config, opts *RestoreOptions, normalizedTime string) 
 	if opts.Exclusive {
 		fmt.Fprintf(os.Stderr, "Exclusive:  yes (stop before target)\n")
 	}
-	if opts.Promote {
-		fmt.Fprintf(os.Stderr, "Promote:    yes (auto-promote after recovery)\n")
+	if action, _ := restoreTargetAction(opts); action != "" {
+		fmt.Fprintf(os.Stderr, "Action:     %s\n", action)
+	}
+	if opts.TargetTimeline != "" {
+		fmt.Fprintf(os.Stderr, "Timeline:   %s\n", opts.TargetTimeline)
 	}
 }
 
@@ -306,6 +397,8 @@ func printPostRestoreHints(cfg *Config, opts *RestoreOptions) {
 	// Check if using custom data directory
 	dataDir := getDataDir(cfg, opts.DataDir)
 	isCustomDataDir := opts.DataDir != "" && opts.DataDir != "/pg/data"
+	action, _ := restoreTargetAction(opts)
+	needsManualPromote := action != "promote" && !opts.Default
 
 	if isCustomDataDir {
 		// Simplified hints for custom data directory
@@ -313,7 +406,7 @@ func printPostRestoreHints(cfg *Config, opts *RestoreOptions) {
 		fmt.Fprintf(os.Stderr, "   pg_ctl -D %s start\n", dataDir)
 		fmt.Fprintln(os.Stderr)
 
-		if !opts.Promote {
+		if needsManualPromote {
 			fmt.Fprintln(os.Stderr, "2. If satisfied, promote to primary:")
 			fmt.Fprintf(os.Stderr, "   pg_ctl -D %s promote\n", dataDir)
 			fmt.Fprintln(os.Stderr)
@@ -327,13 +420,15 @@ func printPostRestoreHints(cfg *Config, opts *RestoreOptions) {
 		fmt.Fprintln(os.Stderr, "   pig pg ps")
 		fmt.Fprintln(os.Stderr)
 
-		if !opts.Promote {
-			fmt.Fprintln(os.Stderr, "3. If satisfied, promote to primary:")
+		nextStep := 3
+		if needsManualPromote {
+			fmt.Fprintf(os.Stderr, "%d. If satisfied, promote to primary:\n", nextStep)
 			fmt.Fprintln(os.Stderr, "   pig pg promote")
 			fmt.Fprintln(os.Stderr)
+			nextStep++
 		}
 
-		fmt.Fprintln(os.Stderr, "4. Re-create stanza if needed:")
+		fmt.Fprintf(os.Stderr, "%d. Re-create stanza if needed:\n", nextStep)
 		fmt.Fprintln(os.Stderr, "   pig pb create")
 	}
 }

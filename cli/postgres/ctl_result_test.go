@@ -187,6 +187,25 @@ func TestPgStartResultData_YAML(t *testing.T) {
 	}
 }
 
+func TestBuildStartArgsAddsDefaultLogFile(t *testing.T) {
+	args := buildStartArgs("/usr/bin/pg_ctl", "/pg/data", 120, &StartOptions{})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, " -l "+DefaultStartLogFile+" ") {
+		t.Fatalf("start args should include default log file %s, got %v", DefaultStartLogFile, args)
+	}
+}
+
+func TestBuildStartArgsKeepsExplicitLogFile(t *testing.T) {
+	args := buildStartArgs("/usr/bin/pg_ctl", "/pg/data", 120, &StartOptions{LogFile: "/tmp/custom.log"})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, " -l /tmp/custom.log ") {
+		t.Fatalf("start args should include explicit log file, got %v", args)
+	}
+	if strings.Contains(joined, DefaultStartLogFile) {
+		t.Fatalf("start args should not add default log file when explicit log file is set, got %v", args)
+	}
+}
+
 // ============================================================================
 // PgStopResultData Tests
 // ============================================================================

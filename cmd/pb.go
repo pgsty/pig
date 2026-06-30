@@ -1,0 +1,846 @@
+package cmd
+
+import (
+	"fmt"
+	"github.com/spf13/cobra"
+	"pig/cli/pgbackrest"
+	"pig/internal/config"
+	"pig/internal/output"
+	"pig/internal/utils"
+	"strings"
+)
+
+// ============================================================================
+// pig pgbackrest (pb) - Manage pgBackRest backups and PITR
+// ============================================================================
+
+// Global config
+var pbConfig *pgbackrest.Config
+
+// pbCmd represents the pgbackrest command
+var pbCmd = &cobra.Command{
+	Use:         "pgbackrest",
+	Short:       "Manage pgBackRest backup & restore",
+	Aliases:     []string{"pb"},
+	GroupID:     "pigsty",
+	Annotations: ancsAnn("pig pgbackrest", "query", "stable", "safe", true, "safe", "none", "current", 100),
+	Long: `Manage pgBackRest backup and point-in-time recovery.
+
+This command wraps pgbackrest to provide simplified backup management,
+PITR (point-in-time recovery), and stanza lifecycle management.
+All commands are executed as the database superuser (postgres by default).
+
+Information:
+  pig pb info                      show backup info
+  pig pb ls                        list backups
+  pig pb ls repo                   list configured repositories
+  pig pb ls stanza                 list all stanzas
+
+Backup & Restore:
+  pig pb backup                    create backup (auto: full/incr)
+  pig pb backup full               create full backup
+  pig pb restore                   restore from backup (PITR)
+  pig pb restore -t "..."          restore to specific time
+  pig pb expire                    cleanup expired backups
+
+Stanza Management:
+  pig pb create                    create stanza (first-time setup)
+  pig pb upgrade                   upgrade stanza (after PG upgrade)
+  pig pb delete                    delete stanza (DANGEROUS!)
+
+Control:
+  pig pb check                     verify backup integrity
+  pig pb start                     enable pgBackRest operations
+  pig pb stop                      disable pgBackRest operations
+  pig pb log                       view pgBackRest logs
+`,
+	Example: `
+  # Information
+  pig pb info                      # show all backup info
+  pig pb info -o json              # JSON format output
+  pig pb ls                        # list all backups
+  pig pb ls repo                   # list configured repositories
+  pig pb ls stanza                 # list all stanzas
+
+  # Backup (must run on primary)
+  pig pb backup                    # auto: full if none, else incr
+  pig pb backup full               # full backup
+  pig pb backup incr               # incremental backup
+
+  # Restore / PITR
+  pig pb restore                   # restore to latest (default)
+  pig pb restore -I                # restore to consistency point
+  pig pb restore -t "2025-01-01 12:00:00+08"  # restore to time
+  pig pb restore -t "2025-01-01"   # restore to date (00:00:00)
+  pig pb restore -t "12:00:00"     # restore to time today
+  pig pb restore -n savepoint      # restore to named point
+  pig pb restore -l "0/7C82CB8"    # restore to LSN
+
+  # Stanza management
+  pig pb create                    # initialize stanza
+  pig pb upgrade                   # upgrade after PG major upgrade
+  pig pb check                     # verify repository
+
+  # Cleanup
+  pig pb expire                    # cleanup per retention policy
+  pig pb expire --set 20250101-*   # delete specific backup
+  pig pb expire --plan             # preview cleanup plan (recommended)`,
+}
+
+// ============================================================================
+// Initialization
+// ============================================================================
+
+func registerPgBackRestCommand() *cobra.Command {
+	// Initialize config
+	pbConfig = pgbackrest.DefaultConfig()
+	pbCmd.PersistentPreRunE = commandModulePreRun
+
+	registerPbFlags()
+	registerPbCommands()
+	return pbCmd
+}
+
+func registerPbFlags() {
+	// Global flags
+	pbCmd.PersistentFlags().StringVarP(&pbConfig.Stanza, "stanza", "s", "", "pgBackRest stanza name (auto-detected if not specified)")
+	pbCmd.PersistentFlags().StringVarP(&pbConfig.ConfigPath, "config", "c", "", "pgBackRest config file path")
+	pbCmd.PersistentFlags().StringVarP(&pbConfig.Repo, "repo", "r", "", "repository number for multi-repo setups (1, 2, etc.)")
+	pbCmd.PersistentFlags().StringVarP(&pbConfig.DbSU, "dbsu", "U", "", "database superuser (default: $PIG_DBSU or postgres)")
+
+	// Info command flags
+	pbInfoCmd.Flags().StringVarP(&pbInfoRawOutput, "raw-output", "O", "", "raw output format: text, json (only with --raw)")
+	pbInfoCmd.Flags().StringVar(&pbInfoSet, "set", "", "show specific backup set")
+	pbInfoCmd.Flags().BoolVarP(&pbInfoRaw, "raw", "R", false, "raw output mode (pass through pgbackrest output)")
+
+	// Backup command flags
+	pbBackupCmd.Flags().BoolVarP(&pbBackupForce, "force", "f", false, "skip primary role check")
+
+	// Expire command flags
+	pbExpireCmd.Flags().StringVar(&pbExpireSet, "set", "", "delete specific backup set")
+	pbExpireCmd.Flags().BoolVar(&pbExpirePlan, "plan", false, "preview cleanup plan without deleting backups")
+
+	// Restore command flags - targets
+	pbRestoreCmd.Flags().BoolVarP(&pbRestoreDefault, "default", "d", false, "recover to end of WAL stream (latest)")
+	pbRestoreCmd.Flags().BoolVarP(&pbRestoreImmediate, "immediate", "I", false, "recover to backup consistency point")
+	pbRestoreCmd.Flags().StringVarP(&pbRestoreTime, "time", "t", "", "recover to specific timestamp")
+	pbRestoreCmd.Flags().StringVarP(&pbRestoreName, "name", "n", "", "recover to named restore point")
+	pbRestoreCmd.Flags().StringVarP(&pbRestoreLSN, "lsn", "l", "", "recover to specific LSN")
+	pbRestoreCmd.Flags().StringVarP(&pbRestoreXID, "xid", "x", "", "recover to specific transaction ID")
+	pbRestoreCmd.Flags().StringVarP(&pbRestoreSet, "set", "b", "", "select backup set to start recovery from")
+
+	// Restore command flags - options
+	pbRestoreCmd.Flags().StringVarP(&pbRestoreDataDir, "data", "D", "", "target data directory")
+	pbRestoreCmd.Flags().BoolVarP(&pbRestoreExclusive, "exclusive", "X", false, "stop before target (exclusive)")
+	pbRestoreCmd.Flags().BoolVarP(&pbRestorePromote, "promote", "P", false, "auto-promote after recovery")
+	pbRestoreCmd.Flags().StringVar(&pbRestoreTargetAction, "target-action", "", "action at recovery target: pause, promote, shutdown")
+	pbRestoreCmd.Flags().StringVarP(&pbRestoreTargetTimeline, "target-timeline", "T", "", "recover along timeline: latest, current, N, or 0xN")
+	pbRestoreCmd.Flags().BoolVarP(&pbRestoreYes, "yes", "y", false, "skip confirmation and countdown")
+	pbRestoreCmd.Flags().BoolVar(&pbRestorePlan, "plan", false, "preview restore plan without executing")
+
+	// Stanza management flags
+	pbCreateCmd.Flags().BoolVar(&pbCreateNoOnline, "no-online", false, "create without PostgreSQL running")
+	pbCreateCmd.Flags().BoolVarP(&pbCreateForce, "force", "f", false, "force creation")
+	pbUpgradeCmd.Flags().BoolVar(&pbUpgradeNoOnline, "no-online", false, "upgrade without PostgreSQL running")
+	pbDeleteCmd.Flags().BoolVarP(&pbDeleteForce, "force", "f", false, "confirm deletion (required)")
+	pbDeleteCmd.Flags().BoolVarP(&pbDeleteYes, "yes", "y", false, "skip countdown confirmation")
+	pbDeleteCmd.Flags().BoolVar(&pbDeletePlan, "plan", false, "preview stanza deletion plan without executing")
+
+	// Control flags
+	pbStopCmd.Flags().BoolVarP(&pbStopForce, "force", "f", false, "terminate running operations")
+
+	// Log flags
+	pbLogCmd.Flags().IntVarP(&pbLogLines, "lines", "n", 50, "number of lines to show")
+	pbLogCmd.Flags().BoolVarP(&pbLogFollow, "follow", "f", false, "follow log output")
+	pbLogTailCmd.Flags().IntVarP(&pbLogLines, "lines", "n", 50, "number of lines to show")
+	pbLogTailCmd.Flags().BoolP("follow", "f", false, "follow log output (default for tail)")
+	pbLogCatCmd.Flags().IntVarP(&pbLogLines, "lines", "n", 50, "number of lines to show")
+}
+
+func registerPbCommands() {
+	pbLogCmd.AddCommand(pbLogListCmd, pbLogTailCmd, pbLogCatCmd)
+
+	// Register all subcommands
+	pbCmd.AddCommand(
+		// Information
+		pbInfoCmd,
+		pbLsCmd,
+
+		// Backup & Restore
+		pbBackupCmd,
+		pbRestoreCmd,
+		pbExpireCmd,
+
+		// Stanza management
+		pbCreateCmd,
+		pbUpgradeCmd,
+		pbDeleteCmd,
+
+		// Control
+		pbCheckCmd,
+		pbStartCmd,
+		pbStopCmd,
+
+		// Logs
+		pbLogCmd,
+	)
+}
+
+// ============================================================================
+// Backup Commands
+// ============================================================================
+
+var pbBackupForce bool
+
+var pbBackupCmd = &cobra.Command{
+	Use:     "backup [type]",
+	Aliases: []string{"bk", "b"},
+	Short:   "Create a backup",
+	Annotations: mergeAnn(
+		ancsAnn("pig pgbackrest backup", "action", "volatile", "unsafe", true, "low", "none", "dbsu", 300000),
+		map[string]string{
+			"args.type.desc": "backup type (auto-detected if omitted)",
+			"args.type.type": "enum",
+		},
+	),
+	Long: `Create a physical backup. Backup can only run on the primary instance.
+
+Types:
+  (empty) - Auto: pgBackRest determines type (full if none, else incr)
+  full    - Full backup
+  diff    - Differential backup (changes since last full)
+  incr    - Incremental backup (changes since last backup)
+
+The command automatically verifies the current instance is primary before
+executing. Use --force to skip this check.`,
+	Example: `
+  pig pb backup                    # auto-detect type
+  pig pb backup full               # full backup
+  pig pb backup diff               # differential backup
+  pig pb backup incr               # incremental backup
+  pig pb backup -o json            # structured output mode`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		backupType := ""
+		if len(args) > 0 {
+			backupType = args[0]
+		}
+		opts := &pgbackrest.BackupOptions{
+			Type:  backupType,
+			Force: pbBackupForce,
+		}
+
+		// Structured output mode: use BackupResult
+		if config.IsStructuredOutput() {
+			result := pgbackrest.BackupResult(pbConfig, opts)
+			return handleAuxResult(result)
+		}
+
+		// Text mode: use original Backup function
+		return pgbackrest.Backup(pbConfig, opts)
+	},
+}
+
+var pbExpireSet string
+var pbExpirePlan bool
+
+var pbExpireCmd = &cobra.Command{
+	Use:         "expire",
+	Aliases:     []string{"ex", "e"},
+	Short:       "Cleanup expired backups",
+	Annotations: ancsAnn("pig pgbackrest expire", "action", "volatile", "restricted", true, "medium", "recommended", "dbsu", 30000),
+	Long: `Clean up expired backups and WAL archives according to retention policy.
+
+The retention policy is configured in pgbackrest.conf:
+  repo1-retention-full     - Number of full backups to keep
+  repo1-retention-diff     - Number of diff backups to keep
+  repo1-retention-archive  - WAL archive retention policy`,
+	Example: `
+  pig pb expire                    # cleanup per policy
+  pig pb expire --set 20250101-*   # delete specific backup
+  pig pb expire --plan             # preview cleanup plan (recommended)`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts := &pgbackrest.ExpireOptions{
+			Set:  pbExpireSet,
+			Plan: pbExpirePlan,
+		}
+		if config.IsStructuredOutput() && pbExpirePlan {
+			return handlePlanOutput(pgbackrest.BuildExpirePlan(pbConfig, opts))
+		}
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest expire", args, map[string]interface{}{
+			"set":  pbExpireSet,
+			"plan": pbExpirePlan,
+		}, func() error {
+			return pgbackrest.Expire(pbConfig, opts)
+		})
+	},
+}
+
+// ============================================================================
+// Restore Command
+// ============================================================================
+
+var (
+	pbRestoreDefault        bool
+	pbRestoreImmediate      bool
+	pbRestoreTime           string
+	pbRestoreName           string
+	pbRestoreLSN            string
+	pbRestoreXID            string
+	pbRestoreSet            string
+	pbRestoreDataDir        string
+	pbRestoreExclusive      bool
+	pbRestorePromote        bool
+	pbRestoreTargetAction   string
+	pbRestoreTargetTimeline string
+	pbRestoreYes            bool
+	pbRestorePlan           bool
+)
+
+var pbRestoreCmd = &cobra.Command{
+	Use:         "restore",
+	Aliases:     []string{"rt", "r", "pitr"},
+	Short:       "Restore from backup (PITR)",
+	Annotations: ancsAnn("pig pgbackrest restore", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 600000),
+	Long: `Restore from backup with point-in-time recovery (PITR) support.
+
+IMPORTANT: You must specify a recovery target. Running without arguments
+will show this help message to prevent accidental restores.
+
+Recovery Targets (mutually exclusive, at least one required):
+  --default, -d      Recover to end of WAL stream (latest data)
+  --immediate, -I    Recover to backup consistency point only
+  --time, -t         Recover to specific timestamp
+  --name, -n         Recover to named restore point
+  --lsn, -l          Recover to specific LSN
+  --xid, -x          Recover to specific transaction ID
+
+Backup Set Selection (can be combined with targets):
+  --set, -b          Select backup set to start recovery from
+
+Target Options:
+  --target-action    Action when target is reached: pause, promote, shutdown
+  --target-timeline  Recover along timeline: latest, current, N, or 0xN
+
+Additional pgBackRest arguments:
+  Put raw pgBackRest restore arguments after -- so Cobra stops parsing them.
+  Example: pig pb restore -d -- --delta
+
+Time Format:
+  - Full: "2025-01-01 12:00:00+08"
+  - Date only: "2025-01-01" (defaults to 00:00:00 in current timezone)
+  - Time only: "12:00:00" (defaults to today in current timezone)
+
+The restore process:
+  1. Validates parameters and environment
+  2. Verifies PostgreSQL is stopped
+  3. Shows restore plan and waits for confirmation
+  4. Executes pgbackrest restore
+  5. Provides post-restore guidance
+
+IMPORTANT: PostgreSQL must be stopped before restore.`,
+	Example: `
+  pig pb restore -d                # restore to latest (end of WAL)
+  pig pb restore -I                # restore to consistency point
+  pig pb restore -t "2025-01-01 12:00:00+08"   # restore to time
+  pig pb restore -t "2025-01-01"   # restore to start of day
+  pig pb restore -t "12:00:00"     # restore to time today
+  pig pb restore -n my-savepoint   # restore to named point
+  pig pb restore -l "0/7C82CB8"    # restore to LSN
+  pig pb restore -b 20251225-120000F -d        # restore specific backup to latest
+
+	  # Options
+	  pig pb restore -t "2025-01-01 12:00:00" -X  # exclusive (stop before target)
+	  pig pb restore -t "2025-01-01 12:00:00" -P  # auto-promote after reaching target
+	  pig pb restore -t "2025-01-01 12:00:00" -T current  # recover along current timeline
+	  pig pb restore -d -y             # skip confirmation
+	  pig pb restore -d -D /data/pg    # restore to custom data directory
+	  pig pb restore -d -- --delta     # pass extra pgBackRest restore args after --`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Check if any recovery target is specified
+		hasTarget := pbRestoreDefault || pbRestoreImmediate ||
+			pbRestoreTime != "" || pbRestoreName != "" ||
+			pbRestoreLSN != "" || pbRestoreXID != ""
+
+		// If no target specified, structured mode returns machine-readable error.
+		if !hasTarget {
+			if config.IsStructuredOutput() {
+				return handleAuxResult(
+					output.Fail(output.CodePbInvalidRestoreParams, "invalid restore parameters").
+						WithDetail("no recovery target specified, choose one of: --default, --immediate, --time, --name, --lsn, --xid"),
+				)
+			}
+			if err := cmd.Help(); err != nil {
+				return err
+			}
+			return &utils.ExitCodeError{
+				Code: output.ExitCode(output.CodePbInvalidRestoreParams),
+				Err:  fmt.Errorf("invalid or missing recovery target"),
+			}
+		}
+
+		opts := &pgbackrest.RestoreOptions{
+			Default:        pbRestoreDefault,
+			Immediate:      pbRestoreImmediate,
+			Time:           pbRestoreTime,
+			Name:           pbRestoreName,
+			LSN:            pbRestoreLSN,
+			XID:            pbRestoreXID,
+			Set:            pbRestoreSet,
+			DataDir:        pbRestoreDataDir,
+			Exclusive:      pbRestoreExclusive,
+			Promote:        pbRestorePromote,
+			TargetAction:   pbRestoreTargetAction,
+			TargetTimeline: pbRestoreTargetTimeline,
+			ExtraArgs:      append([]string(nil), args...),
+			Yes:            pbRestoreYes,
+		}
+
+		if pbRestorePlan {
+			if err := pgbackrest.ValidateRestoreOptions(opts); err != nil {
+				return handleAuxResult(
+					output.Fail(output.CodePbInvalidRestoreParams, "invalid restore parameters").
+						WithDetail(err.Error()),
+				)
+			}
+			return handlePlanOutput(pgbackrest.BuildRestorePlan(pbConfig, opts))
+		}
+
+		// Structured output mode: use RestoreResult
+		if config.IsStructuredOutput() {
+			if !pbRestoreYes {
+				return structuredConfirmationError(
+					output.CodePbInvalidRestoreParams,
+					"pb restore requires explicit confirmation",
+					"structured output mode does not prompt interactively; rerun with --yes to execute or --plan to preview",
+					output.OperationMeta{
+						Module:       "pb",
+						Command:      "restore",
+						Boundary:     "pb:pgbackrest-only",
+						Risk:         "critical",
+						Confirmation: "required",
+						Executed:     false,
+						DryRun:       false,
+					},
+					[]output.NextAction{
+						{Command: "pig pb restore ... --yes", Reason: "execute low-level pgBackRest restore after explicit confirmation", Required: true},
+						{Command: "pig pb restore ... --plan", Reason: "preview the low-level restore primitive", Required: false},
+						{Command: "pig pitr ... --plan", Reason: "use top-level recovery orchestration for managed PostgreSQL/Patroni clusters", Required: false},
+					},
+				)
+			}
+			result := pgbackrest.RestoreResult(pbConfig, opts)
+			return handleAuxResult(result)
+		}
+
+		// Text mode: use original Restore function
+		return pgbackrest.Restore(pbConfig, opts)
+	},
+}
+
+// ============================================================================
+// Control Commands
+// ============================================================================
+
+var pbCheckCmd = &cobra.Command{
+	Use:         "check",
+	Aliases:     []string{"ck"},
+	Short:       "Verify backup repository",
+	Annotations: ancsAnn("pig pgbackrest check", "query", "volatile", "safe", true, "safe", "none", "dbsu", 10000),
+	Long:        `Verify the backup repository integrity and configuration.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest check", args, nil, func() error {
+			return pgbackrest.Check(pbConfig)
+		})
+	},
+}
+
+var pbStartCmd = &cobra.Command{
+	Use:         "start",
+	Aliases:     []string{"on"},
+	Short:       "Enable pgBackRest operations",
+	Annotations: ancsAnn("pig pgbackrest start", "action", "volatile", "restricted", true, "low", "none", "dbsu", 1000),
+	Long:        `Allow pgBackRest to perform operations on the stanza.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest start", args, nil, func() error {
+			return pgbackrest.Start(pbConfig)
+		})
+	},
+}
+
+var pbStopForce bool
+
+var pbStopCmd = &cobra.Command{
+	Use:         "stop",
+	Aliases:     []string{"off"},
+	Short:       "Disable pgBackRest operations",
+	Annotations: ancsAnn("pig pgbackrest stop", "action", "volatile", "restricted", true, "medium", "recommended", "dbsu", 1000),
+	Long:        `Prevent pgBackRest from performing operations on the stanza (for maintenance).`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest stop", args, map[string]interface{}{
+			"force": pbStopForce,
+		}, func() error {
+			return pgbackrest.Stop(pbConfig, &pgbackrest.StopOptions{
+				Force: pbStopForce,
+			})
+		})
+	},
+}
+
+// ============================================================================
+// Log Commands
+// ============================================================================
+
+var (
+	pbLogLines  int
+	pbLogFollow bool
+)
+
+var pbLogCmd = &cobra.Command{
+	Use:         "log",
+	Aliases:     []string{"l", "lg"},
+	Short:       "View pgBackRest logs",
+	Annotations: ancsAnn("pig pgbackrest log", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
+	Long: `View pgBackRest log files from /pg/log/pgbackrest/.
+
+Default action shows the latest log snapshot. Use -f/--follow or the tail
+subcommand for real-time output.`,
+	Example: `
+	  pig pb log                       # show latest log lines
+	  pig pb log -f                    # follow latest log
+	  pig pb log list                  # list log files
+	  pig pb log tail                  # follow latest log
+	  pig pb log show                  # show latest log content`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateLogLines(pbLogLines); err != nil {
+			return err
+		}
+		dbsu := pbConfig.DbSU
+		if pbLogFollow {
+			if config.IsStructuredOutput() {
+				return structuredParamError(
+					output.MODULE_PB,
+					"pig pgbackrest log",
+					"streaming log tail is not supported in structured output",
+					"use 'pig pb log show -n N -o json' in structured mode to get a log snapshot",
+					args,
+					map[string]interface{}{"follow": pbLogFollow, "lines": pbLogLines},
+				)
+			}
+			return pgbackrest.LogTail(pbConfig.ConfigPath, dbsu, "", pbLogLines)
+		}
+
+		if err := rejectUnsupportedLogOutputFormat("pig pb log"); err != nil {
+			return err
+		}
+		if isJSONLogOutput() {
+			return pgbackrest.LogShowJSONL(pbConfig.ConfigPath, dbsu, "", pbLogLines)
+		}
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest log", args, map[string]interface{}{
+			"follow": pbLogFollow,
+			"lines":  pbLogLines,
+		}, func() error {
+			return pgbackrest.LogCat(pbConfig.ConfigPath, dbsu, "", pbLogLines)
+		})
+	},
+}
+
+var pbLogListCmd = &cobra.Command{
+	Use:         "list",
+	Aliases:     []string{"ls"},
+	Short:       "List pgBackRest log files",
+	Annotations: ancsAnn("pig pgbackrest log list", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
+	Args:        cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dbsu := pbConfig.DbSU
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest log list", args, nil, func() error {
+			return pgbackrest.LogList(pbConfig.ConfigPath, dbsu)
+		})
+	},
+}
+
+var pbLogTailCmd = &cobra.Command{
+	Use:         "tail",
+	Aliases:     []string{"t", "f", "follow"},
+	Short:       "Tail latest pgBackRest log file",
+	Annotations: ancsAnn("pig pgbackrest log tail", "query", "volatile", "safe", true, "safe", "none", "dbsu", 0),
+	Args:        cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateLogLines(pbLogLines); err != nil {
+			return err
+		}
+		if config.IsStructuredOutput() {
+			return structuredParamError(
+				output.MODULE_PB,
+				"pig pgbackrest log tail",
+				"streaming log tail is not supported in structured output",
+				"use 'pig pb log show -n N -o json' in structured mode to get a log snapshot",
+				args,
+				map[string]interface{}{"lines": pbLogLines},
+			)
+		}
+		return pgbackrest.LogTail(pbConfig.ConfigPath, pbConfig.DbSU, "", pbLogLines)
+	},
+}
+
+var pbLogCatCmd = &cobra.Command{
+	Use:         "show",
+	Aliases:     []string{"cat", "c"},
+	Short:       "Show latest pgBackRest log content",
+	Annotations: ancsAnn("pig pgbackrest log show", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
+	Args:        cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateLogLines(pbLogLines); err != nil {
+			return err
+		}
+		if err := rejectUnsupportedLogOutputFormat("pig pb log show"); err != nil {
+			return err
+		}
+		if isJSONLogOutput() {
+			return pgbackrest.LogShowJSONL(pbConfig.ConfigPath, pbConfig.DbSU, "", pbLogLines)
+		}
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest log show", args, map[string]interface{}{
+			"lines": pbLogLines,
+		}, func() error {
+			return pgbackrest.LogCat(pbConfig.ConfigPath, pbConfig.DbSU, "", pbLogLines)
+		})
+	},
+}
+
+// ============================================================================
+// Info Commands
+// ============================================================================
+
+var pbInfoRawOutput string
+var pbInfoSet string
+var pbInfoRaw bool
+
+var pbInfoCmd = &cobra.Command{
+	Use:         "info",
+	Aliases:     []string{"i"},
+	Short:       "Show backup repository info",
+	Annotations: ancsAnn("pig pgbackrest info", "query", "volatile", "safe", true, "safe", "none", "dbsu", 5000),
+	Long: `Display detailed information about the backup repository including
+all backup sets, recovery window, WAL archive status, and backup list.
+
+By default, displays a parsed and formatted view of backup information including:
+  - Recovery window (earliest to latest recovery point)
+  - WAL archive range
+  - LSN range
+  - Backup list with type, duration, size, and WAL range
+
+Use --raw/-R for original pgbackrest output format.
+Use --raw-output/-O to control raw output format (text/json).
+Use -o json/yaml for structured output (Result wrapper with pgbackrest native JSON in data).`,
+	Example: `
+  pig pb info                      # detailed formatted output
+  pig pb info -o json              # structured JSON output
+  pig pb info -o yaml              # structured YAML output
+  pig pb info -R                   # raw pgbackrest text output
+  pig pb info --raw --raw-output json  # raw JSON output (pgbackrest native)
+  pig pb info --set 20250101-*     # show specific backup set`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// raw-output only applies in --raw mode
+		if !pbInfoRaw && strings.TrimSpace(pbInfoRawOutput) != "" {
+			if config.IsStructuredOutput() {
+				return handleAuxResult(
+					output.Fail(output.CodePbInvalidInfoParams, "--raw-output can only be used with --raw"),
+				)
+			}
+			return fmt.Errorf("--raw-output can only be used with --raw")
+		}
+
+		// Raw mode: pass through to pgbackrest directly
+		if pbInfoRaw {
+			rawOutput, err := resolvePbInfoRawOutput()
+			if err != nil {
+				return err
+			}
+			return pgbackrest.Info(pbConfig, &pgbackrest.InfoOptions{
+				Output: rawOutput,
+				Set:    pbInfoSet,
+				Raw:    true,
+			})
+		}
+
+		// Structured output mode: use InfoResult
+		if config.IsStructuredOutput() {
+			result := pgbackrest.InfoResult(pbConfig, &pgbackrest.InfoOptions{
+				Set: pbInfoSet,
+			})
+			return handleAuxResult(result)
+		}
+
+		// Text mode: use original Info function
+		return pgbackrest.Info(pbConfig, &pgbackrest.InfoOptions{
+			Set: pbInfoSet,
+			Raw: false,
+		})
+	},
+}
+
+var pbLsCmd = &cobra.Command{
+	Use:     "ls [type]",
+	Aliases: []string{"l", "list"},
+	Short:   "List backups, repositories, or stanzas",
+	Annotations: mergeAnn(
+		ancsAnn("pig pgbackrest ls", "query", "volatile", "safe", true, "safe", "none", "dbsu", 5000),
+		map[string]string{
+			"args.type.desc": "resource type to list",
+			"args.type.type": "enum",
+		},
+	),
+	Long: `List resources in the backup repository.
+
+Types:
+  backup  - List all backup sets (default)
+  repo    - List configured repositories from config file
+  stanza  - List all stanzas (aliases: cluster, cls)
+
+Examples:
+  pig pb ls                        # list all backups
+  pig pb ls backup                 # list all backups (explicit)
+  pig pb ls repo                   # list configured repositories
+  pig pb ls stanza                 # list all stanzas`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		listType := ""
+		if len(args) > 0 {
+			listType = args[0]
+		}
+		return runLegacyStructured(legacyModulePb, "pig pgbackrest ls", args, map[string]interface{}{
+			"type": listType,
+		}, func() error {
+			return pgbackrest.Ls(pbConfig, &pgbackrest.LsOptions{
+				Type: listType,
+			})
+		})
+	},
+}
+
+func resolvePbInfoRawOutput() (string, error) {
+	if out := strings.ToLower(strings.TrimSpace(pbInfoRawOutput)); out != "" {
+		switch out {
+		case "text", "json":
+			return out, nil
+		default:
+			return "", fmt.Errorf("invalid --raw-output value %q, must be text or json", pbInfoRawOutput)
+		}
+	}
+
+	if !config.IsStructuredOutput() {
+		return "", nil
+	}
+	switch config.OutputFormat {
+	case config.OUTPUT_JSON, config.OUTPUT_JSON_PRETTY:
+		return "json", nil
+	case config.OUTPUT_YAML:
+		return "", fmt.Errorf("raw mode does not support YAML output, use JSON or text")
+	default:
+		return "", nil
+	}
+}
+
+// ============================================================================
+// Stanza Management Commands
+// ============================================================================
+
+var pbCreateNoOnline bool
+var pbCreateForce bool
+
+var pbCreateCmd = &cobra.Command{
+	Use:         "create",
+	Aliases:     []string{"cr"},
+	Short:       "Create stanza (stanza-create)",
+	Annotations: ancsAnn("pig pgbackrest create", "action", "stable", "unsafe", true, "low", "none", "dbsu", 5000),
+	Long:        `Initialize a new stanza. Must be run before the first backup.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts := &pgbackrest.CreateOptions{
+			NoOnline: pbCreateNoOnline,
+			Force:    pbCreateForce,
+		}
+
+		if config.IsStructuredOutput() {
+			result := pgbackrest.CreateResult(pbConfig, opts)
+			return handleAuxResult(result)
+		}
+
+		return pgbackrest.Create(pbConfig, opts)
+	},
+}
+
+var pbUpgradeNoOnline bool
+
+var pbUpgradeCmd = &cobra.Command{
+	Use:         "upgrade",
+	Aliases:     []string{"up"},
+	Short:       "Upgrade stanza (stanza-upgrade)",
+	Annotations: ancsAnn("pig pgbackrest upgrade", "action", "stable", "unsafe", true, "low", "none", "dbsu", 5000),
+	Long:        `Update stanza after PostgreSQL major version upgrade.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts := &pgbackrest.UpgradeOptions{
+			NoOnline: pbUpgradeNoOnline,
+		}
+
+		if config.IsStructuredOutput() {
+			result := pgbackrest.UpgradeResult(pbConfig, opts)
+			return handleAuxResult(result)
+		}
+
+		return pgbackrest.Upgrade(pbConfig, opts)
+	},
+}
+
+var pbDeleteForce bool
+var pbDeleteYes bool
+var pbDeletePlan bool
+
+var pbDeleteCmd = &cobra.Command{
+	Use:         "delete",
+	Aliases:     []string{"del", "rm"},
+	Short:       "Delete stanza (stanza-delete)",
+	Annotations: ancsAnn("pig pgbackrest delete", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 5000),
+	Long: `Delete a stanza and all its backups.
+
+WARNING: This is a DESTRUCTIVE and IRREVERSIBLE operation!
+All backups for the stanza will be permanently deleted.
+
+	Requires --force flag to confirm the operation.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		opts := &pgbackrest.DeleteOptions{
+			Force: pbDeleteForce,
+			Yes:   pbDeleteYes,
+		}
+
+		if pbDeletePlan {
+			return handlePlanOutput(pgbackrest.BuildDeletePlan(pbConfig, opts))
+		}
+
+		if config.IsStructuredOutput() {
+			if !pbDeleteForce {
+				return structuredConfirmationError(
+					output.CodePbStanzaDeleteRequiresForce,
+					"pb delete requires explicit confirmation",
+					"structured output mode does not prompt interactively; rerun with --force to execute or --plan to preview",
+					output.OperationMeta{
+						Module:       "pb",
+						Command:      "delete",
+						Boundary:     "pb:pgbackrest-only",
+						Risk:         "critical",
+						Confirmation: "required",
+						Executed:     false,
+						DryRun:       false,
+					},
+					[]output.NextAction{
+						{Command: "pig pb delete --force", Reason: "execute irreversible stanza deletion after explicit confirmation", Required: true},
+						{Command: "pig pb delete --plan", Reason: "preview stanza deletion scope", Required: false},
+						{Command: "pig pb info", Reason: "inspect backup inventory before deletion", Required: false},
+					},
+				)
+			}
+			result := pgbackrest.DeleteResult(pbConfig, opts)
+			return handleAuxResult(result)
+		}
+
+		return pgbackrest.Delete(pbConfig, opts)
+	},
+}

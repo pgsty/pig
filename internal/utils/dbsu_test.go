@@ -2,7 +2,10 @@ package utils
 
 import (
 	"os"
+	"os/user"
 	"testing"
+
+	"pig/internal/config"
 )
 
 func TestCommandWritersStructured(t *testing.T) {
@@ -32,5 +35,23 @@ func TestCommandWritersTextMode(t *testing.T) {
 	}
 	if stderr != os.Stderr {
 		t.Fatalf("text mode should write stderr to stderr, got %T", stderr)
+	}
+}
+
+func TestDBSUCommandStdoutSeparatesStderrOnSuccess(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Fatalf("current user: %v", err)
+	}
+	origUser := config.CurrentUser
+	defer func() { config.CurrentUser = origUser }()
+	config.CurrentUser = current.Username
+
+	out, err := DBSUCommandStdout(current.Username, []string{"sh", "-c", "printf stdout; printf stderr >&2"})
+	if err != nil {
+		t.Fatalf("DBSUCommandStdout returned error: %v", err)
+	}
+	if out != "stdout" {
+		t.Fatalf("DBSUCommandStdout output = %q, want stdout only", out)
 	}
 }

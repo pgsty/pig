@@ -144,6 +144,29 @@ type InfoOptions struct {
 	Raw    bool   // Raw output mode (pass through pgbackrest output)
 }
 
+func LoadInfo(cfg *Config, set string) ([]PgBackRestInfo, error) {
+	effCfg, err := GetEffectiveConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	args := []string{"--output=json", "--log-level-console=error"}
+	if set != "" {
+		args = append(args, "--set="+set)
+	}
+
+	output, err := RunPgBackRestOutput(effCfg, "info", args)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute pgbackrest info: %w", err)
+	}
+
+	var infos []PgBackRestInfo
+	if err := json.Unmarshal([]byte(output), &infos); err != nil {
+		return nil, fmt.Errorf("failed to parse pgbackrest info output: %w", err)
+	}
+	return infos, nil
+}
+
 // Info displays backup repository information.
 func Info(cfg *Config, opts *InfoOptions) error {
 	effCfg, err := GetEffectiveConfig(cfg)

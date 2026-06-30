@@ -126,6 +126,30 @@ type StartOptions struct {
 	Force   bool
 }
 
+const DefaultStartLogFile = "/tmp/pig-pg-start.log"
+
+func buildStartArgs(pgCtl, dataDir string, timeout int, opts *StartOptions) []string {
+	cmdArgs := []string{pgCtl, "start", "-D", dataDir}
+
+	logFile := DefaultStartLogFile
+	if opts != nil && opts.LogFile != "" {
+		logFile = opts.LogFile
+	}
+	cmdArgs = append(cmdArgs, "-l", logFile)
+
+	if opts != nil && opts.NoWait {
+		cmdArgs = append(cmdArgs, "-W")
+	} else {
+		cmdArgs = append(cmdArgs, "-w", "-t", strconv.Itoa(timeout))
+	}
+
+	if opts != nil && opts.Options != "" {
+		cmdArgs = append(cmdArgs, "-o", opts.Options)
+	}
+
+	return cmdArgs
+}
+
 // Start starts PostgreSQL server using pg_ctl
 func Start(cfg *Config, opts *StartOptions) error {
 	dataDir := GetPgData(cfg)
@@ -174,34 +198,18 @@ func Start(cfg *Config, opts *StartOptions) error {
 		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
-	// Build pg_ctl start command
-	cmdArgs := []string{pg.PgCtl(), "start", "-D", dataDir}
-
-	// Log file: only add -l if user explicitly specified it
-	// PostgreSQL instances typically have their own log configuration
+	logFile := DefaultStartLogFile
 	if opts != nil && opts.LogFile != "" {
-		cmdArgs = append(cmdArgs, "-l", opts.LogFile)
-		// Ensure log directory exists
-		if idx := strings.LastIndex(opts.LogFile, "/"); idx > 0 {
-			logDir := opts.LogFile[:idx]
+		logFile = opts.LogFile
+		if idx := strings.LastIndex(logFile, "/"); idx > 0 {
+			logDir := logFile[:idx]
 			if err := utils.DBSUCommand(dbsu, []string{"mkdir", "-p", logDir}); err != nil {
 				logrus.Warnf("failed to create log directory %s: %v", logDir, err)
 			}
 		}
 	}
 
-	// Wait options
-	if opts != nil && opts.NoWait {
-		cmdArgs = append(cmdArgs, "-W")
-	} else {
-		cmdArgs = append(cmdArgs, "-w", "-t", strconv.Itoa(timeout))
-	}
-
-	// Postgres options
-	if opts != nil && opts.Options != "" {
-		cmdArgs = append(cmdArgs, "-o", opts.Options)
-	}
-
+	cmdArgs := buildStartArgs(pg.PgCtl(), dataDir, timeout, opts)
 	logrus.Infof("starting PostgreSQL %d: %s", pg.MajorVersion, dataDir)
 	PrintHint(cmdArgs)
 	return utils.DBSUCommand(dbsu, cmdArgs)

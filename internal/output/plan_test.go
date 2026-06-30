@@ -13,7 +13,9 @@ import (
 
 func samplePlan() *Plan {
 	return &Plan{
-		Command: "pig pitr -t 2026-01-31 01:00:00 --plan",
+		Command:      "pig pitr -t 2026-01-31 01:00:00 --plan",
+		Boundary:     "pitr:orchestrator",
+		Confirmation: "required",
 		Actions: []Action{
 			{Step: 1, Description: "Stop Patroni service"},
 			{Step: 2, Description: "Ensure PostgreSQL is stopped"},
@@ -24,6 +26,15 @@ func samplePlan() *Plan {
 		},
 		Expected: "PostgreSQL restored to target time",
 		Risks:    []string{"This will overwrite current data"},
+		Preconditions: []Check{
+			{Name: "recovery target", Status: "ok", Detail: "time target selected"},
+		},
+		Verifications: []Check{
+			{Name: "post restore query", Status: "manual", Detail: "run pig pg psql"},
+		},
+		NextActions: []NextAction{
+			{Command: "pig pg psql", Reason: "verify recovered data", Required: true},
+		},
 	}
 }
 
@@ -41,6 +52,11 @@ func TestPlanText(t *testing.T) {
 		"Affects:",
 		"Expected:",
 		"Risks:",
+		"Boundary:",
+		"Confirmation:",
+		"Preconditions:",
+		"Verifications:",
+		"Next Actions:",
 	}
 	for _, c := range checks {
 		if !strings.Contains(text, c) {
@@ -74,6 +90,15 @@ func TestPlanYAMLJSON(t *testing.T) {
 	}
 	if jsonPlan.Command != plan.Command {
 		t.Errorf("JSON command = %q, want %q", jsonPlan.Command, plan.Command)
+	}
+	if jsonPlan.Boundary != "pitr:orchestrator" {
+		t.Errorf("JSON boundary = %q, want pitr:orchestrator", jsonPlan.Boundary)
+	}
+	if len(jsonPlan.Preconditions) != 1 || jsonPlan.Preconditions[0].Name != "recovery target" {
+		t.Errorf("JSON preconditions not preserved: %+v", jsonPlan.Preconditions)
+	}
+	if len(jsonPlan.NextActions) != 1 || jsonPlan.NextActions[0].Command != "pig pg psql" {
+		t.Errorf("JSON next_actions not preserved: %+v", jsonPlan.NextActions)
 	}
 }
 

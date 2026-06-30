@@ -23,6 +23,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var postgresDBSUCommandOutput = utils.DBSUCommandOutput
+
 // ============================================================================
 // Default Constants
 // ============================================================================
@@ -197,7 +199,7 @@ func CheckPostgresRunningAsDBSU(dbsu, dataDir string) (bool, int) {
 		logrus.Debugf("cannot parse PID from postmaster.pid: %v", err)
 		return false, 0
 	}
-	if !postmasterPIDMatchesDataDir(pidContent, dataDir) {
+	if !postmasterPIDMatchesDataDirAsDBSU(dbsu, pidContent, dataDir) {
 		logrus.Debugf("postmaster.pid belongs to another data directory")
 		return false, pid
 	}
@@ -215,15 +217,40 @@ func CheckPostgresRunningAsDBSU(dbsu, dataDir string) (bool, int) {
 }
 
 func postmasterPIDMatchesDataDir(pidContent, dataDir string) bool {
-	lines := strings.Split(pidContent, "\n")
-	if len(lines) < 2 {
-		return true
-	}
-	pidDataDir := strings.TrimSpace(lines[1])
+	pidDataDir := postmasterPIDDataDir(pidContent)
 	if pidDataDir == "" {
 		return true
 	}
 	return filepath.Clean(pidDataDir) == filepath.Clean(dataDir)
+}
+
+func postmasterPIDMatchesDataDirAsDBSU(dbsu, pidContent, dataDir string) bool {
+	pidDataDir := postmasterPIDDataDir(pidContent)
+	if pidDataDir == "" {
+		return true
+	}
+	if filepath.Clean(pidDataDir) == filepath.Clean(dataDir) {
+		return true
+	}
+	pidResolved, pidErr := resolvePathAsDBSU(dbsu, pidDataDir)
+	dataResolved, dataErr := resolvePathAsDBSU(dbsu, dataDir)
+	if pidErr == nil && dataErr == nil && pidResolved != "" && dataResolved != "" {
+		return filepath.Clean(pidResolved) == filepath.Clean(dataResolved)
+	}
+	return false
+}
+
+func postmasterPIDDataDir(pidContent string) string {
+	lines := strings.Split(pidContent, "\n")
+	if len(lines) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(lines[1])
+}
+
+func resolvePathAsDBSU(dbsu, path string) (string, error) {
+	out, err := postgresDBSUCommandOutput(dbsu, []string{"readlink", "-f", path})
+	return strings.TrimSpace(out), err
 }
 
 // checkProcessRunningAsDBSU checks if a process is running using kill -0 as DBSU.
@@ -240,7 +267,7 @@ func checkProcessRunningAsDBSU(dbsu string, pid int) bool {
 
 	// Use kill -0 via DBSU privilege escalation
 	// kill -0 returns 0 if process exists and we can signal it, non-zero otherwise
-	_, err := utils.DBSUCommandOutput(dbsu, []string{"kill", "-0", strconv.Itoa(pid)})
+	_, err := postgresDBSUCommandOutput(dbsu, []string{"kill", "-0", strconv.Itoa(pid)})
 	return err == nil
 }
 

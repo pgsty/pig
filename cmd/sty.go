@@ -2,16 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"pig/cli/get"
-	"pig/cli/sty"
+	stycli "pig/cli/sty"
 	"pig/internal/config"
-	"pig/internal/utils"
 	"strings"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -38,6 +32,28 @@ var (
 	pigstyDownloadDir string
 	pigstyVersion     string
 )
+
+var styCmd = &cobra.Command{
+	Use:         "sty",
+	Short:       "Manage Pigsty Installation",
+	Annotations: ancsAnn("pig sty", "query", "stable", "safe", true, "safe", "none", "current", 100),
+	Aliases:     []string{"s", "pigsty"},
+	GroupID:     "pigsty",
+	Long: `pig sty -Init (Download), Bootstrap, Configure, and Deploy Pigsty
+
+  pig sty init    [-pfvd]         # install pigsty (~/pigsty by default)
+  pig sty boot    [-rpk]          # install ansible and prepare offline pkg
+  pig sty conf    [-cvrsoxnpg --raw] # configure pigsty and generate config
+  pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
+  pig sty get                     # download pigsty source tarball
+  pig sty list                    # list available pigsty versions
+`,
+	Example: `  Get Started: https://pigsty.io/docs/setup/install/
+  pig sty init                 # extract and init ~/pigsty
+  pig sty boot                 # install ansible & other deps
+  pig sty conf                 # generate pigsty.yml config file
+  pig sty deploy               # run the deploy.yml playbook`,
+}
 
 const styConfigureLong = `Configure pigsty with native workflow (default) or raw shell workflow
 
@@ -73,30 +89,6 @@ const styConfigureExample = `
   pig sty conf -c full -g -O ha.yml  # full HA template with random passwords to ha.yml
 `
 
-// styCmd represents the pigsty management command
-var styCmd = &cobra.Command{
-	Use:         "sty",
-	Short:       "Manage Pigsty Installation",
-	Annotations: ancsAnn("pig sty", "query", "stable", "safe", true, "safe", "none", "current", 100),
-	Aliases:     []string{"s", "pigsty"},
-	GroupID:     "pigsty",
-	Long: `pig sty -Init (Download), Bootstrap, Configure, and Deploy Pigsty
-
-  pig sty init    [-pfvd]         # install pigsty (~/pigsty by default)
-  pig sty boot    [-rpk]          # install ansible and prepare offline pkg
-  pig sty conf    [-cvrsoxnpg --raw] # configure pigsty and generate config
-  pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
-  pig sty get                     # download pigsty source tarball
-  pig sty list                    # list available pigsty versions
-`,
-	Example: `  Get Started: https://pigsty.io/docs/setup/install/
-  pig sty init                 # extract and init ~/pigsty
-  pig sty boot                 # install ansible & other deps
-  pig sty conf                 # generate pigsty.yml config file
-  pig sty deploy               # run the deploy.yml playbook`,
-}
-
-// pigstyInitCmd will extract and setup ~/pigsty
 var pigstyInitCmd = &cobra.Command{
 	Use:         "init",
 	Short:       "Install Pigsty",
@@ -124,71 +116,13 @@ pig sty init
 			"version": pigstyVersion,
 			"dir":     pigstyDownloadDir,
 		}, func() error {
-			// Handle version from args if provided
-			if len(args) > 0 && pigstyVersion == "" {
-				pigstyVersion = args[0]
-			}
-
-			// Default to latest if no version specified
-			if pigstyVersion == "" {
-				pigstyVersion = "latest"
-			}
-
-			// Ensure version has 'v' prefix if it starts with a number
-			if pigstyVersion != "latest" && len(pigstyVersion) > 0 {
-				if pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
-					pigstyVersion = "v" + pigstyVersion
-				}
-			}
-
-			// if version is explicit given, always download & install from remote
-			get.NetworkCondition()
-			var ver *get.VersionInfo
-			if get.AllVersions == nil {
-				logrus.Warnf("Fail to get pigsty version list, use the built-in version %s", config.PigstyVersion)
-				// Use built-in version as fallback
-				if pigstyVersion == "latest" {
-					pigstyVersion = config.PigstyVersion
-				}
-				// Ensure fallback version has v prefix if it starts with a number
-				if len(pigstyVersion) > 0 && pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
-					pigstyVersion = "v" + pigstyVersion
-				}
-				// Create a fallback VersionInfo for built-in version
-				ver = &get.VersionInfo{
-					Version:     pigstyVersion,
-					DownloadURL: fmt.Sprintf("%s/src/pigsty-%s.tgz", config.RepoPigstyIO, pigstyVersion),
-				}
-			} else {
-				pigstyVersion = get.CompleteVersion(pigstyVersion)
-				ver = get.IsValidVersion(pigstyVersion)
-				if ver == nil {
-					logrus.Errorf("invalid pigsty version: %v", pigstyVersion)
-					return fmt.Errorf("invalid pigsty version: %s", pigstyVersion)
-				}
-			}
-
-			// download according to the version
-			logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, pigstyDownloadDir)
-			err := get.DownloadSrc(pigstyVersion, pigstyDownloadDir)
-			if err != nil {
-				logrus.Errorf("failed to download pigsty src %s: %v", pigstyVersion, err)
-				return fmt.Errorf("failed to download pigsty src %s: %w", pigstyVersion, err)
-			}
-
-			// read, then extract & install it
-			srcTarball, err := sty.LoadPigstySrc(filepath.Join(pigstyDownloadDir, fmt.Sprintf("pigsty-%s.tgz", pigstyVersion)))
-			if err != nil {
-				logrus.Errorf("failed to load pigsty src %s: %v", pigstyVersion, err)
-				return fmt.Errorf("failed to load pigsty src %s: %w", pigstyVersion, err)
-			}
-			err = sty.InstallPigsty(srcTarball, pigstyInitPath, pigstyInitForce)
-			if err != nil {
-				logrus.Errorf("failed to install pigsty src %s: %v", pigstyVersion, err)
-				return err
-			}
-			logrus.Infof("proceed with pig boot & pig conf")
-			return nil
+			return stycli.Init(stycli.InitOptions{
+				TargetPath:  pigstyInitPath,
+				Force:       pigstyInitForce,
+				Version:     pigstyVersion,
+				DownloadDir: pigstyDownloadDir,
+				Args:        args,
+			})
 		})
 	},
 }
@@ -217,42 +151,16 @@ Check https://pigsty.io/docs/setup/offline/#bootstrap for details
 			if len(args) > 0 {
 				return fmt.Errorf("unexpected argument: %v", args)
 			}
-			if config.PigstyHome == "" {
-				logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
-				return fmt.Errorf("pigsty home & inventory not found")
-			}
-			bootstrapPath := filepath.Join(config.PigstyHome, "bootstrap")
-			if _, err := os.Stat(bootstrapPath); os.IsNotExist(err) {
-				logrus.Errorf("bootstrap script not found: %s", bootstrapPath)
-				return fmt.Errorf("bootstrap script not found: %s", bootstrapPath)
-			}
-
-			cmdArgs := []string{bootstrapPath}
-			if pigstyBootRegion != "" {
-				cmdArgs = append(cmdArgs, "-r", pigstyBootRegion)
-			}
-			if pigstyBootPackage != "" {
-				cmdArgs = append(cmdArgs, "-p", pigstyBootPackage)
-			}
-			if pigstyBootKeep {
-				cmdArgs = append(cmdArgs, "-k")
-			}
-			cmdArgs = append(cmdArgs, args...)
-			if err := os.Chdir(config.PigstyHome); err != nil {
-				return fmt.Errorf("failed to change directory to %s: %w", config.PigstyHome, err)
-			}
-			logrus.Infof("bootstrap with: %s", strings.Join(cmdArgs, " "))
-			err := utils.ShellCommand(cmdArgs)
-			if err != nil {
-				logrus.Errorf("bootstrap execution failed: %v", err)
-				return err
-			}
-			return nil
+			return stycli.Bootstrap(stycli.BootstrapOptions{
+				PigstyHome:  config.PigstyHome,
+				Region:      pigstyBootRegion,
+				PackagePath: pigstyBootPackage,
+				Keep:        pigstyBootKeep,
+			})
 		})
 	},
 }
 
-// pigstyConfCmd is the single configure command with aliases.
 var pigstyConfCmd = &cobra.Command{
 	Use:         "conf",
 	Short:       "Configure Pigsty",
@@ -269,7 +177,20 @@ var pigstyConfCmd = &cobra.Command{
 		}
 		if pigstyConfRaw {
 			return runLegacyStructured(legacyModuleSty, command, args, styConfigureParams(), func() error {
-				return runPigstyConfigureRaw(args)
+				return stycli.ConfigureRaw(stycli.RawConfigureOptions{
+					PigstyHome:     config.PigstyHome,
+					Mode:           pigstyConfName,
+					PrimaryIP:      pigstyConfIP,
+					PGVersion:      pigstyConfVer,
+					Region:         pigstyConfRegion,
+					SSHPort:        pigstyConfPort,
+					OutputFile:     pigstyConfOutput,
+					Skip:           pigstyConfSkip,
+					UseProxy:       pigstyConfProxy,
+					NonInteractive: pigstyConfNonInteractive,
+					Generate:       pigstyConfGenerate,
+					Args:           args,
+				})
 			})
 		}
 		return runPigstyConfigureNative(command, args)
@@ -300,7 +221,7 @@ func runPigstyConfigureNative(command string, args []string) error {
 			args, styConfigureParams(),
 		)
 	}
-	opts := sty.ConfigureOptions{
+	opts := stycli.ConfigureOptions{
 		PigstyHome:     config.PigstyHome,
 		Mode:           pigstyConfName,
 		PrimaryIP:      pigstyConfIP,
@@ -313,60 +234,7 @@ func runPigstyConfigureNative(command string, args []string) error {
 		NonInteractive: pigstyConfNonInteractive,
 		Generate:       pigstyConfGenerate,
 	}
-	return handleAuxResult(sty.ConfigureNative(opts))
-}
-
-func runPigstyConfigureRaw(args []string) error {
-	if config.PigstyHome == "" {
-		logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
-		return fmt.Errorf("pigsty home & inventory not found")
-	}
-
-	configurePath := filepath.Join(config.PigstyHome, "configure")
-	if _, err := os.Stat(configurePath); os.IsNotExist(err) {
-		logrus.Errorf("configure script not found: %s", configurePath)
-		return fmt.Errorf("configure script not found: %s", configurePath)
-	}
-
-	cmdArgs := []string{configurePath}
-	if pigstyConfName != "" {
-		cmdArgs = append(cmdArgs, "-c", pigstyConfName)
-	}
-	if pigstyConfIP != "" {
-		cmdArgs = append(cmdArgs, "-i", pigstyConfIP)
-	}
-	if pigstyConfVer != "" {
-		cmdArgs = append(cmdArgs, "-v", pigstyConfVer)
-	}
-	if pigstyConfRegion != "" {
-		cmdArgs = append(cmdArgs, "-r", pigstyConfRegion)
-	}
-	if pigstyConfOutput != "" {
-		cmdArgs = append(cmdArgs, "-o", pigstyConfOutput)
-	}
-	if pigstyConfSkip {
-		cmdArgs = append(cmdArgs, "-s")
-	}
-	if pigstyConfProxy {
-		cmdArgs = append(cmdArgs, "-x")
-	}
-	if pigstyConfNonInteractive {
-		cmdArgs = append(cmdArgs, "-n")
-	}
-	if pigstyConfPort != "" {
-		cmdArgs = append(cmdArgs, "-p", pigstyConfPort)
-	}
-	if pigstyConfGenerate {
-		cmdArgs = append(cmdArgs, "-g")
-	}
-	cmdArgs = append(cmdArgs, args...)
-
-	if err := os.Chdir(config.PigstyHome); err != nil {
-		return fmt.Errorf("failed to change directory to %s: %w", config.PigstyHome, err)
-	}
-
-	logrus.Infof("configure with: %s", strings.Join(cmdArgs, " "))
-	return utils.ShellCommand(cmdArgs)
+	return handleAuxResult(stycli.ConfigureNative(opts))
 }
 
 func addStyConfigureFlags(cmd *cobra.Command) {
@@ -393,7 +261,7 @@ var pigstyListcmd = &cobra.Command{
 	Long: `List available pigsty versions
 
 	pig sty list [-v version]
-	
+
 	Check https://pigsty.io/docs/releasenote for details
 	`,
 	Example: `
@@ -404,38 +272,7 @@ var pigstyListcmd = &cobra.Command{
 	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleSty, "pig sty list", args, nil, func() error {
-			logrus.Info("fetching pigsty version info...")
-			get.NetworkCondition()
-			if get.AllVersions == nil {
-				logrus.Errorf("Fail to list pigsty versions")
-				return fmt.Errorf("failed to list pigsty versions")
-			}
-			var since string
-			if len(args) > 0 {
-				if len(args) > 1 {
-					logrus.Warnf("expect at most one version string, unexpected args: %s", strings.Join(args, " "))
-				}
-				if args[0] == "all" {
-					since = "v1.0.0"
-					logrus.Debugf("list all versions, set since to %s", since)
-				} else {
-					since = get.CompleteVersion(args[0])
-					logrus.Debugf("complete given %s to %s", args[0], since)
-				}
-			} else {
-				since = "v3.0.0"
-				logrus.Debugf("no version given, fallback to %s", since)
-			}
-
-			if !get.ValidVersion(since) {
-				logrus.Errorf("invalid version: %s", since)
-				return fmt.Errorf("invalid version: %s", since)
-			}
-			logrus.Debugf("the since version %s given", since)
-
-			logrus.Infof("pigsty versions since %s ,from %s", since, get.Source)
-			get.PrintAllVersions(since)
-			return nil
+			return stycli.ListVersions(args)
 		})
 	},
 }
@@ -450,42 +287,11 @@ var pigstyGetcmd = &cobra.Command{
 			"version": pigstyVersion,
 			"dir":     pigstyDownloadDir,
 		}, func() error {
-			get.NetworkCondition()
-			if get.AllVersions == nil {
-				logrus.Errorf("Fail to get pigsty version list")
-				return fmt.Errorf("failed to get pigsty version list")
-			}
-			if pigstyVersion == "" && len(args) > 0 {
-				pigstyVersion = args[0]
-			}
-
-			// Ensure version has 'v' prefix if it starts with a number
-			if pigstyVersion != "" && pigstyVersion != "latest" && len(pigstyVersion) > 0 {
-				if pigstyVersion[0] >= '0' && pigstyVersion[0] <= '9' {
-					pigstyVersion = "v" + pigstyVersion
-				}
-			}
-
-			if completeVer := get.CompleteVersion(pigstyVersion); completeVer != pigstyVersion {
-				logrus.Debugf("Complete pigsty version from %s to %s", pigstyVersion, completeVer)
-				pigstyVersion = completeVer
-			}
-
-			ver := get.IsValidVersion(pigstyVersion)
-			if ver == nil {
-				logrus.Errorf("Invalid version: %s", pigstyVersion)
-				return fmt.Errorf("invalid version: %s", pigstyVersion)
-			} else {
-				logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, pigstyDownloadDir)
-			}
-
-			logrus.Debugf("Download pigsty src %s to %s", pigstyVersion, pigstyDownloadDir)
-			err := get.DownloadSrc(pigstyVersion, pigstyDownloadDir)
-			if err != nil {
-				logrus.Errorf("failed to download pigsty src: %v", err)
-				return err
-			}
-			return nil
+			return stycli.Download(stycli.DownloadOptions{
+				Version:     pigstyVersion,
+				DownloadDir: pigstyDownloadDir,
+				Args:        args,
+			})
 		})
 	},
 }
@@ -512,59 +318,12 @@ WARNING: This operation makes changes to your system. Use with caution!
   pig sty ins          # short alias`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleSty, "pig sty deploy", args, nil, func() error {
-			return runPigstyInstall()
+			return stycli.Deploy(stycli.DeployOptions{
+				PigstyHome:   config.PigstyHome,
+				PigstyConfig: config.PigstyConfig,
+			})
 		})
 	},
-}
-
-func runPigstyInstall() error {
-	// check ansible-playbook command available
-	if _, err := exec.LookPath("ansible-playbook"); err != nil {
-		logrus.Errorf("ansible-playbook command not found: %v", err)
-		logrus.Infof("have you run: pig sty boot to install ansible?")
-		return err
-	}
-
-	// check pigsty home exists
-	if _, err := os.Stat(config.PigstyHome); os.IsNotExist(err) {
-		logrus.Errorf("pigsty home %s not found: %v", config.PigstyHome, err)
-		logrus.Infof("have you run: pig sty init to install pigsty?")
-		return err
-	}
-
-	// check pigsty.yml config exists
-	if _, err := os.Stat(config.PigstyConfig); os.IsNotExist(err) {
-		logrus.Errorf("pigsty inventory not found: %s", config.PigstyConfig)
-		logrus.Infof("have you run: pig sty conf to generate pigsty.yml config?")
-		return err
-	}
-
-	// check for deploy.yml playbook first, fallback to install.yml for backward compatibility
-	var playbookName string
-	deployPath := filepath.Join(config.PigstyHome, "deploy.yml")
-	installPath := filepath.Join(config.PigstyHome, "install.yml")
-
-	if _, err := os.Stat(deployPath); err == nil {
-		// deploy.yml exists, use it
-		playbookName = "deploy.yml"
-		logrus.Debugf("using deploy.yml playbook: %s", deployPath)
-	} else if _, err := os.Stat(installPath); err == nil {
-		// deploy.yml not found, fallback to install.yml
-		playbookName = "install.yml"
-		logrus.Warnf("deploy.yml not found, falling back to install.yml for backward compatibility")
-	} else {
-		// neither exists
-		logrus.Errorf("pigsty playbook not found: neither deploy.yml nor install.yml exists in %s", config.PigstyHome)
-		return fmt.Errorf("playbook not found")
-	}
-
-	// run the playbook
-	if err := os.Chdir(config.PigstyHome); err != nil {
-		return fmt.Errorf("failed to change directory to %s: %w", config.PigstyHome, err)
-	}
-	logrus.Infof("run playbook %s", playbookName)
-	logrus.Warnf("IT'S DANGEROUS TO RUN THIS ON INSTALLED SYSTEM!!! Use Ctrl+C to abort")
-	return utils.Command([]string{"ansible-playbook", playbookName})
 }
 
 func init() {
@@ -584,5 +343,4 @@ func init() {
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
 
 	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyDeployCmd, pigstyListcmd, pigstyGetcmd)
-
 }

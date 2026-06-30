@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"pig/internal/config"
 	"pig/internal/output"
@@ -41,14 +43,41 @@ func TestNormalizeInstanceDefaults(t *testing.T) {
 	if n.DbSU != "postgres" {
 		t.Errorf("DbSU = %q, want postgres", n.DbSU)
 	}
-	if n.Mode != ModeAuto {
-		t.Errorf("Mode = %q, want %q", n.Mode, ModeAuto)
-	}
 	if n.Start {
 		t.Error("Start should default to false")
 	}
 	if !n.Instance.Managed {
 		t.Error("default fork should be managed")
+	}
+}
+
+func TestNormalizeAcceptsCanonicalStartAndDeprecatedRun(t *testing.T) {
+	for _, opts := range []*Options{
+		{Kind: KindInstance, Start: true, Instance: InstanceOptions{Name: "dev"}},
+		{Kind: KindInstance, Run: true, Instance: InstanceOptions{Name: "dev"}},
+	} {
+		n, err := NormalizeOptions(opts)
+		if err != nil {
+			t.Fatalf("NormalizeOptions returned error: %v", err)
+		}
+		if !n.Start {
+			t.Fatalf("NormalizeOptions should enable Start for %#v", opts)
+		}
+	}
+
+	n, err := NormalizeOptions(&Options{
+		Kind:    KindInstance,
+		Start:   true,
+		NoStart: true,
+		Instance: InstanceOptions{
+			Name: "dev",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NormalizeOptions returned error: %v", err)
+	}
+	if n.Start {
+		t.Fatal("NoStart should still disable a requested start")
 	}
 }
 
@@ -242,10 +271,10 @@ func TestBuildInstancePlan(t *testing.T) {
 	}
 }
 
-func TestBuildInstancePlanWithRunStartsFork(t *testing.T) {
+func TestBuildInstancePlanWithStartStartsFork(t *testing.T) {
 	opts, err := NormalizeOptions(&Options{
-		Kind: KindInstance,
-		Run:  true,
+		Kind:  KindInstance,
+		Start: true,
 		Instance: InstanceOptions{
 			Name: "dev",
 		},
@@ -256,11 +285,32 @@ func TestBuildInstancePlanWithRunStartsFork(t *testing.T) {
 	}
 
 	plan := BuildPlan(opts, &State{CloneMode: CloneModeCOW, BackupMode: BackupModeHot})
-	if plan.Command != "pig pg fork init dev -r --plan" {
-		t.Errorf("Command = %q, want pig pg fork init dev -r --plan", plan.Command)
+	if plan.Command != "pig pg fork init dev --start --plan" {
+		t.Errorf("Command = %q, want pig pg fork init dev --start --plan", plan.Command)
 	}
 	if !containsForkAction(plan.Actions, "Start forked PostgreSQL instance") {
 		t.Errorf("plan actions missing start step: %#v", plan.Actions)
+	}
+}
+
+func TestPlanRunsReadOnlyPrecheck(t *testing.T) {
+	root := t.TempDir()
+	dest := filepath.Join(root, "data-dev")
+	_, err := Plan(&Options{
+		Kind: KindInstance,
+		Plan: true,
+		Instance: InstanceOptions{
+			Name:       "dev",
+			SourceData: filepath.Join(root, "missing-source"),
+			DestData:   dest,
+			DestPort:   15432,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected plan to reject missing source data directory")
+	}
+	if !strings.Contains(err.Error(), "source data directory") {
+		t.Fatalf("error should mention source data directory, got %v", err)
 	}
 }
 
@@ -293,12 +343,27 @@ func TestFirstFreePortAvoidsReservedForkPorts(t *testing.T) {
 	})
 	forkPortFree = func(port int) bool { return true }
 
-	got := firstFreePortAvoiding(15432, map[int]bool{
+	got, err := firstFreePortAvoiding(15432, map[int]bool{
 		15432: true,
 		15433: true,
 	})
+	if err != nil {
+		t.Fatalf("firstFreePortAvoiding returned error: %v", err)
+	}
 	if got != 15434 {
 		t.Fatalf("firstFreePortAvoiding() = %d, want 15434", got)
+	}
+}
+
+func TestFirstFreePortAvoidingReportsExhaustion(t *testing.T) {
+	original := forkPortFree
+	t.Cleanup(func() {
+		forkPortFree = original
+	})
+	forkPortFree = func(port int) bool { return false }
+
+	if got, err := firstFreePortAvoiding(65535, nil); err == nil || got != 0 {
+		t.Fatalf("firstFreePortAvoiding exhaustion = (%d, %v), want (0, error)", got, err)
 	}
 }
 
@@ -309,15 +374,15 @@ func TestReservedForkPortsExcludesCurrentDataDir(t *testing.T) {
 		{Name: "old", Target: ForkEndpoint{Data: "/pg/data-old"}},
 	}
 
-	reserved := reservedForkPorts(forks, "/pg/data-dev")
+	reserved := reservedForkPortsAs("", forks, "/pg/data-dev")
 	if reserved[15432] {
-		t.Fatal("reservedForkPorts should ignore the current fork data directory")
+		t.Fatal("reservedForkPortsAs should ignore the current fork data directory")
 	}
 	if !reserved[15433] {
-		t.Fatal("reservedForkPorts should include other managed fork ports")
+		t.Fatal("reservedForkPortsAs should include other managed fork ports")
 	}
 	if reserved[0] {
-		t.Fatal("reservedForkPorts should ignore empty ports")
+		t.Fatal("reservedForkPortsAs should ignore empty ports")
 	}
 }
 
@@ -450,13 +515,14 @@ func TestHotBackupStopsBackupWhenCopyFails(t *testing.T) {
 	}
 }
 
-func TestRequireCOWRejectsRegularCopyUnlessForced(t *testing.T) {
-	state := &State{CloneMode: CloneModeCopy, FS: "ext4"}
-	if err := requireCOW(state, false); err == nil {
-		t.Fatal("expected non-CoW error without force")
+func TestRegularCopyFallbackIsAllowedButWarns(t *testing.T) {
+	// A regular (non-CoW) copy is never blocked; it only triggers a countdown
+	// warning so the operator can cancel before a full-size copy proceeds.
+	if reason := forkCountdownReason(&State{CloneMode: CloneModeCopy, FS: "ext4"}); reason == "" {
+		t.Fatal("regular copy fallback should warn via a countdown reason")
 	}
-	if err := requireCOW(state, true); err != nil {
-		t.Fatalf("force should allow regular copy fallback: %v", err)
+	if reason := forkCountdownReason(&State{CloneMode: CloneModeCOW, FS: "xfs"}); reason != "" {
+		t.Fatalf("CoW clone should not warn, got %q", reason)
 	}
 }
 
@@ -487,8 +553,8 @@ func (s *fakeBackupSession) Close() error {
 
 func TestBuildForkInfoIncludesKeyFields(t *testing.T) {
 	opts, err := NormalizeOptions(&Options{
-		Kind: KindInstance,
-		Run:  true,
+		Kind:  KindInstance,
+		Start: true,
 		Instance: InstanceOptions{
 			Name: "dev",
 		},
@@ -513,6 +579,12 @@ func TestBuildForkInfoIncludesKeyFields(t *testing.T) {
 	if !info.Managed {
 		t.Error("BuildForkInfo should mark default forks as managed")
 	}
+	if info.Commands.Stop != "pig pg fork stop dev" {
+		t.Fatalf("Stop command = %q, want pig pg fork stop dev", info.Commands.Stop)
+	}
+	if info.Commands.Remove != "pig pg fork rm dev --stop" {
+		t.Fatalf("Remove command = %q, want pig pg fork rm dev --stop", info.Commands.Remove)
+	}
 }
 
 func TestBuildForkInfoMarksExplicitDestinationAsUnmanaged(t *testing.T) {
@@ -530,18 +602,289 @@ func TestBuildForkInfoMarksExplicitDestinationAsUnmanaged(t *testing.T) {
 	if info.Managed {
 		t.Fatal("explicit destination fork should be recorded as unmanaged")
 	}
+	if info.Commands.Stop != "pig pg fork stop -d /tmp/dev-fork" {
+		t.Fatalf("Stop command = %q, want unmanaged pig command", info.Commands.Stop)
+	}
+	if info.Commands.Remove != "pig pg fork rm -d /tmp/dev-fork --stop" {
+		t.Fatalf("Remove command = %q, want unmanaged pig command", info.Commands.Remove)
+	}
 }
 
-func TestScanForksReadsForkInfoAndOrphans(t *testing.T) {
-	root := t.TempDir()
-	writeForkInfoForTest(t, root, "data-dev", `{"kind":"pg_fork","version":1,"name":"dev","target":{"data":"/pg/data-dev","port":15432,"started":true}}`)
-	if err := os.Mkdir(filepath.Join(root, "data-old"), 0755); err != nil {
-		t.Fatalf("mkdir orphan: %v", err)
+func TestInstanceResultUsesPigCleanupCommand(t *testing.T) {
+	opts, err := NormalizeOptions(&Options{
+		Kind: KindInstance,
+		Instance: InstanceOptions{
+			Name: "dev",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NormalizeOptions returned error: %v", err)
+	}
+	result := instanceResult(opts, &State{BackupMode: BackupModeHot, CloneMode: CloneModeCOW}, 0)
+	if result.CleanupCommand != "pig pg fork rm dev --stop" {
+		t.Fatalf("CleanupCommand = %q, want pig fork removal command", result.CleanupCommand)
+	}
+}
+
+func TestForkExecutionSummaryIncludesPrecheckedTarget(t *testing.T) {
+	opts, err := NormalizeOptions(&Options{
+		Kind:  KindInstance,
+		Start: true,
+		Instance: InstanceOptions{
+			Name:       "dev",
+			SourceData: "/pg/data",
+			SourcePort: 5432,
+			DestData:   "/tmp/dev-fork",
+			DestPort:   15440,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NormalizeOptions returned error: %v", err)
+	}
+	summary := forkExecutionSummary(opts, &State{BackupMode: BackupModeHot, CloneMode: CloneModeCopy, FS: "ext4"})
+
+	for _, want := range []string{
+		"Precheck: OK",
+		"Source: /pg/data @ 5432 (verified)",
+		"Target: /tmp/dev-fork @ 15440 (unmanaged)",
+		"After copy: start fork",
+		"Backup: hot backup",
+		"Copy: regular copy (ext4); may use full data directory space",
+		"Pig: ",
+		"Command: pig pg fork init dev -d /tmp/dev-fork -p 15440 --start",
+	} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary missing %q:\n%s", want, summary)
+		}
+	}
+}
+
+func TestForkCreateHintShowsNextStepsForStoppedFork(t *testing.T) {
+	hint := ForkCreateHint(ResultData{
+		Name:            "dev",
+		Destination:     "/pg/data-dev",
+		DestinationPort: 15432,
+		StartCommand:    "pig pg fork start dev",
+		CleanupCommand:  "pig pg fork rm dev --stop",
+	})
+	for _, want := range []string{
+		"Created: dev (/pg/data-dev)",
+		"Port: 15432",
+		"State: stopped",
+		"Start: pig pg fork start dev",
+		"Remove: pig pg fork rm dev --stop",
+	} {
+		if !strings.Contains(hint, want) {
+			t.Fatalf("create hint missing %q:\n%s", want, hint)
+		}
+	}
+}
+
+func TestForkCreateHintShowsConnectForStartedFork(t *testing.T) {
+	hint := ForkCreateHint(ResultData{
+		Name:            "dev",
+		Destination:     "/pg/data-dev",
+		DestinationPort: 15432,
+		Started:         true,
+		ConnectCommand:  "psql -p 15432 -d postgres",
+		StopCommand:     "pig pg fork stop dev",
+		CleanupCommand:  "pig pg fork rm dev --stop",
+	})
+	for _, want := range []string{
+		"Created: dev (/pg/data-dev)",
+		"State: running",
+		"Connect: psql -p 15432 -d postgres",
+		"Stop: pig pg fork stop dev",
+		"Remove: pig pg fork rm dev --stop",
+	} {
+		if !strings.Contains(hint, want) {
+			t.Fatalf("create hint missing %q:\n%s", want, hint)
+		}
+	}
+}
+
+func TestForkActionHintShowsStopAndRemoveResults(t *testing.T) {
+	stopHint := ForkActionHint("fork stop", ResultData{Name: "dev", Destination: "/pg/data-dev"})
+	if !strings.Contains(stopHint, "Stopped: dev (/pg/data-dev)") {
+		t.Fatalf("stop hint = %q", stopHint)
+	}
+	alreadyHint := ForkActionHint("fork stop", ResultData{Name: "dev", Destination: "/pg/data-dev", Already: true})
+	if !strings.Contains(alreadyHint, "Already stopped: dev (/pg/data-dev)") {
+		t.Fatalf("already stopped hint = %q", alreadyHint)
+	}
+	removeHint := ForkActionHint("fork remove", ResultData{Name: "dev", Destination: "/pg/data-dev"})
+	if !strings.Contains(removeHint, "Removed: dev (/pg/data-dev)") {
+		t.Fatalf("remove hint = %q", removeHint)
+	}
+}
+
+func TestForkConnectionHintShowsPortAndPsqlCommand(t *testing.T) {
+	hint := ForkConnectionHint(ResultData{
+		DestinationPort: 15432,
+		Started:         true,
+		ConnectCommand:  "psql -p 15432 -d postgres",
+	})
+	for _, want := range []string{
+		"Fork is running on port 15432",
+		"Connect: psql -p 15432 -d postgres",
+	} {
+		if !strings.Contains(hint, want) {
+			t.Fatalf("hint missing %q:\n%s", want, hint)
+		}
+	}
+}
+
+func TestForkConnectionHintEmptyForStoppedFork(t *testing.T) {
+	if hint := ForkConnectionHint(ResultData{DestinationPort: 15432}); hint != "" {
+		t.Fatalf("stopped fork hint = %q, want empty", hint)
+	}
+}
+
+func TestCountdownTickMessageUsesProceedingWording(t *testing.T) {
+	if got := countdownTickMessage(5); got != "\rProceeding in 5 seconds... " {
+		t.Fatalf("countdown tick = %q", got)
+	}
+}
+
+func TestForkProgressWritesOnlyForInteractiveExecution(t *testing.T) {
+	disabled := captureForkStderr(t, func() {
+		forkProgress(&Options{}, "copying data directory")
+	})
+	if disabled != "" {
+		t.Fatalf("progress should be silent when disabled, got %q", disabled)
 	}
 
-	forks, err := ScanForks(root)
+	enabled := captureForkStderr(t, func() {
+		forkProgress(&Options{Progress: true}, "copying data directory")
+	})
+	if enabled != "Step: copying data directory\n" {
+		t.Fatalf("progress output = %q", enabled)
+	}
+}
+
+func TestStartForkRejectsPortOverrideForRunningFork(t *testing.T) {
+	originalRead := forkReadFileAsDBSU
+	originalCheckDataDir := forkCheckDataDir
+	originalRunning := forkCheckPostgresRunning
+	t.Cleanup(func() {
+		forkReadFileAsDBSU = originalRead
+		forkCheckDataDir = originalCheckDataDir
+		forkCheckPostgresRunning = originalRunning
+	})
+	forkCheckDataDir = func(dbsu, dataDir string) (bool, bool) {
+		return true, true
+	}
+	forkReadFileAsDBSU = func(path, dbsu string) (string, error) {
+		return `{"kind":"pg_fork","version":1,"name":"dev","managed":true,"target":{"data":"/pg/data-dev","port":15432}}`, nil
+	}
+	forkCheckPostgresRunning = func(dbsu, dataDir string) (bool, int) {
+		return true, 123
+	}
+
+	_, err := StartFork(ForkTargetOptions{Name: "dev", DestPort: 15440})
+	if err == nil {
+		t.Fatal("expected running fork port override to be rejected")
+	}
+	if !strings.Contains(err.Error(), "already running") || !strings.Contains(err.Error(), "15432") {
+		t.Fatalf("error should mention running fork port, got %v", err)
+	}
+}
+
+func TestReservedManagedForkPortsScansVisibleSymlinkRootAsDBSU(t *testing.T) {
+	originalLstat := forkLstat
+	originalOutput := forkDBSUCommandOutput
+	originalRead := forkReadFileAsDBSU
+	t.Cleanup(func() {
+		forkLstat = originalLstat
+		forkDBSUCommandOutput = originalOutput
+		forkReadFileAsDBSU = originalRead
+	})
+	forkLstat = func(path string) (os.FileInfo, error) {
+		if path != "/pg" {
+			t.Fatalf("unexpected lstat path: %s", path)
+		}
+		return fakeForkFileInfo{name: "pg"}, nil
+	}
+	forkDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+		if strings.Join(args, " ") != "find -H /pg -mindepth 1 -maxdepth 1 -type d -name data-* -print" {
+			t.Fatalf("unexpected scan command: %#v", args)
+		}
+		return "/pg/data-dev\n", nil
+	}
+	forkReadFileAsDBSU = func(path, dbsu string) (string, error) {
+		if path != "/pg/data-dev/fork.json" {
+			t.Fatalf("unexpected metadata path: %s", path)
+		}
+		return `{"kind":"pg_fork","version":1,"name":"dev","target":{"data":"/pg/data-dev","port":15432}}`, nil
+	}
+
+	reserved := reservedManagedForkPorts("postgres", "")
+	if !reserved[15432] {
+		t.Fatalf("reservedManagedForkPorts should include metadata port 15432: %#v", reserved)
+	}
+}
+
+func TestForkPortReservationIgnoresCurrentForkPathAlias(t *testing.T) {
+	originalLstat := forkLstat
+	originalOutput := forkDBSUCommandOutput
+	originalRead := forkReadFileAsDBSU
+	originalResolve := postgresDBSUCommandOutput
+	t.Cleanup(func() {
+		forkLstat = originalLstat
+		forkDBSUCommandOutput = originalOutput
+		forkReadFileAsDBSU = originalRead
+		postgresDBSUCommandOutput = originalResolve
+	})
+	forkLstat = func(path string) (os.FileInfo, error) {
+		return fakeForkFileInfo{name: filepath.Base(path)}, nil
+	}
+	forkDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+		if strings.Join(args, " ") != "find -H /pg -mindepth 1 -maxdepth 1 -type d -name data-* -print" {
+			t.Fatalf("unexpected scan command: %#v", args)
+		}
+		return "/pg/data-dev\n", nil
+	}
+	forkReadFileAsDBSU = func(path, dbsu string) (string, error) {
+		return `{"kind":"pg_fork","version":1,"name":"dev","managed":true,"target":{"data":"/data/postgres/pg-meta-18/data-dev","port":15432}}`, nil
+	}
+	postgresDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "readlink -f /data/postgres/pg-meta-18/data-dev", "readlink -f /pg/data-dev":
+			return "/data/postgres/pg-meta-18/data-dev\n", nil
+		default:
+			t.Fatalf("unexpected resolve command: %#v", args)
+		}
+		return "", nil
+	}
+
+	if forkPortReservedByManagedFork("postgres", 15432, "/pg/data-dev") {
+		t.Fatal("current fork path alias should not reserve its own port")
+	}
+}
+
+func TestScanForksAsReadsForkInfoAndOrphans(t *testing.T) {
+	originalOutput := forkDBSUCommandOutput
+	originalRead := forkReadFileAsDBSU
+	t.Cleanup(func() {
+		forkDBSUCommandOutput = originalOutput
+		forkReadFileAsDBSU = originalRead
+	})
+	forkDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+		if len(args) < 2 || args[0] != "find" {
+			t.Fatalf("ScanForksAs should enumerate via find, got %#v", args)
+		}
+		return "/pg/data-dev\n/pg/data-old\n", nil
+	}
+	forkReadFileAsDBSU = func(path, dbsu string) (string, error) {
+		if path == "/pg/data-dev/fork.json" {
+			return `{"kind":"pg_fork","version":1,"name":"dev","target":{"data":"/pg/data-dev","port":15432,"started":true}}`, nil
+		}
+		return "", os.ErrNotExist
+	}
+
+	forks, err := ScanForksAs("postgres", "/pg")
 	if err != nil {
-		t.Fatalf("ScanForks returned error: %v", err)
+		t.Fatalf("ScanForksAs returned error: %v", err)
 	}
 	if len(forks) != 2 {
 		t.Fatalf("len(forks) = %d, want 2: %#v", len(forks), forks)
@@ -600,7 +943,7 @@ func TestResolveForkTargetAllowsUnmanagedDestination(t *testing.T) {
 	}
 }
 
-func TestRemoveForkRefusesRunningForkWithoutStopForce(t *testing.T) {
+func TestRemoveForkRefusesRunningForkWithoutStop(t *testing.T) {
 	dbsu := withCurrentUserAsDBSU(t)
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "data-dev")
@@ -621,8 +964,224 @@ func TestRemoveForkRefusesRunningForkWithoutStopForce(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected running fork removal to be refused")
 	}
-	if !strings.Contains(err.Error(), "--stop -f") {
-		t.Fatalf("error should mention explicit --stop -f, got %v", err)
+	if !strings.Contains(err.Error(), "--stop") || strings.Contains(err.Error(), "--stop -f") {
+		t.Fatalf("error should mention --stop without requiring -f, got %v", err)
+	}
+}
+
+func TestRemoveForkStopDoesNotRequireForce(t *testing.T) {
+	originalCommand := forkDBSUCommand
+	originalRead := forkReadFileAsDBSU
+	originalCheckDataDir := forkCheckDataDir
+	originalRunning := forkCheckPostgresRunning
+	originalStop := forkStopPostgres
+	t.Cleanup(func() {
+		forkDBSUCommand = originalCommand
+		forkReadFileAsDBSU = originalRead
+		forkCheckDataDir = originalCheckDataDir
+		forkCheckPostgresRunning = originalRunning
+		forkStopPostgres = originalStop
+	})
+	forkCheckDataDir = func(dbsu, dataDir string) (bool, bool) {
+		return true, true
+	}
+	forkReadFileAsDBSU = func(path, dbsu string) (string, error) {
+		return `{"kind":"pg_fork","version":1,"name":"dev","managed":true,"target":{"data":"/pg/data-dev","port":15432}}`, nil
+	}
+	forkCheckPostgresRunning = func(dbsu, dataDir string) (bool, int) {
+		return true, 123
+	}
+	stopped := false
+	forkStopPostgres = func(cfg *Config, opts *StopOptions) error {
+		stopped = true
+		return nil
+	}
+	commands := []string{}
+	forkDBSUCommand = func(dbsu string, args []string) error {
+		commands = append(commands, strings.Join(args, " "))
+		return nil
+	}
+
+	_, err := RemoveFork(ForkTargetOptions{Name: "dev", StopBefore: true, Yes: true})
+	if err != nil {
+		t.Fatalf("RemoveFork returned error: %v", err)
+	}
+	if !stopped {
+		t.Fatal("--stop should stop the running fork without requiring -f")
+	}
+	if !containsForkArg(commands, "rm -rf -- /pg/data-dev") {
+		t.Fatalf("remove command not executed: %#v", commands)
+	}
+}
+
+func TestRemoveForkSuppressesCommandEchoByDefault(t *testing.T) {
+	dbsu := withCurrentUserAsDBSU(t)
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "dev-fork")
+	if err := os.Mkdir(dataDir, 0755); err != nil {
+		t.Fatalf("mkdir data dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "PG_VERSION"), []byte("18\n"), 0644); err != nil {
+		t.Fatalf("write PG_VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "fork.json"), []byte(`{"kind":"pg_fork","version":1,"name":"dev","managed":false,"target":{"data":"`+dataDir+`","port":15432}}`), 0644); err != nil {
+		t.Fatalf("write fork.json: %v", err)
+	}
+
+	errOutput := captureForkStderr(t, func() {
+		if _, err := RemoveFork(ForkTargetOptions{DbSU: dbsu, DestData: dataDir, Force: true, Yes: true}); err != nil {
+			t.Fatalf("RemoveFork returned error: %v", err)
+		}
+	})
+	if errOutput != "" {
+		t.Fatalf("RemoveFork should be silent by default, got stderr %q", errOutput)
+	}
+}
+
+func TestRemoveForkConfirmsBeforeStoppingRunningFork(t *testing.T) {
+	originalCommand := forkDBSUCommand
+	originalRead := forkReadFileAsDBSU
+	originalCheckDataDir := forkCheckDataDir
+	originalRunning := forkCheckPostgresRunning
+	originalStop := forkStopPostgres
+	originalConfirm := forkConfirmCountdown
+	t.Cleanup(func() {
+		forkDBSUCommand = originalCommand
+		forkReadFileAsDBSU = originalRead
+		forkCheckDataDir = originalCheckDataDir
+		forkCheckPostgresRunning = originalRunning
+		forkStopPostgres = originalStop
+		forkConfirmCountdown = originalConfirm
+	})
+	forkCheckDataDir = func(dbsu, dataDir string) (bool, bool) {
+		return true, true
+	}
+	forkReadFileAsDBSU = func(path, dbsu string) (string, error) {
+		return `{"kind":"pg_fork","version":1,"name":"dev","managed":true,"target":{"data":"/pg/data-dev","port":15432}}`, nil
+	}
+	forkCheckPostgresRunning = func(dbsu, dataDir string) (bool, int) {
+		return true, 123
+	}
+	events := []string{}
+	forkConfirmCountdown = func(warning, action string) error {
+		events = append(events, "confirm")
+		return nil
+	}
+	forkStopPostgres = func(cfg *Config, opts *StopOptions) error {
+		events = append(events, "stop")
+		return nil
+	}
+	forkDBSUCommand = func(dbsu string, args []string) error {
+		if strings.Join(args, " ") == "rm -rf -- /pg/data-dev" {
+			events = append(events, "remove")
+		}
+		return nil
+	}
+
+	_, err := RemoveFork(ForkTargetOptions{Name: "dev", StopBefore: true})
+	if err != nil {
+		t.Fatalf("RemoveFork returned error: %v", err)
+	}
+	if strings.Join(events, ",") != "confirm,stop,remove" {
+		t.Fatalf("events = %#v, want confirm before stop/remove", events)
+	}
+}
+
+func TestRemoveForkRejectsManagedForkThroughDstData(t *testing.T) {
+	originalCommand := forkDBSUCommand
+	originalRead := forkReadFileAsDBSU
+	originalCheckDataDir := forkCheckDataDir
+	originalRunning := forkCheckPostgresRunning
+	t.Cleanup(func() {
+		forkDBSUCommand = originalCommand
+		forkReadFileAsDBSU = originalRead
+		forkCheckDataDir = originalCheckDataDir
+		forkCheckPostgresRunning = originalRunning
+	})
+	forkCheckDataDir = func(dbsu, dataDir string) (bool, bool) {
+		return true, true
+	}
+	forkReadFileAsDBSU = func(path, dbsu string) (string, error) {
+		return `{"kind":"pg_fork","version":1,"name":"dev","managed":true,"target":{"data":"/pg/data-dev","port":15432}}`, nil
+	}
+	forkCheckPostgresRunning = func(dbsu, dataDir string) (bool, int) {
+		return false, 0
+	}
+	forkDBSUCommand = func(dbsu string, args []string) error {
+		t.Fatalf("remove command should not run for managed fork through --dst-data: %#v", args)
+		return nil
+	}
+
+	_, err := RemoveFork(ForkTargetOptions{DestData: "/pg/data-dev", Force: true, Yes: true})
+	if err == nil {
+		t.Fatal("expected managed fork through --dst-data to be rejected")
+	}
+	if !strings.Contains(err.Error(), "managed fork") {
+		t.Fatalf("error should mention managed fork, got %v", err)
+	}
+}
+
+func TestRemoveForkRejectsMismatchedForkMetadataTarget(t *testing.T) {
+	originalCommand := forkDBSUCommand
+	originalRead := forkReadFileAsDBSU
+	originalCheckDataDir := forkCheckDataDir
+	originalRunning := forkCheckPostgresRunning
+	t.Cleanup(func() {
+		forkDBSUCommand = originalCommand
+		forkReadFileAsDBSU = originalRead
+		forkCheckDataDir = originalCheckDataDir
+		forkCheckPostgresRunning = originalRunning
+	})
+	forkCheckDataDir = func(dbsu, dataDir string) (bool, bool) {
+		return true, true
+	}
+	forkReadFileAsDBSU = func(path, dbsu string) (string, error) {
+		return `{"kind":"pg_fork","version":1,"name":"dev","managed":false,"target":{"data":"/tmp/other-fork","port":15432}}`, nil
+	}
+	forkCheckPostgresRunning = func(dbsu, dataDir string) (bool, int) {
+		return false, 0
+	}
+	forkDBSUCommand = func(dbsu string, args []string) error {
+		t.Fatalf("remove command should not run with mismatched metadata target: %#v", args)
+		return nil
+	}
+
+	_, err := RemoveFork(ForkTargetOptions{DestData: "/tmp/dev-fork", Force: true, Yes: true})
+	if err == nil {
+		t.Fatal("expected mismatched metadata target to be rejected")
+	}
+	if !strings.Contains(err.Error(), "metadata target") {
+		t.Fatalf("error should mention metadata target, got %v", err)
+	}
+}
+
+func TestRemoveForkRejectsUnmanagedSymlink(t *testing.T) {
+	dbsu := withCurrentUserAsDBSU(t)
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	linkDir := filepath.Join(root, "link")
+	if err := os.Mkdir(realDir, 0755); err != nil {
+		t.Fatalf("mkdir real dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "PG_VERSION"), []byte("18\n"), 0644); err != nil {
+		t.Fatalf("write PG_VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "fork.json"), []byte(`{"kind":"pg_fork","version":1,"name":"dev","managed":false,"target":{"data":"`+linkDir+`","port":15432}}`), 0644); err != nil {
+		t.Fatalf("write fork.json: %v", err)
+	}
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Fatalf("symlink fork dir: %v", err)
+	}
+
+	_, err := RemoveFork(ForkTargetOptions{DbSU: dbsu, DestData: linkDir, Force: true, Yes: true})
+	if err == nil {
+		t.Fatal("expected symlink fork path to be rejected")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("error should mention symlink, got %v", err)
+	}
+	if _, statErr := os.Stat(realDir); statErr != nil {
+		t.Fatalf("real fork dir should remain after rejected symlink removal: %v", statErr)
 	}
 }
 
@@ -682,7 +1241,6 @@ func TestPrecheckInstanceRefusesReplacingRunningDestination(t *testing.T) {
 
 	_, err := precheckInstance(&Options{
 		Kind:    KindInstance,
-		Mode:    ModeCold,
 		DbSU:    dbsu,
 		Replace: true,
 		Instance: InstanceOptions{
@@ -699,6 +1257,184 @@ func TestPrecheckInstanceRefusesReplacingRunningDestination(t *testing.T) {
 	if !strings.Contains(err.Error(), "running") {
 		t.Fatalf("error should mention running destination, got %v", err)
 	}
+	if !strings.Contains(err.Error(), "Hint:") || !strings.Contains(err.Error(), "pig pg fork stop") {
+		t.Fatalf("error should include stop hint, got %v", err)
+	}
+}
+
+func TestPrecheckInstanceExistingDestinationIncludesReplacementHint(t *testing.T) {
+	dbsu := withCurrentUserAsDBSU(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "data")
+	dest := filepath.Join(root, "data-dev")
+	for _, dir := range []string{source, dest} {
+		if err := os.Mkdir(dir, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "PG_VERSION"), []byte("18\n"), 0644); err != nil {
+			t.Fatalf("write PG_VERSION: %v", err)
+		}
+	}
+
+	_, err := precheckInstance(&Options{
+		Kind: KindInstance,
+		DbSU: dbsu,
+		Instance: InstanceOptions{
+			Name:       "dev",
+			SourceData: source,
+			DestData:   dest,
+			SourcePort: 5432,
+			DestPort:   15432,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected existing destination error")
+	}
+	for _, want := range []string{"destination data directory exists", "Hint:", "-f/--force", "pig pg fork rm -d", dest} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("existing destination error missing %q: %v", want, err)
+		}
+	}
+}
+
+func TestPrecheckInstanceReportsUnreachableSourcePortBeforeColdCopyFallback(t *testing.T) {
+	dbsu := withCurrentUserAsDBSU(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "data")
+	dest := filepath.Join(root, "data-dev")
+	if err := os.Mkdir(source, 0755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "PG_VERSION"), []byte("18\n"), 0644); err != nil {
+		t.Fatalf("write PG_VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "postmaster.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"+source+"\n123\n5432\n"), 0644); err != nil {
+		t.Fatalf("write postmaster.pid: %v", err)
+	}
+
+	_, err := precheckInstance(&Options{
+		Kind: KindInstance,
+		DbSU: dbsu,
+		Instance: InstanceOptions{
+			Name:       "dev",
+			SourceData: source,
+			DestData:   dest,
+			SourcePort: 15999,
+			DestPort:   15432,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected unreachable source port error")
+	}
+	if !strings.Contains(err.Error(), "15999") || !strings.Contains(err.Error(), "not reachable") {
+		t.Fatalf("error should mention unreachable source port, got %v", err)
+	}
+}
+
+func TestPrecheckInstanceRejectsSourcePortDataDirMismatch(t *testing.T) {
+	originalProbe := forkProbeSourceDataDir
+	originalPortFree := forkPortFree
+	t.Cleanup(func() {
+		forkProbeSourceDataDir = originalProbe
+		forkPortFree = originalPortFree
+	})
+	dbsu := withCurrentUserAsDBSU(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "data")
+	other := filepath.Join(root, "other")
+	dest := filepath.Join(root, "data-dev")
+	for _, dir := range []string{source, other} {
+		if err := os.Mkdir(dir, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "PG_VERSION"), []byte("18\n"), 0644); err != nil {
+			t.Fatalf("write PG_VERSION: %v", err)
+		}
+	}
+	forkProbeSourceDataDir = func(dbsu string, port int) (string, error) {
+		if port != 5432 {
+			t.Fatalf("probe port = %d, want 5432", port)
+		}
+		return other, nil
+	}
+	forkPortFree = func(port int) bool { return true }
+
+	_, err := precheckInstance(&Options{
+		Kind: KindInstance,
+		DbSU: dbsu,
+		Instance: InstanceOptions{
+			Name:       "dev",
+			SourceData: source,
+			DestData:   dest,
+			SourcePort: 5432,
+			DestPort:   15432,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected source port/data directory mismatch to be rejected")
+	}
+	if !strings.Contains(err.Error(), "does not match source data directory") {
+		t.Fatalf("error should mention source data directory mismatch, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "Hint:") {
+		t.Fatalf("error should include hint, got %v", err)
+	}
+}
+
+func TestPrecheckInstancePortReservedErrorNamesManagedFork(t *testing.T) {
+	originalLstat := forkLstat
+	originalOutput := forkDBSUCommandOutput
+	originalRead := forkReadFileAsDBSU
+	t.Cleanup(func() {
+		forkLstat = originalLstat
+		forkDBSUCommandOutput = originalOutput
+		forkReadFileAsDBSU = originalRead
+	})
+	dbsu := withCurrentUserAsDBSU(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "data")
+	dest := filepath.Join(root, "data-dev")
+	if err := os.Mkdir(source, 0755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "PG_VERSION"), []byte("18\n"), 0644); err != nil {
+		t.Fatalf("write PG_VERSION: %v", err)
+	}
+	forkLstat = func(path string) (os.FileInfo, error) {
+		if path != "/pg" {
+			t.Fatalf("unexpected lstat path: %s", path)
+		}
+		return fakeForkFileInfo{name: "pg"}, nil
+	}
+	forkDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+		if args[0] != "find" {
+			t.Fatalf("unexpected command: %#v", args)
+		}
+		return "/pg/data-other\n", nil
+	}
+	forkReadFileAsDBSU = func(path, dbsu string) (string, error) {
+		return `{"kind":"pg_fork","version":1,"name":"other","managed":true,"target":{"data":"/pg/data-other","port":15432}}`, nil
+	}
+
+	_, err := precheckInstance(&Options{
+		Kind: KindInstance,
+		DbSU: dbsu,
+		Instance: InstanceOptions{
+			Name:       "dev",
+			SourceData: source,
+			DestData:   dest,
+			SourcePort: 5432,
+			DestPort:   15432,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected reserved port error")
+	}
+	for _, want := range []string{"15432", "other", "/pg/data-other", "Hint:", "pig pg fork list", "-p"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("reserved port error missing %q: %v", want, err)
+		}
+	}
 }
 
 func TestPostmasterPIDMatchesDataDirRejectsCopiedSourcePID(t *testing.T) {
@@ -708,6 +1444,29 @@ func TestPostmasterPIDMatchesDataDirRejectsCopiedSourcePID(t *testing.T) {
 	}
 	if !postmasterPIDMatchesDataDir(pidContent, "/pg/data") {
 		t.Fatal("postmaster.pid should match its own data directory")
+	}
+}
+
+func TestPostmasterPIDMatchesDataDirAsDBSUResolvesSymlinkAliases(t *testing.T) {
+	original := postgresDBSUCommandOutput
+	t.Cleanup(func() {
+		postgresDBSUCommandOutput = original
+	})
+	postgresDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+		switch strings.Join(args, " ") {
+		case "readlink -f /data/postgres/pg-meta-18/data-dev":
+			return "/data/postgres/pg-meta-18/data-dev\n", nil
+		case "readlink -f /pg/data-dev":
+			return "/data/postgres/pg-meta-18/data-dev\n", nil
+		default:
+			t.Fatalf("unexpected command: %#v", args)
+		}
+		return "", nil
+	}
+
+	pidContent := strconv.Itoa(os.Getpid()) + "\n/data/postgres/pg-meta-18/data-dev\n1782617444\n15432\n"
+	if !postmasterPIDMatchesDataDirAsDBSU("postgres", pidContent, "/pg/data-dev") {
+		t.Fatal("dbsu path resolution should treat symlink and real data paths as the same fork")
 	}
 }
 
@@ -915,16 +1674,16 @@ func containsForkArg(values []string, want string) bool {
 	return false
 }
 
-func writeForkInfoForTest(t *testing.T, root, dir, content string) {
-	t.Helper()
-	path := filepath.Join(root, dir)
-	if err := os.Mkdir(path, 0755); err != nil {
-		t.Fatalf("mkdir %s: %v", path, err)
-	}
-	if err := os.WriteFile(filepath.Join(path, "fork.json"), []byte(content), 0644); err != nil {
-		t.Fatalf("write fork.json: %v", err)
-	}
+type fakeForkFileInfo struct {
+	name string
 }
+
+func (f fakeForkFileInfo) Name() string       { return f.name }
+func (f fakeForkFileInfo) Size() int64        { return 0 }
+func (f fakeForkFileInfo) Mode() os.FileMode  { return os.ModeSymlink }
+func (f fakeForkFileInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeForkFileInfo) IsDir() bool        { return false }
+func (f fakeForkFileInfo) Sys() any           { return nil }
 
 func withCurrentUserAsDBSU(t *testing.T) string {
 	t.Helper()
@@ -938,4 +1697,22 @@ func withCurrentUserAsDBSU(t *testing.T) string {
 		config.CurrentUser = original
 	})
 	return current.Username
+}
+
+func captureForkStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create pipe failed: %v", err)
+	}
+	os.Stderr = w
+	fn()
+	_ = w.Close()
+	os.Stderr = old
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr failed: %v", err)
+	}
+	return string(out)
 }

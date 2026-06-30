@@ -146,6 +146,29 @@ func DBSUCommandOutput(dbsu string, args []string) (string, error) {
 	return out.String(), nil
 }
 
+// DBSUCommandStdout executes a command as the database superuser and returns
+// stdout only. Stderr is reserved for error details and is not mixed into data.
+func DBSUCommandStdout(dbsu string, args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("no command specified")
+	}
+
+	cmd := buildDBSUCmd(dbsu, args)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errText := strings.TrimSpace(stderr.String())
+		if errText != "" {
+			return stdout.String(), fmt.Errorf("command failed: %w: %s", err, errText)
+		}
+		return stdout.String(), fmt.Errorf("command failed: %w", err)
+	}
+	return stdout.String(), nil
+}
+
 // buildDBSUCmd creates an exec.Cmd for running a command as DBSU.
 func buildDBSUCmd(dbsu string, args []string) *exec.Cmd {
 	if IsDBSU(dbsu) {

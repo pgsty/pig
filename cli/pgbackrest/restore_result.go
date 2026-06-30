@@ -20,16 +20,18 @@ import (
 // PbRestoreResultData contains restore operation result in an agent-friendly format.
 // This struct is used as the Data field in output.Result for structured output of pb restore.
 type PbRestoreResultData struct {
-	Stanza          string `json:"stanza" yaml:"stanza"`                                         // Stanza name
-	DataDir         string `json:"data_dir" yaml:"data_dir"`                                     // Restored data directory
-	RestoredBackup  string `json:"restored_backup,omitempty" yaml:"restored_backup,omitempty"`   // Backup label (if --set specified)
-	TargetType      string `json:"target_type" yaml:"target_type"`                               // Recovery target type: default/immediate/time/name/lsn/xid
-	TargetValue     string `json:"target_value,omitempty" yaml:"target_value,omitempty"`         // Recovery target value (for time/name/lsn/xid)
-	Exclusive       bool   `json:"exclusive" yaml:"exclusive"`                                   // Whether exclusive mode is enabled
-	Promote         bool   `json:"promote" yaml:"promote"`                                       // Whether auto-promote is enabled
-	StartTime       int64  `json:"start_time" yaml:"start_time"`                                 // Start time (Unix timestamp)
-	StopTime        int64  `json:"stop_time" yaml:"stop_time"`                                   // Stop time (Unix timestamp)
-	DurationSeconds int64  `json:"duration_seconds" yaml:"duration_seconds"`                     // Duration in seconds
+	Stanza          string `json:"stanza" yaml:"stanza"`                                       // Stanza name
+	DataDir         string `json:"data_dir" yaml:"data_dir"`                                   // Restored data directory
+	RestoredBackup  string `json:"restored_backup,omitempty" yaml:"restored_backup,omitempty"` // Backup label (if --set specified)
+	TargetType      string `json:"target_type" yaml:"target_type"`                             // Recovery target type: default/immediate/time/name/lsn/xid
+	TargetValue     string `json:"target_value,omitempty" yaml:"target_value,omitempty"`       // Recovery target value (for time/name/lsn/xid)
+	TargetAction    string `json:"target_action,omitempty" yaml:"target_action,omitempty"`     // Recovery target action (pause/promote/shutdown)
+	TargetTimeline  string `json:"target_timeline,omitempty" yaml:"target_timeline,omitempty"` // Recovery target timeline
+	Exclusive       bool   `json:"exclusive" yaml:"exclusive"`                                 // Whether exclusive mode is enabled
+	Promote         bool   `json:"promote" yaml:"promote"`                                     // Whether auto-promote is enabled
+	StartTime       int64  `json:"start_time" yaml:"start_time"`                               // Start time (Unix timestamp)
+	StopTime        int64  `json:"stop_time" yaml:"stop_time"`                                 // Stop time (Unix timestamp)
+	DurationSeconds int64  `json:"duration_seconds" yaml:"duration_seconds"`                   // Duration in seconds
 }
 
 // RestoreResult creates a structured result for pb restore command.
@@ -110,6 +112,8 @@ func RestoreResult(cfg *Config, opts *RestoreOptions) *output.Result {
 		RestoredBackup:  opts.Set,
 		TargetType:      determineTargetType(opts),
 		TargetValue:     determineTargetValue(opts, normalizedTime),
+		TargetAction:    determineTargetAction(opts),
+		TargetTimeline:  opts.TargetTimeline,
 		Exclusive:       opts.Exclusive,
 		Promote:         opts.Promote,
 		StartTime:       startTime.Unix(),
@@ -118,6 +122,14 @@ func RestoreResult(cfg *Config, opts *RestoreOptions) *output.Result {
 	}
 
 	return output.OK("Restore completed successfully", data)
+}
+
+func determineTargetAction(opts *RestoreOptions) string {
+	action, err := restoreTargetAction(opts)
+	if err != nil {
+		return ""
+	}
+	return action
 }
 
 // checkPostgresStoppedResult checks if PostgreSQL is stopped and returns a Result on error.

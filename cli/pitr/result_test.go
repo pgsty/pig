@@ -15,7 +15,7 @@ func TestPITRResultData(t *testing.T) {
 	state := &SystemState{DataDir: "/pg/data"}
 	opts := &Options{Time: "2026-01-31 01:00:00", Set: "20240101-010101F", Promote: true}
 
-	data := newPITRResultData(state, opts, true, true, start, end)
+	data := newPITRResultData(state, opts, true, true, start, end, nil)
 	if data.Target == "" || data.DataDir == "" {
 		t.Fatalf("unexpected empty fields: %+v", data)
 	}
@@ -37,16 +37,45 @@ func TestPITRResultData(t *testing.T) {
 func TestPITRResultDataDefaultBackup(t *testing.T) {
 	start := time.Now()
 	end := start.Add(1 * time.Second)
-	data := newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true}, false, false, start, end)
+	data := newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true}, false, false, start, end, nil)
 	if data.BackupSet != "latest" {
 		t.Errorf("backup_set = %q, want %q", data.BackupSet, "latest")
+	}
+}
+
+func TestPITRResultDataIncludesPostRestoreState(t *testing.T) {
+	start := time.Date(2026, 1, 31, 1, 0, 0, 0, time.UTC)
+	end := start.Add(2 * time.Second)
+	inRecovery := false
+	post := &PostRestoreState{
+		Queried:       true,
+		Running:       true,
+		InRecovery:    &inRecovery,
+		CurrentLSN:    "0/50001A0",
+		TimelineID:    "4",
+		PatroniActive: false,
+	}
+
+	data := newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true}, true, true, start, end, post)
+
+	if data.PostRestore == nil {
+		t.Fatal("post_restore should be present")
+	}
+	if data.PostRestore.InRecovery == nil || *data.PostRestore.InRecovery {
+		t.Fatalf("post_restore.in_recovery = %v, want false", data.PostRestore.InRecovery)
+	}
+	if data.PostRestore.CurrentLSN != "0/50001A0" {
+		t.Fatalf("current_lsn = %q", data.PostRestore.CurrentLSN)
+	}
+	if data.PostRestore.TimelineID != "4" {
+		t.Fatalf("timeline_id = %q", data.PostRestore.TimelineID)
 	}
 }
 
 func TestPITRResultDataNilState(t *testing.T) {
 	start := time.Now()
 	end := start.Add(1 * time.Second)
-	data := newPITRResultData(nil, &Options{Default: true}, false, false, start, end)
+	data := newPITRResultData(nil, &Options{Default: true}, false, false, start, end, nil)
 	if data.DataDir != "" {
 		t.Errorf("DataDir should be empty with nil state, got %q", data.DataDir)
 	}
@@ -58,7 +87,7 @@ func TestPITRResultDataNilState(t *testing.T) {
 func TestPITRResultDataNilOpts(t *testing.T) {
 	start := time.Now()
 	end := start.Add(1 * time.Second)
-	data := newPITRResultData(&SystemState{DataDir: "/pg/data"}, nil, false, false, start, end)
+	data := newPITRResultData(&SystemState{DataDir: "/pg/data"}, nil, false, false, start, end, nil)
 	if data.Target != "unknown" {
 		t.Errorf("Target should be 'unknown' with nil opts, got %q", data.Target)
 	}
@@ -76,7 +105,7 @@ func TestPITRResultDataNilOpts(t *testing.T) {
 func TestPITRResultDataNegativeDuration(t *testing.T) {
 	start := time.Now()
 	end := start.Add(-1 * time.Second) // End before start
-	data := newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true}, false, false, start, end)
+	data := newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true}, false, false, start, end, nil)
 	if data.DurationSeconds != 0 {
 		t.Errorf("duration_seconds should be 0 for negative duration, got %f", data.DurationSeconds)
 	}
@@ -87,19 +116,19 @@ func TestPITRResultDataFlags(t *testing.T) {
 	end := start.Add(1 * time.Second)
 
 	// Test Promote flag
-	data := newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true, Promote: true}, false, false, start, end)
+	data := newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true, Promote: true}, false, false, start, end, nil)
 	if !data.Promote {
 		t.Error("Promote should be true")
 	}
 
 	// Test Exclusive flag
-	data = newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true, Exclusive: true}, false, false, start, end)
+	data = newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true, Exclusive: true}, false, false, start, end, nil)
 	if !data.Exclusive {
 		t.Error("Exclusive should be true")
 	}
 
 	// Test PatroniStopped and PostgresRestarted
-	data = newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true}, true, true, start, end)
+	data = newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true}, true, true, start, end, nil)
 	if !data.PatroniStopped {
 		t.Error("PatroniStopped should be true")
 	}
@@ -115,7 +144,7 @@ func TestPITRResultDataJSONTags(t *testing.T) {
 	state := &SystemState{DataDir: "/pg/data"}
 	opts := &Options{Time: "2026-01-31 01:00:00", Promote: true, Exclusive: true}
 
-	data := newPITRResultData(state, opts, true, true, start, end)
+	data := newPITRResultData(state, opts, true, true, start, end, nil)
 	jsonBytes, err := json.Marshal(data)
 	if err != nil {
 		t.Fatalf("json marshal failed: %v", err)
@@ -146,7 +175,7 @@ func TestPITRResultDataYAMLTags(t *testing.T) {
 	state := &SystemState{DataDir: "/pg/data"}
 	opts := &Options{Default: true}
 
-	data := newPITRResultData(state, opts, false, true, start, end)
+	data := newPITRResultData(state, opts, false, true, start, end, nil)
 	yamlBytes, err := yaml.Marshal(data)
 	if err != nil {
 		t.Fatalf("yaml marshal failed: %v", err)
