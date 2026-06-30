@@ -2,8 +2,8 @@
 
 [![Website: pigsty.io/ext](https://img.shields.io/badge/Website-pigsty.io%2Fext-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/ext/)
 [![Doc: pig](https://img.shields.io/badge/Docs-pig-slategray?style=flat)](https://pigsty.io/docs/pig)
-[![Version: v1.4.3](https://img.shields.io/badge/version-v1.4.3-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.4.3)
-[![Pigsty: v4.3.0](https://img.shields.io/badge/Pigsty-v4.3.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
+[![Version: v1.5.0](https://img.shields.io/badge/version-v1.5.0-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.5.0)
+[![Pigsty: v4.4.0](https://img.shields.io/badge/Pigsty-v4.4.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 531](https://img.shields.io/badge/extensions-531-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pgsty/pig)
