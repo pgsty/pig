@@ -211,8 +211,8 @@ var OSAliasOverride = map[string]map[string]string{
 // Key format: "el9.arm64", value is a map of alias -> package names
 var ArchAliasOverride = map[string]map[string]string{
 	"el9.arm64": {
-		"patroni":      "patroni-4.1.3 patroni-etcd-4.1.3",
-		"pgsql-common": "patroni-4.1.3 patroni-etcd-4.1.3 pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager",
+		"patroni":      "patroni.noarch patroni-etcd.noarch",
+		"pgsql-common": "patroni.noarch patroni-etcd.noarch pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager",
 	},
 }
 
