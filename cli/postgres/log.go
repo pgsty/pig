@@ -53,6 +53,8 @@ var csvLogFieldNames = []string{
 
 var openLogFileForRead = openLogFileWithSudoFallback
 
+const maxCSVLogRecordBytes = 10 * 1024 * 1024
+
 func openLogFileWithSudoFallback(logFile string) (io.ReadCloser, error) {
 	f, err := os.Open(logFile)
 	if err == nil {
@@ -68,18 +70,41 @@ func openLogFileWithSudoFallback(logFile string) (io.ReadCloser, error) {
 	} else {
 		cmd = exec.Command("sudo", "cat", logFile)
 	}
-	var out bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &out
 	cmd.Stderr = &stderr
-	if fallbackErr := cmd.Run(); fallbackErr != nil {
+
+	stdout, pipeErr := cmd.StdoutPipe()
+	if pipeErr != nil {
+		return nil, fmt.Errorf("cannot read log file %s: %w", logFile, pipeErr)
+	}
+	if fallbackErr := cmd.Start(); fallbackErr != nil {
 		detail := strings.TrimSpace(stderr.String())
 		if detail != "" {
 			return nil, fmt.Errorf("cannot read log file %s: %w: %s", logFile, fallbackErr, detail)
 		}
 		return nil, fmt.Errorf("cannot read log file %s: %w", logFile, fallbackErr)
 	}
-	return io.NopCloser(bytes.NewReader(out.Bytes())), nil
+	return &commandReadCloser{ReadCloser: stdout, cmd: cmd, stderr: &stderr, source: logFile}, nil
+}
+
+type commandReadCloser struct {
+	io.ReadCloser
+	cmd    *exec.Cmd
+	stderr *bytes.Buffer
+	source string
+}
+
+func (r *commandReadCloser) Close() error {
+	closeErr := r.ReadCloser.Close()
+	waitErr := r.cmd.Wait()
+	if waitErr != nil {
+		detail := strings.TrimSpace(r.stderr.String())
+		if detail != "" {
+			return fmt.Errorf("cannot read log file %s: %w: %s", r.source, waitErr, detail)
+		}
+		return fmt.Errorf("cannot read log file %s: %w", r.source, waitErr)
+	}
+	return closeErr
 }
 
 func resolveRequestedLogFile(logDir string, file string) (string, error) {
@@ -286,9 +311,8 @@ func writeCSVLogJSONL(w io.Writer, logFile string, lines int) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	reader := csv.NewReader(f)
+	reader := csv.NewReader(newCSVRecordLimitReader(f, maxCSVLogRecordBytes))
 	reader.FieldsPerRecord = -1
 
 	var records [][]string
@@ -298,7 +322,7 @@ func writeCSVLogJSONL(w io.Writer, logFile string, lines int) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("parse csv log %s: %w", logFile, err)
+			return closeLogReader(f, fmt.Errorf("parse csv log %s: %w", logFile, err))
 		}
 		records = append(records, record)
 		if len(records) > lines {
@@ -311,13 +335,89 @@ func writeCSVLogJSONL(w io.Writer, logFile string, lines int) error {
 		row := csvLogRecordToMap(record)
 		data, err := json.Marshal(row)
 		if err != nil {
-			return err
+			return closeLogReader(f, err)
 		}
 		if _, err := fmt.Fprintln(w, string(data)); err != nil {
-			return err
+			return closeLogReader(f, err)
 		}
 	}
-	return nil
+	return closeLogReader(f, nil)
+}
+
+func closeLogReader(r io.Closer, err error) error {
+	closeErr := r.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
+}
+
+type csvRecordLimitReader struct {
+	r            io.Reader
+	max          int
+	current      int
+	inQuotes     bool
+	quotePending bool
+	atFieldStart bool
+	err          error
+}
+
+func newCSVRecordLimitReader(r io.Reader, max int) io.Reader {
+	return &csvRecordLimitReader{r: r, max: max, atFieldStart: true}
+}
+
+func (r *csvRecordLimitReader) Read(p []byte) (int, error) {
+	if r.err != nil {
+		return 0, r.err
+	}
+	n, err := r.r.Read(p)
+	for i := 0; i < n; i++ {
+		r.current++
+		if r.max > 0 && r.current > r.max {
+			r.err = fmt.Errorf("csv log record exceeds %d bytes", r.max)
+			if i == 0 {
+				return 0, r.err
+			}
+			return i, nil
+		}
+		r.observeCSVByte(p[i])
+	}
+	return n, err
+}
+
+func (r *csvRecordLimitReader) observeCSVByte(b byte) {
+	for {
+		if r.quotePending {
+			r.quotePending = false
+			if b == '"' {
+				r.atFieldStart = false
+				return
+			}
+			r.inQuotes = false
+			continue
+		}
+		if r.inQuotes {
+			if b == '"' {
+				r.quotePending = true
+			}
+			return
+		}
+		switch b {
+		case '"':
+			if r.atFieldStart {
+				r.inQuotes = true
+			}
+			r.atFieldStart = false
+		case ',':
+			r.atFieldStart = true
+		case '\n', '\r':
+			r.current = 0
+			r.atFieldStart = true
+		default:
+			r.atFieldStart = false
+		}
+		return
+	}
 }
 
 func csvLogRecordToMap(record []string) map[string]string {

@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLogShowJSONLParsesCSVLog(t *testing.T) {
@@ -102,6 +104,56 @@ func TestWriteCSVLogJSONLRejectsNonPositiveLines(t *testing.T) {
 	err := writeCSVLogJSONL(&out, path, 0)
 	if err == nil || !strings.Contains(err.Error(), "lines must be positive") {
 		t.Fatalf("expected positive line count error, got %v", err)
+	}
+}
+
+func TestOpenLogFileFallbackStreamsWithoutBufferingCommandOutput(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("permission fallback requires non-root unix user")
+	}
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "postgresql-2026-06-30.csv")
+	if err := os.WriteFile(logPath, []byte("direct file should be unreadable\n"), 0600); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+	if err := os.Chmod(logPath, 0000); err != nil {
+		t.Fatalf("chmod log file: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(logPath, 0600) })
+
+	fakeBin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(fakeBin, 0755); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	fakeSudo := filepath.Join(fakeBin, "sudo")
+	if err := os.WriteFile(fakeSudo, []byte("#!/bin/sh\nprintf 'streamed fallback row\\n'\nsleep 0.3\n"), 0755); err != nil {
+		t.Fatalf("write fake sudo: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	start := time.Now()
+	rc, err := openLogFileWithSudoFallback(logPath)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("openLogFileWithSudoFallback returned error: %v", err)
+	}
+	defer rc.Close()
+
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("fallback open took %s; expected streaming reader to return before command exits", elapsed)
+	}
+}
+
+func TestWriteCSVLogJSONLRejectsOversizedCSVRecord(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "postgresql-2026-06-30.csv")
+	writeCSVLogRows(t, path, [][]string{minimalCSVLogRow(strings.Repeat("x", 10*1024*1024+1))})
+
+	var out bytes.Buffer
+	err := writeCSVLogJSONL(&out, path, 1)
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("expected oversized CSV record error, got %v", err)
 	}
 }
 
