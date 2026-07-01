@@ -929,6 +929,32 @@ func TestValidatePatroniPolicyAllowsCustomDataDirSideRestore(t *testing.T) {
 	}
 }
 
+func TestClassifyPITRDataDirTreatsEquivalentManagedPathAsManaged(t *testing.T) {
+	resolver := func(path string) (string, error) {
+		switch path {
+		case "/pg/data", "/pg/data/", "/pg/../pg/data":
+			return "/data/postgres/pg-meta-1/data", nil
+		default:
+			return path, nil
+		}
+	}
+
+	sideRestore := classifyPITRSideRestore("/pg/data/", "/pg/data", resolver)
+	if sideRestore {
+		t.Fatal("trailing-slash managed PGDATA should not be treated as side restore")
+	}
+
+	sideRestore = classifyPITRSideRestore("/pg/../pg/data", "/pg/data", resolver)
+	if sideRestore {
+		t.Fatal("canonically equivalent managed PGDATA should not be treated as side restore")
+	}
+
+	sideRestore = classifyPITRSideRestore("/tmp/pitr-restore", "/pg/data", resolver)
+	if !sideRestore {
+		t.Fatal("distinct custom data dir should be treated as side restore")
+	}
+}
+
 func TestValidateSideRestorePolicyRequiresNoRestart(t *testing.T) {
 	err := validateSideRestorePolicy(true, false)
 	if err == nil {
@@ -1301,6 +1327,63 @@ func TestPrintPostRestoreGuidanceDefaultDoesNotSuggestManualPromote(t *testing.T
 
 	if strings.Contains(output, "pig pg promote") {
 		t.Fatalf("default PITR guidance should not suggest manual promote, got:\n%s", output)
+	}
+}
+
+func TestPrintPostRestoreGuidanceManagedDataDirWithTrailingSlashUsesManagedGuidance(t *testing.T) {
+	output := capturePITRStderr(t, func() {
+		err := printPostRestoreGuidance(&Options{Default: true, DataDir: "/pg/data/"}, false)
+		if err != nil {
+			t.Fatalf("printPostRestoreGuidance failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "pig pg psql") {
+		t.Fatalf("managed PGDATA guidance should use pig pg psql, got:\n%s", output)
+	}
+	if strings.Contains(output, "pg_ctl -D /pg/data/") {
+		t.Fatalf("managed PGDATA guidance should not use custom pg_ctl path, got:\n%s", output)
+	}
+}
+
+func TestPrintPostRestoreGuidanceTargetActionPromoteDoesNotSuggestManualPromote(t *testing.T) {
+	output := capturePITRStderr(t, func() {
+		err := printPostRestoreGuidance(&Options{
+			Time:         "2026-01-31 01:00:00",
+			TargetAction: "promote",
+		}, false)
+		if err != nil {
+			t.Fatalf("printPostRestoreGuidance failed: %v", err)
+		}
+	})
+
+	if strings.Contains(output, "pig pg promote") {
+		t.Fatalf("target-action=promote guidance should not suggest manual promote, got:\n%s", output)
+	}
+}
+
+func TestPrintPostRestoreGuidanceTargetActionShutdownUsesRecoveryShutdownGuidance(t *testing.T) {
+	output := capturePITRStderr(t, func() {
+		err := printPostRestoreGuidance(&Options{
+			Time:         "2026-01-31 01:00:00",
+			TargetAction: "shutdown",
+			NoRestart:    true,
+		}, false)
+		if err != nil {
+			t.Fatalf("printPostRestoreGuidance failed: %v", err)
+		}
+	})
+
+	if strings.Contains(output, "pig pg psql") {
+		t.Fatalf("shutdown target guidance should not suggest psql against a server expected to exit, got:\n%s", output)
+	}
+	if strings.Contains(output, "pig pg promote") {
+		t.Fatalf("shutdown target guidance should not suggest manual promote, got:\n%s", output)
+	}
+	for _, want := range []string{"reaches the recovery target and exits", "pig pg start", "pig pg log show"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("shutdown target guidance should mention %q, got:\n%s", want, output)
+		}
 	}
 }
 

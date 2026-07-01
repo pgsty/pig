@@ -9,6 +9,7 @@ package pitr
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -100,6 +101,7 @@ var (
 	pitrLoadPgBackRestInfo         = pgbackrest.LoadInfo
 	pitrQueryRecoveryState         = queryRecoveryState
 	pitrQueryPostRestoreState      = queryPostRestoreState
+	pitrResolvePathAsDBSU          = resolvePathAsDBSU
 	pitrSleep                      = time.Sleep
 )
 
@@ -272,25 +274,32 @@ func preCheck(opts *Options) (*SystemState, error) {
 		return nil, &PITRError{Code: output.CodePITRInvalidArgs, Err: err}
 	}
 
-	// Determine DBSU and data directory
+	// Determine DBSU, pgBackRest config, and data directory.
 	dbsu := utils.GetDBSU(opts.DbSU)
-	explicitCustom := opts.DataDir != "" && opts.DataDir != postgres.DefaultPgData
-	if err := validateSideRestorePolicy(explicitCustom, opts.NoRestart); err != nil {
-		return nil, &PITRError{Code: output.CodePITRPrecheckFailed, Err: err}
-	}
 	pbConfig, err := effectivePgBackRestConfigFromPITR(opts, dbsu)
 	if err != nil {
 		return nil, &PITRError{Code: output.CodePITRPrecheckFailed, Err: err}
 	}
+	managedDataDir := pgbackrest.ResolveDataDir(pbConfig, "")
 	dataDir := pgbackrest.ResolveDataDir(pbConfig, opts.DataDir)
 	opts.DataDir = dataDir
+	sideRestore := classifyPITRSideRestore(dataDir, managedDataDir, func(path string) (string, error) {
+		return pitrResolvePathAsDBSU(dbsu, path)
+	})
+	if !sideRestore {
+		dataDir = managedDataDir
+		opts.DataDir = dataDir
+	}
+	if err := validateSideRestorePolicy(sideRestore, opts.NoRestart); err != nil {
+		return nil, &PITRError{Code: output.CodePITRPrecheckFailed, Err: err}
+	}
 
 	// Check data directory exists and is initialized
 	exists, initialized := postgres.CheckDataDirAsDBSU(dbsu, dataDir)
-	if err := validatePITRDataDir(dataDir, explicitCustom, exists, initialized); err != nil {
+	if err := validatePITRDataDir(dataDir, sideRestore, exists, initialized); err != nil {
 		return nil, &PITRError{Code: output.CodePITRPrecheckFailed, Err: err}
 	}
-	if explicitCustom {
+	if sideRestore {
 		owner, err := pitrDataDirOwnerAsDBSU(dbsu, dataDir)
 		if err != nil {
 			return nil, &PITRError{Code: output.CodePITRPrecheckFailed, Err: err}
@@ -310,7 +319,6 @@ func preCheck(opts *Options) (*SystemState, error) {
 
 	// Check current state
 	patroniActive := utils.IsServiceActive("patroni")
-	sideRestore := explicitCustom
 	if err := validatePatroniPolicy(patroniActive, opts.SkipPatroni, sideRestore); err != nil {
 		return nil, &PITRError{Code: output.CodePITRPrecheckFailed, Err: err}
 	}
@@ -353,6 +361,39 @@ func pgbackrestConfigFromPITR(opts *Options) *pgbackrest.Config {
 		pbConfig.DbSU = opts.DbSU
 	}
 	return pbConfig
+}
+
+func classifyPITRSideRestore(dataDir string, managedDataDir string, resolver func(string) (string, error)) bool {
+	if dataDir == "" {
+		return false
+	}
+	if managedDataDir == "" {
+		managedDataDir = postgres.DefaultPgData
+	}
+
+	if filepath.Clean(dataDir) == filepath.Clean(managedDataDir) {
+		return false
+	}
+	if resolver == nil {
+		return true
+	}
+
+	resolvedDataDir, dataErr := resolver(dataDir)
+	resolvedManagedDataDir, managedErr := resolver(managedDataDir)
+	if dataErr == nil && managedErr == nil &&
+		resolvedDataDir != "" && resolvedManagedDataDir != "" &&
+		filepath.Clean(resolvedDataDir) == filepath.Clean(resolvedManagedDataDir) {
+		return false
+	}
+	return true
+}
+
+func resolvePathAsDBSU(dbsu string, path string) (string, error) {
+	out, err := utils.DBSUCommandOutput(dbsu, []string{"readlink", "-f", path})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
 }
 
 func validatePITRDataDir(dataDir string, explicitCustom bool, exists bool, initialized bool) error {
@@ -1078,7 +1119,7 @@ func startPostgres(state *SystemState, opts *Options) *PITRError {
 }
 
 func shouldWaitForRecoveryComplete(opts *Options) bool {
-	return opts != nil && (opts.Default || opts.Promote || opts.TargetAction == "promote")
+	return opts != nil && (opts.Default || targetActionFromOptions(opts) == "promote")
 }
 
 func recoveryWaitTimeout(opts *Options) time.Duration {
@@ -1262,10 +1303,31 @@ func printPostRestoreGuidance(opts *Options, patroniWasStopped bool) error {
 	if opts.DataDir != "" {
 		dataDir = opts.DataDir
 	}
-	customDataDir := dataDir != postgres.DefaultPgData
-	needsManualPromote := !opts.Promote && !opts.Default
+	customDataDir := classifyPITRSideRestore(dataDir, postgres.DefaultPgData, nil)
+	targetAction := targetActionFromOptions(opts)
+	shutdownTarget := targetAction == "shutdown"
+	needsManualPromote := targetAction != "promote" && !opts.Default && !shutdownTarget
 
 	if customDataDir {
+		if shutdownTarget {
+			if opts.NoRestart {
+				fmt.Fprintf(os.Stderr, "\n%s[%d] Start PostgreSQL to complete recovery shutdown:%s\n", utils.ColorBold, step, utils.ColorReset)
+				fmt.Fprintf(os.Stderr, "   pg_ctl -D %s -o \"-p 5433\" start\n", dataDir)
+				fmt.Fprintf(os.Stderr, "   # PostgreSQL reaches the recovery target and exits because target-action=shutdown\n")
+				step++
+			}
+			fmt.Fprintf(os.Stderr, "\n%s[%d] Verify recovery shutdown:%s\n", utils.ColorBold, step, utils.ColorReset)
+			fmt.Fprintf(os.Stderr, "   pg_ctl -D %s status\n", dataDir)
+			step++
+			fmt.Fprintf(os.Stderr, "\n%s[%d] Inspect PostgreSQL logs before next start:%s\n", utils.ColorBold, step, utils.ColorReset)
+			fmt.Fprintf(os.Stderr, "   pig pg log show\n")
+			step++
+			fmt.Fprintf(os.Stderr, "\n%s[%d] Re-create pgBackRest stanza if needed:%s\n", utils.ColorBold, step, utils.ColorReset)
+			fmt.Fprintf(os.Stderr, "   pgbackrest --pg1-path=%s stanza-create\n", dataDir)
+			fmt.Fprintf(os.Stderr, "\n%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
+			return nil
+		}
+
 		if opts.NoRestart {
 			fmt.Fprintf(os.Stderr, "\n%s[%d] Start PostgreSQL:%s\n", utils.ColorBold, step, utils.ColorReset)
 			fmt.Fprintf(os.Stderr, "   pg_ctl -D %s -o \"-p 5433\" start\n", dataDir)
@@ -1285,6 +1347,27 @@ func printPostRestoreGuidance(opts *Options, patroniWasStopped bool) error {
 
 		fmt.Fprintf(os.Stderr, "\n%s[%d] Re-create pgBackRest stanza if needed:%s\n", utils.ColorBold, step, utils.ColorReset)
 		fmt.Fprintf(os.Stderr, "   pgbackrest --pg1-path=%s stanza-create\n", dataDir)
+		fmt.Fprintf(os.Stderr, "\n%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
+		return nil
+	}
+
+	if shutdownTarget {
+		if opts.NoRestart {
+			fmt.Fprintf(os.Stderr, "\n%s[%d] Start PostgreSQL to complete recovery shutdown:%s\n", utils.ColorBold, step, utils.ColorReset)
+			fmt.Fprintf(os.Stderr, "   pig pg start\n")
+			fmt.Fprintf(os.Stderr, "   # PostgreSQL reaches the recovery target and exits because target-action=shutdown\n")
+			step++
+		}
+		fmt.Fprintf(os.Stderr, "\n%s[%d] Inspect PostgreSQL logs before next start:%s\n", utils.ColorBold, step, utils.ColorReset)
+		fmt.Fprintf(os.Stderr, "   pig pg log show\n")
+		step++
+		if patroniWasStopped {
+			fmt.Fprintf(os.Stderr, "\n%s[%d] Keep Patroni stopped until the recovered state is validated:%s\n", utils.ColorBold, step, utils.ColorReset)
+			fmt.Fprintf(os.Stderr, "   systemctl status patroni\n")
+			step++
+		}
+		fmt.Fprintf(os.Stderr, "\n%s[%d] Re-create pgBackRest stanza if needed:%s\n", utils.ColorBold, step, utils.ColorReset)
+		fmt.Fprintf(os.Stderr, "   pig pb create\n")
 		fmt.Fprintf(os.Stderr, "\n%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
 		return nil
 	}
