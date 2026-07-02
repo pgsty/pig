@@ -57,7 +57,7 @@ Pig owns confirmation for cluster operations (B04): `patronictl` always runs wit
 |:--------|:------|:------------|:---------------|
 | `pt list [cluster]` | `ls, l` | List cluster members | `patronictl list [cluster] -e -t` |
 | `pt restart` | `reboot, rt` | Restart PostgreSQL instance | `patronictl restart` |
-| `pt reload` | `rl, hup` | Reload PostgreSQL config | `patronictl reload` |
+| `pt reload` | `rl, hup` | Reload PostgreSQL config | `patronictl reload <scope>` |
 | `pt reinit` | `ri` | Reinitialize member | `patronictl reinit` |
 | `pt switchover` | `sw` | Planned switchover | `patronictl switchover` |
 | `pt failover` | `fo` | Manual failover | `patronictl failover` |
@@ -151,7 +151,7 @@ pig pt list pg-test -W -w 3    # Watch pg-test cluster, 3s refresh
 | `--interval` | `-w` | Watch refresh interval (seconds) |
 {.full-width}
 
-**Argument policy:** `pt list` accepts at most one optional cluster positional. `pt restart` accepts at most one member positional. `pt reinit` requires exactly one member positional. `pt reload`, `pt switchover`, `pt failover`, `pt pause`, and `pt resume` do not accept positionals; use `--leader` or `--candidate` for switchover/failover target selection.
+**Argument policy:** `pt list` accepts at most one optional cluster positional. `pt restart` accepts at most one member positional. `pt reinit` requires exactly one member positional. `pt reload`, `pt switchover`, `pt failover`, `pt pause`, and `pt resume` do not accept positionals; `pt reload` resolves the current cluster scope from Patroni config, and switchover/failover target selection uses `--leader` or `--candidate`.
 
 
 ### pt restart
@@ -181,6 +181,11 @@ pig pt restart --pending         # Restart pending members
 ### pt reload
 
 Reload PostgreSQL configuration via Patroni. Triggers config reload on all members.
+
+`pig pt reload` does not accept a cluster positional. It reads `scope:` from
+`/etc/patroni/patroni.yml` and executes `patronictl reload <scope>` internally,
+because `patronictl reload` requires `CLUSTER_NAME` even when `-c` points at the
+Patroni config file.
 
 ```bash
 pig pt reload
@@ -431,7 +436,7 @@ pig pt svc status                # Show service status
 
 **Cluster Scope Resolution:**
 
-`patronictl restart`, `reinit`, `switchover`, and `failover` require a `CLUSTER_NAME` positional argument. `pig pt` reads `scope:` from `/etc/patroni/patroni.yml` and prepends it before member/candidate flags for those subcommands. If the config is not directly readable, `pig pt` retries the read as the configured DBSU.
+`patronictl reload`, `restart`, `reinit`, `switchover`, and `failover` require a `CLUSTER_NAME` positional argument. `pig pt` reads `scope:` from `/etc/patroni/patroni.yml` and prepends it before member/candidate flags for those subcommands. If the config is not directly readable, `pig pt` retries the read as the configured DBSU.
 
 **Structured Output Error Codes:**
 

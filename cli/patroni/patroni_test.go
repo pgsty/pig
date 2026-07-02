@@ -190,6 +190,15 @@ func TestBuildRestartArgs(t *testing.T) {
 	}
 }
 
+func TestBuildReloadArgs(t *testing.T) {
+	const cluster = "pg-nms"
+
+	got := buildReloadArgs(cluster)
+	if len(got) != 2 || got[0] != "reload" || got[1] != cluster {
+		t.Errorf("want [reload %s], got %v", cluster, got)
+	}
+}
+
 func TestBuildReinitArgs(t *testing.T) {
 	const cluster = "pg-nms"
 
@@ -241,14 +250,15 @@ func TestBuildFailoverArgs(t *testing.T) {
 }
 
 // TestPatronictlPositionalContract documents the constraint that motivated the
-// CLUSTER_NAME prepend across Restart / Reinit / Switchover / Failover.
-// Unlike pause / resume / list, those four patronictl subcommands require
+// CLUSTER_NAME prepend across Reload / Restart / Reinit / Switchover / Failover.
+// Unlike pause / resume / list, these patronictl subcommands require
 // CLUSTER_NAME as the first positional argument; `-c <config>` does NOT supply
 // scope to them. If a future refactor drops the prepend, this test fails fast.
 func TestPatronictlPositionalContract(t *testing.T) {
 	const cluster = "scope-name"
 
 	for name, args := range map[string][]string{
+		"reload":     buildReloadArgs(cluster),
 		"restart":    buildRestartArgs(cluster, nil),
 		"reinit":     buildReinitArgs(cluster, nil),
 		"switchover": buildSwitchoverArgs(cluster, nil),
@@ -281,6 +291,11 @@ func TestPatroniOperationWrappersUseResolvedClusterName(t *testing.T) {
 		run  func() error
 		want []string
 	}{
+		{
+			name: "reload",
+			run:  func() error { return Reload("postgres") },
+			want: []string{"reload", "pg-nms"},
+		},
 		{
 			name: "restart",
 			run:  func() error { return Restart("postgres", &RestartOptions{Member: "pg-nms-1", Force: true}) },

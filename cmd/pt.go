@@ -308,7 +308,8 @@ var patroniReloadCmd = &cobra.Command{
 	Long: `Reload PostgreSQL configuration for all cluster members.
 
 This triggers a configuration reload (similar to pg_reload_conf()) on all
-PostgreSQL instances managed by Patroni.`,
+PostgreSQL instances managed by Patroni. The cluster scope is resolved from
+/etc/patroni/patroni.yml and passed to patronictl internally.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModulePt, "pig patroni reload", args, nil, func() error {
 			return patroni.Reload(utils.GetDBSU(patroniDBSU))

@@ -24,7 +24,7 @@ const DefaultDBSU = "postgres"
 
 // GetClusterName returns the cluster scope name read from `scope:` in the
 // patroni config file. Required for patronictl subcommands that take a
-// positional CLUSTER_NAME (restart, reinit, switchover, failover); the
+// positional CLUSTER_NAME (reload, restart, reinit, switchover, failover); the
 // `-c <config>` flag alone does NOT supply scope to those subcommands.
 //
 // Falls back to reading via DBSU when the config file isn't world-readable
@@ -132,9 +132,19 @@ func ConfigPG(dbsu string, kvPairs []string) error {
 	return runPatronictl(dbsu, args)
 }
 
-// Reload reloads PostgreSQL configuration via patronictl reload
+// buildReloadArgs builds the positional args for `patronictl reload`.
+// patronictl reload requires CLUSTER_NAME as the first positional argument.
+func buildReloadArgs(cluster string) []string {
+	return []string{"reload", cluster}
+}
+
+// Reload reloads PostgreSQL configuration via patronictl reload.
 func Reload(dbsu string) error {
-	return runPatronictl(dbsu, []string{"reload"})
+	cluster, err := resolveClusterName(dbsu, "reload")
+	if err != nil {
+		return err
+	}
+	return patroniRunPatronictl(dbsu, buildReloadArgs(cluster))
 }
 
 // Pause pauses automatic failover for the cluster
@@ -165,7 +175,7 @@ func Systemctl(action string) error {
 func Status(dbsu string) error {
 	// 1. systemctl status patroni
 	fmt.Println("=== Patroni Service Status ===")
-	cmd1 := exec.Command("sudo", "systemctl", "status", "patroni", "--no-pager", "-l")
+	cmd1 := exec.Command("systemctl", "status", "patroni", "--no-pager", "-l")
 	cmd1.Stdout = os.Stdout
 	cmd1.Stderr = os.Stderr
 	if err := cmd1.Run(); err != nil {
