@@ -14,6 +14,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var patroniRunJournalctlOutput = runJournalctlOutput
+
 // DefaultConfigPath is the fixed patroni config file path
 const DefaultConfigPath = "/etc/patroni/patroni.yml"
 
@@ -216,20 +218,37 @@ func LogJSONL(lines int) error {
 	if lines <= 0 {
 		return fmt.Errorf("lines must be positive")
 	}
-	args := []string{"-u", "patroni", "-n", strconv.Itoa(lines), "--no-pager"}
+	args := []string{"-u", "patroni", "-n", strconv.Itoa(lines), "--no-pager", "-o", "cat"}
 	logrus.Debugf("journalctl %s", strings.Join(args, " "))
+	stdout, stderr, err := patroniRunJournalctlOutput(args)
+	if err != nil {
+		if errText := strings.TrimSpace(stderr); errText != "" {
+			return fmt.Errorf("%w: %s", err, errText)
+		}
+		return err
+	}
+	return utils.PrintLogMessagesJSONL("patroni", filterJournalNoEntries(stdout))
+}
+
+func runJournalctlOutput(args []string) (string, string, error) {
 	cmd := exec.Command("journalctl", args...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if errText := strings.TrimSpace(stderr.String()); errText != "" {
-			return fmt.Errorf("%w: %s", err, errText)
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
+
+func filterJournalNoEntries(text string) string {
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == "-- No entries --" {
+			continue
 		}
-		return err
+		lines = append(lines, line)
 	}
-	return utils.PrintLogMessagesJSONL("patroni", stdout.String())
+	return strings.Join(lines, "\n")
 }
 
 // RestartOptions holds options for patronictl restart

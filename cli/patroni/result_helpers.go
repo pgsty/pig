@@ -129,6 +129,24 @@ func clusterNameErrorResult(err error) *output.Result {
 	}
 }
 
+func RestartNeedForceResult() *output.Result {
+	return output.Fail(output.CodePtConfirmationRequired,
+		"restart requires --force (-f) flag in structured output mode").
+		WithNextActions(
+			output.NextAction{Command: "pig pt restart ... --force", Reason: "execute restart after explicit confirmation", Required: true},
+			output.NextAction{Command: "pig pt restart ... --plan", Reason: "preview restart without executing", Required: false},
+		)
+}
+
+func ReinitNeedForceResult() *output.Result {
+	return output.Fail(output.CodePtConfirmationRequired,
+		"reinit requires --force (-f) flag in structured output mode").
+		WithNextActions(
+			output.NextAction{Command: "pig pt reinit <member> --force", Reason: "execute member reinit after explicit confirmation", Required: true},
+			output.NextAction{Command: "pig pt reinit <member> --plan", Reason: "preview reinit without executing", Required: false},
+		)
+}
+
 func validateResolvedClusterName(cluster string) error {
 	trimmed := strings.TrimSpace(cluster)
 	if trimmed == "" {

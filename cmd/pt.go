@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/spf13/cobra"
 	"pig/cli/patroni"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
-	"strings"
 )
 
 var (
@@ -154,7 +156,7 @@ func registerPatroniCommands() {
 // patroniListCmd: pig pt list [cluster] [-W] [-w interval]
 var patroniListCmd = &cobra.Command{
 	Use:     "list [cluster]",
-	Aliases: []string{"ls", "l"},
+	Aliases: []string{"ls"}, // B02: "l" belongs to log
 	Short:   "List cluster members",
 	Args:    cobra.MaximumNArgs(1),
 	Long:    `List Patroni cluster members using patronictl list. Text mode uses -e -t flags; structured output uses -f json.`,
@@ -236,6 +238,9 @@ while keeping Patroni running.`,
 			Force:   force,
 			Pending: pending,
 		}
+		if err := requirePatroniStructuredForce(force, patroni.RestartNeedForceResult()); err != nil {
+			return err
+		}
 		return runLegacyStructured(legacyModulePt, "pig patroni restart", args, map[string]interface{}{
 			"member":  member,
 			"force":   force,
@@ -245,6 +250,25 @@ while keeping Patroni running.`,
 			return patroni.Restart(utils.GetDBSU(patroniDBSU), opts)
 		})
 	},
+}
+
+func requirePatroniStructuredForce(force bool, result *output.Result) error {
+	if !config.IsStructuredOutput() || force {
+		return nil
+	}
+	return handleAuxResult(result)
+}
+
+// splitConfigKVPairs partitions config args into key=value pairs and invalid tokens.
+func splitConfigKVPairs(args []string) (pairs []string, invalid []string) {
+	for _, arg := range args {
+		if strings.Contains(arg, "=") {
+			pairs = append(pairs, arg)
+		} else {
+			invalid = append(invalid, arg)
+		}
+	}
+	return pairs, invalid
 }
 
 // patroniReloadCmd: pig pt reload - reload PostgreSQL config via patronictl
@@ -291,6 +315,9 @@ from scratch using pg_basebackup from the current leader.`,
 		}
 		if patroniPlan {
 			return handlePlanOutput(patroni.BuildReinitPlan(opts))
+		}
+		if err := requirePatroniStructuredForce(force, patroni.ReinitNeedForceResult()); err != nil {
+			return err
 		}
 		return runLegacyStructured(legacyModulePt, "pig patroni reinit", args, map[string]interface{}{
 			"member": args[0],
@@ -480,12 +507,18 @@ Actions:
 		action := args[0]
 		kvPairs := args[1:]
 
-		// Filter out non key=value args (should all be k=v after action)
-		var filteredKV []string
-		for _, arg := range kvPairs {
-			if strings.Contains(arg, "=") {
-				filteredKV = append(filteredKV, arg)
-			}
+		// Reject non key=value args instead of silently dropping them:
+		// partially applied cluster config with exit 0 is worse than failing.
+		filteredKV, invalidKV := splitConfigKVPairs(kvPairs)
+		if (action == "set" || action == "pg") && len(invalidKV) > 0 {
+			return structuredParamError(
+				output.MODULE_PT,
+				"pig patroni config "+action,
+				"invalid config arguments",
+				fmt.Sprintf("expected key=value pairs, got: %s", strings.Join(invalidKV, ", ")),
+				args,
+				map[string]interface{}{"action": action, "invalid": invalidKV},
+			)
 		}
 
 		switch action {

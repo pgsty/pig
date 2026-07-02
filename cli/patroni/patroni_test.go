@@ -1,7 +1,11 @@
 package patroni
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -16,6 +20,28 @@ func argsHas(args []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func withPatroniStdout(t *testing.T, w io.Writer, fn func()) {
+	t.Helper()
+	old := os.Stdout
+	r, pipeW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = pipeW
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(w, r)
+		close(done)
+	}()
+
+	fn()
+
+	_ = pipeW.Close()
+	os.Stdout = old
+	<-done
+	_ = r.Close()
 }
 
 func argsHasInOrder(args []string, wants ...string) bool {
@@ -36,6 +62,67 @@ func TestLogRejectsNonPositiveLines(t *testing.T) {
 		if err := LogJSONL(n); err == nil || !strings.Contains(err.Error(), "lines must be positive") {
 			t.Fatalf("LogJSONL(%d) = %v, want positive line count error", n, err)
 		}
+	}
+}
+
+func TestLogJSONLUsesCatOutputAndPrintsJSONL(t *testing.T) {
+	origRun := patroniRunJournalctlOutput
+	defer func() { patroniRunJournalctlOutput = origRun }()
+
+	var gotArgs []string
+	patroniRunJournalctlOutput = func(args []string) (string, string, error) {
+		gotArgs = append([]string(nil), args...)
+		return "patroni started\nleader lock acquired\n", "", nil
+	}
+
+	var out bytes.Buffer
+	withPatroniStdout(t, &out, func() {
+		if err := LogJSONL(2); err != nil {
+			t.Fatalf("LogJSONL returned error: %v", err)
+		}
+	})
+
+	if !argsHasInOrder(gotArgs, "-u", "patroni", "-n", "2", "--no-pager", "-o", "cat") {
+		t.Fatalf("journalctl args = %v, want patroni line count with cat output", gotArgs)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected two JSONL lines, got %d: %q", len(lines), out.String())
+	}
+	var row map[string]string
+	if err := json.Unmarshal([]byte(lines[0]), &row); err != nil {
+		t.Fatalf("invalid JSONL row: %v", err)
+	}
+	if row["component"] != "patroni" || row["message"] != "patroni started" {
+		t.Fatalf("unexpected JSONL row: %v", row)
+	}
+}
+
+func TestLogJSONLSkipsNoEntriesSentinel(t *testing.T) {
+	origRun := patroniRunJournalctlOutput
+	defer func() { patroniRunJournalctlOutput = origRun }()
+
+	patroniRunJournalctlOutput = func(args []string) (string, string, error) {
+		return "-- No entries --\npatroni started\n", "", nil
+	}
+
+	var out bytes.Buffer
+	withPatroniStdout(t, &out, func() {
+		if err := LogJSONL(2); err != nil {
+			t.Fatalf("LogJSONL returned error: %v", err)
+		}
+	})
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected one JSONL line after skipping sentinel, got %d: %q", len(lines), out.String())
+	}
+	var row map[string]string
+	if err := json.Unmarshal([]byte(lines[0]), &row); err != nil {
+		t.Fatalf("invalid JSONL row: %v", err)
+	}
+	if row["message"] != "patroni started" {
+		t.Fatalf("unexpected JSONL message: %v", row)
 	}
 }
 

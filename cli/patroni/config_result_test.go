@@ -469,9 +469,9 @@ func TestPtConfigResultData_TextWithAllFields(t *testing.T) {
 		RetryTimeout:         &rt,
 		MaximumLagOnFailover: &mlf,
 		Raw: map[string]interface{}{
-			"loop_wait":              10,
-			"ttl":                    30,
-			"retry_timeout":          10,
+			"loop_wait":               10,
+			"ttl":                     30,
+			"retry_timeout":           10,
 			"maximum_lag_on_failover": 1048576,
 		},
 	}

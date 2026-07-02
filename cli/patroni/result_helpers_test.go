@@ -38,6 +38,28 @@ func TestClusterNameErrorResultCodes(t *testing.T) {
 	}
 }
 
+func TestNeedForceResultCodes(t *testing.T) {
+	tests := []struct {
+		name   string
+		result *output.Result
+		code   int
+	}{
+		{name: "restart", result: RestartNeedForceResult(), code: output.CodePtConfirmationRequired},
+		{name: "reinit", result: ReinitNeedForceResult(), code: output.CodePtConfirmationRequired},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.result.Success {
+				t.Fatal("need-force result should fail")
+			}
+			if tt.result.Code != tt.code {
+				t.Fatalf("code = %d, want %d", tt.result.Code, tt.code)
+			}
+		})
+	}
+}
+
 func stubPatroniResultDeps(t *testing.T, cluster string, clusterErr error, captured *[]string) {
 	t.Helper()
 	patroniTestDepsMu.Lock()

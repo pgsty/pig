@@ -57,8 +57,12 @@ func FailoverResult(dbsu string, opts *FailoverOptions) *output.Result {
 
 	// 3. Structured output mode requires --force (cannot handle interactive prompts)
 	if opts == nil || !opts.Force {
-		return output.Fail(output.CodePtFailoverNeedForce,
-			"failover requires --force (-f) flag in structured output mode")
+		return output.Fail(output.CodePtConfirmationRequired,
+			"failover requires --force (-f) flag in structured output mode").
+			WithNextActions(
+				output.NextAction{Command: "pig pt failover ... --force", Reason: "execute failover after explicit confirmation", Required: true},
+				output.NextAction{Command: "pig pt failover ... --plan", Reason: "preview failover without executing", Required: false},
+			)
 	}
 
 	// 4. Resolve cluster name and build command arguments

@@ -171,8 +171,8 @@ func TestSwitchoverResultRequiresForce(t *testing.T) {
 			stubPatroniResultDeps(t, "pg-nms", nil, &captured)
 
 			result := SwitchoverResult("postgres", tt.opts)
-			if result.Code != output.CodePtSwitchoverNeedForce {
-				t.Fatalf("code = %d, want %d", result.Code, output.CodePtSwitchoverNeedForce)
+			if result.Code != output.CodePtConfirmationRequired {
+				t.Fatalf("code = %d, want %d", result.Code, output.CodePtConfirmationRequired)
 			}
 			if captured != nil {
 				t.Fatalf("patronictl should not execute without --force, captured=%v", captured)
@@ -334,20 +334,20 @@ func TestSwitchoverFailResult(t *testing.T) {
 }
 
 func TestSwitchoverNeedForceResult(t *testing.T) {
-	result := output.Fail(output.CodePtSwitchoverNeedForce,
+	result := output.Fail(output.CodePtConfirmationRequired,
 		"switchover requires --force (-f) flag in structured output mode")
 
 	if result.Success {
 		t.Error("Result should not be successful")
 	}
-	if result.Code != output.CodePtSwitchoverNeedForce {
-		t.Errorf("Code = %d, want %d", result.Code, output.CodePtSwitchoverNeedForce)
+	if result.Code != output.CodePtConfirmationRequired {
+		t.Errorf("Code = %d, want %d", result.Code, output.CodePtConfirmationRequired)
 	}
 
-	// Verify exit code mapping (CAT_PARAM → exit 2)
+	// Verify exit code mapping (CAT_CONFIRM → exit 7)
 	exitCode := result.ExitCode()
-	if exitCode != 2 {
-		t.Errorf("ExitCode = %d, want 2 (param error)", exitCode)
+	if exitCode != 7 {
+		t.Errorf("ExitCode = %d, want 7 (confirmation required)", exitCode)
 	}
 }
 

@@ -59,8 +59,12 @@ func SwitchoverResult(dbsu string, opts *SwitchoverOptions) *output.Result {
 
 	// 3. Structured output mode requires --force (cannot handle interactive prompts)
 	if opts == nil || !opts.Force {
-		return output.Fail(output.CodePtSwitchoverNeedForce,
-			"switchover requires --force (-f) flag in structured output mode")
+		return output.Fail(output.CodePtConfirmationRequired,
+			"switchover requires --force (-f) flag in structured output mode").
+			WithNextActions(
+				output.NextAction{Command: "pig pt switchover ... --force", Reason: "execute switchover after explicit confirmation", Required: true},
+				output.NextAction{Command: "pig pt switchover ... --plan", Reason: "preview switchover without executing", Required: false},
+			)
 	}
 
 	// 4. Resolve cluster name and build command arguments

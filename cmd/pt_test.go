@@ -141,6 +141,59 @@ func TestPatroniConfigPlanRequiresKeyValuePairs(t *testing.T) {
 	}
 }
 
+func TestPatroniConfigRejectsNonKeyValueArgs(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniConfigPlan
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniConfigPlan = origPlan
+	}()
+	patroniConfigPlan = false
+
+	// Text mode: typo (space instead of '=') must fail naming the offending tokens,
+	// never partially apply the valid pairs.
+	config.OutputFormat = config.OUTPUT_TEXT
+	err := patroniConfigCmd.RunE(patroniConfigCmd, []string{"pg", "shared_buffers=4GB", "work_mem", "256MB"})
+	if err == nil {
+		t.Fatal("pt config pg with non key=value args should fail")
+	}
+	for _, tok := range []string{"work_mem", "256MB"} {
+		if !strings.Contains(err.Error(), tok) {
+			t.Fatalf("error should name invalid token %q, got: %v", tok, err)
+		}
+	}
+
+	// Structured mode: same rejection as a Fail result.
+	config.OutputFormat = config.OUTPUT_JSON
+	var runErr error
+	raw := capturePtStdout(t, func() {
+		runErr = patroniConfigCmd.RunE(patroniConfigCmd, []string{"set", "ttl=60", "loopwait"})
+	})
+	if runErr == nil {
+		t.Fatal("structured pt config set with invalid args should fail")
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(ptBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if success, _ := payload["success"].(bool); success {
+		t.Fatalf("expected success=false, got %v", payload)
+	}
+	if !strings.Contains(ptAsString(payload["detail"]), "loopwait") {
+		t.Fatalf("expected detail to name invalid token, got %v", payload)
+	}
+}
+
+func TestSplitConfigKVPairs(t *testing.T) {
+	pairs, invalid := splitConfigKVPairs([]string{"a=1", "b", "c=3", ""})
+	if len(pairs) != 2 || pairs[0] != "a=1" || pairs[1] != "c=3" {
+		t.Fatalf("unexpected pairs: %v", pairs)
+	}
+	if len(invalid) != 2 || invalid[0] != "b" || invalid[1] != "" {
+		t.Fatalf("unexpected invalid tokens: %v", invalid)
+	}
+}
+
 func TestPatroniConfigInvalidActionStructuredError(t *testing.T) {
 	origFormat := config.OutputFormat
 	defer func() {
@@ -161,6 +214,76 @@ func TestPatroniConfigInvalidActionStructuredError(t *testing.T) {
 	if exitErr.Code != output.ExitCode(output.CodePtInvalidConfigAction) {
 		t.Fatalf("unexpected exit code: got %d, want %d",
 			exitErr.Code, output.ExitCode(output.CodePtInvalidConfigAction))
+	}
+}
+
+func TestPatroniStructuredNeedForceGate(t *testing.T) {
+	origFormat := config.OutputFormat
+	defer func() {
+		config.OutputFormat = origFormat
+	}()
+	config.OutputFormat = config.OUTPUT_JSON
+
+	var runErr error
+	raw := capturePtStdout(t, func() {
+		runErr = requirePatroniStructuredForce(false, patroni.RestartNeedForceResult())
+	})
+	if runErr == nil {
+		t.Fatal("structured Patroni command without --force should fail")
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(ptBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if success, _ := payload["success"].(bool); success {
+		t.Fatalf("expected success=false, got %v", payload)
+	}
+	if code, _ := payload["code"].(float64); int(code) != output.CodePtConfirmationRequired {
+		t.Fatalf("code = %v, want %d", payload["code"], output.CodePtConfirmationRequired)
+	}
+}
+
+func TestPatroniRestartReinitStructuredRunERequiresForce(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		_ = patroniRestartCmd.Flags().Set("force", "false")
+		_ = patroniReinitCmd.Flags().Set("force", "false")
+	}()
+	config.OutputFormat = config.OUTPUT_JSON
+	patroniPlan = false
+
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+		args []string
+		code int
+	}{
+		{name: "restart", cmd: patroniRestartCmd, args: nil, code: output.CodePtConfirmationRequired},
+		{name: "reinit", cmd: patroniReinitCmd, args: []string{"pg1"}, code: output.CodePtConfirmationRequired},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_ = tt.cmd.Flags().Set("force", "false")
+			var runErr error
+			raw := capturePtStdout(t, func() {
+				runErr = tt.cmd.RunE(tt.cmd, tt.args)
+			})
+			if runErr == nil {
+				t.Fatalf("%s without --force should fail in structured mode", tt.name)
+			}
+			var payload map[string]interface{}
+			if err := json.Unmarshal(ptBytesTrimSpace([]byte(raw)), &payload); err != nil {
+				t.Fatalf("invalid json output: %v raw=%q", err, raw)
+			}
+			if code, _ := payload["code"].(float64); int(code) != tt.code {
+				t.Fatalf("code = %v, want %d", payload["code"], tt.code)
+			}
+		})
 	}
 }
 
