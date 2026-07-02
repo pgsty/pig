@@ -3,8 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
 	"os"
 	"pig/cli/ext"
 	"pig/cli/postgres"
@@ -15,6 +13,9 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 )
 
 // ============================================================================
@@ -657,10 +658,10 @@ This wraps CREATE DATABASE ... TEMPLATE ... STRATEGY FILE_COPY. It terminates
 existing source-database sessions immediately before cloning, matching Pigsty's
 pgsql-db clone workflow.`,
 		Example: `  pig pg clone meta                       # clone meta to meta_1/meta_2/...
-  pig pg clone meta meta_fork            # clone meta to meta_fork
-  pig pg clone meta meta_fork --owner dba # set owner on cloned database
-  pig pg clone meta meta_fork --port 5433 # source instance on another local port
-  pig pg clone meta meta_fork --plan      # preview clone plan`,
+  pig pg clone meta meta_fork             # clone meta to meta_fork
+  pig pg clone meta meta_dev --owner dba  # set owner on cloned database
+  pig pg clone meta fork3    --port 5433  # source instance on another local port
+  pig pg clone meta metadb4  --plan       # preview clone plan`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			destDB := ""
 			if len(args) > 1 {
