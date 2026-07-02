@@ -601,13 +601,13 @@ func BuildCommand(opts *Options) string {
 			args = append(args, "-D", quoteArg(opts.Instance.SourceData))
 		}
 		if opts.Instance.SourcePort != 0 && opts.Instance.SourcePort != 5432 {
-			args = append(args, "-P", fmt.Sprintf("%d", opts.Instance.SourcePort))
+			args = append(args, "--src-port", fmt.Sprintf("%d", opts.Instance.SourcePort))
 		}
 		if opts.Instance.DestData != "" && !opts.Instance.Managed {
-			args = append(args, "-d", quoteArg(opts.Instance.DestData))
+			args = append(args, "--dst-data", quoteArg(opts.Instance.DestData))
 		}
 		if opts.Instance.DestPort != 0 && opts.Instance.DestPort != 15432 {
-			args = append(args, "-p", fmt.Sprintf("%d", opts.Instance.DestPort))
+			args = append(args, "--dst-port", fmt.Sprintf("%d", opts.Instance.DestPort))
 		}
 		if opts.Start || opts.Run {
 			args = append(args, "--start")
@@ -687,21 +687,21 @@ func forkStopCommand(inst InstanceOptions) string {
 	if inst.Managed {
 		return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "stop", inst.Name})
 	}
-	return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "stop", "-d", inst.DestData})
+	return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "stop", "--dst-data", inst.DestData})
 }
 
 func forkStartCommand(inst InstanceOptions) string {
 	if inst.Managed {
 		return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "start", inst.Name})
 	}
-	return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "start", "-d", inst.DestData})
+	return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "start", "--dst-data", inst.DestData})
 }
 
 func forkRemoveCommand(inst InstanceOptions) string {
 	if inst.Managed {
 		return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "rm", inst.Name, "--stop"})
 	}
-	return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "rm", "-d", inst.DestData, "--stop"})
+	return utils.ShellQuoteArgs([]string{"pig", "pg", "fork", "rm", "--dst-data", inst.DestData, "--stop"})
 }
 
 // ScanForksAs enumerates managed forks under root (the data-* directories) as the
@@ -836,7 +836,7 @@ func StartFork(opts ForkTargetOptions) (ResultData, error) {
 		return ResultData{}, &ForkError{Code: output.CodeForkPortInUse, Err: forkPortReservedError(port, owner)}
 	}
 	if !forkPortFree(port) {
-		return ResultData{}, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("destination port is in use: %d\nHint: choose another destination port with -p/--dst-port", port)}
+		return ResultData{}, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("destination port is in use: %d\nHint: choose another destination port with --dst-port", port)}
 	}
 	if opts.DestPort != 0 {
 		if err := configureInstance(dbsu, dataDir, port); err != nil {
@@ -1163,7 +1163,7 @@ func precheckInstance(opts *Options) (*State, error) {
 		return nil, &ForkError{Code: output.CodeForkPortInUse, Err: forkPortReservedError(inst.DestPort, owner)}
 	}
 	if !forkPortFree(inst.DestPort) {
-		return nil, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("destination port is in use: %d\nHint: choose another destination port with -p/--dst-port", inst.DestPort)}
+		return nil, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("destination port is in use: %d\nHint: choose another destination port with --dst-port", inst.DestPort)}
 	}
 
 	// Auto-detect the copy mode: take a hot backup if the source is reachable,
@@ -1175,7 +1175,7 @@ func precheckInstance(opts *Options) (*State, error) {
 		return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: err}
 	}
 	if !running && hasPostmasterPID(opts.DbSU, inst.SourceData) {
-		return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("source instance is not reachable on port %d while %s has postmaster.pid; check --src-port/-P or stop the source before cold copy", inst.SourcePort, inst.SourceData)}
+		return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("source instance is not reachable on port %d while %s has postmaster.pid; check --src-port or stop the source before cold copy", inst.SourcePort, inst.SourceData)}
 	}
 
 	mode := BackupModeHot
@@ -1530,7 +1530,7 @@ func sourcePortMatchesDataDir(dbsu string, port int, sourceData string) (bool, e
 		return false, nil
 	}
 	if !forkDataDirMatches(dbsu, probedDataDir, sourceData) {
-		return true, fmt.Errorf("source port %d data directory %s does not match source data directory %s\nHint: pass matching -D/--src-data and -P/--src-port, or omit both to use the default source", port, probedDataDir, sourceData)
+		return true, fmt.Errorf("source port %d data directory %s does not match source data directory %s\nHint: pass matching --src-data and --src-port, or omit both to use the default source", port, probedDataDir, sourceData)
 	}
 	return true, nil
 }
@@ -1646,7 +1646,7 @@ func forkPortReservedError(port int, owner ForkInfo) error {
 	if data == "" {
 		data = "unknown data directory"
 	}
-	return fmt.Errorf("destination port %d is reserved by managed fork %s (%s)\nHint: run `pig pg fork list`, or choose another destination port with -p/--dst-port", port, name, data)
+	return fmt.Errorf("destination port %d is reserved by managed fork %s (%s)\nHint: run `pig pg fork list`, or choose another destination port with --dst-port", port, name, data)
 }
 
 func isPortFree(port int) bool {

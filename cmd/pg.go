@@ -37,7 +37,6 @@ var (
 	pgStartTimeout int
 	pgStartNoWait  bool
 	pgStartOptions string
-	pgStartYes     bool
 
 	// stop flags
 	pgStopMode    string
@@ -115,7 +114,9 @@ var pgCmd = &cobra.Command{
 	Aliases:     []string{"pg"},
 	GroupID:     "pigsty",
 	Annotations: ancsAnn("pig postgres", "query", "stable", "safe", true, "safe", "none", "current", 100),
-	Long: `Manage local PostgreSQL server and databases.
+	Long: `Local PostgreSQL primitives (pg_ctl / psql / local files). Cluster-level operations live in "pig pt"; orchestrated point-in-time recovery in "pig pitr".
+
+Manage local PostgreSQL server and databases.
 
 Server Control (via pg_ctl):
   pig pg init     [-v ver] [-D datadir]     initialize data directory
@@ -216,11 +217,10 @@ var pgStartCmd = &cobra.Command{
 	Short:       "Start PostgreSQL server",
 	Aliases:     []string{"boot", "up"},
 	Annotations: ancsAnn("pig postgres start", "action", "volatile", "unsafe", true, "medium", "none", "dbsu", 10000),
-	Example: `  pig pg start                     # start with defaults
+	Example: `  pig pg start                     # start with defaults (no-op if already running)
   pig pg start -D /data/pg18       # specify data directory
   pig pg start -l /pg/log/pg.log   # redirect output to log file
   pig pg start -O "-p 5433"        # pass options to postgres
-  pig pg start -y                  # force start (skip running check)
   pig pg start -o json             # structured output (JSON)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := &postgres.StartOptions{
@@ -228,7 +228,6 @@ var pgStartCmd = &cobra.Command{
 			Timeout: pgStartTimeout,
 			NoWait:  pgStartNoWait,
 			Options: pgStartOptions,
-			Force:   pgStartYes,
 		}
 
 		// Structured output mode (YAML/JSON)
@@ -509,26 +508,25 @@ func registerPgControlCommands() {
 	// start subcommand flags
 	pgStartCmd.Flags().StringVarP(&pgStartLog, "log", "l", "", "redirect stdout/stderr to log file")
 	pgStartCmd.Flags().IntVarP(&pgStartTimeout, "timeout", "t", 0, "wait timeout in seconds")
-	pgStartCmd.Flags().BoolVarP(&pgStartNoWait, "no-wait", "W", false, "do not wait for startup")
+	pgStartCmd.Flags().BoolVar(&pgStartNoWait, "no-wait", false, "do not wait for startup")
 	pgStartCmd.Flags().StringVarP(&pgStartOptions, "options", "O", "", "options passed to postgres")
-	pgStartCmd.Flags().BoolVarP(&pgStartYes, "yes", "y", false, "force start even if already running")
 
 	// stop subcommand flags
 	pgStopCmd.Flags().StringVarP(&pgStopMode, "mode", "m", "fast", "shutdown mode: smart/fast/immediate")
 	pgStopCmd.Flags().IntVarP(&pgStopTimeout, "timeout", "t", 0, "wait timeout in seconds")
-	pgStopCmd.Flags().BoolVarP(&pgStopNoWait, "no-wait", "W", false, "do not wait for shutdown")
+	pgStopCmd.Flags().BoolVar(&pgStopNoWait, "no-wait", false, "do not wait for shutdown")
 	pgStopCmd.Flags().BoolVar(&pgStopPlan, "plan", false, "preview stop plan without executing")
 
 	// restart subcommand flags
 	pgRestartCmd.Flags().StringVarP(&pgRestartMode, "mode", "m", "fast", "shutdown mode: smart/fast/immediate")
 	pgRestartCmd.Flags().IntVarP(&pgRestartTimeout, "timeout", "t", 0, "wait timeout in seconds")
-	pgRestartCmd.Flags().BoolVarP(&pgRestartNoWait, "no-wait", "W", false, "do not wait for restart")
+	pgRestartCmd.Flags().BoolVar(&pgRestartNoWait, "no-wait", false, "do not wait for restart")
 	pgRestartCmd.Flags().StringVarP(&pgRestartOptions, "options", "O", "", "options passed to postgres")
 	pgRestartCmd.Flags().BoolVar(&pgRestartPlan, "plan", false, "preview restart plan without executing")
 
 	// promote subcommand flags
 	pgPromoteCmd.Flags().IntVarP(&pgPromoteTimeout, "timeout", "t", 0, "wait timeout in seconds")
-	pgPromoteCmd.Flags().BoolVarP(&pgPromoteNoWait, "no-wait", "W", false, "do not wait for promotion")
+	pgPromoteCmd.Flags().BoolVar(&pgPromoteNoWait, "no-wait", false, "do not wait for promotion")
 	pgPromoteCmd.Flags().BoolVarP(&pgPromoteYes, "yes", "y", false, "skip confirmation prompt")
 	pgPromoteCmd.Flags().BoolVar(&pgPromotePlan, "plan", false, "preview promote plan without executing")
 
@@ -553,7 +551,7 @@ func registerPgLogCommands() {
 	pgLogCmd.PersistentFlags().StringVar(&pgConfig.LogDir, "log-dir", "", "log directory (default: /pg/log/postgres)")
 	pgLogCmd.Flags().BoolVarP(&pgLogFollow, "follow", "f", false, "follow log output")
 	pgLogCmd.PersistentFlags().IntVarP(&pgLogNum, "lines", "n", 50, "number of lines")
-	pgLogTailCmd.Flags().BoolP("follow", "f", false, "follow log output (default for tail)")
+	pgLogTailCmd.Flags().BoolP("follow", "f", false, "(no-op: tail always follows)")
 	pgLogGrepCmd.Flags().BoolVar(&pgLogGrepIgnoreCase, "ignore-case", false, "ignore case")
 	pgLogGrepCmd.Flags().IntVarP(&pgLogGrepContext, "context", "C", 0, "show N lines of context")
 
@@ -583,14 +581,14 @@ func registerPgConnectionCommands() {
 	pgKillCmd.Flags().StringVarP(&pgKillQuery, "query", "q", "", "filter by query pattern")
 	pgKillCmd.Flags().BoolVarP(&pgKillAll, "all", "a", false, "include replication connections")
 	pgKillCmd.Flags().BoolVarP(&pgKillCancel, "cancel", "c", false, "cancel query instead of terminate")
-	pgKillCmd.Flags().IntVarP(&pgKillWatch, "watch", "w", 0, "repeat every N seconds")
+	pgKillCmd.Flags().IntVar(&pgKillWatch, "watch", 0, "repeat every N seconds")
 	pgKillCmd.Flags().BoolVar(&pgKillPlan, "plan", false, "preview kill plan without executing")
 	pgCmd.AddCommand(pgKillCmd)
 }
 
 func addPgMaintFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVarP(&pgMaintAll, "all", "a", false, "process all databases")
-	cmd.Flags().StringVarP(&pgMaintSchema, "schema", "n", "", "schema name")
+	cmd.Flags().StringVar(&pgMaintSchema, "schema", "", "schema name")
 	cmd.Flags().StringVarP(&pgMaintTable, "table", "t", "", "table name")
 	cmd.Flags().BoolVarP(&pgMaintVerbose, "verbose", "V", false, "verbose output")
 }
@@ -614,7 +612,7 @@ func registerPgMaintenanceCommands() {
 	// repack command
 	addPgMaintFlags(pgRepackCmd)
 	pgRepackCmd.Flags().IntVarP(&pgMaintJobs, "jobs", "j", 1, "number of parallel jobs")
-	pgRepackCmd.Flags().BoolVarP(&pgMaintPlan, "plan", "N", false, "show repack plan without executing")
+	pgRepackCmd.Flags().BoolVar(&pgMaintPlan, "plan", false, "show repack plan without executing")
 	pgCmd.AddCommand(pgRepackCmd)
 }
 
@@ -661,7 +659,7 @@ pgsql-db clone workflow.`,
 		Example: `  pig pg clone meta                       # clone meta to meta_1/meta_2/...
   pig pg clone meta meta_fork            # clone meta to meta_fork
   pig pg clone meta meta_fork --owner dba # set owner on cloned database
-  pig pg clone meta meta_fork -p 5433     # clone on another local port
+  pig pg clone meta meta_fork --port 5433 # source instance on another local port
   pig pg clone meta meta_fork --plan      # preview clone plan`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			destDB := ""
@@ -677,7 +675,7 @@ pgsql-db clone workflow.`,
 }
 
 func addPgCloneFlags(cmd *cobra.Command, opts *cloneCLIOptions) {
-	cmd.Flags().IntVarP(&opts.port, "port", "p", 0, "PostgreSQL port (default: 5432 or $PG_PORT)")
+	cmd.Flags().IntVar(&opts.port, "port", 0, "source instance port (default: 5432 or $PG_PORT)")
 	cmd.Flags().StringVar(&opts.connDB, "conn-db", "", "database used to run CREATE DATABASE (default: postgres, or template1 when cloning postgres)")
 	cmd.Flags().StringVar(&opts.owner, "owner", "", "best-effort owner change after clone")
 	cmd.Flags().IntVar(&opts.connLimit, "conn-limit", 0, "connection limit for cloned database (-1 = no limit, 0 = disallow)")
@@ -869,7 +867,7 @@ var pgKillCmd = &cobra.Command{
   pig pg kill -d mydb -x         # kill connections to database
   pig pg kill -s idle -x         # kill idle connections
   pig pg kill --cancel -x        # cancel queries instead of terminate
-  pig pg kill -w 5 -x            # repeat every 5 seconds`,
+  pig pg kill --watch 5 -x       # repeat every 5 seconds`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := &postgres.KillOptions{
 			Execute: pgKillExecute,
@@ -961,12 +959,12 @@ func newPgForkCommand() *cobra.Command {
 
 Use "pig pg fork init <name>" to create a managed fork under /pg/data-<name>.
 The shorthand "pig pg fork <name>" is kept as an alias for init. An explicit
--d/--dst-data creates an unmanaged fork outside the enumerated /pg/data-* set.`,
+--dst-data creates an unmanaged fork outside the enumerated /pg/data-* set.`,
 		Example: `  pig pg fork init dev                  # /pg/data -> /pg/data-dev
   pig pg fork dev                       # shorthand for "pig pg fork init dev"
-  pig pg fork init dev -D /pg/data2 -P 15431
-  pig pg fork init dev --start -p 15440 # start fork on a specific destination port
-  pig pg fork init dev -d /tmp/dev      # unmanaged destination escape hatch
+  pig pg fork init dev -D /pg/data2 --src-port 15431
+  pig pg fork init dev --start --dst-port 15440 # start fork on a specific destination port
+  pig pg fork init dev --dst-data /tmp/dev      # unmanaged destination escape hatch
   pig pg fork list                      # list managed /pg/data-* forks
   pig pg fork stop dev                  # stop a managed fork
   pig pg fork rm dev --stop             # stop and remove a running fork`,
@@ -997,9 +995,9 @@ func addPgForkFlags(cmd *cobra.Command, opts *forkCLIOptions) {
 	cmd.Flags().BoolVarP(&opts.force, "force", "f", false, "replace existing stopped fork data directory and skip confirmation")
 	addForkStartFlag(cmd, opts)
 	cmd.Flags().StringVar(&opts.sourceData, "src-data", "", "source PostgreSQL data directory (also set by pg -D/--data; default: $PG_DATA or /pg/data)")
-	cmd.Flags().IntVarP(&opts.sourcePort, "src-port", "P", 0, "source PostgreSQL port (default: 5432 or $PG_PORT)")
-	cmd.Flags().StringVarP(&opts.destData, "dst-data", "d", "", "unmanaged destination data directory escape hatch")
-	cmd.Flags().IntVarP(&opts.destPort, "dst-port", "p", 0, "destination PostgreSQL port (default: first free port from 15432)")
+	cmd.Flags().IntVar(&opts.sourcePort, "src-port", 0, "source PostgreSQL port (default: 5432 or $PG_PORT)")
+	cmd.Flags().StringVar(&opts.destData, "dst-data", "", "unmanaged destination data directory escape hatch")
+	cmd.Flags().IntVar(&opts.destPort, "dst-port", 0, "destination PostgreSQL port (default: first free port from 15432)")
 	cmd.Flags().IntVarP(&opts.timeout, "timeout", "t", 0, "startup timeout in seconds")
 }
 
@@ -1013,8 +1011,8 @@ func newPgForkInitCommand(opts *forkCLIOptions) *cobra.Command {
 		Annotations:  ancsAnn("pig postgres fork init", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 600000),
 		Example: `  pig pg fork init dev
   pig pg fork init dev --start
-  pig pg fork init dev -D /pg/data2 -P 15431
-  pig pg fork init dev -d /tmp/dev-fork -p 15440`,
+  pig pg fork init dev -D /pg/data2 --src-port 15431
+  pig pg fork init dev --dst-data /tmp/dev-fork --dst-port 15440`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runFork(cmd, buildInstanceOptions(opts, args[0]))
 		},
@@ -1028,9 +1026,9 @@ func addPgForkCreateFlags(cmd *cobra.Command, opts *forkCLIOptions) {
 	cmd.Flags().BoolVarP(&opts.force, "force", "f", false, "replace existing stopped fork data directory and skip confirmation")
 	addForkStartFlag(cmd, opts)
 	cmd.Flags().StringVar(&opts.sourceData, "src-data", "", "source PostgreSQL data directory (also set by pg -D/--data; default: $PG_DATA or /pg/data)")
-	cmd.Flags().IntVarP(&opts.sourcePort, "src-port", "P", 0, "source PostgreSQL port (default: 5432 or $PG_PORT)")
-	cmd.Flags().StringVarP(&opts.destData, "dst-data", "d", "", "unmanaged destination data directory escape hatch")
-	cmd.Flags().IntVarP(&opts.destPort, "dst-port", "p", 0, "destination PostgreSQL port (default: first free port from 15432)")
+	cmd.Flags().IntVar(&opts.sourcePort, "src-port", 0, "source PostgreSQL port (default: 5432 or $PG_PORT)")
+	cmd.Flags().StringVar(&opts.destData, "dst-data", "", "unmanaged destination data directory escape hatch")
+	cmd.Flags().IntVar(&opts.destPort, "dst-port", 0, "destination PostgreSQL port (default: first free port from 15432)")
 	cmd.Flags().IntVarP(&opts.timeout, "timeout", "t", 0, "startup timeout in seconds")
 }
 
@@ -1067,9 +1065,9 @@ func newPgForkStartCommand(opts *forkCLIOptions) *cobra.Command {
 			})
 		},
 	}
-	setPgForkUseLine(cmd, "pig pg fork start <name>|-d <dir>")
-	cmd.Flags().StringVarP(&opts.destData, "dst-data", "d", "", "unmanaged fork data directory")
-	cmd.Flags().IntVarP(&opts.destPort, "dst-port", "p", 0, "destination PostgreSQL port override")
+	setPgForkUseLine(cmd, "pig pg fork start <name>|--dst-data <dir>")
+	cmd.Flags().StringVar(&opts.destData, "dst-data", "", "unmanaged fork data directory")
+	cmd.Flags().IntVar(&opts.destPort, "dst-port", 0, "destination PostgreSQL port override")
 	cmd.Flags().IntVarP(&opts.timeout, "timeout", "t", 0, "startup timeout in seconds")
 	return cmd
 }
@@ -1093,8 +1091,8 @@ func newPgForkStopCommand(opts *forkCLIOptions) *cobra.Command {
 			})
 		},
 	}
-	setPgForkUseLine(cmd, "pig pg fork stop <name>|-d <dir>")
-	cmd.Flags().StringVarP(&opts.destData, "dst-data", "d", "", "unmanaged fork data directory")
+	setPgForkUseLine(cmd, "pig pg fork stop <name>|--dst-data <dir>")
+	cmd.Flags().StringVar(&opts.destData, "dst-data", "", "unmanaged fork data directory")
 	cmd.Flags().StringVarP(&opts.stopMode, "mode", "m", "", "shutdown mode: smart, fast, or immediate")
 	cmd.Flags().IntVarP(&opts.timeout, "timeout", "t", 0, "shutdown timeout in seconds")
 	return cmd
@@ -1123,8 +1121,8 @@ func newPgForkRemoveCommand(opts *forkCLIOptions) *cobra.Command {
 			})
 		},
 	}
-	setPgForkUseLine(cmd, "pig pg fork rm <name>|-d <dir>")
-	cmd.Flags().StringVarP(&opts.destData, "dst-data", "d", "", "unmanaged fork data directory")
+	setPgForkUseLine(cmd, "pig pg fork rm <name>|--dst-data <dir>")
+	cmd.Flags().StringVar(&opts.destData, "dst-data", "", "unmanaged fork data directory")
 	cmd.Flags().BoolVarP(&opts.force, "force", "f", false, "skip confirmation for stopped forks")
 	cmd.Flags().BoolVar(&opts.stopBefore, "stop", false, "stop a running fork before removing it")
 	cmd.Flags().StringVarP(&opts.stopMode, "mode", "m", "", "shutdown mode when --stop is used: smart, fast, or immediate")
@@ -1450,14 +1448,14 @@ func runForkTargetPlan(verb string, cli *forkCLIOptions, name string, descriptio
 func buildForkTargetPlanCommand(verb string, cli *forkCLIOptions, name string) string {
 	args := []string{"pig", "pg", "fork", verb}
 	if cli.destData != "" {
-		args = append(args, "-d", cli.destData)
+		args = append(args, "--dst-data", cli.destData)
 	} else {
 		args = append(args, name)
 	}
 	switch verb {
 	case "start":
 		if cli.destPort != 0 {
-			args = append(args, "-p", fmt.Sprintf("%d", cli.destPort))
+			args = append(args, "--dst-port", fmt.Sprintf("%d", cli.destPort))
 		}
 	case "stop":
 		appendForkStopFlags(&args, cli)
@@ -1710,7 +1708,7 @@ var pgVacuumCmd = &cobra.Command{
   pig pg vacuum mydb             # vacuum specific database
   pig pg vacuum -a               # vacuum all databases
   pig pg vacuum mydb -t mytable  # vacuum specific table
-  pig pg vacuum mydb -n myschema # vacuum tables in schema
+  pig pg vacuum mydb --schema myschema # vacuum tables in schema
   pig pg vacuum mydb --full      # VACUUM FULL (exclusive lock)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbname := ""
@@ -1851,7 +1849,7 @@ var pgRepackCmd = &cobra.Command{
 	Example: `  pig pg repack mydb             # repack all tables in database
   pig pg repack -a               # repack all databases
   pig pg repack mydb -t mytable  # repack specific table
-  pig pg repack mydb -n myschema # repack tables in schema
+  pig pg repack mydb --schema myschema # repack tables in schema
   pig pg repack mydb -j 4        # parallel repack
   pig pg repack mydb --plan      # show repack plan without executing (recommended)`,
 	RunE: func(cmd *cobra.Command, args []string) error {

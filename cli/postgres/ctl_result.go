@@ -82,6 +82,7 @@ type PgStartResultData struct {
 	PID     int    `json:"pid" yaml:"pid"`
 	DataDir string `json:"data_dir" yaml:"data_dir"`
 	NoWait  bool   `json:"no_wait,omitempty" yaml:"no_wait,omitempty"`
+	Already bool   `json:"already,omitempty" yaml:"already,omitempty"`
 }
 
 // StartOK creates a successful result for pg start operation.
@@ -89,6 +90,16 @@ func StartOK(pid int, dataDir string) *output.Result {
 	return output.OK("PostgreSQL started successfully", &PgStartResultData{
 		PID:     pid,
 		DataDir: dataDir,
+	})
+}
+
+// StartOKAlready creates an idempotent success result when PostgreSQL is
+// already running (B06/B22): starting a running server is not an error.
+func StartOKAlready(pid int, dataDir string) *output.Result {
+	return output.OK(fmt.Sprintf("PostgreSQL is already running (pid %d)", pid), &PgStartResultData{
+		PID:     pid,
+		DataDir: dataDir,
+		Already: true,
 	})
 }
 
@@ -113,6 +124,7 @@ type PgStopResultData struct {
 	DataDir    string `json:"data_dir" yaml:"data_dir"`
 	Mode       string `json:"mode,omitempty" yaml:"mode,omitempty"`
 	NoWait     bool   `json:"no_wait,omitempty" yaml:"no_wait,omitempty"`
+	Already    bool   `json:"already,omitempty" yaml:"already,omitempty"`
 }
 
 // StopOK creates a successful result for pg stop operation.
@@ -121,6 +133,17 @@ func StopOK(stoppedPID int, dataDir, mode string) *output.Result {
 		StoppedPID: stoppedPID,
 		DataDir:    dataDir,
 		Mode:       mode,
+	})
+}
+
+// StopOKAlready creates an idempotent success result when PostgreSQL is
+// already stopped (B22): stopping a stopped server is not an error.
+func StopOKAlready(dataDir, mode string) *output.Result {
+	return output.OK("PostgreSQL is already stopped", &PgStopResultData{
+		StoppedPID: 0,
+		DataDir:    dataDir,
+		Mode:       mode,
+		Already:    true,
 	})
 }
 
@@ -194,6 +217,12 @@ func ReloadOK(pid int, dataDir string) *output.Result {
 // Structured Result Functions (wrap existing control functions)
 // ============================================================================
 
+// test seams for structured start/stop results (allow stubbing in unit tests)
+var (
+	ctlCheckDataDirState = checkDataDirStateAsDBSU
+	ctlCheckRunningState = checkPostgresRunningAsDBSUWithError
+)
+
 // StartResult executes pg start and returns a structured result.
 // It captures the PID before/after and handles errors with appropriate codes.
 func StartResult(cfg *Config, opts *StartOptions) *output.Result {
@@ -201,7 +230,7 @@ func StartResult(cfg *Config, opts *StartOptions) *output.Result {
 	dbsu := GetDbSU(cfg)
 
 	// Pre-check: data directory initialization (permission-aware)
-	exists, initialized, err := checkDataDirStateAsDBSU(dbsu, dataDir)
+	exists, initialized, err := ctlCheckDataDirState(dbsu, dataDir)
 	if err != nil {
 		return output.Fail(output.CodePgPermissionDenied,
 			"Permission denied checking PostgreSQL data directory").
@@ -222,7 +251,8 @@ func StartResult(cfg *Config, opts *StartOptions) *output.Result {
 	}
 
 	// Pre-check: already running? (permission-aware)
-	running, pid, _, err := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
+	// Idempotent success (B06/B22): already running is not an error.
+	running, pid, _, err := ctlCheckRunningState(dbsu, dataDir)
 	if err != nil {
 		return output.Fail(output.CodePgPermissionDenied,
 			"Permission denied checking PostgreSQL status").
@@ -230,14 +260,7 @@ func StartResult(cfg *Config, opts *StartOptions) *output.Result {
 			WithDetail(err.Error())
 	}
 	if running {
-		force := opts != nil && opts.Force
-		if !force {
-			return output.Fail(output.CodePgAlreadyRunning,
-				"PostgreSQL is already running").
-				WithData(&PgStartResultData{PID: pid, DataDir: dataDir}).
-				WithDetail(fmt.Sprintf("PID=%d; use -y to force start", pid))
-		}
-		logrus.Debugf("forcing start even though PostgreSQL is running (PID=%d)", pid)
+		return StartOKAlready(pid, dataDir)
 	}
 
 	// Execute the start operation
@@ -278,7 +301,8 @@ func StopResult(cfg *Config, opts *StopOptions) *output.Result {
 	}
 
 	// Pre-check: get current PID (permission-aware)
-	running, stoppedPID, _, err := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
+	// Idempotent success (B22): already stopped is not an error.
+	running, stoppedPID, _, err := ctlCheckRunningState(dbsu, dataDir)
 	if err != nil {
 		return output.Fail(output.CodePgPermissionDenied,
 			"Permission denied checking PostgreSQL status").
@@ -286,10 +310,7 @@ func StopResult(cfg *Config, opts *StopOptions) *output.Result {
 			WithDetail(err.Error())
 	}
 	if !running {
-		return output.Fail(output.CodePgAlreadyStopped,
-			"PostgreSQL is not running").
-			WithData(&PgStopResultData{StoppedPID: 0, DataDir: dataDir, Mode: mode}).
-			WithDetail("No PostgreSQL process found")
+		return StopOKAlready(dataDir, mode)
 	}
 
 	// Execute the stop operation

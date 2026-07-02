@@ -123,8 +123,13 @@ type StartOptions struct {
 	Timeout int
 	NoWait  bool
 	Options string
-	Force   bool
 }
+
+// test seams for start/stop state checks (allow stubbing in unit tests)
+var (
+	ctlCheckDataDir = CheckDataDirAsDBSU
+	ctlCheckRunning = CheckPostgresRunningAsDBSU
+)
 
 const DefaultStartLogFile = "/tmp/pig-pg-start.log"
 
@@ -163,33 +168,20 @@ func Start(cfg *Config, opts *StartOptions) error {
 	timeout := GetTimeout(optTimeout)
 
 	// Check data directory as dbsu (handles permission issues for non-dbsu users)
-	_, initialized := CheckDataDirAsDBSU(dbsu, dataDir)
+	_, initialized := ctlCheckDataDir(dbsu, dataDir)
 	if !initialized {
 		return fmt.Errorf("data directory %s not initialized (run 'pig pg init' first)", dataDir)
 	}
 
-	// Check if PostgreSQL is already running as dbsu
-	running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
+	// Idempotent success (B06/B22): already running is not an error
+	running, pid := ctlCheckRunning(dbsu, dataDir)
 	if running {
 		if config.IsStructuredOutput() {
-			utils.PrintWarn("PostgreSQL is already running (PID: %d) in %s", pid, dataDir)
+			utils.PrintInfo("PostgreSQL is already running (pid %d)", pid)
 		} else {
-			fmt.Printf("%sWARNING: PostgreSQL is already running (PID: %d) in %s%s\n",
-				utils.ColorYellow, pid, dataDir, utils.ColorReset)
+			fmt.Printf("PostgreSQL is already running (pid %d)\n", pid)
 		}
-		if opts == nil || !opts.Force {
-			if config.IsStructuredOutput() {
-				utils.PrintWarn("Use -y to force start anyway")
-			} else {
-				fmt.Printf("%sUse -y to force start anyway%s\n", utils.ColorYellow, utils.ColorReset)
-			}
-			return fmt.Errorf("postgresql already running, use -y to force")
-		}
-		if config.IsStructuredOutput() {
-			utils.PrintInfo("Forcing start as requested (-y)")
-		} else {
-			fmt.Printf("%sForcing start as requested (-y)%s\n", utils.ColorYellow, utils.ColorReset)
-		}
+		return nil
 	}
 
 	// Find PostgreSQL
@@ -245,6 +237,17 @@ func Stop(cfg *Config, opts *StopOptions) error {
 	}
 	if mode != "smart" && mode != "fast" && mode != "immediate" {
 		return fmt.Errorf("invalid stop mode: %s (use smart/fast/immediate)", mode)
+	}
+
+	// Idempotent success (B22): already stopped is not an error
+	running, _ := ctlCheckRunning(dbsu, dataDir)
+	if !running {
+		if config.IsStructuredOutput() {
+			utils.PrintInfo("PostgreSQL is already stopped")
+		} else {
+			fmt.Println("PostgreSQL is already stopped")
+		}
+		return nil
 	}
 
 	// Find PostgreSQL

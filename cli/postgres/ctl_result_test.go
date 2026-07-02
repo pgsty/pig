@@ -472,6 +472,141 @@ func TestStartOKNoWait(t *testing.T) {
 	}
 }
 
+func TestStartOKAlready(t *testing.T) {
+	result := StartOKAlready(4242, "/pg/data")
+	if result == nil {
+		t.Fatal("StartOKAlready returned nil")
+	}
+	if !result.Success {
+		t.Error("StartOKAlready should return success=true")
+	}
+	if !strings.Contains(result.Message, "already running (pid 4242)") {
+		t.Errorf("StartOKAlready message = %q, want already-running fact with pid", result.Message)
+	}
+	data, ok := result.Data.(*PgStartResultData)
+	if !ok {
+		t.Fatal("StartOKAlready data should be *PgStartResultData")
+	}
+	if !data.Already {
+		t.Error("Already should be true")
+	}
+	if data.PID != 4242 {
+		t.Errorf("Expected PID 4242, got %d", data.PID)
+	}
+	if data.DataDir != "/pg/data" {
+		t.Errorf("Expected DataDir /pg/data, got %s", data.DataDir)
+	}
+}
+
+func TestPgStartResultData_JSON_AlreadyOmittedWhenFalse(t *testing.T) {
+	jsonBytes, err := json.Marshal(&PgStartResultData{PID: 1, DataDir: "/pg/data"})
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+	if strings.Contains(string(jsonBytes), `"already"`) {
+		t.Errorf("JSON should omit already when false: %s", jsonBytes)
+	}
+
+	jsonBytes, err = json.Marshal(&PgStartResultData{PID: 1, DataDir: "/pg/data", Already: true})
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+	if !strings.Contains(string(jsonBytes), `"already":true`) {
+		t.Errorf("JSON should contain already:true: %s", jsonBytes)
+	}
+}
+
+// stubCtlResultChecks replaces the structured-result state-check seams for one test.
+func stubCtlResultChecks(t *testing.T, exists, initialized, running bool, pid int) {
+	t.Helper()
+	origDataDir := ctlCheckDataDirState
+	origRunning := ctlCheckRunningState
+	t.Cleanup(func() {
+		ctlCheckDataDirState = origDataDir
+		ctlCheckRunningState = origRunning
+	})
+	ctlCheckDataDirState = func(dbsu, dataDir string) (bool, bool, error) {
+		return exists, initialized, nil
+	}
+	ctlCheckRunningState = func(dbsu, dataDir string) (bool, int, string, error) {
+		return running, pid, "", nil
+	}
+}
+
+// TestStartResultAlreadyRunningReturnsOK covers T9/B22: pg start on a running
+// server is an idempotent success with already:true, not CodePgAlreadyRunning.
+func TestStartResultAlreadyRunningReturnsOK(t *testing.T) {
+	stubCtlResultChecks(t, true, true, true, 4242)
+
+	result := StartResult(nil, &StartOptions{})
+	if result == nil {
+		t.Fatal("StartResult returned nil")
+	}
+	if !result.Success {
+		t.Fatalf("StartResult on running server should succeed, got code=%d message=%q", result.Code, result.Message)
+	}
+	data, ok := result.Data.(*PgStartResultData)
+	if !ok {
+		t.Fatal("StartResult data should be *PgStartResultData")
+	}
+	if !data.Already {
+		t.Error("Already should be true when server was already running")
+	}
+	if data.PID != 4242 {
+		t.Errorf("Expected PID 4242, got %d", data.PID)
+	}
+}
+
+// TestStopResultAlreadyStoppedReturnsOK covers T9/B22: pg stop on a stopped
+// server is an idempotent success with already:true, not CodePgAlreadyStopped.
+func TestStopResultAlreadyStoppedReturnsOK(t *testing.T) {
+	stubCtlResultChecks(t, true, true, false, 0)
+
+	result := StopResult(nil, &StopOptions{Mode: "fast"})
+	if result == nil {
+		t.Fatal("StopResult returned nil")
+	}
+	if !result.Success {
+		t.Fatalf("StopResult on stopped server should succeed, got code=%d message=%q", result.Code, result.Message)
+	}
+	data, ok := result.Data.(*PgStopResultData)
+	if !ok {
+		t.Fatal("StopResult data should be *PgStopResultData")
+	}
+	if !data.Already {
+		t.Error("Already should be true when server was already stopped")
+	}
+	if data.StoppedPID != 0 {
+		t.Errorf("Expected StoppedPID 0, got %d", data.StoppedPID)
+	}
+	if data.Mode != "fast" {
+		t.Errorf("Expected Mode fast, got %s", data.Mode)
+	}
+}
+
+func TestStopOKAlready(t *testing.T) {
+	result := StopOKAlready("/pg/data", "fast")
+	if result == nil {
+		t.Fatal("StopOKAlready returned nil")
+	}
+	if !result.Success {
+		t.Error("StopOKAlready should return success=true")
+	}
+	if !strings.Contains(result.Message, "already stopped") {
+		t.Errorf("StopOKAlready message = %q, want already-stopped fact", result.Message)
+	}
+	data, ok := result.Data.(*PgStopResultData)
+	if !ok {
+		t.Fatal("StopOKAlready data should be *PgStopResultData")
+	}
+	if !data.Already {
+		t.Error("Already should be true")
+	}
+	if data.StoppedPID != 0 {
+		t.Errorf("Expected StoppedPID 0, got %d", data.StoppedPID)
+	}
+}
+
 func TestStopOK(t *testing.T) {
 	result := StopOK(12345, "/pg/data", "fast")
 	if result == nil {

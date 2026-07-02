@@ -330,7 +330,7 @@ func TestBuildCommandUsesUppercaseSourceAndLowercaseDestinationFlags(t *testing.
 		t.Fatalf("NormalizeOptions returned error: %v", err)
 	}
 
-	want := "pig pg fork init dev -D /pg/data2 -P 15431 -d /tmp/dev-fork -p 15433 --plan"
+	want := "pig pg fork init dev -D /pg/data2 --src-port 15431 --dst-data /tmp/dev-fork --dst-port 15433 --plan"
 	if got := BuildCommand(opts); got != want {
 		t.Fatalf("BuildCommand() = %q, want %q", got, want)
 	}
@@ -602,10 +602,10 @@ func TestBuildForkInfoMarksExplicitDestinationAsUnmanaged(t *testing.T) {
 	if info.Managed {
 		t.Fatal("explicit destination fork should be recorded as unmanaged")
 	}
-	if info.Commands.Stop != "pig pg fork stop -d /tmp/dev-fork" {
+	if info.Commands.Stop != "pig pg fork stop --dst-data /tmp/dev-fork" {
 		t.Fatalf("Stop command = %q, want unmanaged pig command", info.Commands.Stop)
 	}
-	if info.Commands.Remove != "pig pg fork rm -d /tmp/dev-fork --stop" {
+	if info.Commands.Remove != "pig pg fork rm --dst-data /tmp/dev-fork --stop" {
 		t.Fatalf("Remove command = %q, want unmanaged pig command", info.Commands.Remove)
 	}
 }
@@ -651,7 +651,7 @@ func TestForkExecutionSummaryIncludesPrecheckedTarget(t *testing.T) {
 		"Backup: hot backup",
 		"Copy: regular copy (ext4); may use full data directory space",
 		"Pig: ",
-		"Command: pig pg fork init dev -d /tmp/dev-fork -p 15440 --start",
+		"Command: pig pg fork init dev --dst-data /tmp/dev-fork --dst-port 15440 --start",
 	} {
 		if !strings.Contains(summary, want) {
 			t.Fatalf("summary missing %q:\n%s", want, summary)
@@ -1290,7 +1290,7 @@ func TestPrecheckInstanceExistingDestinationIncludesReplacementHint(t *testing.T
 	if err == nil {
 		t.Fatal("expected existing destination error")
 	}
-	for _, want := range []string{"destination data directory exists", "Hint:", "-f/--force", "pig pg fork rm -d", dest} {
+	for _, want := range []string{"destination data directory exists", "Hint:", "-f/--force", "pig pg fork rm --dst-data", dest} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("existing destination error missing %q: %v", want, err)
 		}

@@ -291,7 +291,7 @@ func BuildCloneCommand(opts *CloneOptions) string {
 		args = append(args, opts.DestDB)
 	}
 	if opts.Port != 0 && opts.Port != 5432 {
-		args = append(args, "-p", fmt.Sprintf("%d", opts.Port))
+		args = append(args, "--port", fmt.Sprintf("%d", opts.Port))
 	}
 	if opts.ConnDB != "" && opts.ConnDB != "postgres" {
 		args = append(args, "--conn-db", opts.ConnDB)

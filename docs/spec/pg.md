@@ -25,7 +25,7 @@ Control Commands (via pg_ctl or systemctl):
 Connection & Query (via psql):
   pig pg psql [db] [-c sql]        connect to postgres
   pig pg ps                        show current connections
-  pig pg kill [-a] [-x] [-u user] [-d db] [-q sql] [-w secs]
+  pig pg kill [-a] [-x] [-u user] [-d db] [-q sql] [--watch secs]
 
 Maintenance (via psql & pg_repack):
   pig pg vacuum  [db] [-a]         vacuum database
@@ -205,7 +205,6 @@ pig pg start                      # Start with defaults
 pig pg start -D /data/pg17        # Specify data directory
 pig pg start -l /pg/log/pg.log    # Redirect output to log file
 pig pg start -O "-p 5433"         # Pass options to postgres
-pig pg start -y                   # Force start (skip running check)
 ```
 
 **Options:**
@@ -214,10 +213,11 @@ pig pg start -y                   # Force start (skip running check)
 |:---|:---|:---|
 | `--log` | `-l` | Redirect stdout/stderr to log file |
 | `--timeout` | `-t` | Wait timeout (seconds) |
-| `--no-wait` | `-W` | Don't wait for startup completion |
+| `--no-wait` | | Don't wait for startup completion |
 | `--options` | `-O` | Options to pass to postgres |
-| `--yes` | `-y` | Force start (even if already running) |
 {.full-width}
+
+**Idempotency:** Starting an already-running server succeeds (exit 0). Text mode prints `PostgreSQL is already running (pid N)`; JSON/YAML mode returns `already: true` in the result payload.
 
 
 ### pg stop
@@ -236,8 +236,10 @@ pig pg stop -m immediate          # Immediate shutdown
 |:---|:---|:---|:---|
 | `--mode` | `-m` | fast | Shutdown mode: smart/fast/immediate |
 | `--timeout` | `-t` | 60 | Wait timeout (seconds) |
-| `--no-wait` | `-W` | false | Don't wait for shutdown completion |
+| `--no-wait` | | false | Don't wait for shutdown completion |
 {.full-width}
+
+**Idempotency:** Stopping an already-stopped server succeeds (exit 0). Text mode prints `PostgreSQL is already stopped`; JSON/YAML mode returns `already: true` in the result payload.
 
 **Shutdown Modes:**
 
@@ -310,7 +312,7 @@ pig pg promote -y                 # Skip confirmation prompt
 | Option | Short | Description |
 |:---|:---|:---|
 | `--timeout` | `-t` | Wait timeout (seconds) |
-| `--no-wait` | `-W` | Don't wait for promotion completion |
+| `--no-wait` | | Don't wait for promotion completion |
 | `--yes` | `-y` | Skip confirmation prompt |
 | `--plan` | | Preview local-only promotion without executing |
 {.full-width}
@@ -404,7 +406,7 @@ pig pg kill -u admin -x           # Terminate user's connections
 pig pg kill -d mydb -x            # Terminate database connections
 pig pg kill -s idle -x            # Terminate idle connections
 pig pg kill --cancel -x           # Cancel queries instead of terminating
-pig pg kill -w 5 -x               # Repeat every 5 seconds
+pig pg kill --watch 5 -x          # Repeat every 5 seconds
 ```
 
 **Options:**
@@ -419,7 +421,7 @@ pig pg kill -w 5 -x               # Repeat every 5 seconds
 | `--query` | `-q` | Filter by query pattern |
 | `--all` | `-a` | Include replication connections |
 | `--cancel` | `-c` | Cancel queries instead of terminating |
-| `--watch` | `-w` | Repeat every N seconds |
+| `--watch` | | Repeat every N seconds |
 | `--plan` | | Preview primitive plan without executing |
 {.full-width}
 
