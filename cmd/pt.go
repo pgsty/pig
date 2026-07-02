@@ -26,7 +26,9 @@ var patroniCmd = &cobra.Command{
 	Aliases:     []string{"pt"},
 	GroupID:     "pigsty",
 	Annotations: ancsAnn("pig patroni", "query", "stable", "safe", true, "safe", "none", "current", 100),
-	Long: `Manage Patroni cluster using patronictl commands.
+	Long: `Low-level Patroni primitives (patronictl + systemd unit patroni). Orchestrated point-in-time recovery lives in "pig pitr".
+
+Manage Patroni cluster using patronictl commands.
 
 Cluster Operations (via patronictl):
   pig pt list [cluster]            list cluster members
@@ -41,8 +43,6 @@ Cluster Operations (via patronictl):
 
 Service Management (via systemctl):
   pig pt status                    show comprehensive patroni status
-  pig pt start                     start patroni service (shortcut)
-  pig pt stop                      stop patroni service (shortcut)
   pig pt svc start                 start patroni service
   pig pt svc stop                  stop patroni service
   pig pt svc restart               restart patroni service
@@ -76,31 +76,31 @@ func registerPatroniFlags() {
 	patroniListCmd.Flags().BoolP("watch", "W", false, "Watch mode")
 	patroniListCmd.Flags().Float64P("interval", "w", 0, "Watch interval in seconds (supports decimals, e.g., 0.5)")
 
-	// restart subcommand flags
-	patroniRestartCmd.Flags().BoolP("force", "f", false, "Skip confirmation")
+	// restart subcommand flags (B04: pig owns confirmation, patronictl gets --force)
+	patroniRestartCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
 	patroniRestartCmd.Flags().BoolP("pending", "p", false, "Only restart members with pending restart")
 	patroniRestartCmd.Flags().StringP("role", "r", "", "Filter by role: leader, replica, any")
 
-	// reinit subcommand flags
-	patroniReinitCmd.Flags().BoolP("force", "f", false, "Skip confirmation")
-	patroniReinitCmd.Flags().BoolP("wait", "w", false, "Wait for reinit to complete")
+	// reinit subcommand flags (B12: --wait is long-only)
+	patroniReinitCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
+	patroniReinitCmd.Flags().Bool("wait", false, "Wait for reinit to complete")
 	patroniReinitCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
-	// switchover subcommand flags
-	patroniSwitchoverCmd.Flags().StringP("leader", "l", "", "Current leader name")
-	patroniSwitchoverCmd.Flags().StringP("candidate", "c", "", "Candidate to promote")
-	patroniSwitchoverCmd.Flags().BoolP("force", "f", false, "Skip confirmation")
-	patroniSwitchoverCmd.Flags().StringP("scheduled", "s", "", "Scheduled time for switchover")
+	// switchover subcommand flags (B17: target flags are long-only)
+	patroniSwitchoverCmd.Flags().String("leader", "", "Current leader name")
+	patroniSwitchoverCmd.Flags().String("candidate", "", "Candidate to promote")
+	patroniSwitchoverCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
+	patroniSwitchoverCmd.Flags().String("scheduled", "", "Scheduled time for switchover")
 	patroniSwitchoverCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
-	// failover subcommand flags
-	patroniFailoverCmd.Flags().StringP("candidate", "c", "", "Candidate to promote")
-	patroniFailoverCmd.Flags().BoolP("force", "f", false, "Skip confirmation")
+	// failover subcommand flags (B17: --candidate is long-only)
+	patroniFailoverCmd.Flags().String("candidate", "", "Candidate to promote")
+	patroniFailoverCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
 	patroniFailoverCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
-	// pause/resume subcommand flags
-	patroniPauseCmd.Flags().BoolP("wait", "w", false, "Wait for all members to confirm")
-	patroniResumeCmd.Flags().BoolP("wait", "w", false, "Wait for all members to confirm")
+	// pause/resume subcommand flags (B12: --wait is long-only)
+	patroniPauseCmd.Flags().Bool("wait", false, "Wait for all members to confirm")
+	patroniResumeCmd.Flags().Bool("wait", false, "Wait for all members to confirm")
 
 	// config subcommand flags
 	patroniConfigCmd.Flags().BoolVar(&patroniConfigPlan, "plan", false, "preview config changes without executing")
@@ -109,7 +109,7 @@ func registerPatroniFlags() {
 	patroniLogCmd.Flags().BoolVarP(&patroniLogFollow, "follow", "f", false, "follow log output")
 	patroniLogCmd.Flags().IntVarP(&patroniLogLines, "lines", "n", 50, "number of lines to show")
 	patroniLogTailCmd.Flags().IntVarP(&patroniLogLines, "lines", "n", 50, "number of lines to show")
-	patroniLogTailCmd.Flags().BoolP("follow", "f", false, "follow log output (default for tail)")
+	patroniLogTailCmd.Flags().BoolP("follow", "f", false, "(no-op: tail always follows)")
 	patroniLogCatCmd.Flags().IntVarP(&patroniLogLines, "lines", "n", 50, "number of lines to show")
 }
 
@@ -141,7 +141,7 @@ func registerPatroniCommands() {
 		patroniConfigCmd,
 		patroniLogCmd,
 		patroniStatusCmd,
-		// Service shortcuts (systemctl)
+		// Hidden stubs routing removed shortcuts to svc (B03)
 		patroniStartCmd,
 		patroniStopCmd,
 		// Service management (systemctl)
@@ -216,11 +216,16 @@ var patroniRestartCmd = &cobra.Command{
 This command uses patronictl restart to perform a rolling restart of
 PostgreSQL instances. Unlike 'pig pt svc restart' which restarts the
 Patroni daemon itself, this command restarts the PostgreSQL database
-while keeping Patroni running.`,
+while keeping Patroni running.
+
+Confirmation tier is conditional (D2): restarting a single explicit
+member executes directly; a cluster-wide rolling restart (no member
+argument) asks for confirmation unless --yes is given. patronictl
+always runs with --force; pig owns the confirmation prompt.`,
 	Example: `
-  pig pt restart                   # restart all members (interactive)
-  pig pt restart pg-test-1         # restart specific member
-  pig pt restart -f                # restart without confirmation
+  pig pt restart                   # rolling restart ALL members (asks confirmation)
+  pig pt restart -y                # cluster-wide restart, skip confirmation
+  pig pt restart pg-test-1         # restart specific member (direct)
   pig pt restart --role=replica    # restart replicas only
   pig pt restart --pending         # restart members with pending restart`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -228,36 +233,58 @@ while keeping Patroni running.`,
 		if len(args) > 0 {
 			member = args[0]
 		}
-		force, _ := cmd.Flags().GetBool("force")
+		yes, _ := cmd.Flags().GetBool("yes")
 		pending, _ := cmd.Flags().GetBool("pending")
 		role, _ := cmd.Flags().GetString("role")
+
+		// D2 conditional tier: cluster-wide rolling restart (no member) is T2;
+		// an explicit single member executes directly in both modes.
+		if member == "" {
+			if err := requirePatroniStructuredYes(yes, patroni.RestartNeedYesResult()); err != nil {
+				return err
+			}
+			if err := requireTextHighRiskConfirmation(yes,
+				"This will rolling-restart PostgreSQL on ALL cluster members",
+				"cluster-wide restart"); err != nil {
+				return err
+			}
+		}
 
 		opts := &patroni.RestartOptions{
 			Member:  member,
 			Role:    role,
-			Force:   force,
+			Force:   true, // B04: patronictl never prompts; pig owns confirmation
 			Pending: pending,
-		}
-		if err := requirePatroniStructuredForce(force, patroni.RestartNeedForceResult()); err != nil {
-			return err
 		}
 		return runLegacyStructured(legacyModulePt, "pig patroni restart", args, map[string]interface{}{
 			"member":  member,
-			"force":   force,
+			"yes":     yes,
 			"pending": pending,
 			"role":    role,
 		}, func() error {
-			return patroni.Restart(utils.GetDBSU(patroniDBSU), opts)
+			return patroniRestartExec(utils.GetDBSU(patroniDBSU), opts)
 		})
 	},
 }
 
-func requirePatroniStructuredForce(force bool, result *output.Result) error {
-	if !config.IsStructuredOutput() || force {
+// requirePatroniStructuredYes is the fail-closed structured-mode gate for
+// destructive pt commands: without --yes, emit the confirmation-required
+// result instead of executing (B04).
+func requirePatroniStructuredYes(yes bool, result *output.Result) error {
+	if !config.IsStructuredOutput() || yes {
 		return nil
 	}
 	return handleAuxResult(result)
 }
+
+// Execution seams for cluster operations, stubbed in tests so RunE-level
+// gating can be verified without invoking patronictl/sudo.
+var (
+	patroniRestartExec    = patroni.Restart
+	patroniReinitExec     = patroni.Reinit
+	patroniSwitchoverExec = patroni.Switchover
+	patroniFailoverExec   = patroni.Failover
+)
 
 // splitConfigKVPairs partitions config args into key=value pairs and invalid tokens.
 func splitConfigKVPairs(args []string) (pairs []string, invalid []string) {
@@ -300,31 +327,37 @@ var patroniReinitCmd = &cobra.Command{
 WARNING: This will DELETE all data on the target member and rebuild it
 from scratch using pg_basebackup from the current leader.`,
 	Example: `
-  pig pt reinit pg-test-2          # reinit member pg-test-2
-  pig pt reinit pg-test-2 -f       # reinit without confirmation
-  pig pt reinit pg-test-2 -w       # wait for completion`,
+  pig pt reinit pg-test-2          # reinit member pg-test-2 (asks confirmation)
+  pig pt reinit pg-test-2 -y       # reinit without confirmation
+  pig pt reinit pg-test-2 --wait   # wait for completion`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		force, _ := cmd.Flags().GetBool("force")
+		yes, _ := cmd.Flags().GetBool("yes")
 		wait, _ := cmd.Flags().GetBool("wait")
 
 		opts := &patroni.ReinitOptions{
 			Member: args[0],
-			Force:  force,
+			Force:  yes,
 			Wait:   wait,
 		}
 		if patroniPlan {
 			return handlePlanOutput(patroni.BuildReinitPlan(opts))
 		}
-		if err := requirePatroniStructuredForce(force, patroni.ReinitNeedForceResult()); err != nil {
+		if err := requirePatroniStructuredYes(yes, patroni.ReinitNeedYesResult()); err != nil {
 			return err
 		}
+		if err := requireTextHighRiskConfirmation(yes,
+			fmt.Sprintf("This will WIPE and rebuild member %s from a replica copy", args[0]),
+			"reinit"); err != nil {
+			return err
+		}
+		opts.Force = true // B04: patronictl never prompts; pig owns confirmation
 		return runLegacyStructured(legacyModulePt, "pig patroni reinit", args, map[string]interface{}{
 			"member": args[0],
-			"force":  force,
+			"yes":    yes,
 			"wait":   wait,
 		}, func() error {
-			return patroni.Reinit(utils.GetDBSU(patroniDBSU), opts)
+			return patroniReinitExec(utils.GetDBSU(patroniDBSU), opts)
 		})
 	},
 }
@@ -341,21 +374,21 @@ A switchover is a planned operation that gracefully transfers leadership
 from the current leader to a specified candidate (or auto-selected replica).
 The old leader becomes a replica after switchover.`,
 	Example: `
-  pig pt switchover                          # interactive switchover
+  pig pt switchover                          # planned switchover (asks confirmation)
   pig pt switchover --candidate pg-test-2    # switchover to specific member
-  pig pt switchover -f                       # switchover without confirmation
+  pig pt switchover -y                       # switchover without confirmation
   pig pt switchover --scheduled "2024-01-01T12:00:00"  # scheduled switchover`,
 	Annotations: ancsAnn("pig patroni switchover", "action", "volatile", "unsafe", false, "high", "required", "dbsu", 300000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		leader, _ := cmd.Flags().GetString("leader")
 		candidate, _ := cmd.Flags().GetString("candidate")
-		force, _ := cmd.Flags().GetBool("force")
+		yes, _ := cmd.Flags().GetBool("yes")
 		scheduled, _ := cmd.Flags().GetString("scheduled")
 
 		opts := &patroni.SwitchoverOptions{
 			Leader:    leader,
 			Candidate: candidate,
-			Force:     force,
+			Force:     yes,
 			Scheduled: scheduled,
 		}
 
@@ -365,14 +398,20 @@ The old leader becomes a replica after switchover.`,
 			return output.RenderPlan(plan)
 		}
 
-		// Structured output mode
+		// Structured output mode (fail-closed without --yes inside SwitchoverResult)
 		if config.IsStructuredOutput() {
 			result := patroni.SwitchoverResult(utils.GetDBSU(patroniDBSU), opts)
 			return handleAuxResult(result)
 		}
 
-		// Default passthrough
-		return patroni.Switchover(utils.GetDBSU(patroniDBSU), opts)
+		// Text mode: pig owns confirmation; patronictl never prompts (B04)
+		if err := requireTextHighRiskConfirmation(yes,
+			"This will transfer cluster leadership (planned switchover)",
+			"switchover"); err != nil {
+			return err
+		}
+		opts.Force = true
+		return patroniSwitchoverExec(utils.GetDBSU(patroniDBSU), opts)
 	},
 }
 
@@ -391,19 +430,19 @@ transactions.
 WARNING: Use switchover for planned maintenance. Only use failover when
 the leader is truly unavailable.`,
 	Example: `
-  pig pt failover                          # interactive failover
+  pig pt failover                          # manual failover (asks confirmation)
   pig pt failover --candidate pg-test-2    # failover to specific member
-  pig pt failover -f                       # failover without confirmation
-  pig pt failover -f -o json               # structured JSON output
+  pig pt failover -y                       # failover without confirmation
+  pig pt failover -y -o json               # structured JSON output
   pig pt failover --plan                   # show execution plan`,
 	Annotations: ancsAnn("pig patroni failover", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 300000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		candidate, _ := cmd.Flags().GetString("candidate")
-		force, _ := cmd.Flags().GetBool("force")
+		yes, _ := cmd.Flags().GetBool("yes")
 
 		opts := &patroni.FailoverOptions{
 			Candidate: candidate,
-			Force:     force,
+			Force:     yes,
 		}
 
 		// Plan mode (highest priority)
@@ -412,14 +451,20 @@ the leader is truly unavailable.`,
 			return output.RenderPlan(plan)
 		}
 
-		// Structured output mode
+		// Structured output mode (fail-closed without --yes inside FailoverResult)
 		if config.IsStructuredOutput() {
 			result := patroni.FailoverResult(utils.GetDBSU(patroniDBSU), opts)
 			return handleAuxResult(result)
 		}
 
-		// Default passthrough
-		return patroni.Failover(utils.GetDBSU(patroniDBSU), opts)
+		// Text mode: pig owns confirmation; patronictl never prompts (B04)
+		if err := requireTextHighRiskConfirmation(yes,
+			"This will force leadership transfer (failover, data loss possible)",
+			"failover"); err != nil {
+			return err
+		}
+		opts.Force = true
+		return patroniFailoverExec(utils.GetDBSU(patroniDBSU), opts)
 	},
 }
 
@@ -712,34 +757,36 @@ var patroniStatusCmd = &cobra.Command{
 }
 
 // ============================================================================
-// Service Shortcuts (via systemctl) - pig pt start/stop
+// Removed Service Shortcuts (B03) - hidden landing-pad stubs
 // ============================================================================
 
-// patroniStartCmd: pig pt start - shortcut for pig pt svc start
+// patroniDaemonMovedErr is the exact one-line route printed when the removed
+// top-level shortcuts are invoked (B03; wording is guarded by T1 tests).
+const patroniDaemonMovedErr = "daemon control moved: use pig pt svc start|stop"
+
+// patroniStartCmd: hidden stub for the removed 'pig pt start' shortcut.
 var patroniStartCmd = &cobra.Command{
-	Use:         "start",
-	Aliases:     []string{"boot", "up"},
-	Short:       "Start patroni service (shortcut for 'svc start')",
-	Annotations: ancsAnn("pig patroni start", "action", "volatile", "unsafe", true, "medium", "none", "root", 10000),
-	Long:        `Start the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc start'.`,
+	Use:          "start",
+	Aliases:      []string{"boot", "up"},
+	Hidden:       true,
+	SilenceUsage: true,
+	Short:        "(moved) use 'pig pt svc start'",
+	Args:         cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePt, "pig patroni start", args, nil, func() error {
-			return patroni.Systemctl("start")
-		})
+		return fmt.Errorf("%s", patroniDaemonMovedErr)
 	},
 }
 
-// patroniStopCmd: pig pt stop - shortcut for pig pt svc stop
+// patroniStopCmd: hidden stub for the removed 'pig pt stop' shortcut.
 var patroniStopCmd = &cobra.Command{
-	Use:         "stop",
-	Aliases:     []string{"halt", "dn", "down"},
-	Short:       "Stop patroni service (shortcut for 'svc stop')",
-	Annotations: ancsAnn("pig patroni stop", "action", "volatile", "unsafe", true, "high", "recommended", "root", 10000),
-	Long:        `Stop the Patroni daemon service using systemctl. This is a shortcut for 'pig pt svc stop'.`,
+	Use:          "stop",
+	Aliases:      []string{"halt", "dn", "down"},
+	Hidden:       true,
+	SilenceUsage: true,
+	Short:        "(moved) use 'pig pt svc stop'",
+	Args:         cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePt, "pig patroni stop", args, nil, func() error {
-			return patroni.Systemctl("stop")
-		})
+		return fmt.Errorf("%s", patroniDaemonMovedErr)
 	},
 }
 

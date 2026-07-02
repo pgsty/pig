@@ -42,8 +42,8 @@ func (d *PtSwitchoverResultData) Text() string {
 }
 
 // SwitchoverResult executes patronictl switchover and returns a structured result.
-// It requires --force (opts.Force=true) since structured output mode cannot handle
-// interactive confirmation prompts.
+// It requires --yes (mapped by cmd to opts.Force=true) since structured output
+// mode cannot handle interactive confirmation prompts (B04).
 func SwitchoverResult(dbsu string, opts *SwitchoverOptions) *output.Result {
 	// 1. Check patronictl existence
 	binPath, err := patroniLookPath("patronictl")
@@ -57,12 +57,12 @@ func SwitchoverResult(dbsu string, opts *SwitchoverOptions) *output.Result {
 			fmt.Sprintf("Patroni config not found: %s", DefaultConfigPath))
 	}
 
-	// 3. Structured output mode requires --force (cannot handle interactive prompts)
+	// 3. Structured output mode requires --yes (cannot handle interactive prompts)
 	if opts == nil || !opts.Force {
 		return output.Fail(output.CodePtConfirmationRequired,
-			"switchover requires --force (-f) flag in structured output mode").
+			"switchover requires --yes (-y) flag in structured output mode").
 			WithNextActions(
-				output.NextAction{Command: "pig pt switchover ... --force", Reason: "execute switchover after explicit confirmation", Required: true},
+				output.NextAction{Command: "pig pt switchover ... --yes", Reason: "execute switchover after explicit confirmation", Required: true},
 				output.NextAction{Command: "pig pt switchover ... --plan", Reason: "preview switchover without executing", Required: false},
 			)
 	}

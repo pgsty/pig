@@ -458,8 +458,8 @@ func TestBuildSwitchoverPlanForceOption(t *testing.T) {
 	if plan == nil {
 		t.Fatal("BuildSwitchoverPlan returned nil")
 	}
-	if !strings.Contains(plan.Command, "--force") {
-		t.Errorf("plan.Command should include --force: %q", plan.Command)
+	if !strings.Contains(plan.Command, "--yes") {
+		t.Errorf("plan.Command should include --yes: %q", plan.Command)
 	}
 	// Risks should mention force mode
 	hasForceRisk := false
@@ -485,7 +485,7 @@ func TestBuildSwitchoverCommand(t *testing.T) {
 			name:     "nil opts",
 			opts:     nil,
 			contains: []string{"pig", "pt", "switchover"},
-			excludes: []string{"--leader", "--candidate", "--scheduled", "--force"},
+			excludes: []string{"--leader", "--candidate", "--scheduled", "--yes", "--force"},
 		},
 		{
 			name: "all options",
@@ -495,8 +495,8 @@ func TestBuildSwitchoverCommand(t *testing.T) {
 				Scheduled: "2026-02-03T12:00:00",
 				Force:     true,
 			},
-			contains: []string{"--leader", "pg-1", "--candidate", "pg-2", "--scheduled", "--force"},
-			excludes: []string{},
+			contains: []string{"--leader", "pg-1", "--candidate", "pg-2", "--scheduled", "--yes"},
+			excludes: []string{"--force"},
 		},
 		{
 			name: "only candidate",
@@ -504,7 +504,7 @@ func TestBuildSwitchoverCommand(t *testing.T) {
 				Candidate: "pg-2",
 			},
 			contains: []string{"--candidate", "pg-2"},
-			excludes: []string{"--leader", "--scheduled", "--force"},
+			excludes: []string{"--leader", "--scheduled", "--yes", "--force"},
 		},
 	}
 

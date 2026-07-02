@@ -270,8 +270,8 @@ func TestBuildFailoverPlan_EmptyOpts(t *testing.T) {
 	if strings.Contains(plan.Command, "--candidate") {
 		t.Errorf("plan.Command should not include --candidate when empty: %q", plan.Command)
 	}
-	if strings.Contains(plan.Command, "--force") {
-		t.Errorf("plan.Command should not include --force when not set: %q", plan.Command)
+	if strings.Contains(plan.Command, "--yes") || strings.Contains(plan.Command, "--force") {
+		t.Errorf("plan.Command should not include --yes when not set: %q", plan.Command)
 	}
 }
 
@@ -291,8 +291,8 @@ func TestBuildFailoverPlan_FullOpts(t *testing.T) {
 	if !strings.Contains(plan.Command, "--candidate") {
 		t.Errorf("plan.Command missing --candidate: %q", plan.Command)
 	}
-	if !strings.Contains(plan.Command, "--force") {
-		t.Errorf("plan.Command missing --force: %q", plan.Command)
+	if !strings.Contains(plan.Command, "--yes") {
+		t.Errorf("plan.Command missing --yes: %q", plan.Command)
 	}
 
 	if len(plan.Actions) == 0 {
@@ -358,7 +358,7 @@ func TestBuildFailoverCommand(t *testing.T) {
 			name:     "nil opts",
 			opts:     nil,
 			contains: []string{"pig", "pt", "failover"},
-			excludes: []string{"--candidate", "--force"},
+			excludes: []string{"--candidate", "--yes", "--force"},
 		},
 		{
 			name: "all options",
@@ -366,8 +366,8 @@ func TestBuildFailoverCommand(t *testing.T) {
 				Candidate: "pg-2",
 				Force:     true,
 			},
-			contains: []string{"--candidate", "pg-2", "--force"},
-			excludes: []string{},
+			contains: []string{"--candidate", "pg-2", "--yes"},
+			excludes: []string{"--force"},
 		},
 		{
 			name: "only candidate",
@@ -375,15 +375,15 @@ func TestBuildFailoverCommand(t *testing.T) {
 				Candidate: "pg-2",
 			},
 			contains: []string{"--candidate", "pg-2"},
-			excludes: []string{"--force"},
+			excludes: []string{"--yes", "--force"},
 		},
 		{
 			name: "only force",
 			opts: &FailoverOptions{
 				Force: true,
 			},
-			contains: []string{"--force"},
-			excludes: []string{"--candidate"},
+			contains: []string{"--yes"},
+			excludes: []string{"--candidate", "--force"},
 		},
 	}
 
@@ -468,9 +468,9 @@ func TestFailoverFailResult(t *testing.T) {
 	}
 }
 
-func TestFailoverNeedForceResult(t *testing.T) {
+func TestFailoverNeedYesResult(t *testing.T) {
 	result := output.Fail(output.CodePtConfirmationRequired,
-		"failover requires --force (-f) flag in structured output mode")
+		"failover requires --yes (-y) flag in structured output mode")
 
 	if result.Success {
 		t.Error("Result should not be successful")

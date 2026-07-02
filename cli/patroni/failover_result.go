@@ -40,8 +40,8 @@ func (d *PtFailoverResultData) Text() string {
 }
 
 // FailoverResult executes patronictl failover and returns a structured result.
-// It requires --force (opts.Force=true) since structured output mode cannot handle
-// interactive confirmation prompts.
+// It requires --yes (mapped by cmd to opts.Force=true) since structured output
+// mode cannot handle interactive confirmation prompts (B04).
 func FailoverResult(dbsu string, opts *FailoverOptions) *output.Result {
 	// 1. Check patronictl existence
 	binPath, err := patroniLookPath("patronictl")
@@ -55,12 +55,12 @@ func FailoverResult(dbsu string, opts *FailoverOptions) *output.Result {
 			fmt.Sprintf("Patroni config not found: %s", DefaultConfigPath))
 	}
 
-	// 3. Structured output mode requires --force (cannot handle interactive prompts)
+	// 3. Structured output mode requires --yes (cannot handle interactive prompts)
 	if opts == nil || !opts.Force {
 		return output.Fail(output.CodePtConfirmationRequired,
-			"failover requires --force (-f) flag in structured output mode").
+			"failover requires --yes (-y) flag in structured output mode").
 			WithNextActions(
-				output.NextAction{Command: "pig pt failover ... --force", Reason: "execute failover after explicit confirmation", Required: true},
+				output.NextAction{Command: "pig pt failover ... --yes", Reason: "execute failover after explicit confirmation", Required: true},
 				output.NextAction{Command: "pig pt failover ... --plan", Reason: "preview failover without executing", Required: false},
 			)
 	}

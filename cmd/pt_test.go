@@ -217,7 +217,7 @@ func TestPatroniConfigInvalidActionStructuredError(t *testing.T) {
 	}
 }
 
-func TestPatroniStructuredNeedForceGate(t *testing.T) {
+func TestPatroniStructuredNeedYesGate(t *testing.T) {
 	origFormat := config.OutputFormat
 	defer func() {
 		config.OutputFormat = origFormat
@@ -226,10 +226,10 @@ func TestPatroniStructuredNeedForceGate(t *testing.T) {
 
 	var runErr error
 	raw := capturePtStdout(t, func() {
-		runErr = requirePatroniStructuredForce(false, patroni.RestartNeedForceResult())
+		runErr = requirePatroniStructuredYes(false, patroni.RestartNeedYesResult())
 	})
 	if runErr == nil {
-		t.Fatal("structured Patroni command without --force should fail")
+		t.Fatal("structured Patroni command without --yes should fail")
 	}
 
 	var payload map[string]interface{}
@@ -242,16 +242,19 @@ func TestPatroniStructuredNeedForceGate(t *testing.T) {
 	if code, _ := payload["code"].(float64); int(code) != output.CodePtConfirmationRequired {
 		t.Fatalf("code = %v, want %d", payload["code"], output.CodePtConfirmationRequired)
 	}
+	if msg, _ := payload["message"].(string); !strings.Contains(msg, "--yes (-y)") {
+		t.Fatalf("gate message must reference --yes (-y), got %q", msg)
+	}
 }
 
-func TestPatroniRestartReinitStructuredRunERequiresForce(t *testing.T) {
+func TestPatroniRestartReinitStructuredRunERequiresYes(t *testing.T) {
 	origFormat := config.OutputFormat
 	origPlan := patroniPlan
 	defer func() {
 		config.OutputFormat = origFormat
 		patroniPlan = origPlan
-		_ = patroniRestartCmd.Flags().Set("force", "false")
-		_ = patroniReinitCmd.Flags().Set("force", "false")
+		_ = patroniRestartCmd.Flags().Set("yes", "false")
+		_ = patroniReinitCmd.Flags().Set("yes", "false")
 	}()
 	config.OutputFormat = config.OUTPUT_JSON
 	patroniPlan = false
@@ -262,19 +265,19 @@ func TestPatroniRestartReinitStructuredRunERequiresForce(t *testing.T) {
 		args []string
 		code int
 	}{
-		{name: "restart", cmd: patroniRestartCmd, args: nil, code: output.CodePtConfirmationRequired},
+		{name: "restart cluster-wide", cmd: patroniRestartCmd, args: nil, code: output.CodePtConfirmationRequired},
 		{name: "reinit", cmd: patroniReinitCmd, args: []string{"pg1"}, code: output.CodePtConfirmationRequired},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_ = tt.cmd.Flags().Set("force", "false")
+			_ = tt.cmd.Flags().Set("yes", "false")
 			var runErr error
 			raw := capturePtStdout(t, func() {
 				runErr = tt.cmd.RunE(tt.cmd, tt.args)
 			})
 			if runErr == nil {
-				t.Fatalf("%s without --force should fail in structured mode", tt.name)
+				t.Fatalf("%s without --yes should fail in structured mode", tt.name)
 			}
 			var payload map[string]interface{}
 			if err := json.Unmarshal(ptBytesTrimSpace([]byte(raw)), &payload); err != nil {
@@ -284,6 +287,261 @@ func TestPatroniRestartReinitStructuredRunERequiresForce(t *testing.T) {
 				t.Fatalf("code = %v, want %d", payload["code"], tt.code)
 			}
 		})
+	}
+}
+
+// TestPatroniRestartMemberBranchSkipsGate (D2): an explicit member argument
+// executes directly in both output modes — no gate, no prompt — while
+// patronictl always receives --force (B04).
+func TestPatroniRestartMemberBranchSkipsGate(t *testing.T) {
+	origFormat := config.OutputFormat
+	origExec := patroniRestartExec
+	origConfirm := highRiskTextConfirm
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniRestartExec = origExec
+		highRiskTextConfirm = origConfirm
+		_ = patroniRestartCmd.Flags().Set("yes", "false")
+	}()
+
+	confirmCalled := false
+	highRiskTextConfirm = func(warning, action string) error {
+		confirmCalled = true
+		return nil
+	}
+
+	for _, mode := range []string{config.OUTPUT_TEXT, config.OUTPUT_JSON} {
+		t.Run(mode, func(t *testing.T) {
+			config.OutputFormat = mode
+			confirmCalled = false
+			var gotOpts *patroni.RestartOptions
+			patroniRestartExec = func(dbsu string, opts *patroni.RestartOptions) error {
+				gotOpts = opts
+				return nil
+			}
+			var runErr error
+			_ = capturePtStdout(t, func() {
+				runErr = patroniRestartCmd.RunE(patroniRestartCmd, []string{"pg-test-1"})
+			})
+			if runErr != nil {
+				t.Fatalf("restart with explicit member should execute directly: %v", runErr)
+			}
+			if confirmCalled {
+				t.Fatal("restart with explicit member must not prompt for confirmation")
+			}
+			if gotOpts == nil || gotOpts.Member != "pg-test-1" {
+				t.Fatalf("restart should execute against member pg-test-1, got %+v", gotOpts)
+			}
+			if !gotOpts.Force {
+				t.Fatal("patronictl must always receive --force (B04)")
+			}
+		})
+	}
+}
+
+// TestPatroniClusterWideRestartTextConfirm (D2): cluster-wide rolling restart
+// in text mode is T2 — it asks for confirmation unless --yes.
+func TestPatroniClusterWideRestartTextConfirm(t *testing.T) {
+	origFormat := config.OutputFormat
+	origExec := patroniRestartExec
+	origConfirm := highRiskTextConfirm
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniRestartExec = origExec
+		highRiskTextConfirm = origConfirm
+		_ = patroniRestartCmd.Flags().Set("yes", "false")
+	}()
+	config.OutputFormat = config.OUTPUT_TEXT
+
+	execCalled := false
+	patroniRestartExec = func(dbsu string, opts *patroni.RestartOptions) error {
+		execCalled = true
+		return nil
+	}
+
+	// Confirmation rejected: nothing executes.
+	var gotWarning string
+	highRiskTextConfirm = func(warning, action string) error {
+		gotWarning = warning
+		return errors.New("cluster-wide restart cancelled by user")
+	}
+	_ = patroniRestartCmd.Flags().Set("yes", "false")
+	if err := patroniRestartCmd.RunE(patroniRestartCmd, nil); err == nil {
+		t.Fatal("rejected confirmation must abort cluster-wide restart")
+	}
+	if execCalled {
+		t.Fatal("patronictl restart must not run after rejected confirmation")
+	}
+	if !strings.Contains(gotWarning, "ALL cluster members") {
+		t.Fatalf("warning should mention all cluster members, got %q", gotWarning)
+	}
+
+	// --yes skips the prompt and executes with patronictl --force.
+	highRiskTextConfirm = func(warning, action string) error {
+		t.Fatal("--yes must skip the confirmation prompt")
+		return nil
+	}
+	var gotOpts *patroni.RestartOptions
+	patroniRestartExec = func(dbsu string, opts *patroni.RestartOptions) error {
+		gotOpts = opts
+		return nil
+	}
+	_ = patroniRestartCmd.Flags().Set("yes", "true")
+	if err := patroniRestartCmd.RunE(patroniRestartCmd, nil); err != nil {
+		t.Fatalf("cluster-wide restart with --yes should execute: %v", err)
+	}
+	if gotOpts == nil || !gotOpts.Force {
+		t.Fatalf("patronictl must always receive --force (B04), got %+v", gotOpts)
+	}
+}
+
+// TestPatroniTextConfirmClusterOps (B04): text-mode reinit/switchover/failover
+// prompt at the pig layer and, once confirmed, execute with patronictl --force
+// so patronictl never prompts.
+func TestPatroniTextConfirmClusterOps(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	origConfirm := highRiskTextConfirm
+	origReinit := patroniReinitExec
+	origSwitchover := patroniSwitchoverExec
+	origFailover := patroniFailoverExec
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		highRiskTextConfirm = origConfirm
+		patroniReinitExec = origReinit
+		patroniSwitchoverExec = origSwitchover
+		patroniFailoverExec = origFailover
+		_ = patroniReinitCmd.Flags().Set("yes", "false")
+		_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
+		_ = patroniFailoverCmd.Flags().Set("yes", "false")
+	}()
+	config.OutputFormat = config.OUTPUT_TEXT
+	patroniPlan = false
+
+	var forcedToPatronictl bool
+	patroniReinitExec = func(dbsu string, opts *patroni.ReinitOptions) error {
+		forcedToPatronictl = opts != nil && opts.Force
+		return nil
+	}
+	patroniSwitchoverExec = func(dbsu string, opts *patroni.SwitchoverOptions) error {
+		forcedToPatronictl = opts != nil && opts.Force
+		return nil
+	}
+	patroniFailoverExec = func(dbsu string, opts *patroni.FailoverOptions) error {
+		forcedToPatronictl = opts != nil && opts.Force
+		return nil
+	}
+
+	tests := []struct {
+		name    string
+		cmd     *cobra.Command
+		args    []string
+		warning string
+	}{
+		{name: "reinit", cmd: patroniReinitCmd, args: []string{"pg-test-2"}, warning: "WIPE and rebuild member pg-test-2"},
+		{name: "switchover", cmd: patroniSwitchoverCmd, args: nil, warning: "transfer cluster leadership"},
+		{name: "failover", cmd: patroniFailoverCmd, args: nil, warning: "data loss possible"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Rejected confirmation aborts before execution.
+			forcedToPatronictl = false
+			var gotWarning string
+			highRiskTextConfirm = func(warning, action string) error {
+				gotWarning = warning
+				return errors.New(tt.name + " cancelled by user")
+			}
+			_ = tt.cmd.Flags().Set("yes", "false")
+			if err := tt.cmd.RunE(tt.cmd, tt.args); err == nil {
+				t.Fatalf("%s must abort on rejected confirmation", tt.name)
+			}
+			if forcedToPatronictl {
+				t.Fatalf("%s must not execute after rejected confirmation", tt.name)
+			}
+			if !strings.Contains(gotWarning, tt.warning) {
+				t.Fatalf("%s warning %q should contain %q", tt.name, gotWarning, tt.warning)
+			}
+
+			// Accepted confirmation executes with patronictl --force.
+			highRiskTextConfirm = func(warning, action string) error { return nil }
+			if err := tt.cmd.RunE(tt.cmd, tt.args); err != nil {
+				t.Fatalf("%s should execute after accepted confirmation: %v", tt.name, err)
+			}
+			if !forcedToPatronictl {
+				t.Fatalf("%s must pass --force to patronictl after pig-level confirmation (B04)", tt.name)
+			}
+		})
+	}
+}
+
+// TestPatroniStartStopStubs (B03): the removed top-level start/stop shortcuts
+// stay as hidden stubs that print nothing to stdout and route to pt svc.
+func TestPatroniStartStopStubs(t *testing.T) {
+	for _, cmd := range []*cobra.Command{patroniStartCmd, patroniStopCmd} {
+		t.Run(cmd.Name(), func(t *testing.T) {
+			if !cmd.Hidden {
+				t.Errorf("pt %s stub must be hidden", cmd.Name())
+			}
+			var runErr error
+			raw := capturePtStdout(t, func() {
+				runErr = cmd.RunE(cmd, nil)
+			})
+			if runErr == nil {
+				t.Fatalf("pt %s stub must return an error", cmd.Name())
+			}
+			if !strings.Contains(runErr.Error(), "pig pt svc") {
+				t.Errorf("pt %s stub must route to pig pt svc, got %q", cmd.Name(), runErr)
+			}
+			if runErr.Error() != "daemon control moved: use pig pt svc start|stop" {
+				t.Errorf("pt %s stub wording drifted: %q", cmd.Name(), runErr)
+			}
+			if strings.TrimSpace(raw) != "" {
+				t.Errorf("pt %s stub must print nothing to stdout, got %q", cmd.Name(), raw)
+			}
+		})
+	}
+}
+
+// TestPatroniRemovedShorthands guards B04/B12/B17: -f/-l/-c/-s/-w are gone from
+// the pt cluster-op surface while --yes/-y is present on all four T2 commands.
+func TestPatroniRemovedShorthands(t *testing.T) {
+	removed := map[*cobra.Command][]string{
+		patroniRestartCmd:    {"force"},
+		patroniReinitCmd:     {"force"},
+		patroniSwitchoverCmd: {"force"},
+		patroniFailoverCmd:   {"force"},
+	}
+	for cmd, flags := range removed {
+		for _, name := range flags {
+			if cmd.Flags().Lookup(name) != nil {
+				t.Errorf("pt %s: flag --%s should be removed (B04)", cmd.Name(), name)
+			}
+		}
+		yes := cmd.Flags().Lookup("yes")
+		if yes == nil || yes.Shorthand != "y" {
+			t.Errorf("pt %s: --yes/-y gate flag missing (B04)", cmd.Name())
+		}
+	}
+	longOnly := map[*cobra.Command][]string{
+		patroniReinitCmd:     {"wait"},
+		patroniPauseCmd:      {"wait"},
+		patroniResumeCmd:     {"wait"},
+		patroniSwitchoverCmd: {"leader", "candidate", "scheduled"},
+		patroniFailoverCmd:   {"candidate"},
+	}
+	for cmd, flags := range longOnly {
+		for _, name := range flags {
+			f := cmd.Flags().Lookup(name)
+			if f == nil {
+				t.Errorf("pt %s: flag --%s missing", cmd.Name(), name)
+				continue
+			}
+			if f.Shorthand != "" {
+				t.Errorf("pt %s: --%s must be long-only (B12/B17), has -%s", cmd.Name(), name, f.Shorthand)
+			}
+		}
 	}
 }
 

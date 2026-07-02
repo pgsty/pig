@@ -10,7 +10,8 @@ categories: [Reference]
 The `pig patroni` command (alias `pig pt`) manages Patroni service and PostgreSQL HA clusters. It wraps common `patronictl` and `systemctl` operations for simplified cluster management.
 
 ```bash
-pig pt - Manage Patroni cluster using patronictl commands.
+pig pt - Low-level Patroni primitives (patronictl + systemd unit patroni).
+         Orchestrated point-in-time recovery lives in "pig pitr".
 
 Cluster Operations (via patronictl):
   pig pt list [cluster]            list cluster members
@@ -25,8 +26,6 @@ Cluster Operations (via patronictl):
 
 Service Management (via systemctl):
   pig pt status                    show comprehensive patroni status
-  pig pt start                     start patroni service (shortcut)
-  pig pt stop                      stop patroni service (shortcut)
   pig pt svc start                 start patroni service
   pig pt svc stop                  stop patroni service
   pig pt svc restart               restart patroni service
@@ -38,13 +37,16 @@ Logs:
   pig pt log show [-n 100]         show patroni log snapshot
 ```
 
+> **B03**: the former top-level shortcuts `pt start` / `pt stop` are removed. They remain as
+> hidden stubs that fail with a one-line route: `daemon control moved: use pig pt svc start|stop`.
+
 ## Primitive Contract
 
 `pig pt` is the Patroni and DCS primitive layer. It changes cluster state through `patronictl` and Patroni service operations; it does not call `pig pg` to manage local `pg_ctl` lifecycle and does not run pgBackRest restore. Cross-module recovery and lifecycle choreography belongs in `pig pitr`.
 
-High-risk cluster actions and DCS mutations should present a structured `state -> plan -> precheck -> execute -> verify -> result -> next_actions` contract. In JSON/YAML mode, unsafe execution requires explicit `--force` or equivalent confirmation, while read-only commands such as `pt list`, `pt status`, and `pt config show` remain confirmation-free. Plan output is side-effect-free and may include `boundary`, `confirmation`, `preconditions`, `verifications`, and `next_actions` in addition to the existing plan fields.
+High-risk cluster actions and DCS mutations should present a structured `state -> plan -> precheck -> execute -> verify -> result -> next_actions` contract. In JSON/YAML mode, unsafe execution requires explicit `--yes` confirmation, while read-only commands such as `pt list`, `pt status`, and `pt config show` remain confirmation-free. Plan output is side-effect-free and may include `boundary`, `confirmation`, `preconditions`, `verifications`, and `next_actions` in addition to the existing plan fields.
 
-Structured `pt restart`, `pt reinit`, `pt switchover`, and `pt failover` do not enter `patronictl` interactive prompts. They require `--force` for execution; otherwise Pig returns a structured confirmation-required result. `pt reinit`, `pt switchover`, and `pt failover` also expose `--plan` previews.
+Pig owns confirmation for cluster operations (B04): `patronictl` always runs with its own `--force` flag and never prompts interactively. In text mode, `pt reinit`, `pt switchover`, `pt failover`, and cluster-wide `pt restart` ask a one-line `y/yes` confirmation at the pig layer unless `--yes/-y` is given. In structured (JSON/YAML) mode the same commands are fail-closed: without `--yes` Pig returns a structured confirmation-required result. `pt restart` uses a conditional tier (D2): an explicit single member executes directly in both modes; only the cluster-wide rolling restart (no member argument) requires confirmation. `pt reinit`, `pt switchover`, and `pt failover` also expose `--plan` previews.
 
 
 ## Overview
@@ -68,11 +70,12 @@ Structured `pt restart`, `pt reinit`, `pt switchover`, and `pt failover` do not 
 
 | Command | Alias | Description | Implementation |
 |:--------|:------|:------------|:---------------|
-| `pt start` | `boot, up` | Start Patroni service | `systemctl start patroni` |
-| `pt stop` | `halt, dn, down` | Stop Patroni service | `systemctl stop patroni` |
 | `pt status` | `st, stat` | Show service status | `systemctl status patroni` |
 | `pt log` | `l, lg` | View Patroni logs | `journalctl -u patroni` |
 {.full-width}
+
+The former top-level shortcuts `pt start` / `pt stop` are removed (B03). Hidden stubs keep the
+old tokens routable: invoking them fails with `daemon control moved: use pig pt svc start|stop`.
 
 **Service Subcommand** (`pt svc`):
 
@@ -101,17 +104,17 @@ pig pt config ttl=60           # Modify single config item (immediate effect)
 pig pt config ttl=60 loop_wait=15  # Modify multiple config items
 
 # Cluster operations
-pig pt restart                 # Restart all members' PostgreSQL
-pig pt restart pg-test-1       # Restart specific member
-pig pt restart -f              # Execute without patronictl prompt
-pig pt switchover              # Planned switchover
+pig pt restart                 # Rolling restart ALL members (asks confirmation)
+pig pt restart pg-test-1       # Restart specific member (direct)
+pig pt restart -y              # Cluster-wide restart, skip confirmation
+pig pt switchover              # Planned switchover (asks confirmation)
 pig pt pause                   # Pause auto-failover
 pig pt resume                  # Resume auto-failover
 
 # Manage Patroni service
 pig pt status                  # Check service status
-pig pt start                   # Start service
-pig pt stop                    # Stop service
+pig pt svc start               # Start service
+pig pt svc stop                # Stop service
 pig pt log -f                  # Real-time log viewing
 ```
 
@@ -156,9 +159,9 @@ pig pt list pg-test -W -w 3    # Watch pg-test cluster, 3s refresh
 Restart PostgreSQL instance via Patroni. This triggers a rolling restart of PostgreSQL, not the Patroni daemon itself.
 
 ```bash
-pig pt restart                   # Restart all members (interactive)
-pig pt restart pg-test-1         # Restart specific member
-pig pt restart -f                # Skip confirmation
+pig pt restart                   # Rolling restart ALL members (asks confirmation)
+pig pt restart -y                # Cluster-wide restart, skip confirmation
+pig pt restart pg-test-1         # Restart specific member (direct execution)
 pig pt restart --role=replica    # Restart replicas only
 pig pt restart --pending         # Restart pending members
 ```
@@ -167,12 +170,12 @@ pig pt restart --pending         # Restart pending members
 
 | Option | Short | Description |
 |:-------|:------|:------------|
-| `--force` | `-f` | Skip confirmation |
-| `--role` | | Filter by role (primary/replica) |
-| `--pending` | | Restart only pending members |
+| `--yes` | `-y` | Skip confirmation prompt |
+| `--role` | `-r` | Filter by role (leader/replica/any) |
+| `--pending` | `-p` | Restart only pending members |
 {.full-width}
 
-**Structured mode:** JSON/YAML execution requires `--force`; without it, Pig returns `CodePtRestartNeedForce` instead of entering the `patronictl` confirmation prompt.
+**Confirmation tier (D2, conditional):** an explicit single member executes directly in both output modes. A cluster-wide rolling restart (no member argument) is T2: text mode asks a pig-level confirmation unless `--yes`; JSON/YAML mode is fail-closed and returns a confirmation-required result without `--yes`. `patronictl restart` always receives `--force` and never prompts (B04).
 
 
 ### pt reload
@@ -189,8 +192,8 @@ pig pt reload
 Reinitialize cluster member. This re-syncs data from the primary.
 
 ```bash
-pig pt reinit pg-test-1          # Reinit specific member
-pig pt reinit pg-test-1 -f       # Skip confirmation
+pig pt reinit pg-test-1          # Reinit specific member (asks confirmation)
+pig pt reinit pg-test-1 -y       # Skip confirmation
 pig pt reinit pg-test-1 --wait   # Wait for completion
 pig pt reinit pg-test-1 --plan   # Preview reinit plan
 ```
@@ -199,12 +202,12 @@ pig pt reinit pg-test-1 --plan   # Preview reinit plan
 
 | Option | Short | Description |
 |:-------|:------|:------------|
-| `--force` | `-f` | Skip confirmation |
-| `--wait` | `-w` | Wait for reinit completion |
+| `--yes` | `-y` | Skip confirmation prompt |
+| `--wait` | | Wait for reinit completion (long-only, B12) |
 | `--plan` | | Preview reinit plan without executing |
 {.full-width}
 
-**Warning:** This operation deletes all data on the target member and re-syncs from primary. JSON/YAML execution requires `--force`; without it, Pig returns `CodePtReinitNeedForce`.
+**Warning:** This operation deletes all data on the target member and re-syncs from primary. Text mode asks a pig-level confirmation ("This will WIPE and rebuild member ...") unless `--yes`; JSON/YAML execution is fail-closed and requires `--yes`. `patronictl reinit` always receives `--force` (B04).
 
 
 ### pt switchover
@@ -212,8 +215,8 @@ pig pt reinit pg-test-1 --plan   # Preview reinit plan
 Perform planned primary-replica switchover.
 
 ```bash
-pig pt switchover                 # Interactive switchover
-pig pt switchover -f              # Skip confirmation
+pig pt switchover                 # Planned switchover (asks confirmation)
+pig pt switchover -y              # Skip confirmation
 pig pt switchover --plan          # Show switchover plan without running
 pig pt switchover --leader pg-1   # Specify current primary
 pig pt switchover --candidate pg-2  # Specify new primary
@@ -223,11 +226,14 @@ pig pt switchover --candidate pg-2  # Specify new primary
 
 | Option | Short | Description |
 |:-------|:------|:------------|
-| `--force` | `-f` | Skip confirmation |
-| `--leader` | | Specify current primary |
-| `--candidate` | | Specify candidate new primary |
+| `--yes` | `-y` | Skip confirmation prompt |
+| `--leader` | | Specify current primary (long-only, B17) |
+| `--candidate` | | Specify candidate new primary (long-only, B17) |
+| `--scheduled` | | Scheduled time for switchover (long-only, B17) |
 | `--plan` | | Show execution plan only, don't execute |
 {.full-width}
+
+Text mode asks a pig-level confirmation ("This will transfer cluster leadership") unless `--yes`; JSON/YAML execution is fail-closed and requires `--yes`. `patronictl switchover` always receives `--force` (B04).
 
 
 ### pt failover
@@ -235,8 +241,8 @@ pig pt switchover --candidate pg-2  # Specify new primary
 Perform manual failover. Used when primary is unavailable.
 
 ```bash
-pig pt failover                   # Interactive failover
-pig pt failover -f                # Skip confirmation
+pig pt failover                   # Manual failover (asks confirmation)
+pig pt failover -y                # Skip confirmation
 pig pt failover --candidate pg-2  # Specify new primary
 ```
 
@@ -244,9 +250,12 @@ pig pt failover --candidate pg-2  # Specify new primary
 
 | Option | Short | Description |
 |:-------|:------|:------------|
-| `--force` | `-f` | Skip confirmation |
-| `--candidate` | | Specify candidate new primary |
+| `--yes` | `-y` | Skip confirmation prompt |
+| `--candidate` | | Specify candidate new primary (long-only, B17) |
+| `--plan` | | Show execution plan only, don't execute |
 {.full-width}
+
+Text mode asks a pig-level confirmation ("This will force leadership transfer (failover, data loss possible)") unless `--yes`; JSON/YAML execution is fail-closed and requires `--yes`. `patronictl failover` always receives `--force` (B04).
 
 
 ### pt pause
@@ -262,7 +271,7 @@ pig pt pause --wait               # Wait for confirmation
 
 | Option | Short | Description |
 |:-------|:------|:------------|
-| `--wait` | `-w` | Wait for operation completion |
+| `--wait` | | Wait for operation completion (long-only, B12) |
 {.full-width}
 
 **Use case:** Pause auto-failover during maintenance operations (e.g., major version upgrade, storage migration) to prevent accidental triggers.
@@ -281,7 +290,7 @@ pig pt resume --wait              # Wait for confirmation
 
 | Option | Short | Description |
 |:-------|:------|:------------|
-| `--wait` | `-w` | Wait for operation completion |
+| `--wait` | | Wait for operation completion (long-only, B12) |
 {.full-width}
 
 
@@ -323,30 +332,18 @@ pig pt config pg max_connections=200    # Modify PostgreSQL parameter
 
 ## Service Commands
 
-### pt start
+### pt start / pt stop (removed, B03)
 
-Start Patroni service.
-
-```bash
-pig pt start                     # Start Patroni service
-pig pt up                        # Alias
-pig pt boot                      # Alias
-```
-
-Equivalent to `sudo systemctl start patroni`.
-
-
-### pt stop
-
-Stop Patroni service.
+The top-level `pt start` / `pt stop` shortcuts are removed. Daemon control lives under `pt svc`:
 
 ```bash
-pig pt stop                      # Stop Patroni service
-pig pt down                      # Alias
-pig pt halt                      # Alias
+pig pt svc start                 # Start Patroni service
+pig pt svc stop                  # Stop Patroni service
 ```
 
-Equivalent to `sudo systemctl stop patroni`.
+Hidden landing-pad stubs keep the old tokens (and their aliases `boot/up`, `halt/dn/down`)
+routable: invoking them prints nothing to stdout and fails with the exact one-line route
+`daemon control moved: use pig pt svc start|stop`.
 
 **Note:** Stopping Patroni service will also stop the PostgreSQL instance on this node (depending on Patroni configuration).
 
@@ -383,6 +380,8 @@ pig pt log -f -n 200           # Show last 200 lines and follow
 | `--follow` | `-f` | false | Real-time log following |
 | `--lines` | `-n` | 50 | Number of log lines to show |
 {.full-width}
+
+`pt log tail` also accepts `--follow/-f` as a documented no-op (B16): tail always follows.
 
 Text mode is equivalent to `journalctl -u patroni [-f] [-n N]`. JSONL mode is equivalent to `journalctl -u patroni -n N --no-pager -o cat` followed by JSONL wrapping.
 
@@ -443,10 +442,7 @@ pig pt svc status                # Show service status
 | `CodePtScopeMissing` | `scope:` is missing or empty in the Patroni config |
 | `CodePtConfigResolveFailed` | Cluster scope resolution failed for an unclassified reason |
 | `CodePtConfigReadFailed` | Patroni config exists or was attempted but could not be read for a non-permission, non-not-found reason |
-| `CodePtSwitchoverNeedForce` | Structured `pt switchover` requires `--force` |
-| `CodePtFailoverNeedForce` | Structured `pt failover` requires `--force` |
-| `CodePtRestartNeedForce` | Structured `pt restart` requires `--force` |
-| `CodePtReinitNeedForce` | Structured `pt reinit` requires `--force` |
+| `CodePtConfirmationRequired` | Structured cluster-wide `pt restart` / `pt reinit` / `pt switchover` / `pt failover` invoked without `--yes` |
 | `CodePtWatchModeUnsupported` | `pt list --watch/-W` is incompatible with structured output |
 {.full-width}
 

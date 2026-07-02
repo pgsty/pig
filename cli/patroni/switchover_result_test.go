@@ -333,9 +333,9 @@ func TestSwitchoverFailResult(t *testing.T) {
 	}
 }
 
-func TestSwitchoverNeedForceResult(t *testing.T) {
+func TestSwitchoverNeedYesResult(t *testing.T) {
 	result := output.Fail(output.CodePtConfirmationRequired,
-		"switchover requires --force (-f) flag in structured output mode")
+		"switchover requires --yes (-y) flag in structured output mode")
 
 	if result.Success {
 		t.Error("Result should not be successful")

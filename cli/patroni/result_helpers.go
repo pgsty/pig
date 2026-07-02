@@ -129,20 +129,24 @@ func clusterNameErrorResult(err error) *output.Result {
 	}
 }
 
-func RestartNeedForceResult() *output.Result {
+// RestartNeedYesResult is the fail-closed refusal for a structured cluster-wide
+// restart invoked without --yes (B04: pig owns confirmation).
+func RestartNeedYesResult() *output.Result {
 	return output.Fail(output.CodePtConfirmationRequired,
-		"restart requires --force (-f) flag in structured output mode").
+		"restart requires --yes (-y) flag in structured output mode").
 		WithNextActions(
-			output.NextAction{Command: "pig pt restart ... --force", Reason: "execute restart after explicit confirmation", Required: true},
-			output.NextAction{Command: "pig pt restart ... --plan", Reason: "preview restart without executing", Required: false},
+			output.NextAction{Command: "pig pt restart ... --yes", Reason: "execute restart after explicit confirmation", Required: true},
+			output.NextAction{Command: "pig pt restart <member>", Reason: "restart a single explicit member directly", Required: false},
 		)
 }
 
-func ReinitNeedForceResult() *output.Result {
+// ReinitNeedYesResult is the fail-closed refusal for a structured reinit
+// invoked without --yes (B04: pig owns confirmation).
+func ReinitNeedYesResult() *output.Result {
 	return output.Fail(output.CodePtConfirmationRequired,
-		"reinit requires --force (-f) flag in structured output mode").
+		"reinit requires --yes (-y) flag in structured output mode").
 		WithNextActions(
-			output.NextAction{Command: "pig pt reinit <member> --force", Reason: "execute member reinit after explicit confirmation", Required: true},
+			output.NextAction{Command: "pig pt reinit <member> --yes", Reason: "execute member reinit after explicit confirmation", Required: true},
 			output.NextAction{Command: "pig pt reinit <member> --plan", Reason: "preview reinit without executing", Required: false},
 		)
 }

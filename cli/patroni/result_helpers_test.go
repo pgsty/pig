@@ -3,6 +3,7 @@ package patroni
 import (
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -38,23 +39,31 @@ func TestClusterNameErrorResultCodes(t *testing.T) {
 	}
 }
 
-func TestNeedForceResultCodes(t *testing.T) {
+func TestNeedYesResultCodes(t *testing.T) {
 	tests := []struct {
 		name   string
 		result *output.Result
 		code   int
 	}{
-		{name: "restart", result: RestartNeedForceResult(), code: output.CodePtConfirmationRequired},
-		{name: "reinit", result: ReinitNeedForceResult(), code: output.CodePtConfirmationRequired},
+		{name: "restart", result: RestartNeedYesResult(), code: output.CodePtConfirmationRequired},
+		{name: "reinit", result: ReinitNeedYesResult(), code: output.CodePtConfirmationRequired},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.result.Success {
-				t.Fatal("need-force result should fail")
+				t.Fatal("need-yes result should fail")
 			}
 			if tt.result.Code != tt.code {
 				t.Fatalf("code = %d, want %d", tt.result.Code, tt.code)
+			}
+			if !strings.Contains(tt.result.Message, "--yes (-y)") {
+				t.Fatalf("message should reference --yes (-y), got %q", tt.result.Message)
+			}
+			for _, action := range tt.result.NextActions {
+				if strings.Contains(action.Command, "--force") {
+					t.Fatalf("next_actions must route to --yes, not --force: %q", action.Command)
+				}
 			}
 		})
 	}

@@ -255,7 +255,7 @@ func filterJournalNoEntries(text string) string {
 type RestartOptions struct {
 	Member  string // specific member to restart (empty = all)
 	Role    string // filter by role: leader, replica, any
-	Force   bool   // skip confirmation
+	Force   bool   // pass --force to patronictl (pig owns confirmation, B04)
 	Pending bool   // only restart members with pending restart
 }
 
@@ -295,7 +295,7 @@ func Restart(dbsu string, opts *RestartOptions) error {
 // ReinitOptions holds options for patronictl reinit
 type ReinitOptions struct {
 	Member string // specific member to reinit (required)
-	Force  bool   // skip confirmation
+	Force  bool   // pass --force to patronictl (pig owns confirmation, B04)
 	Wait   bool   // wait for reinit to complete
 }
 
@@ -351,7 +351,7 @@ func buildReinitExecuteCommand(opts *ReinitOptions) string {
 		args = append(args, opts.Member)
 	}
 	if opts != nil && opts.Force {
-		args = append(args, "--force")
+		args = append(args, "--yes")
 	}
 	if opts != nil && opts.Wait {
 		args = append(args, "--wait")
@@ -400,7 +400,7 @@ func Reinit(dbsu string, opts *ReinitOptions) error {
 type SwitchoverOptions struct {
 	Leader    string // current leader (optional, auto-detected)
 	Candidate string // target candidate (optional)
-	Force     bool   // skip confirmation
+	Force     bool   // pass --force to patronictl (pig owns confirmation, B04)
 	Scheduled string // scheduled time (e.g., "2024-01-01T12:00:00")
 }
 
@@ -454,7 +454,7 @@ func BuildSwitchoverPlan(opts *SwitchoverOptions) *output.Plan {
 		"Clients may need to reconnect after switchover",
 	}
 	if opts != nil && opts.Force {
-		risks = append(risks, "Confirmation is skipped (--force)")
+		risks = append(risks, "Confirmation is skipped (--yes)")
 	}
 
 	return &output.Plan{
@@ -497,7 +497,7 @@ func buildSwitchoverCommand(opts *SwitchoverOptions) string {
 		args = append(args, "--scheduled", opts.Scheduled)
 	}
 	if opts.Force {
-		args = append(args, "--force")
+		args = append(args, "--yes")
 	}
 	return strings.Join(args, " ")
 }
@@ -536,7 +536,7 @@ func Switchover(dbsu string, opts *SwitchoverOptions) error {
 // FailoverOptions holds options for patronictl failover
 type FailoverOptions struct {
 	Candidate string // target candidate (optional)
-	Force     bool   // skip confirmation
+	Force     bool   // pass --force to patronictl (pig owns confirmation, B04)
 }
 
 // BuildFailoverPlan builds a structured execution plan for failover.
@@ -576,7 +576,7 @@ func BuildFailoverPlan(opts *FailoverOptions) *output.Plan {
 		"All connections will be reset after failover",
 	}
 	if opts.Force {
-		risks = append(risks, "Confirmation is skipped (--force)")
+		risks = append(risks, "Confirmation is skipped (--yes)")
 	}
 
 	return &output.Plan{
@@ -613,7 +613,7 @@ func buildFailoverCommand(opts *FailoverOptions) string {
 		args = append(args, "--candidate", opts.Candidate)
 	}
 	if opts.Force {
-		args = append(args, "--force")
+		args = append(args, "--yes")
 	}
 	return strings.Join(args, " ")
 }
