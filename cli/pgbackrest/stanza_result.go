@@ -120,16 +120,15 @@ func UpgradeResult(cfg *Config, opts *UpgradeOptions) *output.Result {
 // It validates parameters and configuration, executes stanza-delete, and returns the result.
 // Returns nil-safe Result on all paths.
 //
-// IMPORTANT: In structured output mode, --force is required as an explicit confirmation.
-// The confirmation countdown is skipped (implicit --yes) since agents should have
-// already confirmed their intent before calling delete.
+// IMPORTANT: In structured output mode, --yes is required as an explicit confirmation
+// (B05): structured callers never get an interactive prompt.
 func DeleteResult(cfg *Config, opts *DeleteOptions) *output.Result {
 	if opts == nil {
 		opts = &DeleteOptions{}
 	}
-	if !opts.Force {
-		return output.Fail(output.CodePbStanzaDeleteRequiresForce, "Stanza delete requires --force flag").
-			WithDetail("Use --force to confirm deletion of stanza and ALL its backups. This operation is IRREVERSIBLE.")
+	if !opts.Yes {
+		return output.Fail(output.CodePbConfirmationRequired, "Stanza delete requires --yes flag").
+			WithDetail("Use --yes to confirm deletion of stanza and ALL its backups. This operation is IRREVERSIBLE.")
 	}
 
 	effCfg, err := GetEffectiveConfig(cfg)
@@ -159,7 +158,7 @@ func DeleteResult(cfg *Config, opts *DeleteOptions) *output.Result {
 	data := &PbStanzaResultData{
 		Stanza:    effCfg.Stanza,
 		Operation: "delete",
-		Force:     true, // Always true for delete (required parameter)
+		Force:     true, // pgbackrest stanza-delete always runs with --force
 		Deleted:   true,
 	}
 	return output.OK("Stanza deleted successfully", data)

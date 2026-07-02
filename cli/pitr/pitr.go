@@ -41,12 +41,11 @@ type Options struct {
 	Set string // Recover from specific backup set
 
 	// PITR control
-	SkipPatroni bool // Skip Patroni operations
-	NoRestart   bool // Don't restart PostgreSQL after restore
-	Plan        bool // Show plan only, don't execute
-	Yes         bool // Skip confirmations
-	Quiet       bool // Suppress human progress logs
-	Timeout     int  // PostgreSQL start/recovery timeout in seconds
+	NoRestart bool // Don't restart PostgreSQL after restore
+	Plan      bool // Show plan only, don't execute
+	Yes       bool // Skip confirmations
+	Quiet     bool // Suppress human progress logs
+	Timeout   int  // PostgreSQL start/recovery timeout in seconds
 
 	// Common (inherited from pgbackrest)
 	Stanza         string // pgBackRest stanza name
@@ -55,7 +54,6 @@ type Options struct {
 	DbSU           string // Database superuser
 	DataDir        string // Target data directory
 	Exclusive      bool   // Stop before target (exclusive)
-	Promote        bool   // Auto-promote after recovery
 	TargetAction   string // Action at target: pause, promote, shutdown
 	TargetTimeline string // Timeline to recover along: latest, current, N, or 0xN
 	ExtraArgs      []string
@@ -149,7 +147,7 @@ func Execute(opts *Options) error {
 
 	// Phase 2: Stop Patroni (if active)
 	patroniWasStopped := false
-	if shouldManagePatroni(state.PatroniActive, state.SideRestore) && !opts.SkipPatroni {
+	if shouldManagePatroni(state.PatroniActive, state.SideRestore) {
 		if pitrErr := stopPatroni(); pitrErr != nil {
 			return &utils.ExitCodeError{Code: output.ExitCode(pitrErr.Code), Err: pitrErr}
 		}
@@ -210,7 +208,7 @@ func executeResult(opts *Options) *output.Result {
 	}
 
 	patroniWasStopped := false
-	if shouldManagePatroni(state.PatroniActive, state.SideRestore) && !opts.SkipPatroni {
+	if shouldManagePatroni(state.PatroniActive, state.SideRestore) {
 		if pitrErr := stopPatroni(); pitrErr != nil {
 			return output.Fail(pitrErr.Code, pitrErr.Error())
 		}
@@ -312,9 +310,6 @@ func preCheck(opts *Options) (*SystemState, error) {
 
 	// Check current state
 	patroniActive := utils.IsServiceActive("patroni")
-	if err := validatePatroniPolicy(patroniActive, opts.SkipPatroni, sideRestore); err != nil {
-		return nil, &PITRError{Code: output.CodePITRPrecheckFailed, Err: err}
-	}
 	pgRunning, pgPID := postgres.CheckPostgresRunningAsDBSU(dbsu, dataDir)
 
 	state := &SystemState{
@@ -410,13 +405,6 @@ func dataDirOwnerAsDBSU(dbsu string, dataDir string) (string, error) {
 func validatePITRDataDirOwner(dataDir string, dbsu string, owner string) error {
 	if owner != dbsu {
 		return fmt.Errorf("custom data directory %s is owned by %s; run: chown %s %s", dataDir, owner, dbsu, dataDir)
-	}
-	return nil
-}
-
-func validatePatroniPolicy(patroniActive bool, skipPatroni bool, sideRestore bool) error {
-	if patroniActive && skipPatroni && !sideRestore {
-		return fmt.Errorf("patroni is active; refusing --skip-patroni because it may restart PostgreSQL during restore")
 	}
 	return nil
 }
@@ -547,9 +535,6 @@ func printExecutionPlan(state *SystemState, opts *Options) {
 	if opts.Exclusive {
 		fmt.Fprintf(os.Stderr, "  Mode: exclusive (stop before target)\n")
 	}
-	if opts.Promote {
-		fmt.Fprintf(os.Stderr, "  Auto-promote: yes\n")
-	}
 	if opts.TargetAction != "" {
 		fmt.Fprintf(os.Stderr, "  Target action: %s\n", opts.TargetAction)
 	}
@@ -564,13 +549,11 @@ func printExecutionPlan(state *SystemState, opts *Options) {
 	fmt.Fprintf(os.Stderr, "\n%sExecution Steps:%s\n", utils.ColorBold, utils.ColorReset)
 	step := 1
 
-	if managePatroni && !opts.SkipPatroni {
+	if managePatroni {
 		fmt.Fprintf(os.Stderr, "  [%d] Stop Patroni service\n", step)
 		step++
 	} else if state.PatroniActive && state.SideRestore {
 		fmt.Fprintf(os.Stderr, "  [-] Leave Patroni running (custom data directory)\n")
-	} else if opts.SkipPatroni {
-		fmt.Fprintf(os.Stderr, "  [-] Skip Patroni (--skip-patroni)\n")
 	}
 
 	if state.PGRunning || managePatroni {
@@ -653,7 +636,7 @@ func buildActions(state *SystemState, opts *Options) []output.Action {
 	actions := []output.Action{}
 	step := 1
 
-	if managePatroni && !opts.SkipPatroni {
+	if managePatroni {
 		actions = append(actions, output.Action{Step: step, Description: "Stop Patroni service"})
 		step++
 	}
@@ -687,7 +670,7 @@ func buildAffects(state *SystemState, opts *Options) []output.Resource {
 	managePatroni := shouldManagePatroni(state.PatroniActive, state.SideRestore)
 	affects := []output.Resource{}
 
-	if managePatroni && !opts.SkipPatroni {
+	if managePatroni {
 		affects = append(affects, output.Resource{
 			Type:   "service",
 			Name:   "patroni",
@@ -743,9 +726,6 @@ func buildExpected(state *SystemState, opts *Options) string {
 	if opts.NoRestart {
 		expected = expected + "; PostgreSQL remains stopped"
 	}
-	if opts.Promote {
-		expected = expected + "; auto-promote enabled"
-	}
 	if opts.TargetAction != "" {
 		expected = expected + "; target action " + opts.TargetAction
 	}
@@ -767,11 +747,8 @@ func buildRisks(state *SystemState, opts *Options) []string {
 		"Current data directory will be overwritten",
 	}
 
-	if managePatroni && !opts.SkipPatroni {
+	if managePatroni {
 		risks = append(risks, "Patroni will be stopped; HA management suspended and Patroni is not restarted or rejoined by this command")
-	}
-	if opts.SkipPatroni && !state.SideRestore {
-		risks = append(risks, "Patroni is not stopped; ensure cluster safety before restoring")
 	}
 	if opts.NoRestart {
 		risks = append(risks, "PostgreSQL will remain stopped after restore")
@@ -799,27 +776,21 @@ func buildCommand(opts *Options) string {
 	case opts.Time != "":
 		args = append(args, "-t", quoteIfNeeded(opts.Time))
 	case opts.Name != "":
-		args = append(args, "-n", opts.Name)
+		args = append(args, "--name", opts.Name)
 	case opts.LSN != "":
-		args = append(args, "-l", opts.LSN)
+		args = append(args, "--lsn", opts.LSN)
 	case opts.XID != "":
-		args = append(args, "-x", opts.XID)
+		args = append(args, "--xid", opts.XID)
 	}
 
 	if opts.Set != "" {
 		args = append(args, "-b", opts.Set)
-	}
-	if opts.SkipPatroni {
-		args = append(args, "--skip-patroni")
 	}
 	if opts.NoRestart {
 		args = append(args, "--no-restart")
 	}
 	if opts.Exclusive {
 		args = append(args, "-X")
-	}
-	if opts.Promote {
-		args = append(args, "-P")
 	}
 	if opts.TargetAction != "" {
 		args = append(args, "--target-action", opts.TargetAction)
@@ -1039,7 +1010,6 @@ func restoreOptionsFromPITR(opts *Options) *pgbackrest.RestoreOptions {
 		Set:            opts.Set,
 		DataDir:        opts.DataDir,
 		Exclusive:      opts.Exclusive,
-		Promote:        opts.Promote,
 		TargetAction:   opts.TargetAction,
 		TargetTimeline: opts.TargetTimeline,
 		ExtraArgs:      append([]string(nil), opts.ExtraArgs...),

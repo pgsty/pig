@@ -26,10 +26,10 @@ var pbCmd = &cobra.Command{
 	Aliases:     []string{"pb"},
 	GroupID:     "pigsty",
 	Annotations: ancsAnn("pig pgbackrest", "query", "stable", "safe", true, "safe", "none", "current", 100),
-	Long: `Manage pgBackRest backup and point-in-time recovery.
+	Long: `Low-level pgBackRest primitives. Orchestrated point-in-time recovery lives in "pig pitr".
 
 This command wraps pgbackrest to provide simplified backup management,
-PITR (point-in-time recovery), and stanza lifecycle management.
+low-level restore primitives, and stanza lifecycle management.
 All commands are executed as the database superuser (postgres by default).
 
 Information:
@@ -41,7 +41,7 @@ Information:
 Backup & Restore:
   pig pb backup                    create backup (auto: full/incr)
   pig pb backup full               create full backup
-  pig pb restore                   restore from backup (PITR)
+  pig pb restore                   restore from backup (low-level primitive)
   pig pb restore -t "..."          restore to specific time
   pig pb expire                    cleanup expired backups
 
@@ -69,14 +69,14 @@ Control:
   pig pb backup full               # full backup
   pig pb backup incr               # incremental backup
 
-  # Restore / PITR
-  pig pb restore                   # restore to latest (default)
+  # Restore (low-level primitive; use pig pitr for orchestrated recovery)
+  pig pb restore -d                # restore to latest (end of WAL)
   pig pb restore -I                # restore to consistency point
   pig pb restore -t "2025-01-01 12:00:00+08"  # restore to time
   pig pb restore -t "2025-01-01"   # restore to date (00:00:00)
   pig pb restore -t "12:00:00"     # restore to time today
-  pig pb restore -n savepoint      # restore to named point
-  pig pb restore -l "0/7C82CB8"    # restore to LSN
+  pig pb restore --name savepoint  # restore to named point
+  pig pb restore --lsn "0/7C82CB8" # restore to LSN
 
   # Stanza management
   pig pb create                    # initialize stanza
@@ -111,7 +111,7 @@ func registerPbFlags() {
 	pbCmd.PersistentFlags().StringVarP(&pbConfig.DbSU, "dbsu", "U", "", "database superuser (default: $PIG_DBSU or postgres)")
 
 	// Info command flags
-	pbInfoCmd.Flags().StringVarP(&pbInfoRawOutput, "raw-output", "O", "", "raw output format: text, json (only with --raw)")
+	pbInfoCmd.Flags().StringVar(&pbInfoRawOutput, "raw-output", "", "raw output format: text, json (only with --raw)")
 	pbInfoCmd.Flags().StringVar(&pbInfoSet, "set", "", "show specific backup set")
 	pbInfoCmd.Flags().BoolVarP(&pbInfoRaw, "raw", "R", false, "raw output mode (pass through pgbackrest output)")
 
@@ -127,15 +127,14 @@ func registerPbFlags() {
 	pbRestoreCmd.Flags().BoolVarP(&pbRestoreDefault, "default", "d", false, "recover to end of WAL stream (latest)")
 	pbRestoreCmd.Flags().BoolVarP(&pbRestoreImmediate, "immediate", "I", false, "recover to backup consistency point")
 	pbRestoreCmd.Flags().StringVarP(&pbRestoreTime, "time", "t", "", "recover to specific timestamp")
-	pbRestoreCmd.Flags().StringVarP(&pbRestoreName, "name", "n", "", "recover to named restore point")
-	pbRestoreCmd.Flags().StringVarP(&pbRestoreLSN, "lsn", "l", "", "recover to specific LSN")
-	pbRestoreCmd.Flags().StringVarP(&pbRestoreXID, "xid", "x", "", "recover to specific transaction ID")
+	pbRestoreCmd.Flags().StringVar(&pbRestoreName, "name", "", "recover to named restore point")
+	pbRestoreCmd.Flags().StringVar(&pbRestoreLSN, "lsn", "", "recover to specific LSN")
+	pbRestoreCmd.Flags().StringVar(&pbRestoreXID, "xid", "", "recover to specific transaction ID")
 	pbRestoreCmd.Flags().StringVarP(&pbRestoreSet, "set", "b", "", "select backup set to start recovery from")
 
 	// Restore command flags - options
 	pbRestoreCmd.Flags().StringVarP(&pbRestoreDataDir, "data", "D", "", "target data directory")
 	pbRestoreCmd.Flags().BoolVarP(&pbRestoreExclusive, "exclusive", "X", false, "stop before target (exclusive)")
-	pbRestoreCmd.Flags().BoolVarP(&pbRestorePromote, "promote", "P", false, "auto-promote after recovery")
 	pbRestoreCmd.Flags().StringVar(&pbRestoreTargetAction, "target-action", "", "action at recovery target: pause, promote, shutdown")
 	pbRestoreCmd.Flags().StringVarP(&pbRestoreTargetTimeline, "target-timeline", "T", "", "recover along timeline: latest, current, N, or 0xN")
 	pbRestoreCmd.Flags().BoolVarP(&pbRestoreYes, "yes", "y", false, "skip confirmation and countdown")
@@ -145,8 +144,7 @@ func registerPbFlags() {
 	pbCreateCmd.Flags().BoolVar(&pbCreateNoOnline, "no-online", false, "create without PostgreSQL running")
 	pbCreateCmd.Flags().BoolVarP(&pbCreateForce, "force", "f", false, "force creation")
 	pbUpgradeCmd.Flags().BoolVar(&pbUpgradeNoOnline, "no-online", false, "upgrade without PostgreSQL running")
-	pbDeleteCmd.Flags().BoolVarP(&pbDeleteForce, "force", "f", false, "confirm deletion (required)")
-	pbDeleteCmd.Flags().BoolVarP(&pbDeleteYes, "yes", "y", false, "skip countdown confirmation")
+	pbDeleteCmd.Flags().BoolVarP(&pbDeleteYes, "yes", "y", false, "skip confirmation prompt")
 	pbDeleteCmd.Flags().BoolVar(&pbDeletePlan, "plan", false, "preview stanza deletion plan without executing")
 
 	// Control flags
@@ -156,7 +154,7 @@ func registerPbFlags() {
 	pbLogCmd.Flags().IntVarP(&pbLogLines, "lines", "n", 50, "number of lines to show")
 	pbLogCmd.Flags().BoolVarP(&pbLogFollow, "follow", "f", false, "follow log output")
 	pbLogTailCmd.Flags().IntVarP(&pbLogLines, "lines", "n", 50, "number of lines to show")
-	pbLogTailCmd.Flags().BoolP("follow", "f", false, "follow log output (default for tail)")
+	pbLogTailCmd.Flags().BoolP("follow", "f", false, "(no-op: tail always follows)")
 	pbLogCatCmd.Flags().IntVarP(&pbLogLines, "lines", "n", 50, "number of lines to show")
 }
 
@@ -338,7 +336,6 @@ var (
 	pbRestoreSet            string
 	pbRestoreDataDir        string
 	pbRestoreExclusive      bool
-	pbRestorePromote        bool
 	pbRestoreTargetAction   string
 	pbRestoreTargetTimeline string
 	pbRestoreYes            bool
@@ -348,9 +345,10 @@ var (
 var pbRestoreCmd = &cobra.Command{
 	Use:         "restore",
 	Aliases:     []string{"r"}, // B01: "rt" (=restart elsewhere) and "pitr" (=the orchestrator) removed
-	Short:       "Restore from backup (PITR)",
+	Short:       "Restore from backup (low-level primitive)",
 	Annotations: ancsAnn("pig pgbackrest restore", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 600000),
 	Long: `Restore from backup with point-in-time recovery (PITR) support.
+For orchestrated point-in-time recovery on a managed cluster, use pig pitr.
 
 IMPORTANT: You must specify a recovery target. Running without arguments
 will show this help message to prevent accidental restores.
@@ -359,9 +357,9 @@ Recovery Targets (mutually exclusive, at least one required):
   --default, -d      Recover to end of WAL stream (latest data)
   --immediate, -I    Recover to backup consistency point only
   --time, -t         Recover to specific timestamp
-  --name, -n         Recover to named restore point
-  --lsn, -l          Recover to specific LSN
-  --xid, -x          Recover to specific transaction ID
+  --name             Recover to named restore point
+  --lsn              Recover to specific LSN
+  --xid              Recover to specific transaction ID
 
 Backup Set Selection (can be combined with targets):
   --set, -b          Select backup set to start recovery from
@@ -393,13 +391,13 @@ IMPORTANT: PostgreSQL must be stopped before restore.`,
   pig pb restore -t "2025-01-01 12:00:00+08"   # restore to time
   pig pb restore -t "2025-01-01"   # restore to start of day
   pig pb restore -t "12:00:00"     # restore to time today
-  pig pb restore -n my-savepoint   # restore to named point
-  pig pb restore -l "0/7C82CB8"    # restore to LSN
+  pig pb restore --name my-savepoint   # restore to named point
+  pig pb restore --lsn "0/7C82CB8" # restore to LSN
   pig pb restore -b 20251225-120000F -d        # restore specific backup to latest
 
 	  # Options
 	  pig pb restore -t "2025-01-01 12:00:00" -X  # exclusive (stop before target)
-	  pig pb restore -t "2025-01-01 12:00:00" -P  # auto-promote after reaching target
+	  pig pb restore -t "2025-01-01 12:00:00" --target-action=promote  # promote after reaching target
 	  pig pb restore -t "2025-01-01 12:00:00" -T current  # recover along current timeline
 	  pig pb restore -d -y             # skip confirmation
 	  pig pb restore -d -D /data/pg    # restore to custom data directory
@@ -437,7 +435,6 @@ IMPORTANT: PostgreSQL must be stopped before restore.`,
 			Set:            pbRestoreSet,
 			DataDir:        pbRestoreDataDir,
 			Exclusive:      pbRestoreExclusive,
-			Promote:        pbRestorePromote,
 			TargetAction:   pbRestoreTargetAction,
 			TargetTimeline: pbRestoreTargetTimeline,
 			ExtraArgs:      append([]string(nil), args...),
@@ -680,7 +677,7 @@ By default, displays a parsed and formatted view of backup information including
   - Backup list with type, duration, size, and WAL range
 
 Use --raw/-R for original pgbackrest output format.
-Use --raw-output/-O to control raw output format (text/json).
+Use --raw-output to control raw output format (text/json).
 Use -o json/yaml for structured output (Result wrapper with pgbackrest native JSON in data).`,
 	Example: `
   pig pb info                      # detailed formatted output
@@ -840,7 +837,6 @@ var pbUpgradeCmd = &cobra.Command{
 	},
 }
 
-var pbDeleteForce bool
 var pbDeleteYes bool
 var pbDeletePlan bool
 
@@ -854,11 +850,10 @@ var pbDeleteCmd = &cobra.Command{
 WARNING: This is a DESTRUCTIVE and IRREVERSIBLE operation!
 All backups for the stanza will be permanently deleted.
 
-	Requires --force flag to confirm the operation.`,
+Prompts for interactive confirmation unless --yes is provided.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := &pgbackrest.DeleteOptions{
-			Force: pbDeleteForce,
-			Yes:   pbDeleteYes,
+			Yes: pbDeleteYes,
 		}
 
 		if pbDeletePlan {
@@ -866,11 +861,11 @@ All backups for the stanza will be permanently deleted.
 		}
 
 		if config.IsStructuredOutput() {
-			if !pbDeleteForce {
+			if !pbDeleteYes {
 				return structuredConfirmationError(
 					output.CodePbConfirmationRequired,
 					"pb delete requires explicit confirmation",
-					"structured output mode does not prompt interactively; rerun with --force to execute or --plan to preview",
+					"structured output mode does not prompt interactively; rerun with --yes to execute or --plan to preview",
 					output.OperationMeta{
 						Module:       "pb",
 						Command:      "delete",
@@ -881,7 +876,7 @@ All backups for the stanza will be permanently deleted.
 						DryRun:       false,
 					},
 					[]output.NextAction{
-						{Command: "pig pb delete --force", Reason: "execute irreversible stanza deletion after explicit confirmation", Required: true},
+						{Command: "pig pb delete --yes", Reason: "execute irreversible stanza deletion after explicit confirmation", Required: true},
 						{Command: "pig pb delete --plan", Reason: "preview stanza deletion scope", Required: false},
 						{Command: "pig pb info", Reason: "inspect backup inventory before deletion", Required: false},
 					},

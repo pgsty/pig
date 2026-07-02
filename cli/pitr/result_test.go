@@ -13,7 +13,7 @@ func TestPITRResultData(t *testing.T) {
 	end := start.Add(2 * time.Second)
 
 	state := &SystemState{DataDir: "/pg/data"}
-	opts := &Options{Time: "2026-01-31 01:00:00", Set: "20240101-010101F", Promote: true}
+	opts := &Options{Time: "2026-01-31 01:00:00", Set: "20240101-010101F", TargetAction: "promote"}
 
 	data := newPITRResultData(state, opts, true, true, start, end, nil)
 	if data.Target == "" || data.DataDir == "" {
@@ -94,8 +94,8 @@ func TestPITRResultDataNilOpts(t *testing.T) {
 	if data.BackupSet != "latest" {
 		t.Errorf("backup_set = %q, want %q", data.BackupSet, "latest")
 	}
-	if data.Promote != false {
-		t.Error("Promote should be false with nil opts")
+	if data.TargetAction != "" {
+		t.Error("TargetAction should be empty with nil opts")
 	}
 	if data.Exclusive != false {
 		t.Error("Exclusive should be false with nil opts")
@@ -115,10 +115,10 @@ func TestPITRResultDataFlags(t *testing.T) {
 	start := time.Now()
 	end := start.Add(1 * time.Second)
 
-	// Test Promote flag
-	data := newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Default: true, Promote: true}, false, false, start, end, nil)
-	if !data.Promote {
-		t.Error("Promote should be true")
+	// Test TargetAction pass-through
+	data := newPITRResultData(&SystemState{DataDir: "/pg/data"}, &Options{Time: "2026-01-31 01:00:00", TargetAction: "promote"}, false, false, start, end, nil)
+	if data.TargetAction != "promote" {
+		t.Errorf("TargetAction = %q, want %q", data.TargetAction, "promote")
 	}
 
 	// Test Exclusive flag
@@ -142,7 +142,7 @@ func TestPITRResultDataJSONTags(t *testing.T) {
 	end := start.Add(2 * time.Second)
 
 	state := &SystemState{DataDir: "/pg/data"}
-	opts := &Options{Time: "2026-01-31 01:00:00", Promote: true, Exclusive: true}
+	opts := &Options{Time: "2026-01-31 01:00:00", Exclusive: true}
 
 	data := newPITRResultData(state, opts, true, true, start, end, nil)
 	jsonBytes, err := json.Marshal(data)

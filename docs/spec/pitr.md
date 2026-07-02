@@ -23,9 +23,9 @@ Recovery Targets (at least one required):
   --default, -d      Recover to end of WAL stream (latest)
   --immediate, -I    Recover to backup consistency point
   --time, -t         Recover to specific timestamp
-  --name, -n         Recover to named restore point
-  --lsn, -l          Recover to specific LSN
-  --xid, -x          Recover to specific transaction ID
+  --name             Recover to named restore point
+  --lsn              Recover to specific LSN
+  --xid              Recover to specific transaction ID
 
 Time Format:
   - Full: "2025-01-01 12:00:00+08"
@@ -38,7 +38,6 @@ Examples:
   pig pitr -I                      # Recover to backup consistency point
   pig pitr -d --plan               # Show execution plan without running
   pig pitr -d -y                   # Skip confirmation (for automation)
-  pig pitr -d --skip-patroni       # Skip Patroni management
   pig pitr -d --no-restart         # Don't auto-start PostgreSQL after restore
   pig pitr -d --target-timeline current
 ```
@@ -88,9 +87,6 @@ pig pitr -d -y
 # Recover from specific backup set
 pig pitr -d -b 20251225-120000F
 
-# Standalone PostgreSQL (non-Patroni managed)
-pig pitr -d --skip-patroni
-
 # Don't auto-start PostgreSQL after recovery
 pig pitr -d --no-restart
 ```
@@ -105,9 +101,9 @@ pig pitr -d --no-restart
 | `--default` | `-d` | Recover to end of WAL stream (latest data) |
 | `--immediate` | `-I` | Recover to backup consistency point |
 | `--time` | `-t` | Recover to specific timestamp |
-| `--name` | `-n` | Recover to named restore point |
-| `--lsn` | `-l` | Recover to specific LSN |
-| `--xid` | `-x` | Recover to specific transaction ID |
+| `--name` | | Recover to named restore point |
+| `--lsn` | | Recover to specific LSN |
+| `--xid` | | Recover to specific transaction ID |
 {.full-width}
 
 ### Backup Selection
@@ -121,8 +117,7 @@ pig pitr -d --no-restart
 
 | Param | Short | Description |
 |:------|:------|:------------|
-| `--skip-patroni` | `-S` | Skip Patroni stop operation |
-| `--no-restart` | `-N` | Don't auto-start PostgreSQL after recovery |
+| `--no-restart` | | Don't auto-start PostgreSQL after recovery |
 | `--plan` | | Show execution plan only, don't execute |
 | `--yes` | `-y` | Skip confirmation countdown |
 | `--timeout` | | PostgreSQL start/recovery timeout in seconds |
@@ -134,7 +129,6 @@ pig pitr -d --no-restart
 | Param | Short | Description |
 |:------|:------|:------------|
 | `--exclusive` | `-X` | Exclusive mode: stop before target |
-| `--promote` | `-P` | Auto-promote to primary after recovery |
 | `--target-action` | | Action at recovery target: `pause`, `promote`, or `shutdown` |
 | `--target-timeline` | `-T` | Timeline: `latest`, `current`, integer, or `0xHEX` |
 {.full-width}
@@ -176,7 +170,9 @@ The `--time` parameter supports multiple formats with strict validation and auto
 
 ### Phase 2: Stop Patroni
 
-If Patroni service is running and `--skip-patroni` not specified:
+If Patroni service is running and the restore targets the managed data
+directory, Patroni is always stopped (side restores to a custom `-D`
+directory never touch Patroni):
 - Execute `systemctl stop patroni`
 - Wait for PostgreSQL to auto-stop with Patroni
 
@@ -256,8 +252,9 @@ pig pitr -d -y
 ### Scenario 5: Standalone PostgreSQL Instance
 
 ```bash
-# Non-Patroni managed instance
-pig pitr -d --skip-patroni
+# Non-Patroni managed instance: inactive Patroni is detected automatically,
+# no extra flag is needed
+pig pitr -d
 ```
 
 ### Scenario 6: Recover Without Starting

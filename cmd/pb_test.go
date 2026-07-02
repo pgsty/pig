@@ -273,7 +273,6 @@ func TestPbRestorePlanJSONRejectsExtraArgsBeforeDash(t *testing.T) {
 	origSet := pbRestoreSet
 	origDataDir := pbRestoreDataDir
 	origExclusive := pbRestoreExclusive
-	origPromote := pbRestorePromote
 	origTargetAction := pbRestoreTargetAction
 	origTargetTimeline := pbRestoreTargetTimeline
 	origPlan := pbRestorePlan
@@ -289,7 +288,6 @@ func TestPbRestorePlanJSONRejectsExtraArgsBeforeDash(t *testing.T) {
 		pbRestoreSet = origSet
 		pbRestoreDataDir = origDataDir
 		pbRestoreExclusive = origExclusive
-		pbRestorePromote = origPromote
 		pbRestoreTargetAction = origTargetAction
 		pbRestoreTargetTimeline = origTargetTimeline
 		pbRestorePlan = origPlan
@@ -306,7 +304,6 @@ func TestPbRestorePlanJSONRejectsExtraArgsBeforeDash(t *testing.T) {
 	pbRestoreSet = ""
 	pbRestoreDataDir = ""
 	pbRestoreExclusive = false
-	pbRestorePromote = false
 	pbRestoreTargetAction = ""
 	pbRestoreTargetTimeline = ""
 	pbRestorePlan = true
@@ -387,18 +384,18 @@ func TestPbRestorePlanRejectsInvalidRestoreOptions(t *testing.T) {
 	origFormat := config.OutputFormat
 	origDefault := pbRestoreDefault
 	origPlan := pbRestorePlan
-	origPromote := pbRestorePromote
+	origTargetAction := pbRestoreTargetAction
 	defer func() {
 		config.OutputFormat = origFormat
 		pbRestoreDefault = origDefault
 		pbRestorePlan = origPlan
-		pbRestorePromote = origPromote
+		pbRestoreTargetAction = origTargetAction
 	}()
 
 	config.OutputFormat = config.OUTPUT_JSON
 	pbRestoreDefault = true
 	pbRestorePlan = true
-	pbRestorePromote = true
+	pbRestoreTargetAction = "promote"
 
 	var runErr error
 	raw := capturePbStdout(t, func() {
@@ -419,8 +416,8 @@ func TestPbRestorePlanRejectsInvalidRestoreOptions(t *testing.T) {
 	if success, _ := payload["success"].(bool); success {
 		t.Fatalf("expected success=false, got %v", payload)
 	}
-	if !strings.Contains(pbAsString(payload["detail"]), "--promote") {
-		t.Fatalf("expected detail to mention --promote, got %v", payload)
+	if !strings.Contains(pbAsString(payload["detail"]), "--target-action") {
+		t.Fatalf("expected detail to mention --target-action, got %v", payload)
 	}
 }
 

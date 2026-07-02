@@ -47,7 +47,6 @@ type PbRestoreResultData struct {
 	TargetAction    string `json:"target_action,omitempty" yaml:"target_action,omitempty"`     // Recovery target action (pause/promote/shutdown)
 	TargetTimeline  string `json:"target_timeline,omitempty" yaml:"target_timeline,omitempty"` // Recovery target timeline
 	Exclusive       bool   `json:"exclusive" yaml:"exclusive"`                                 // Whether exclusive mode is enabled
-	Promote         bool   `json:"promote" yaml:"promote"`                                     // Whether auto-promote is enabled
 	StartTime       int64  `json:"start_time" yaml:"start_time"`                               // Start time (Unix timestamp)
 	StopTime        int64  `json:"stop_time" yaml:"stop_time"`                                 // Stop time (Unix timestamp)
 	DurationSeconds int64  `json:"duration_seconds" yaml:"duration_seconds"`                   // Duration in seconds
@@ -138,7 +137,6 @@ func RestoreResult(cfg *Config, opts *RestoreOptions) *output.Result {
 		TargetAction:    determineTargetAction(opts),
 		TargetTimeline:  opts.TargetTimeline,
 		Exclusive:       opts.Exclusive,
-		Promote:         opts.Promote,
 		StartTime:       startTime.Unix(),
 		StopTime:        stopTime.Unix(),
 		DurationSeconds: durationSeconds,

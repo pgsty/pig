@@ -61,7 +61,9 @@ func TestBuildPlanBasic(t *testing.T) {
 	}
 }
 
-func TestBuildPlanSkipPatroniNoRestart(t *testing.T) {
+// TestBuildPlanManagedDirAlwaysStopsPatroni (B10): with --skip-patroni removed,
+// an active Patroni on the managed data dir is ALWAYS stopped before restore.
+func TestBuildPlanManagedDirAlwaysStopsPatroni(t *testing.T) {
 	state := &SystemState{
 		PatroniActive: true,
 		PGRunning:     false,
@@ -69,14 +71,13 @@ func TestBuildPlanSkipPatroniNoRestart(t *testing.T) {
 		DbSU:          "postgres",
 	}
 	opts := &Options{
-		Default:     true,
-		SkipPatroni: true,
-		NoRestart:   true,
+		Default:   true,
+		NoRestart: true,
 	}
 
 	plan := BuildPlan(state, opts)
-	if containsAction(plan.Actions, "Stop Patroni service") {
-		t.Error("Plan.Actions should not include Patroni stop when skip is set")
+	if !containsAction(plan.Actions, "Stop Patroni service") {
+		t.Error("Plan.Actions should always include Patroni stop for managed data dir")
 	}
 	if containsAction(plan.Actions, "Start PostgreSQL") {
 		t.Error("Plan.Actions should not include PostgreSQL start when no-restart is set")
@@ -95,10 +96,9 @@ func TestBuildPlanCustomDataDirSideRestoreDoesNotManagePatroni(t *testing.T) {
 		DbSU:          "postgres",
 	}
 	opts := &Options{
-		Default:     true,
-		DataDir:     "/tmp/pitr-restore",
-		SkipPatroni: true,
-		NoRestart:   true,
+		Default:   true,
+		DataDir:   "/tmp/pitr-restore",
+		NoRestart: true,
 	}
 
 	plan := BuildPlan(state, opts)
@@ -152,9 +152,9 @@ func TestBuildPlanIncludesRecoveryWaitForAutoPromoteTargets(t *testing.T) {
 		t.Fatalf("manual PITR target should not wait for promotion, got %+v", plan.Actions)
 	}
 
-	plan = BuildPlan(state, &Options{Time: "2026-01-31 01:00:00", Promote: true})
+	plan = BuildPlan(state, &Options{Time: "2026-01-31 01:00:00", TargetAction: "promote"})
 	if !containsAction(plan.Actions, "Wait for PostgreSQL recovery to complete") {
-		t.Fatalf("auto-promote PITR plan should include recovery completion wait, got %+v", plan.Actions)
+		t.Fatalf("target-action=promote PITR plan should include recovery completion wait, got %+v", plan.Actions)
 	}
 }
 
@@ -223,9 +223,15 @@ func TestBuildCommand(t *testing.T) {
 		},
 		{
 			name:     "with flags",
-			opts:     &Options{Default: true, SkipPatroni: true, NoRestart: true, Exclusive: true, Promote: true, ForceStop: true},
-			contains: []string{"--skip-patroni", "--no-restart", "-X", "-P", "--force-stop"},
-			excludes: []string{},
+			opts:     &Options{Default: true, NoRestart: true, Exclusive: true, ForceStop: true},
+			contains: []string{"--no-restart", "-X", "--force-stop"},
+			excludes: []string{"--skip-patroni", "-P"},
+		},
+		{
+			name:     "with target action",
+			opts:     &Options{Time: "2026-01-31 01:00:00", TargetAction: "promote"},
+			contains: []string{"--target-action", "promote"},
+			excludes: []string{"-P"},
 		},
 		{
 			name: "with operational context",
@@ -249,19 +255,19 @@ func TestBuildCommand(t *testing.T) {
 		{
 			name:     "lsn target",
 			opts:     &Options{LSN: "0/1234567"},
-			contains: []string{"-l", "0/1234567"},
+			contains: []string{"--lsn", "0/1234567"},
 			excludes: []string{"-d", "-t"},
 		},
 		{
 			name:     "xid target",
 			opts:     &Options{XID: "12345"},
-			contains: []string{"-x", "12345"},
+			contains: []string{"--xid", "12345"},
 			excludes: []string{"-d", "-t"},
 		},
 		{
 			name:     "name target",
 			opts:     &Options{Name: "my_restore_point"},
-			contains: []string{"-n", "my_restore_point"},
+			contains: []string{"--name", "my_restore_point"},
 			excludes: []string{"-d", "-t"},
 		},
 	}
@@ -386,11 +392,11 @@ func TestBuildExpected(t *testing.T) {
 		t.Errorf("buildExpected with NoRestart should mention stopped, got %q", expected)
 	}
 
-	// Test with Promote
-	opts = &Options{Default: true, Promote: true}
+	// Test with target action
+	opts = &Options{Time: "2026-01-31 01:00:00", TargetAction: "promote"}
 	expected = buildExpected(state, opts)
-	if !strings.Contains(expected, "promote") {
-		t.Errorf("buildExpected with Promote should mention promote, got %q", expected)
+	if !strings.Contains(expected, "target action promote") {
+		t.Errorf("buildExpected with TargetAction should mention target action, got %q", expected)
 	}
 }
 
@@ -422,20 +428,6 @@ func TestBuildRisks(t *testing.T) {
 	}
 	if !hasPatroniRisk {
 		t.Error("buildRisks with Patroni active should mention Patroni")
-	}
-
-	// Test with SkipPatroni
-	opts = &Options{Default: true, SkipPatroni: true}
-	risks = buildRisks(state, opts)
-	hasSkipRisk := false
-	for _, r := range risks {
-		if strings.Contains(r, "not stopped") {
-			hasSkipRisk = true
-			break
-		}
-	}
-	if !hasSkipRisk {
-		t.Error("buildRisks with SkipPatroni should warn about Patroni not stopped")
 	}
 
 	// Test with Exclusive
@@ -866,7 +858,7 @@ func TestPITRError_PreCheckValidatesRestoreOptionsBeforeDataDir(t *testing.T) {
 	}{
 		{name: "invalid lsn", opts: &Options{LSN: "BAD"}, want: "invalid LSN"},
 		{name: "invalid xid", opts: &Options{XID: "abc"}, want: "invalid XID"},
-		{name: "default promote", opts: &Options{Default: true, Promote: true}, want: "--promote"},
+		{name: "default target-action", opts: &Options{Default: true, TargetAction: "promote"}, want: "--target-action"},
 		{name: "default exclusive", opts: &Options{Default: true, Exclusive: true}, want: "--exclusive"},
 	}
 
@@ -919,27 +911,10 @@ func TestValidatePITRDataDirOwnerRequiresDBSUForSideRestore(t *testing.T) {
 	}
 }
 
-func TestValidatePatroniPolicyRejectsSkipWhenActive(t *testing.T) {
-	err := validatePatroniPolicy(true, true, false)
-	if err == nil {
-		t.Fatal("active Patroni with --skip-patroni should be rejected")
-	}
-	if !strings.Contains(err.Error(), "patroni") {
-		t.Fatalf("error should mention patroni, got %q", err.Error())
-	}
-
-	if err := validatePatroniPolicy(false, true, false); err != nil {
-		t.Fatalf("inactive Patroni with --skip-patroni should be allowed: %v", err)
-	}
-	if err := validatePatroniPolicy(true, false, false); err != nil {
-		t.Fatalf("managed Patroni PITR should be allowed: %v", err)
-	}
-}
-
-func TestValidatePatroniPolicyAllowsCustomDataDirSideRestore(t *testing.T) {
-	if err := validatePatroniPolicy(true, true, true); err != nil {
-		t.Fatalf("explicit custom data dir side restore should allow --skip-patroni: %v", err)
-	}
+// TestShouldManagePatroni (B10): Patroni lifecycle policy is now state-derived
+// only — active Patroni + managed dir is always stopped, side restores never
+// touch Patroni, inactive Patroni is never managed.
+func TestShouldManagePatroni(t *testing.T) {
 	if shouldManagePatroni(true, true) {
 		t.Fatal("explicit custom data dir side restore should not manage Patroni")
 	}
@@ -948,6 +923,9 @@ func TestValidatePatroniPolicyAllowsCustomDataDirSideRestore(t *testing.T) {
 	}
 	if shouldManagePatroni(false, false) {
 		t.Fatal("inactive Patroni should not be managed")
+	}
+	if shouldManagePatroni(false, true) {
+		t.Fatal("inactive Patroni side restore should not be managed")
 	}
 }
 
@@ -1145,7 +1123,7 @@ func TestShouldWaitForRecoveryComplete(t *testing.T) {
 	}{
 		{name: "nil", opts: nil, want: false},
 		{name: "default", opts: &Options{Default: true}, want: true},
-		{name: "promote", opts: &Options{Time: "2026-01-31 01:00:00", Promote: true}, want: true},
+		{name: "target-action promote", opts: &Options{Time: "2026-01-31 01:00:00", TargetAction: "promote"}, want: true},
 		{name: "manual target", opts: &Options{Time: "2026-01-31 01:00:00"}, want: false},
 		{name: "immediate manual", opts: &Options{Immediate: true}, want: false},
 	}

@@ -9,7 +9,6 @@ type PITRResultData struct {
 	BackupSet         string            `json:"backup_set" yaml:"backup_set"`
 	PatroniStopped    bool              `json:"patroni_stopped" yaml:"patroni_stopped"`
 	PostgresRestarted bool              `json:"postgres_restarted" yaml:"postgres_restarted"`
-	Promote           bool              `json:"promote" yaml:"promote"`
 	Exclusive         bool              `json:"exclusive" yaml:"exclusive"`
 	TargetAction      string            `json:"target_action,omitempty" yaml:"target_action,omitempty"`
 	TargetTimeline    string            `json:"target_timeline,omitempty" yaml:"target_timeline,omitempty"`
@@ -56,7 +55,6 @@ func newPITRResultData(state *SystemState, opts *Options, patroniStopped bool, p
 		BackupSet:         backupSet,
 		PatroniStopped:    patroniStopped,
 		PostgresRestarted: postgresStarted,
-		Promote:           opts != nil && opts.Promote,
 		Exclusive:         opts != nil && opts.Exclusive,
 		TargetAction:      targetActionFromOptions(opts),
 		TargetTimeline:    targetTimelineFromOptions(opts),
@@ -71,13 +69,7 @@ func targetActionFromOptions(opts *Options) string {
 	if opts == nil {
 		return ""
 	}
-	if opts.TargetAction != "" {
-		return opts.TargetAction
-	}
-	if opts.Promote {
-		return "promote"
-	}
-	return ""
+	return opts.TargetAction
 }
 
 func targetTimelineFromOptions(opts *Options) string {

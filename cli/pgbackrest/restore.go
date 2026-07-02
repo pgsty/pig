@@ -3,12 +3,10 @@ package pgbackrest
 import (
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"pig/cli/postgres"
@@ -34,7 +32,6 @@ type RestoreOptions struct {
 	// Other options
 	DataDir        string // Target data directory
 	Exclusive      bool   // Stop before target (exclusive)
-	Promote        bool   // Promote after reaching target (target-action=promote)
 	TargetAction   string // Action at target: pause, promote, shutdown
 	TargetTimeline string // Timeline to recover along: latest, current, N, or 0xN
 	ExtraArgs      []string
@@ -159,7 +156,7 @@ func ValidateRestoreOptions(opts *RestoreOptions) error {
 		return err
 	}
 	if action != "" && opts.Default {
-		return fmt.Errorf("--target-action/--promote cannot be used with --default")
+		return fmt.Errorf("--target-action cannot be used with --default")
 	}
 	if opts.Exclusive && opts.Time == "" && opts.LSN == "" && opts.XID == "" {
 		return fmt.Errorf("--exclusive requires --time, --lsn, or --xid")
@@ -317,9 +314,7 @@ func buildRestoreArgs(cfg *Config, opts *RestoreOptions, normalizedTime string) 
 	if opts.Exclusive {
 		args = append(args, "--target-exclusive")
 	}
-	if opts.Promote {
-		args = append(args, "--target-action=promote")
-	} else if opts.TargetAction != "" {
+	if opts.TargetAction != "" {
 		args = append(args, "--target-action="+opts.TargetAction)
 	}
 	if opts.TargetTimeline != "" {
@@ -342,12 +337,6 @@ func restoreTargetAction(opts *RestoreOptions) (string, error) {
 		default:
 			return "", fmt.Errorf("invalid target action: %s (use pause, promote, or shutdown)", opts.TargetAction)
 		}
-	}
-	if opts.Promote {
-		if opts.TargetAction != "" && opts.TargetAction != "promote" {
-			return "", fmt.Errorf("--promote conflicts with --target-action=%s", opts.TargetAction)
-		}
-		return "promote", nil
 	}
 	return opts.TargetAction, nil
 }
@@ -404,32 +393,6 @@ func ResolveDataDir(cfg *Config, optDataDir string) string {
 // utils.Confirm directly in new code.
 func ConfirmDestructive(warning, action string) error {
 	return utils.Confirm(warning, action)
-}
-
-// ConfirmWithCountdown shows a warning and countdown, returns error if cancelled.
-// This is exported for use by pitr and other packages that need confirmation.
-func ConfirmWithCountdown(warning, action string) error {
-	fmt.Fprintf(os.Stderr, "\n%sWARNING: %s%s\n", utils.ColorYellow, warning, utils.ColorReset)
-	fmt.Fprintln(os.Stderr, "Press Ctrl+C to cancel, or wait for countdown...")
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	defer func() {
-		signal.Stop(sigChan)
-		close(sigChan)
-	}()
-
-	for i := 5; i > 0; i-- {
-		select {
-		case <-sigChan:
-			fmt.Fprintf(os.Stderr, "\n%s cancelled.\n", action)
-			return fmt.Errorf("%s cancelled by user", action)
-		case <-time.After(time.Second):
-			fmt.Fprintf(os.Stderr, "\rStarting %s in %d seconds... ", action, i)
-		}
-	}
-	fmt.Fprintln(os.Stderr)
-	return nil
 }
 
 // printRestorePlan displays the restore plan to stderr.

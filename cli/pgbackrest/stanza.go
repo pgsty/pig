@@ -2,7 +2,6 @@ package pgbackrest
 
 import (
 	"fmt"
-	"os"
 
 	"pig/internal/utils"
 )
@@ -54,8 +53,7 @@ func Upgrade(cfg *Config, opts *UpgradeOptions) error {
 
 // DeleteOptions holds options for stanza-delete command.
 type DeleteOptions struct {
-	Force bool // Force deletion (required)
-	Yes   bool // Skip countdown confirmation
+	Yes bool // Skip interactive confirmation prompt
 }
 
 // Delete removes a stanza and all its backups (stanza-delete).
@@ -66,16 +64,11 @@ func Delete(cfg *Config, opts *DeleteOptions) error {
 		return err
 	}
 
-	if !opts.Force {
-		return fmt.Errorf("stanza-delete is a destructive operation that removes ALL backups\nuse --force to confirm deletion of stanza '%s'", effCfg.Stanza)
-	}
-
 	if !opts.Yes {
-		fmt.Fprintf(os.Stderr, "\n%s!!! WARNING !!!%s\n", utils.ColorRed, utils.ColorReset)
-		fmt.Fprintf(os.Stderr, "This will permanently delete stanza '%s' and ALL its backups.\n", effCfg.Stanza)
-		fmt.Fprintf(os.Stderr, "This operation is %sIRREVERSIBLE%s.\n", utils.ColorRed, utils.ColorReset)
-
-		if err := ConfirmWithCountdown("stanza deletion", "stanza deletion"); err != nil {
+		if err := utils.Confirm(
+			fmt.Sprintf("This will permanently delete ALL backups and archives for stanza %s", effCfg.Stanza),
+			"pb delete",
+		); err != nil {
 			return err
 		}
 	}

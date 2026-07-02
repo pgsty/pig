@@ -132,11 +132,11 @@ func BuildDeletePlan(cfg *Config, opts *DeleteOptions) *output.Plan {
 			"All backups for the stanza are permanently removed.",
 		},
 		Preconditions: []output.Check{
-			{Name: "explicit confirmation", Status: "required", Detail: "rerun with --force for structured execution"},
+			{Name: "explicit confirmation", Status: "required", Detail: "rerun with --yes for structured execution"},
 			{Name: "pgbackrest stanza", Status: "required", Detail: restoreStanzaName(cfg)},
 		},
 		NextActions: []output.NextAction{
-			{Command: "pig pb delete --force", Reason: "execute irreversible stanza deletion", Required: true},
+			{Command: "pig pb delete --yes", Reason: "execute irreversible stanza deletion", Required: true},
 			{Command: "pig pb info", Reason: "inspect backup inventory before deletion", Required: false},
 		},
 	}
@@ -170,9 +170,6 @@ func buildRestoreCommand(opts *RestoreOptions, includePlan bool) string {
 	}
 	if opts.Exclusive {
 		parts = append(parts, "--exclusive")
-	}
-	if opts.Promote {
-		parts = append(parts, "--promote")
 	}
 	if opts.TargetAction != "" {
 		parts = append(parts, "--target-action", quoteArg(opts.TargetAction))

@@ -68,16 +68,19 @@ func TestPbStanzaResultDataYAMLSerialization(t *testing.T) {
 	}
 }
 
-func TestDeleteResultRequiresForce(t *testing.T) {
-	result := DeleteResult(&Config{}, &DeleteOptions{Force: false})
+func TestDeleteResultRequiresYes(t *testing.T) {
+	result := DeleteResult(&Config{}, &DeleteOptions{Yes: false})
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
 	if result.Success {
 		t.Fatal("expected failure result")
 	}
-	if result.Code != output.CodePbStanzaDeleteRequiresForce {
-		t.Fatalf("expected CodePbStanzaDeleteRequiresForce, got %d", result.Code)
+	if result.Code != output.CodePbConfirmationRequired {
+		t.Fatalf("expected CodePbConfirmationRequired, got %d", result.Code)
+	}
+	if !containsStr(result.Message+result.Detail, "--yes") {
+		t.Fatalf("delete confirmation error should mention --yes, got %q / %q", result.Message, result.Detail)
 	}
 }
 
@@ -87,10 +90,10 @@ func TestDeleteResultNilOptions(t *testing.T) {
 		t.Fatal("expected non-nil result")
 	}
 	if result.Success {
-		t.Fatal("expected failure result for nil options (no --force)")
+		t.Fatal("expected failure result for nil options (no --yes)")
 	}
-	if result.Code != output.CodePbStanzaDeleteRequiresForce {
-		t.Fatalf("expected CodePbStanzaDeleteRequiresForce, got %d", result.Code)
+	if result.Code != output.CodePbConfirmationRequired {
+		t.Fatalf("expected CodePbConfirmationRequired, got %d", result.Code)
 	}
 }
 

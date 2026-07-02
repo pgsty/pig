@@ -26,8 +26,8 @@ func TestPbRestoreResultData_JSONSerialization(t *testing.T) {
 		RestoredBackup:  "20250204-120000F",
 		TargetType:      "time",
 		TargetValue:     "2025-02-04 12:00:00+08",
+		TargetAction:    "promote",
 		Exclusive:       false,
-		Promote:         true,
 		StartTime:       1738627200,
 		StopTime:        1738627800,
 		DurationSeconds: 600,
@@ -61,8 +61,8 @@ func TestPbRestoreResultData_JSONSerialization(t *testing.T) {
 	if decoded.Exclusive != data.Exclusive {
 		t.Errorf("Exclusive mismatch: got %v, want %v", decoded.Exclusive, data.Exclusive)
 	}
-	if decoded.Promote != data.Promote {
-		t.Errorf("Promote mismatch: got %v, want %v", decoded.Promote, data.Promote)
+	if decoded.TargetAction != data.TargetAction {
+		t.Errorf("TargetAction mismatch: got %q, want %q", decoded.TargetAction, data.TargetAction)
 	}
 	if decoded.StartTime != data.StartTime {
 		t.Errorf("StartTime mismatch: got %d, want %d", decoded.StartTime, data.StartTime)
@@ -84,7 +84,6 @@ func TestPbRestoreResultData_YAMLSerialization(t *testing.T) {
 		TargetType:      "default",
 		TargetValue:     "",
 		Exclusive:       false,
-		Promote:         false,
 		StartTime:       1738627200,
 		StopTime:        1738627800,
 		DurationSeconds: 600,
@@ -119,8 +118,8 @@ func TestPbRestoreResultData_JSONFieldNames(t *testing.T) {
 		RestoredBackup:  "backup",
 		TargetType:      "time",
 		TargetValue:     "2025-01-01",
+		TargetAction:    "promote",
 		Exclusive:       true,
-		Promote:         true,
 		StartTime:       1000,
 		StopTime:        2000,
 		DurationSeconds: 1000,
@@ -139,8 +138,8 @@ func TestPbRestoreResultData_JSONFieldNames(t *testing.T) {
 		`"restored_backup"`,
 		`"target_type"`,
 		`"target_value"`,
+		`"target_action"`,
 		`"exclusive"`,
-		`"promote"`,
 		`"start_time"`,
 		`"stop_time"`,
 		`"duration_seconds"`,
@@ -162,7 +161,6 @@ func TestPbRestoreResultData_OmitEmptyFields(t *testing.T) {
 		TargetType:      "default",
 		TargetValue:     "", // Should be omitted
 		Exclusive:       false,
-		Promote:         false,
 		StartTime:       1000,
 		StopTime:        2000,
 		DurationSeconds: 1000,
@@ -386,9 +384,9 @@ func TestValidateRestoreOptionsRejectsDefaultOnlyTargetModifiers(t *testing.T) {
 		want string
 	}{
 		{
-			name: "default promote",
-			opts: &RestoreOptions{Default: true, Promote: true},
-			want: "--promote",
+			name: "default target-action",
+			opts: &RestoreOptions{Default: true, TargetAction: "promote"},
+			want: "--target-action",
 		},
 		{
 			name: "default exclusive",
@@ -423,7 +421,7 @@ func TestValidateRestoreOptionsAcceptsTargetModifiersWithSupportedTargets(t *tes
 		{name: "time exclusive", opts: &RestoreOptions{Time: "2026-01-01 00:00:00+00", Exclusive: true}},
 		{name: "lsn exclusive", opts: &RestoreOptions{LSN: "0/7C82CB8", Exclusive: true}},
 		{name: "xid exclusive", opts: &RestoreOptions{XID: "12345", Exclusive: true}},
-		{name: "name promote", opts: &RestoreOptions{Name: "restore_point", Promote: true}},
+		{name: "name target-action promote", opts: &RestoreOptions{Name: "restore_point", TargetAction: "promote"}},
 	}
 
 	for _, tt := range tests {
@@ -696,13 +694,12 @@ func TestPbRestoreResultData_WithBackupSet(t *testing.T) {
 
 // TestPbRestoreResultData_BooleanFields tests that boolean fields are always serialized.
 func TestPbRestoreResultData_BooleanFields(t *testing.T) {
-	// Test with both false values
+	// Test with false value
 	data := &PbRestoreResultData{
 		Stanza:          "test",
 		DataDir:         "/data",
 		TargetType:      "default",
 		Exclusive:       false,
-		Promote:         false,
 		StartTime:       1000,
 		StopTime:        2000,
 		DurationSeconds: 1000,
@@ -718,13 +715,9 @@ func TestPbRestoreResultData_BooleanFields(t *testing.T) {
 	if !containsStr(jsonStr, `"exclusive":false`) {
 		t.Errorf("JSON should contain exclusive:false, got: %s", jsonStr)
 	}
-	if !containsStr(jsonStr, `"promote":false`) {
-		t.Errorf("JSON should contain promote:false, got: %s", jsonStr)
-	}
 
-	// Test with both true values
+	// Test with true value
 	data.Exclusive = true
-	data.Promote = true
 	jsonBytes, err = json.Marshal(data)
 	if err != nil {
 		t.Fatalf("JSON marshal failed: %v", err)
@@ -733,9 +726,6 @@ func TestPbRestoreResultData_BooleanFields(t *testing.T) {
 	jsonStr = string(jsonBytes)
 	if !containsStr(jsonStr, `"exclusive":true`) {
 		t.Errorf("JSON should contain exclusive:true, got: %s", jsonStr)
-	}
-	if !containsStr(jsonStr, `"promote":true`) {
-		t.Errorf("JSON should contain promote:true, got: %s", jsonStr)
 	}
 }
 

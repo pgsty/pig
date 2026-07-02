@@ -26,17 +26,17 @@ Backup Commands (Primary Only):
   pig pb backup diff               differential backup
   pig pb backup incr               incremental backup
 
-Restore Commands:
-  pig pb restore -d                restore to latest (default)
+Restore Commands (low-level primitive):
+  pig pb restore -d                restore to latest (end of WAL)
   pig pb restore -I                restore to backup consistency point
   pig pb restore -t <time>         restore to specific time
-  pig pb restore -n <name>         restore to named restore point
+  pig pb restore --name <name>     restore to named restore point
   pig pb restore -b <set>          restore from specific backup set
 
 Stanza Management:
   pig pb create                    create stanza (first-time setup)
   pig pb upgrade                   upgrade stanza after PG major upgrade
-  pig pb delete --force            delete stanza (dangerous!)
+  pig pb delete                    delete stanza (dangerous!)
 
 Control Commands:
   pig pb check                     verify backup repository
@@ -56,7 +56,7 @@ Log Commands:
 
 `pig pb` is the pgBackRest primitive layer. It manages repository, stanza, backup, expire, and restore operations through pgBackRest only. `pb restore` restores files and recovery targets; it does not stop Patroni, stop PostgreSQL, start PostgreSQL, promote, rejoin HA, or verify cluster health. Use `pig pitr` for managed recovery orchestration.
 
-High-risk pgBackRest actions expose a structured `state -> plan -> precheck -> execute -> verify -> result -> next_actions` contract. In JSON/YAML mode, destructive execution requires explicit `--yes` or `--force`; missing confirmation returns a structured parameter error with `next_actions` instead of prompting. Plan output is side-effect-free and may include `boundary`, `confirmation`, `preconditions`, `verifications`, and `next_actions` in addition to the existing plan fields.
+High-risk pgBackRest actions expose a structured `state -> plan -> precheck -> execute -> verify -> result -> next_actions` contract. In JSON/YAML mode, destructive execution requires explicit `--yes`; missing confirmation returns a structured parameter error with `next_actions` instead of prompting. Plan output is side-effect-free and may include `boundary`, `confirmation`, `preconditions`, `verifications`, and `next_actions` in addition to the existing plan fields.
 
 
 ## Command Overview
@@ -76,7 +76,7 @@ High-risk pgBackRest actions expose a structured `state -> plan -> precheck -> e
 | Command | Description | Implementation |
 |:---|:---|:---|
 | `pb backup` | Create backup | `pgbackrest backup` |
-| `pb restore` | Restore from backup (PITR) | `pgbackrest restore` |
+| `pb restore` | Restore from backup (low-level primitive) | `pgbackrest restore` |
 | `pb expire` | Clean up expired backups | `pgbackrest expire` |
 {.full-width}
 
@@ -116,11 +116,11 @@ pig pb backup full                   # Full backup
 pig pb backup diff                   # Differential backup
 pig pb backup incr                   # Incremental backup
 
-# Restore (PITR)
+# Restore (low-level primitive; use pig pitr for orchestrated recovery)
 pig pb restore -d                    # Restore to latest (end of WAL)
 pig pb restore -I                    # Restore to backup consistency point
 pig pb restore -t "2025-01-01 12:00:00+08"  # Restore to specific time
-pig pb restore -n savepoint          # Restore to named restore point
+pig pb restore --name savepoint      # Restore to named restore point
 
 # Stanza management
 pig pb create                        # Initialize stanza
@@ -293,16 +293,16 @@ pig pb restore -I                    # Restore to backup consistency point
 pig pb restore -t "2025-01-01 12:00:00+08"  # Restore to specific time
 pig pb restore -t "2025-01-01"       # Restore to date (00:00:00 that day)
 pig pb restore -t "12:00:00"         # Restore to time (today)
-pig pb restore -n my-savepoint       # Restore to named restore point
-pig pb restore -l "0/7C82CB8"        # Restore to LSN
-pig pb restore -x 12345              # Restore to transaction ID
+pig pb restore --name my-savepoint   # Restore to named restore point
+pig pb restore --lsn "0/7C82CB8"     # Restore to LSN
+pig pb restore --xid 12345           # Restore to transaction ID
 
 # Backup set selection (can combine with recovery target)
 pig pb restore -b 20251225-120000F   # Restore from specific backup set
 
 # Other options
 pig pb restore -t "..." -X           # Exclusive mode (stop before target)
-pig pb restore -t "..." -P           # Auto-promote after restore
+pig pb restore -t "..." --target-action promote   # Promote after reaching target
 pig pb restore -t "..." --target-action shutdown
 pig pb restore -d -- --delta         # Raw pgBackRest args after --
 pig pb restore -y                    # Skip confirmation prompt
@@ -315,9 +315,9 @@ pig pb restore -y                    # Skip confirmation prompt
 | `--default` | `-d` | Restore to end of WAL stream (latest data) |
 | `--immediate` | `-I` | Restore to backup consistency point |
 | `--time` | `-t` | Restore to specific timestamp |
-| `--name` | `-n` | Restore to named restore point |
-| `--lsn` | `-l` | Restore to specific LSN |
-| `--xid` | `-x` | Restore to specific transaction ID |
+| `--name` | | Restore to named restore point |
+| `--lsn` | | Restore to specific LSN |
+| `--xid` | | Restore to specific transaction ID |
 {.full-width}
 
 **Backup Set and Other Options:**
@@ -327,7 +327,6 @@ pig pb restore -y                    # Skip confirmation prompt
 | `--set` | `-b` | Restore from specific backup set (can combine with target) |
 | `--data` | `-D` | Target data directory |
 | `--exclusive` | `-X` | Exclusive mode: stop before target |
-| `--promote` | `-P` | Auto-promote to primary after restore |
 | `--target-action` | | Action at target: `pause`, `promote`, or `shutdown` |
 | `--target-timeline` | `-T` | Timeline: `latest`, `current`, integer, or `0xHEX` |
 | `--yes` | `-y` | Skip confirmation prompt |
@@ -413,24 +412,22 @@ After PostgreSQL major version upgrade (e.g., 16 -> 17), run this command to upd
 Delete stanza and all its backups.
 
 ```bash
-pig pb delete --force                # Delete stanza (requires --force)
-pig pb delete --force --yes          # Skip countdown confirmation
+pig pb delete                        # Delete stanza (interactive y/N confirmation)
+pig pb delete --yes                  # Skip confirmation prompt
+pig pb delete --plan                 # Preview stanza deletion plan
 ```
 
 **Options:**
 
 | Option | Short | Description |
 |:---|:---|:---|
-| `--force` | `-f` | Confirm delete (required) |
-| `--yes` | `-y` | Skip countdown confirmation |
+| `--yes` | `-y` | Skip confirmation prompt |
+| `--plan` | | Preview stanza deletion plan without executing |
 {.full-width}
 
 **Warning:** This is a **destructive and irreversible** operation! All backups will be permanently deleted.
 
-Multiple safety mechanisms:
-1. Must provide `--force` parameter
-2. 5-second countdown (press Ctrl+C to cancel)
-3. Use `--yes` to skip countdown
+Safety mechanism: text mode prompts for typed `y`/`yes` confirmation unless `--yes` is provided (EOF aborts). JSON/YAML mode never prompts; without `--yes` it returns a structured confirmation-required error with `--yes`/`--plan` next actions.
 
 
 ## Control Commands
@@ -553,7 +550,7 @@ For full `pgbackrest` functionality, use `pgbackrest` command directly.
 
 **Security Considerations:**
 
-- `pb delete` requires `--force` confirmation, with 5-second countdown
+- `pb delete` prompts for interactive `y`/`yes` confirmation unless `--yes` is given
 - `pb expire --set` requires confirmation or `--yes`
 - `pb restore` requires an explicit recovery target, validates `--time`, and requires typed `yes` confirmation unless `--yes` is used
 - `pb backup` checks primary role by default, prevents running on replica

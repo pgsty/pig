@@ -133,7 +133,8 @@ const (
 	// Parameter errors (14_01_xx - Param category)
 	CodePbInvalidBackupType         = MODULE_PB + CAT_PARAM + 1 // Invalid backup type specified
 	CodePbInvalidRestoreParams      = MODULE_PB + CAT_PARAM + 2 // Invalid restore parameters
-	CodePbStanzaDeleteRequiresForce = MODULE_PB + CAT_PARAM + 3 // Stanza delete requires --force
+	// NOTE: NN=3 was CodePbStanzaDeleteRequiresForce (pre-release), folded into
+	// CodePbConfirmationRequired (CAT_CONFIRM); value retired, do not reuse.
 	CodePbInvalidInfoParams         = MODULE_PB + CAT_PARAM + 4 // Invalid info command parameters
 
 	// Permission errors (14_02_xx - Permission category)

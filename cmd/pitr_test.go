@@ -32,19 +32,17 @@ func TestPITRHelpClarifiesPatroniBoundary(t *testing.T) {
 	if !strings.Contains(pitrCmd.Long, "only to keep the target PGDATA offline") {
 		t.Fatalf("pig pitr help should say Patroni stop is only a restore-safety action:\n%s", pitrCmd.Long)
 	}
-	if strings.Contains(pitrCmd.Example, "pig pitr -d --skip-patroni") {
-		t.Fatalf("pig pitr help should not show --skip-patroni against the managed default data dir:\n%s", pitrCmd.Example)
+	if strings.Contains(pitrCmd.Long+pitrCmd.Example, "--skip-patroni") {
+		t.Fatalf("pig pitr help should not mention removed --skip-patroni flag (B10):\n%s", pitrCmd.Example)
 	}
 	if !strings.Contains(pitrCmd.Example, "leave PostgreSQL and Patroni stopped") {
 		t.Fatalf("pig pitr --no-restart example should mention both PostgreSQL and Patroni state:\n%s", pitrCmd.Example)
 	}
-	skipFlag := pitrCmd.Flags().Lookup("skip-patroni")
-	if skipFlag == nil || !strings.Contains(skipFlag.Usage, "custom -D") {
-		t.Fatalf("--skip-patroni help should mention custom -D/standalone scope, got %v", skipFlag)
+	if pitrCmd.Flags().Lookup("skip-patroni") != nil {
+		t.Fatal("--skip-patroni flag should be removed from pitr (B10)")
 	}
-	promoteFlag := pitrCmd.Flags().Lookup("promote")
-	if promoteFlag == nil || !strings.Contains(promoteFlag.Usage, "manual recovery target") {
-		t.Fatalf("--promote help should mention manual recovery target scope, got %v", promoteFlag)
+	if pitrCmd.Flags().Lookup("promote") != nil {
+		t.Fatal("--promote flag should be removed from pitr (B09); use --target-action=promote")
 	}
 }
 
@@ -52,7 +50,7 @@ func TestPITRHelpSaysCustomDataDirRequiresNoRestart(t *testing.T) {
 	if !strings.Contains(strings.ToLower(pitrCmd.Long), "custom -d side restores require --no-restart") {
 		t.Fatalf("help should document custom -D auto-start safety rule:\n%s", pitrCmd.Long)
 	}
-	if !strings.Contains(pitrCmd.Example, "pig pitr -d -D /tmp/pg-restore --skip-patroni --no-restart") {
+	if !strings.Contains(pitrCmd.Example, "pig pitr -d -D /tmp/pg-restore --no-restart") {
 		t.Fatalf("custom -D example should keep --no-restart:\n%s", pitrCmd.Example)
 	}
 }

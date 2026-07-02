@@ -47,9 +47,9 @@ Recovery Targets (at least one required):
   --default, -d      Recover to end of WAL stream (latest)
   --immediate, -I    Recover to backup consistency point
   --time, -t         Recover to specific timestamp
-  --name, -n         Recover to named restore point
-  --lsn, -l          Recover to specific LSN
-  --xid, -x          Recover to specific transaction ID
+  --name             Recover to named restore point
+  --lsn              Recover to specific LSN
+  --xid              Recover to specific transaction ID
 
 Backup and Target Options:
   --set, -b          Select backup set to start recovery from
@@ -93,7 +93,7 @@ The command uses the same execution privilege strategy as other pig commands:
   pig pitr -d -y
 
   # Side-restore to a custom data dir without touching Patroni or /pg/data
-  pig pitr -d -D /tmp/pg-restore --skip-patroni --no-restart
+  pig pitr -d -D /tmp/pg-restore --no-restart
 
   # Restore the managed data dir, but leave PostgreSQL and Patroni stopped
   pig pitr -d --no-restart
@@ -108,7 +108,7 @@ The command uses the same execution privilege strategy as other pig commands:
   pig pitr -t "2025-01-01 12:00:00" -X
 
   # Auto-promote after reaching a manual recovery target
-  pig pitr -t "2025-01-01 12:00:00" -P
+  pig pitr -t "2025-01-01 12:00:00" --target-action=promote
 
   # Pass extra pgBackRest restore args after --
   pig pitr -d -- --delta`,
@@ -205,16 +205,15 @@ func init() {
 	pitrCmd.Flags().BoolVarP(&pitrOpts.Default, "default", "d", false, "recover to end of WAL stream (latest)")
 	pitrCmd.Flags().BoolVarP(&pitrOpts.Immediate, "immediate", "I", false, "recover to backup consistency point")
 	pitrCmd.Flags().StringVarP(&pitrOpts.Time, "time", "t", "", "recover to specific timestamp")
-	pitrCmd.Flags().StringVarP(&pitrOpts.Name, "name", "n", "", "recover to named restore point")
-	pitrCmd.Flags().StringVarP(&pitrOpts.LSN, "lsn", "l", "", "recover to specific LSN")
-	pitrCmd.Flags().StringVarP(&pitrOpts.XID, "xid", "x", "", "recover to specific transaction ID")
+	pitrCmd.Flags().StringVar(&pitrOpts.Name, "name", "", "recover to named restore point")
+	pitrCmd.Flags().StringVar(&pitrOpts.LSN, "lsn", "", "recover to specific LSN")
+	pitrCmd.Flags().StringVar(&pitrOpts.XID, "xid", "", "recover to specific transaction ID")
 
 	// Backup selection
 	pitrCmd.Flags().StringVarP(&pitrOpts.Set, "set", "b", "", "select backup set to start recovery from")
 
 	// PITR control
-	pitrCmd.Flags().BoolVarP(&pitrOpts.SkipPatroni, "skip-patroni", "S", false, "skip Patroni stop operation (standalone PostgreSQL or custom -D side restore)")
-	pitrCmd.Flags().BoolVarP(&pitrOpts.NoRestart, "no-restart", "N", false, "don't restart PostgreSQL after restore")
+	pitrCmd.Flags().BoolVar(&pitrOpts.NoRestart, "no-restart", false, "don't restart PostgreSQL after restore")
 	pitrCmd.Flags().BoolVar(&pitrOpts.Plan, "plan", false, "show execution plan without running")
 	pitrCmd.Flags().BoolVarP(&pitrOpts.Yes, "yes", "y", false, "skip destructive confirmation prompt")
 	pitrCmd.Flags().IntVar(&pitrOpts.Timeout, "timeout", 120, "PostgreSQL start/recovery timeout in seconds")
@@ -226,7 +225,6 @@ func init() {
 	pitrCmd.Flags().StringVarP(&pitrOpts.DbSU, "dbsu", "U", "", "database superuser (default: postgres)")
 	pitrCmd.Flags().StringVarP(&pitrOpts.DataDir, "data", "D", "", "target data directory")
 	pitrCmd.Flags().BoolVarP(&pitrOpts.Exclusive, "exclusive", "X", false, "stop before target (exclusive)")
-	pitrCmd.Flags().BoolVarP(&pitrOpts.Promote, "promote", "P", false, "auto-promote after reaching a manual recovery target")
 	pitrCmd.Flags().StringVar(&pitrOpts.TargetAction, "target-action", "", "action at recovery target: pause, promote, shutdown")
 	pitrCmd.Flags().StringVarP(&pitrOpts.TargetTimeline, "target-timeline", "T", "", "recover along timeline: latest, current, N, or 0xN")
 	pitrCmd.Flags().BoolVar(&pitrOpts.ForceStop, "force-stop", false, "allow immediate shutdown and kill fallback if fast stop fails")
