@@ -477,6 +477,100 @@ func TestPatroniTextConfirmClusterOps(t *testing.T) {
 	}
 }
 
+func TestPatroniSwitchoverSilentExitSilencesCobraOutput(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	origConfirm := highRiskTextConfirm
+	origSwitchover := patroniSwitchoverExec
+	origSilenceErrors := patroniSwitchoverCmd.SilenceErrors
+	origSilenceUsage := patroniSwitchoverCmd.SilenceUsage
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		highRiskTextConfirm = origConfirm
+		patroniSwitchoverExec = origSwitchover
+		patroniSwitchoverCmd.SilenceErrors = origSilenceErrors
+		patroniSwitchoverCmd.SilenceUsage = origSilenceUsage
+		_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	patroniPlan = false
+	patroniSwitchoverCmd.SilenceErrors = false
+	patroniSwitchoverCmd.SilenceUsage = false
+	_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
+	highRiskTextConfirm = func(warning, action string) error { return nil }
+	patroniSwitchoverExec = func(dbsu string, opts *patroni.SwitchoverOptions) error {
+		return &utils.ExitCodeError{
+			Code:   1,
+			Err:    errors.New("exit status 1: Current cluster topology\n+ table row +\nError: No candidates found to switchover to"),
+			Silent: true,
+		}
+	}
+
+	err := patroniSwitchoverCmd.RunE(patroniSwitchoverCmd, nil)
+	var exitErr *utils.ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("switchover returned %T, want ExitCodeError: %v", err, err)
+	}
+	if !exitErr.Silent {
+		t.Fatalf("switchover exit should stay silent, got %v", err)
+	}
+	if !patroniSwitchoverCmd.SilenceErrors {
+		t.Fatal("silent switchover subprocess failure should silence Cobra error printing")
+	}
+	if !patroniSwitchoverCmd.SilenceUsage {
+		t.Fatal("silent switchover subprocess failure should silence Cobra usage printing")
+	}
+}
+
+func TestPatroniFailoverSilentExitSilencesCobraOutput(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	origConfirm := highRiskTextConfirm
+	origFailover := patroniFailoverExec
+	origSilenceErrors := patroniFailoverCmd.SilenceErrors
+	origSilenceUsage := patroniFailoverCmd.SilenceUsage
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		highRiskTextConfirm = origConfirm
+		patroniFailoverExec = origFailover
+		patroniFailoverCmd.SilenceErrors = origSilenceErrors
+		patroniFailoverCmd.SilenceUsage = origSilenceUsage
+		_ = patroniFailoverCmd.Flags().Set("yes", "false")
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	patroniPlan = false
+	patroniFailoverCmd.SilenceErrors = false
+	patroniFailoverCmd.SilenceUsage = false
+	_ = patroniFailoverCmd.Flags().Set("yes", "false")
+	highRiskTextConfirm = func(warning, action string) error { return nil }
+	patroniFailoverExec = func(dbsu string, opts *patroni.FailoverOptions) error {
+		return &utils.ExitCodeError{
+			Code:   1,
+			Err:    errors.New("exit status 1: Current cluster topology\n+ table row +\nError: No candidates found to failover to"),
+			Silent: true,
+		}
+	}
+
+	err := patroniFailoverCmd.RunE(patroniFailoverCmd, nil)
+	var exitErr *utils.ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("failover returned %T, want ExitCodeError: %v", err, err)
+	}
+	if !exitErr.Silent {
+		t.Fatalf("failover exit should stay silent, got %v", err)
+	}
+	if !patroniFailoverCmd.SilenceErrors {
+		t.Fatal("silent failover subprocess failure should silence Cobra error printing")
+	}
+	if !patroniFailoverCmd.SilenceUsage {
+		t.Fatal("silent failover subprocess failure should silence Cobra usage printing")
+	}
+}
+
 // TestPatroniStartStopShortcutsRouteToSvc (B03): top-level start/stop stay
 // hidden, but execute the same Patroni service action as pt svc start/stop.
 func TestPatroniStartStopShortcutsRouteToSvc(t *testing.T) {

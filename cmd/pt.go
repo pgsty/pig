@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"pig/cli/patroni"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
+
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -39,7 +40,7 @@ Cluster Operations (via patronictl):
   pig pt resume                    resume automatic failover
   pig pt switchover                perform planned switchover
   pig pt failover                  perform manual failover
-  pig pt config <action>           manage cluster config
+  pig pt config edit               edit cluster config
 
 Service Management (via systemctl):
   pig pt status                    show comprehensive patroni status
@@ -412,7 +413,7 @@ The old leader becomes a replica after switchover.`,
 			return err
 		}
 		opts.Force = true
-		return patroniSwitchoverExec(utils.GetDBSU(patroniDBSU), opts)
+		return silenceCobraOnSilentExit(cmd, patroniSwitchoverExec(utils.GetDBSU(patroniDBSU), opts))
 	},
 }
 
@@ -465,7 +466,7 @@ the leader is truly unavailable.`,
 			return err
 		}
 		opts.Force = true
-		return patroniFailoverExec(utils.GetDBSU(patroniDBSU), opts)
+		return silenceCobraOnSilentExit(cmd, patroniFailoverExec(utils.GetDBSU(patroniDBSU), opts))
 	},
 }
 
@@ -530,7 +531,10 @@ Actions:
   pig pt config set ttl=60                # Set Patroni config
   pig pt config set ttl=60 loop_wait=15   # Set multiple values
   pig pt config pg max_connections=200    # Set PostgreSQL config
-  pig pt config pg shared_buffers=4GB work_mem=256MB`,
+  pig pt config pg shared_buffers=4GB work_mem=256MB
+  pig pt config pg shared_preload_libraries='timescaledb, pg_stat_statements, auto_explain'
+
+`,
 	Annotations: mergeAnn(
 		ancsAnn("pig patroni config", "action", "volatile", "restricted", false, "medium", "recommended", "dbsu", 3000),
 		map[string]string{

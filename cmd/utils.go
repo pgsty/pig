@@ -126,6 +126,14 @@ func requireTextHighRiskConfirmation(yes bool, warning, action string) error {
 	return highRiskTextConfirm(warning, action)
 }
 
+func silenceCobraOnSilentExit(cmd *cobra.Command, err error) error {
+	if err != nil && utils.IsSilentExit(err) && cmd != nil {
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+	}
+	return err
+}
+
 func structuredParamError(module int, command, message, detail string, args []string, params map[string]interface{}) error {
 	if !config.IsStructuredOutput() {
 		return fmt.Errorf("%s", detail)

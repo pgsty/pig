@@ -118,6 +118,7 @@ func runDBSUCommand(dbsu string, args []string, preserveStdout bool) error {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if outStr != "" {
 				err = fmt.Errorf("%w: %s", err, outStr)
+				return &ExitCodeError{Code: exitErr.ExitCode(), Err: err, Silent: true}
 			}
 			return &ExitCodeError{Code: exitErr.ExitCode(), Err: err}
 		}
