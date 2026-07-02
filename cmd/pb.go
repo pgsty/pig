@@ -17,6 +17,8 @@ import (
 // Global config
 var pbConfig *pgbackrest.Config
 
+var highRiskTextConfirm = pgbackrest.ConfirmDestructive
+
 // pbCmd represents the pgbackrest command
 var pbCmd = &cobra.Command{
 	Use:         "pgbackrest",
@@ -119,6 +121,7 @@ func registerPbFlags() {
 	// Expire command flags
 	pbExpireCmd.Flags().StringVar(&pbExpireSet, "set", "", "delete specific backup set")
 	pbExpireCmd.Flags().BoolVar(&pbExpirePlan, "plan", false, "preview cleanup plan without deleting backups")
+	pbExpireCmd.Flags().BoolVarP(&pbExpireYes, "yes", "y", false, "skip confirmation when --set deletes a backup set")
 
 	// Restore command flags - targets
 	pbRestoreCmd.Flags().BoolVarP(&pbRestoreDefault, "default", "d", false, "recover to end of WAL stream (latest)")
@@ -242,6 +245,9 @@ executing. Use --force to skip this check.`,
 
 var pbExpireSet string
 var pbExpirePlan bool
+var pbExpireYes bool
+
+var pbExpireCommandExec = pgbackrest.Expire
 
 var pbExpireCmd = &cobra.Command{
 	Use:         "expire",
@@ -266,13 +272,56 @@ The retention policy is configured in pgbackrest.conf:
 		if config.IsStructuredOutput() && pbExpirePlan {
 			return handlePlanOutput(pgbackrest.BuildExpirePlan(pbConfig, opts))
 		}
+		if pbExpireSet != "" && !pbExpirePlan {
+			if config.IsStructuredOutput() && !pbExpireYes {
+				return structuredConfirmationError(
+					output.CodePbConfirmationRequired,
+					"pb expire --set requires explicit confirmation",
+					"structured output mode does not prompt interactively; rerun with --yes to execute or --plan to preview",
+					output.OperationMeta{
+						Module:       "pb",
+						Command:      "expire",
+						Boundary:     "pb:pgbackrest-only",
+						Risk:         "high",
+						Confirmation: "required",
+						Executed:     false,
+						DryRun:       false,
+					},
+					[]output.NextAction{
+						{Command: buildPbExpireSetCommand(pbExpireSet, true, false), Reason: "expire the selected backup set after explicit confirmation", Required: true},
+						{Command: buildPbExpireSetCommand(pbExpireSet, false, true), Reason: "preview backup expiration without deleting", Required: false},
+					},
+				)
+			}
+			if err := requireTextHighRiskConfirmation(pbExpireYes,
+				fmt.Sprintf("This will expire/delete pgBackRest backup set %s", pbExpireSet),
+				"pb expire --set",
+			); err != nil {
+				return err
+			}
+		}
 		return runLegacyStructured(legacyModulePb, "pig pgbackrest expire", args, map[string]interface{}{
 			"set":  pbExpireSet,
 			"plan": pbExpirePlan,
+			"yes":  pbExpireYes,
 		}, func() error {
-			return pgbackrest.Expire(pbConfig, opts)
+			return pbExpireCommandExec(pbConfig, opts)
 		})
 	},
+}
+
+func buildPbExpireSetCommand(set string, yes bool, plan bool) string {
+	parts := []string{"pig", "pb", "expire"}
+	if set != "" {
+		parts = append(parts, "--set", set)
+	}
+	if yes {
+		parts = append(parts, "--yes")
+	}
+	if plan {
+		parts = append(parts, "--plan")
+	}
+	return strings.Join(parts, " ")
 }
 
 // ============================================================================
@@ -298,7 +347,7 @@ var (
 
 var pbRestoreCmd = &cobra.Command{
 	Use:         "restore",
-	Aliases:     []string{"rt", "r", "pitr"},
+	Aliases:     []string{"r"}, // B01: "rt" (=restart elsewhere) and "pitr" (=the orchestrator) removed
 	Short:       "Restore from backup (PITR)",
 	Annotations: ancsAnn("pig pgbackrest restore", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 600000),
 	Long: `Restore from backup with point-in-time recovery (PITR) support.
@@ -395,13 +444,14 @@ IMPORTANT: PostgreSQL must be stopped before restore.`,
 			Yes:            pbRestoreYes,
 		}
 
+		if err := rejectRestoreExtraArgsBeforeDash(cmd, args, output.CodePbInvalidRestoreParams); err != nil {
+			return err
+		}
+		if err := pgbackrest.ValidateRestoreOptions(opts); err != nil {
+			return restoreInvalidParamsError(output.CodePbInvalidRestoreParams, err)
+		}
+
 		if pbRestorePlan {
-			if err := pgbackrest.ValidateRestoreOptions(opts); err != nil {
-				return handleAuxResult(
-					output.Fail(output.CodePbInvalidRestoreParams, "invalid restore parameters").
-						WithDetail(err.Error()),
-				)
-			}
 			return handlePlanOutput(pgbackrest.BuildRestorePlan(pbConfig, opts))
 		}
 
@@ -409,7 +459,7 @@ IMPORTANT: PostgreSQL must be stopped before restore.`,
 		if config.IsStructuredOutput() {
 			if !pbRestoreYes {
 				return structuredConfirmationError(
-					output.CodePbInvalidRestoreParams,
+					output.CodePbConfirmationRequired,
 					"pb restore requires explicit confirmation",
 					"structured output mode does not prompt interactively; rerun with --yes to execute or --plan to preview",
 					output.OperationMeta{
@@ -681,7 +731,7 @@ Use -o json/yaml for structured output (Result wrapper with pgbackrest native JS
 
 var pbLsCmd = &cobra.Command{
 	Use:     "ls [type]",
-	Aliases: []string{"l", "list"},
+	Aliases: []string{"list"}, // B02: "l" belongs to log
 	Short:   "List backups, repositories, or stanzas",
 	Annotations: mergeAnn(
 		ancsAnn("pig pgbackrest ls", "query", "volatile", "safe", true, "safe", "none", "dbsu", 5000),
@@ -818,7 +868,7 @@ All backups for the stanza will be permanently deleted.
 		if config.IsStructuredOutput() {
 			if !pbDeleteForce {
 				return structuredConfirmationError(
-					output.CodePbStanzaDeleteRequiresForce,
+					output.CodePbConfirmationRequired,
 					"pb delete requires explicit confirmation",
 					"structured output mode does not prompt interactively; rerun with --force to execute or --plan to preview",
 					output.OperationMeta{

@@ -11,6 +11,9 @@ import (
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
+
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 )
 
 const legacyOutputCaptureLimit = 64 * 1024
@@ -75,16 +78,13 @@ func handleAuxResult(result *output.Result) error {
 	return nil
 }
 
+// handlePlanOutput is the single cmd-layer entry for rendering plans (M5):
+// it delegates to output.RenderPlan so there is exactly one render path.
 func handlePlanOutput(plan *output.Plan) error {
 	if plan == nil {
 		return fmt.Errorf("nil plan")
 	}
-	data, err := plan.Render(config.OutputFormat)
-	if err != nil {
-		return err
-	}
-	fmt.Println(string(data))
-	return nil
+	return output.RenderPlan(plan)
 }
 
 func runLegacyStructured(module int, command string, args []string, params map[string]interface{}, fn func() error) error {
@@ -119,6 +119,13 @@ func runLegacyStructured(module int, command string, args []string, params map[s
 	return handleAuxResult(output.OK(command+" completed", data))
 }
 
+func requireTextHighRiskConfirmation(yes bool, warning, action string) error {
+	if config.IsStructuredOutput() || yes {
+		return nil
+	}
+	return highRiskTextConfirm(warning, action)
+}
+
 func structuredParamError(module int, command, message, detail string, args []string, params map[string]interface{}) error {
 	if !config.IsStructuredOutput() {
 		return fmt.Errorf("%s", detail)
@@ -135,14 +142,73 @@ func structuredParamError(module int, command, message, detail string, args []st
 	)
 }
 
+// requireStructuredConfirmation is the single fail-closed T2 gate for
+// structured output mode (M1 forerunner: P2 lifts these params into a
+// per-command OpSpec table that also derives cobra annotations).
+// extraActions appends command-specific routing (e.g. "pig pt switchover").
+func requireStructuredConfirmation(module string, code int, message, command, boundary, risk, executeCommand, planCommand string, extraActions ...output.NextAction) error {
+	actions := []output.NextAction{
+		{Command: executeCommand, Reason: "execute after explicit confirmation", Required: true},
+	}
+	detail := "structured output mode does not prompt interactively; rerun with --yes to execute"
+	if planCommand != "" { // not every gated command offers --plan (e.g. pg init)
+		actions = append(actions, output.NextAction{Command: planCommand, Reason: "preview the operation without executing", Required: false})
+		detail += " or --plan to preview"
+	}
+	actions = append(actions, extraActions...)
+	return structuredConfirmationError(
+		code,
+		message,
+		detail,
+		output.OperationMeta{
+			Module:       module,
+			Command:      command,
+			Boundary:     boundary,
+			Risk:         risk,
+			Confirmation: "required",
+			Executed:     false,
+			DryRun:       false,
+		},
+		actions,
+	)
+}
+
+// rejectRestoreExtraArgsBeforeDash rejects stray positionals before the "--"
+// separator on pb restore / pitr: silently forwarding them to pgbackrest is
+// how a -d/-D typo tears down a cluster before failing. Shared by pb and pitr.
+func rejectRestoreExtraArgsBeforeDash(cmd *cobra.Command, args []string, code int) error {
+	if len(args) == 0 || (cmd != nil && cmd.ArgsLenAtDash() >= 0) {
+		return nil
+	}
+	err := fmt.Errorf("extra pgBackRest restore arguments must be placed after --")
+	return restoreInvalidParamsError(code, err)
+}
+
+func restoreInvalidParamsError(code int, err error) error {
+	if err == nil {
+		return nil
+	}
+	if config.IsStructuredOutput() {
+		return handleAuxResult(
+			output.Fail(code, "invalid restore parameters").
+				WithDetail(err.Error()),
+		)
+	}
+	return &utils.ExitCodeError{Code: output.ExitCode(code), Err: err}
+}
+
+// structuredConfirmationError emits the fail-closed refusal for a destructive
+// command invoked in structured output mode without --yes/--force. Follow-up
+// commands live in the typed envelope-level next_actions field (B39) so agents
+// never have to parse prose; the operation metadata stays in data.
 func structuredConfirmationError(code int, message, detail string, operation output.OperationMeta, nextActions []output.NextAction) error {
 	return handleAuxResult(
 		output.Fail(code, message).
 			WithDetail(detail).
 			WithData(&primitiveContractData{
-				Operation:   operation,
-				NextActions: nextActions,
-			}),
+				Operation: operation,
+			}).
+			WithNextActions(nextActions...),
 	)
 }
 
@@ -168,19 +234,20 @@ func rejectUnsupportedLogOutputFormat(command string) error {
 	}
 }
 
-func captureLegacyOutput(fn func() error, limit int) (string, bool, error) {
+func captureLegacyOutput(fn func() error, limit int) (captured string, truncated bool, runErr error) {
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		return "", false, fn()
 	}
-	defer reader.Close()
 
 	oldStdout := os.Stdout
 	oldStderr := os.Stderr
 	oldFormat := config.OutputFormat
+	oldLogrusOut := logrus.StandardLogger().Out
 
 	os.Stdout = writer
 	os.Stderr = writer
+	logrus.SetOutput(writer)
 	config.OutputFormat = config.OUTPUT_TEXT
 
 	done := make(chan captureResult, 1)
@@ -188,18 +255,23 @@ func captureLegacyOutput(fn func() error, limit int) (string, bool, error) {
 		done <- readLimited(reader, limit)
 	}()
 
-	runErr := fn()
+	defer func() {
+		_ = writer.Close()
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+		logrus.SetOutput(oldLogrusOut)
+		config.OutputFormat = oldFormat
+		result := <-done
+		_ = reader.Close()
+		captured = result.output
+		truncated = result.truncated
+		if result.readErr != nil && runErr == nil {
+			runErr = result.readErr
+		}
+	}()
 
-	_ = writer.Close()
-	os.Stdout = oldStdout
-	os.Stderr = oldStderr
-	config.OutputFormat = oldFormat
-
-	result := <-done
-	if result.readErr != nil && runErr == nil {
-		runErr = result.readErr
-	}
-	return result.output, result.truncated, runErr
+	runErr = fn()
+	return captured, truncated, runErr
 }
 
 func readLimited(r io.Reader, limit int) captureResult {

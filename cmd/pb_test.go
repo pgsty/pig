@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"io"
 	"os"
+	"pig/cli/pgbackrest"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
@@ -131,6 +132,95 @@ func TestPbInfoRawOutputValidationStructuredMode(t *testing.T) {
 	}
 }
 
+func TestPbExpireSetTextRequiresConfirmationBeforeExecution(t *testing.T) {
+	origFormat := config.OutputFormat
+	origSet := pbExpireSet
+	origPlan := pbExpirePlan
+	origYes := pbExpireYes
+	origConfirm := highRiskTextConfirm
+	origExec := pbExpireCommandExec
+	defer func() {
+		config.OutputFormat = origFormat
+		pbExpireSet = origSet
+		pbExpirePlan = origPlan
+		pbExpireYes = origYes
+		highRiskTextConfirm = origConfirm
+		pbExpireCommandExec = origExec
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pbExpireSet = "20250101-010101F"
+	pbExpirePlan = false
+	pbExpireYes = false
+	confirmErr := errors.New("confirmation cancelled")
+	executed := false
+	highRiskTextConfirm = func(warning, action string) error {
+		if !strings.Contains(warning, pbExpireSet) || !strings.Contains(action, "expire") {
+			t.Fatalf("unexpected expire confirmation warning/action: %q / %q", warning, action)
+		}
+		return confirmErr
+	}
+	pbExpireCommandExec = func(*pgbackrest.Config, *pgbackrest.ExpireOptions) error {
+		executed = true
+		return nil
+	}
+
+	err := pbExpireCmd.RunE(pbExpireCmd, nil)
+	if !errors.Is(err, confirmErr) {
+		t.Fatalf("pb expire --set error = %v, want confirmation error", err)
+	}
+	if executed {
+		t.Fatal("pb expire --set should not execute after confirmation cancellation")
+	}
+}
+
+func TestPbExpireSetStructuredRequiresExplicitYes(t *testing.T) {
+	origFormat := config.OutputFormat
+	origSet := pbExpireSet
+	origPlan := pbExpirePlan
+	origYes := pbExpireYes
+	origExec := pbExpireCommandExec
+	defer func() {
+		config.OutputFormat = origFormat
+		pbExpireSet = origSet
+		pbExpirePlan = origPlan
+		pbExpireYes = origYes
+		pbExpireCommandExec = origExec
+	}()
+
+	config.OutputFormat = config.OUTPUT_JSON
+	pbExpireSet = "20250101-010101F"
+	pbExpirePlan = false
+	pbExpireYes = false
+	executed := false
+	pbExpireCommandExec = func(*pgbackrest.Config, *pgbackrest.ExpireOptions) error {
+		executed = true
+		return nil
+	}
+
+	var runErr error
+	raw := capturePbStdout(t, func() {
+		runErr = pbExpireCmd.RunE(pbExpireCmd, nil)
+	})
+	if runErr == nil {
+		t.Fatal("structured pb expire --set should require explicit --yes")
+	}
+	if executed {
+		t.Fatal("structured pb expire --set should not execute without --yes")
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(pbBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if success, _ := payload["success"].(bool); success {
+		t.Fatalf("expected success=false, got %v", payload)
+	}
+	if msg, _ := payload["message"].(string); !strings.Contains(msg, "pb expire --set requires explicit confirmation") {
+		t.Fatalf("unexpected confirmation message %q in payload %v", msg, payload)
+	}
+}
+
 func TestPbRestorePlanJSONContainsPrimitiveContract(t *testing.T) {
 	origFormat := config.OutputFormat
 	origDefault := pbRestoreDefault
@@ -172,7 +262,7 @@ func TestPbRestorePlanJSONContainsPrimitiveContract(t *testing.T) {
 	}
 }
 
-func TestPbRestorePlanJSONPassesPositionalExtraArgs(t *testing.T) {
+func TestPbRestorePlanJSONRejectsExtraArgsBeforeDash(t *testing.T) {
 	origFormat := config.OutputFormat
 	origDefault := pbRestoreDefault
 	origImmediate := pbRestoreImmediate
@@ -222,18 +312,23 @@ func TestPbRestorePlanJSONPassesPositionalExtraArgs(t *testing.T) {
 	pbRestorePlan = true
 	pbRestoreYes = false
 
+	var runErr error
 	raw := capturePbStdout(t, func() {
-		if err := pbRestoreCmd.RunE(pbRestoreCmd, []string{"--delta"}); err != nil {
-			t.Fatalf("pb restore --plan should accept positional pgBackRest args: %v", err)
-		}
+		runErr = pbRestoreCmd.RunE(pbRestoreCmd, []string{"--delta"})
 	})
-
-	var plan output.Plan
-	if err := json.Unmarshal(pbBytesTrimSpace([]byte(raw)), &plan); err != nil {
-		t.Fatalf("invalid plan json: %v raw=%q", err, raw)
+	if runErr == nil {
+		t.Fatal("pb restore --plan should reject extra args that are not after --")
 	}
-	if !strings.Contains(plan.Command, "--delta") {
-		t.Fatalf("plan command should include positional pgBackRest arg --delta, got %q", plan.Command)
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(pbBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if success, _ := payload["success"].(bool); success {
+		t.Fatalf("expected success=false, got %v", payload)
+	}
+	if !strings.Contains(asString(payload["detail"]), "after --") {
+		t.Fatalf("detail should mention -- separator, got %v", payload)
 	}
 }
 
@@ -283,9 +378,8 @@ func TestPbRestoreStructuredExecutionRequiresExplicitYes(t *testing.T) {
 	if success, _ := payload["success"].(bool); success {
 		t.Fatalf("expected success=false, got %v", payload)
 	}
-	data, _ := payload["data"].(map[string]interface{})
-	if !pbResultDataHasNextAction(data, "--yes") {
-		t.Fatalf("expected next action mentioning --yes, got data=%v", data)
+	if !pbResultDataHasNextAction(payload, "--yes") {
+		t.Fatalf("expected envelope next action mentioning --yes, got %v", payload)
 	}
 }
 

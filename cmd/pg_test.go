@@ -398,9 +398,81 @@ func TestBuildForkTargetOptionsProgressFollowsOutputMode(t *testing.T) {
 	if structuredOpts.Progress {
 		t.Fatal("structured fork target action should suppress human progress output")
 	}
-	if !structuredOpts.Yes {
-		t.Fatal("structured fork target action should skip interactive confirmation")
+	if structuredOpts.Yes {
+		t.Fatal("structured fork target action should not auto-skip confirmation")
 	}
+
+	for _, cli := range []*forkCLIOptions{{yes: true}, {force: true}} {
+		opts := buildForkTargetOptions(cli, "dev")
+		if !opts.Yes {
+			t.Fatalf("fork target action should honor explicit confirmation flags: %+v", cli)
+		}
+	}
+}
+
+func TestPgCloneStructuredRequiresExplicitYes(t *testing.T) {
+	origFormat := config.OutputFormat
+	t.Cleanup(func() {
+		config.OutputFormat = origFormat
+	})
+	config.OutputFormat = config.OUTPUT_JSON
+
+	opts := &postgrescli.CloneOptions{SourceDB: "template0", DestDB: "template0_copy"}
+	var runErr error
+	raw := capturePgStdout(t, func() {
+		runErr = runClone(nil, opts)
+	})
+	if runErr == nil {
+		t.Fatal("structured pg clone without --yes should fail")
+	}
+	if opts.Yes {
+		t.Fatal("structured pg clone must not mutate opts.Yes")
+	}
+	assertPgStructuredConfirmationRequired(t, raw, "pg clone requires explicit confirmation")
+}
+
+func TestPgForkInitStructuredRequiresExplicitYesOrForce(t *testing.T) {
+	origFormat := config.OutputFormat
+	t.Cleanup(func() {
+		config.OutputFormat = origFormat
+	})
+	config.OutputFormat = config.OUTPUT_JSON
+
+	opts := &postgrescli.Options{
+		Kind: postgrescli.KindInstance,
+		Instance: postgrescli.InstanceOptions{
+			Name: "bad name",
+		},
+	}
+	var runErr error
+	raw := capturePgStdout(t, func() {
+		runErr = runFork(nil, opts)
+	})
+	if runErr == nil {
+		t.Fatal("structured pg fork init without --yes/--force should fail")
+	}
+	if opts.Yes {
+		t.Fatal("structured pg fork init must not mutate opts.Yes")
+	}
+	assertPgStructuredConfirmationRequired(t, raw, "pg fork init requires explicit confirmation")
+}
+
+func TestPgForkRemoveStructuredRequiresExplicitYesOrForce(t *testing.T) {
+	origFormat := config.OutputFormat
+	t.Cleanup(func() {
+		config.OutputFormat = origFormat
+	})
+	config.OutputFormat = config.OUTPUT_JSON
+
+	cmd := newPgForkRemoveCommand(&forkCLIOptions{})
+	var runErr error
+	raw := capturePgStdout(t, func() {
+		runErr = cmd.RunE(cmd, []string{"bad name"})
+	})
+	if runErr == nil {
+		t.Fatal("structured pg fork rm without --yes/--force should fail")
+	}
+	assertPgStructuredConfirmationRequired(t, raw, "pg fork rm requires explicit confirmation")
 }
 
 func captureForkStdout(t *testing.T, fn func()) string {
@@ -680,9 +752,218 @@ func TestPgVacuumFullStructuredExecutionRequiresExplicitYes(t *testing.T) {
 	if success, _ := payload["success"].(bool); success {
 		t.Fatalf("expected success=false, got %v", payload)
 	}
-	data, _ := payload["data"].(map[string]interface{})
-	if !pgResultDataHasNextAction(data, "--yes") {
-		t.Fatalf("expected next action mentioning --yes, got data=%v", data)
+	if !pgResultDataHasNextAction(payload, "--yes") {
+		t.Fatalf("expected envelope next action mentioning --yes, got %v", payload)
+	}
+}
+
+func TestPgInitForceTextRequiresConfirmationBeforeExecution(t *testing.T) {
+	origFormat := config.OutputFormat
+	origForce := pgInitForce
+	origYes := pgInitYes
+	origConfirm := highRiskTextConfirm
+	origExec := pgInitCommandExec
+	origInitialized := pgInitTargetInitialized
+	defer func() {
+		config.OutputFormat = origFormat
+		pgInitForce = origForce
+		pgInitYes = origYes
+		highRiskTextConfirm = origConfirm
+		pgInitCommandExec = origExec
+		pgInitTargetInitialized = origInitialized
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pgInitForce = true
+	pgInitYes = false
+	pgInitTargetInitialized = func(*postgrescli.Config) bool { return true }
+	confirmErr := fmt.Errorf("confirmation cancelled")
+	confirmed := false
+	executed := false
+	highRiskTextConfirm = func(warning, action string) error {
+		confirmed = true
+		if !strings.Contains(warning, "overwrite") || !strings.Contains(action, "init") {
+			t.Fatalf("unexpected init confirmation warning/action: %q / %q", warning, action)
+		}
+		return confirmErr
+	}
+	pgInitCommandExec = func(*postgrescli.Config, *postgrescli.InitOptions) error {
+		executed = true
+		return nil
+	}
+
+	err := pgInitCmd.RunE(pgInitCmd, nil)
+	if !errors.Is(err, confirmErr) {
+		t.Fatalf("pg init -f error = %v, want confirmation error", err)
+	}
+	if !confirmed {
+		t.Fatal("pg init -f should request text confirmation")
+	}
+	if executed {
+		t.Fatal("pg init -f should not execute after confirmation cancellation")
+	}
+}
+
+// TestPgInitForceUninitializedDirNeedsNoConfirmation guards B21: the T2 gate
+// fires only when --force would overwrite an INITIALIZED data directory;
+// wiping nothing must not prompt (principle: simple ops stay simple).
+func TestPgInitForceUninitializedDirNeedsNoConfirmation(t *testing.T) {
+	origFormat := config.OutputFormat
+	origForce := pgInitForce
+	origYes := pgInitYes
+	origConfirm := highRiskTextConfirm
+	origExec := pgInitCommandExec
+	origInitialized := pgInitTargetInitialized
+	defer func() {
+		config.OutputFormat = origFormat
+		pgInitForce = origForce
+		pgInitYes = origYes
+		highRiskTextConfirm = origConfirm
+		pgInitCommandExec = origExec
+		pgInitTargetInitialized = origInitialized
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pgInitForce = true
+	pgInitYes = false
+	pgInitTargetInitialized = func(*postgrescli.Config) bool { return false }
+	confirmed := false
+	highRiskTextConfirm = func(warning, action string) error {
+		confirmed = true
+		return nil
+	}
+	executed := false
+	pgInitCommandExec = func(*postgrescli.Config, *postgrescli.InitOptions) error {
+		executed = true
+		return nil
+	}
+
+	if err := pgInitCmd.RunE(pgInitCmd, nil); err != nil {
+		t.Fatalf("pg init -f on uninitialized dir should run without confirmation: %v", err)
+	}
+	if confirmed {
+		t.Fatal("pg init -f on uninitialized dir must not prompt")
+	}
+	if !executed {
+		t.Fatal("pg init -f on uninitialized dir should execute")
+	}
+}
+
+func TestPgInitForceStructuredRequiresExplicitYes(t *testing.T) {
+	origFormat := config.OutputFormat
+	origForce := pgInitForce
+	origYes := pgInitYes
+	origExec := pgInitCommandExec
+	origInitialized := pgInitTargetInitialized
+	defer func() {
+		config.OutputFormat = origFormat
+		pgInitForce = origForce
+		pgInitYes = origYes
+		pgInitCommandExec = origExec
+		pgInitTargetInitialized = origInitialized
+	}()
+
+	config.OutputFormat = config.OUTPUT_JSON
+	pgInitForce = true
+	pgInitYes = false
+	pgInitTargetInitialized = func(*postgrescli.Config) bool { return true }
+	executed := false
+	pgInitCommandExec = func(*postgrescli.Config, *postgrescli.InitOptions) error {
+		executed = true
+		return nil
+	}
+
+	var runErr error
+	raw := capturePgStdout(t, func() {
+		runErr = pgInitCmd.RunE(pgInitCmd, nil)
+	})
+	if runErr == nil {
+		t.Fatal("structured pg init -f should require explicit --yes")
+	}
+	if executed {
+		t.Fatal("structured pg init -f should not execute without --yes")
+	}
+	assertPgStructuredConfirmationRequired(t, raw, "pg init --force requires explicit confirmation")
+}
+
+func TestPgPromoteTextRequiresConfirmationBeforeExecution(t *testing.T) {
+	origFormat := config.OutputFormat
+	origYes := pgPromoteYes
+	origPlan := pgPromotePlan
+	origConfirm := highRiskTextConfirm
+	origExec := pgPromoteCommandExec
+	defer func() {
+		config.OutputFormat = origFormat
+		pgPromoteYes = origYes
+		pgPromotePlan = origPlan
+		highRiskTextConfirm = origConfirm
+		pgPromoteCommandExec = origExec
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pgPromoteYes = false
+	pgPromotePlan = false
+	confirmErr := fmt.Errorf("confirmation cancelled")
+	executed := false
+	highRiskTextConfirm = func(warning, action string) error {
+		if !strings.Contains(warning, "promote") || !strings.Contains(action, "promote") {
+			t.Fatalf("unexpected promote confirmation warning/action: %q / %q", warning, action)
+		}
+		return confirmErr
+	}
+	pgPromoteCommandExec = func(*postgrescli.Config, *postgrescli.PromoteOptions) error {
+		executed = true
+		return nil
+	}
+
+	err := pgPromoteCmd.RunE(pgPromoteCmd, nil)
+	if !errors.Is(err, confirmErr) {
+		t.Fatalf("pg promote error = %v, want confirmation error", err)
+	}
+	if executed {
+		t.Fatal("pg promote should not execute after confirmation cancellation")
+	}
+}
+
+func TestPgVacuumFullTextRequiresConfirmationBeforeExecution(t *testing.T) {
+	origFormat := config.OutputFormat
+	origFull := pgMaintFull
+	origPlan := pgMaintPlan
+	origYes := pgMaintYes
+	origConfirm := highRiskTextConfirm
+	origExec := pgVacuumCommandExec
+	defer func() {
+		config.OutputFormat = origFormat
+		pgMaintFull = origFull
+		pgMaintPlan = origPlan
+		pgMaintYes = origYes
+		highRiskTextConfirm = origConfirm
+		pgVacuumCommandExec = origExec
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pgMaintFull = true
+	pgMaintPlan = false
+	pgMaintYes = false
+	confirmErr := fmt.Errorf("confirmation cancelled")
+	executed := false
+	highRiskTextConfirm = func(warning, action string) error {
+		if !strings.Contains(warning, "VACUUM FULL") || !strings.Contains(action, "vacuum") {
+			t.Fatalf("unexpected vacuum confirmation warning/action: %q / %q", warning, action)
+		}
+		return confirmErr
+	}
+	pgVacuumCommandExec = func(*postgrescli.Config, string, *postgrescli.VacuumOptions) error {
+		executed = true
+		return nil
+	}
+
+	err := pgVacuumCmd.RunE(pgVacuumCmd, []string{"app"})
+	if !errors.Is(err, confirmErr) {
+		t.Fatalf("pg vacuum --full error = %v, want confirmation error", err)
+	}
+	if executed {
+		t.Fatal("pg vacuum --full should not execute after confirmation cancellation")
 	}
 }
 
@@ -700,6 +981,27 @@ func capturePgStdout(t *testing.T, fn func()) string {
 	raw, _ := io.ReadAll(r)
 	_ = r.Close()
 	return string(raw)
+}
+
+func assertPgStructuredConfirmationRequired(t *testing.T, raw string, wantMessage string) {
+	t.Helper()
+	var payload map[string]interface{}
+	if err := json.Unmarshal(pgBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if success, _ := payload["success"].(bool); success {
+		t.Fatalf("expected success=false, got %v", payload)
+	}
+	if msg, _ := payload["message"].(string); msg != wantMessage {
+		t.Fatalf("message = %q, want %q", msg, wantMessage)
+	}
+	detail, _ := payload["detail"].(string)
+	if !strings.Contains(detail, "structured output mode does not prompt interactively") {
+		t.Fatalf("detail should explain structured confirmation, got %q", detail)
+	}
+	if !pgResultDataHasNextAction(payload, "--yes") {
+		t.Fatalf("expected envelope next action mentioning --yes, got %v", payload)
+	}
 }
 
 func pgBytesTrimSpace(b []byte) []byte {

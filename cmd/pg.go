@@ -30,6 +30,7 @@ var (
 	pgInitLocale   string
 	pgInitChecksum bool
 	pgInitForce    bool
+	pgInitYes      bool
 
 	// start flags
 	pgStartLog     string
@@ -96,6 +97,12 @@ var (
 
 	// role flags
 	pgRoleVerbose bool
+)
+
+var (
+	pgInitCommandExec    = postgres.InitDB
+	pgPromoteCommandExec = postgres.Promote
+	pgVacuumCommandExec  = postgres.Vacuum
 )
 
 // ============================================================================
@@ -169,14 +176,34 @@ var pgInitCmd = &cobra.Command{
 			ExtraArgs: args,
 		}
 
+		// The T2 gate fires only when --force would actually destroy something:
+		// an initialized data directory (B21). Wiping nothing needs no consent.
+		destructive := pgInitForce && pgInitTargetInitialized(pgConfig)
+
 		// Structured output mode (YAML/JSON)
 		if config.IsStructuredOutput() {
+			if destructive && !pgInitYes {
+				return requireStructuredConfirmation("pg",
+					output.CodePgConfirmationRequired,
+					"pg init --force requires explicit confirmation",
+					"init", "pg:local-instance", "high",
+					"pig pg init --force --yes",
+					"", // pg init has no --plan
+				)
+			}
 			result := postgres.InitResult(pgConfig, opts)
 			return handleAuxResult(result)
 		}
 
-		// Text mode: preserve existing behavior
-		return postgres.InitDB(pgConfig, opts)
+		if destructive {
+			if err := requireTextHighRiskConfirmation(pgInitYes,
+				fmt.Sprintf("This will overwrite the initialized PostgreSQL data directory %s", postgres.GetPgData(pgConfig)),
+				"pg init --force",
+			); err != nil {
+				return err
+			}
+		}
+		return pgInitCommandExec(pgConfig, opts)
 	},
 }
 
@@ -377,7 +404,7 @@ var pgPromoteCmd = &cobra.Command{
 		if config.IsStructuredOutput() {
 			if !pgPromoteYes {
 				return structuredConfirmationError(
-					output.MODULE_PG+output.CAT_PARAM+1,
+					output.CodePgConfirmationRequired,
 					"pg promote requires explicit confirmation",
 					"structured output mode does not prompt interactively; rerun with --yes to execute or --plan to preview",
 					output.OperationMeta{
@@ -400,8 +427,13 @@ var pgPromoteCmd = &cobra.Command{
 			return handleAuxResult(result)
 		}
 
-		// Text mode: preserve existing behavior
-		return postgres.Promote(pgConfig, opts)
+		if err := requireTextHighRiskConfirmation(pgPromoteYes,
+			"This will promote the local PostgreSQL standby outside cluster orchestration",
+			"pg promote",
+		); err != nil {
+			return err
+		}
+		return pgPromoteCommandExec(pgConfig, opts)
 	},
 }
 
@@ -472,6 +504,7 @@ func registerPgControlCommands() {
 	pgInitCmd.Flags().StringVar(&pgInitLocale, "locale", "", "locale setting (default: C)")
 	pgInitCmd.Flags().BoolVarP(&pgInitChecksum, "data-checksum", "k", false, "enable data checksums")
 	pgInitCmd.Flags().BoolVarP(&pgInitForce, "force", "f", false, "force init, remove existing data directory (DANGEROUS)")
+	pgInitCmd.Flags().BoolVarP(&pgInitYes, "yes", "y", false, "skip confirmation when --force overwrites a data directory")
 
 	// start subcommand flags
 	pgStartCmd.Flags().StringVarP(&pgStartLog, "log", "l", "", "redirect stdout/stderr to log file")
@@ -496,7 +529,7 @@ func registerPgControlCommands() {
 	// promote subcommand flags
 	pgPromoteCmd.Flags().IntVarP(&pgPromoteTimeout, "timeout", "t", 0, "wait timeout in seconds")
 	pgPromoteCmd.Flags().BoolVarP(&pgPromoteNoWait, "no-wait", "W", false, "do not wait for promotion")
-	pgPromoteCmd.Flags().BoolVarP(&pgPromoteYes, "yes", "y", false, "skip confirmation in structured output mode")
+	pgPromoteCmd.Flags().BoolVarP(&pgPromoteYes, "yes", "y", false, "skip confirmation prompt")
 	pgPromoteCmd.Flags().BoolVar(&pgPromotePlan, "plan", false, "preview promote plan without executing")
 
 	// role subcommand flags
@@ -566,7 +599,7 @@ func registerPgMaintenanceCommands() {
 	// vacuum command
 	addPgMaintFlags(pgVacuumCmd)
 	pgVacuumCmd.Flags().BoolVarP(&pgMaintFull, "full", "F", false, "VACUUM FULL (requires exclusive lock)")
-	pgVacuumCmd.Flags().BoolVarP(&pgMaintYes, "yes", "y", false, "confirm VACUUM FULL in structured output mode")
+	pgVacuumCmd.Flags().BoolVarP(&pgMaintYes, "yes", "y", false, "skip VACUUM FULL confirmation prompt")
 	pgVacuumCmd.Flags().BoolVar(&pgMaintPlan, "plan", false, "preview vacuum plan without executing")
 	pgCmd.AddCommand(pgVacuumCmd)
 
@@ -678,7 +711,17 @@ func runClone(cmd *cobra.Command, opts *postgrescli.CloneOptions) error {
 	}
 
 	if config.IsStructuredOutput() {
-		opts.Yes = true
+		if opts == nil || !opts.Yes {
+			return structuredPgConfirmationRequired(
+				output.CodeForkConfirmationRequired,
+				"pg clone requires explicit confirmation",
+				"clone",
+				"pg:local-instance",
+				"high",
+				buildCloneConfirmationCommand(opts, true, false),
+				buildCloneConfirmationCommand(opts, false, true),
+			)
+		}
 		return handleAuxResult(postgrescli.ExecuteCloneResult(opts))
 	}
 
@@ -697,6 +740,39 @@ func cloneErrorResult(err error) *output.Result {
 		return output.Fail(cloneErr.Code, cloneErr.Error())
 	}
 	return output.Fail(output.CodeForkPrecheckFailed, err.Error())
+}
+
+func buildCloneConfirmationCommand(opts *postgrescli.CloneOptions, includeYes bool, includePlan bool) string {
+	if opts == nil {
+		args := []string{"pig", "pg", "clone"}
+		if includeYes {
+			args = append(args, "--yes")
+		}
+		if includePlan {
+			args = append(args, "--plan")
+		}
+		return strings.Join(args, " ")
+	}
+	n := *opts
+	n.Yes = false
+	n.Plan = includePlan
+	command := postgrescli.BuildCloneCommand(&n)
+	if includeYes {
+		command += " --yes"
+	}
+	return command
+}
+
+// pgInitTargetInitialized reports whether pg init's target data directory is
+// already initialized (PG_VERSION present); overridable for tests.
+var pgInitTargetInitialized = func(cfg *postgres.Config) bool {
+	dbsu := utils.GetDBSU(cfg.DbSU)
+	_, initialized := postgres.CheckDataDirAsDBSU(dbsu, postgres.GetPgData(cfg))
+	return initialized
+}
+
+func structuredPgConfirmationRequired(code int, message, command, boundary, risk, executeCommand, planCommand string) error {
+	return requireStructuredConfirmation("pg", code, message, command, boundary, risk, executeCommand, planCommand)
 }
 
 func handleCloneError(err error) error {
@@ -1039,6 +1115,9 @@ func newPgForkRemoveCommand(opts *forkCLIOptions) *cobra.Command {
 			if opts.plan {
 				return runForkTargetPlan("rm", opts, firstArg(args), "Remove PostgreSQL fork")
 			}
+			if err := requireForkRemoveStructuredConfirmation(opts, firstArg(args)); err != nil {
+				return err
+			}
 			return runForkAction("fork remove", func() (postgrescli.ResultData, error) {
 				return postgrescli.RemoveFork(buildForkTargetOptions(opts, firstArg(args)))
 			})
@@ -1098,7 +1177,7 @@ func buildForkTargetOptions(cli *forkCLIOptions, name string) postgrescli.ForkTa
 		StopMode:   cli.stopMode,
 		Force:      cli.force,
 		StopBefore: cli.stopBefore,
-		Yes:        cli.yes || cli.force || config.IsStructuredOutput(),
+		Yes:        cli.yes || cli.force,
 		Progress:   !config.IsStructuredOutput(),
 	}
 }
@@ -1270,7 +1349,17 @@ func runFork(cmd *cobra.Command, opts *postgrescli.Options) error {
 	}
 
 	if config.IsStructuredOutput() {
-		opts.Yes = true
+		if opts == nil || (!opts.Yes && !opts.Replace) {
+			return structuredPgConfirmationRequired(
+				output.CodeForkConfirmationRequired,
+				"pg fork init requires explicit confirmation",
+				"fork init",
+				"pg:local-instance",
+				"critical",
+				buildForkConfirmationCommand(opts, true, false),
+				buildForkConfirmationCommand(opts, false, true),
+			)
+		}
 		return handleAuxResult(postgrescli.ExecuteResult(opts))
 	}
 
@@ -1278,6 +1367,27 @@ func runFork(cmd *cobra.Command, opts *postgrescli.Options) error {
 		return handleForkError(err)
 	}
 	return nil
+}
+
+func buildForkConfirmationCommand(opts *postgrescli.Options, includeYes bool, includePlan bool) string {
+	if opts == nil {
+		args := []string{"pig", "pg", "fork", "init"}
+		if includeYes {
+			args = append(args, "--yes")
+		}
+		if includePlan {
+			args = append(args, "--plan")
+		}
+		return strings.Join(args, " ")
+	}
+	n := *opts
+	n.Yes = false
+	n.Plan = includePlan
+	command := postgrescli.BuildCommand(&n)
+	if includeYes {
+		command += " --yes"
+	}
+	return command
 }
 
 func runForkAction(message string, action func() (postgrescli.ResultData, error)) error {
@@ -1293,6 +1403,25 @@ func runForkAction(message string, action func() (postgrescli.ResultData, error)
 	}
 	fmt.Fprint(os.Stderr, postgrescli.ForkActionHint(message, result))
 	return nil
+}
+
+func requireForkRemoveStructuredConfirmation(cli *forkCLIOptions, name string) error {
+	if !config.IsStructuredOutput() || cli == nil || cli.yes || cli.force {
+		return nil
+	}
+	executeCmd := buildForkTargetPlanCommand("rm", cli, name)
+	if executeCmd == "" {
+		executeCmd = "pig pg fork rm"
+	}
+	return structuredPgConfirmationRequired(
+		output.CodeForkConfirmationRequired,
+		"pg fork rm requires explicit confirmation",
+		"fork rm",
+		"pg:local-instance",
+		"critical",
+		executeCmd+" --yes",
+		executeCmd+" --plan",
+	)
 }
 
 func runForkTargetPlan(verb string, cli *forkCLIOptions, name string, description string) error {
@@ -1612,7 +1741,7 @@ var pgVacuumCmd = &cobra.Command{
 		}
 		if config.IsStructuredOutput() && pgMaintFull && !pgMaintYes {
 			return structuredConfirmationError(
-				output.MODULE_PG+output.CAT_PARAM+1,
+				output.CodePgConfirmationRequired,
 				"pg vacuum --full requires explicit confirmation",
 				"structured output mode does not prompt interactively; rerun with --yes to execute or --plan to preview",
 				output.OperationMeta{
@@ -1630,6 +1759,14 @@ var pgVacuumCmd = &cobra.Command{
 				},
 			)
 		}
+		if pgMaintFull {
+			if err := requireTextHighRiskConfirmation(pgMaintYes,
+				"VACUUM FULL rewrites relations and requires exclusive locks",
+				"pg vacuum --full",
+			); err != nil {
+				return err
+			}
+		}
 		return runLegacyStructured(legacyModulePg, "pig postgres vacuum", args, map[string]interface{}{
 			"database": dbname,
 			"all":      pgMaintAll,
@@ -1639,7 +1776,7 @@ var pgVacuumCmd = &cobra.Command{
 			"full":     pgMaintFull,
 			"yes":      pgMaintYes,
 		}, func() error {
-			return postgres.Vacuum(pgConfig, dbname, opts)
+			return pgVacuumCommandExec(pgConfig, dbname, opts)
 		})
 	},
 }
