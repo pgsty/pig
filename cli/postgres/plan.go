@@ -12,6 +12,8 @@ import (
 	"pig/internal/output"
 )
 
+const patroniPgCtlPrimitiveRisk = "This pg_ctl primitive does not coordinate Patroni, DCS, failover, or client routing; use pig pt or pig pitr when Patroni manages this PGDATA"
+
 // ============================================================================
 // BuildRestartPlan
 // ============================================================================
@@ -117,6 +119,7 @@ func buildRestartRisks(running bool) []string {
 		"All active connections will be terminated",
 		"In-flight transactions will be rolled back",
 		"Write operations will be temporarily unavailable",
+		patroniPgCtlPrimitiveRisk,
 	}
 }
 
@@ -222,6 +225,7 @@ func buildStopRisks(running bool, mode string) []string {
 	risks := []string{
 		"All active connections will be terminated",
 		"Write operations will become unavailable",
+		patroniPgCtlPrimitiveRisk,
 	}
 
 	switch mode {

@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -49,5 +50,46 @@ func TestBuildMaintSQLForWholeDatabase(t *testing.T) {
 	want := "VACUUM (FULL)"
 	if got != want {
 		t.Fatalf("buildMaintSQL() = %q, want %q", got, want)
+	}
+}
+
+func TestRunMaintAllDatabasesReturnsPartialFailureAfterAllAttempts(t *testing.T) {
+	origList := maintGetAllDatabases
+	origRun := maintRunPsqlMaintenance
+	defer func() {
+		maintGetAllDatabases = origList
+		maintRunPsqlMaintenance = origRun
+	}()
+
+	maintGetAllDatabases = func(*Config) ([]string, error) {
+		return []string{"app", "broken", "report"}, nil
+	}
+	var calls []string
+	maintRunPsqlMaintenance = func(_ *Config, dbname, sql string) error {
+		calls = append(calls, dbname+":"+sql)
+		if dbname == "broken" {
+			return fmt.Errorf("permission denied")
+		}
+		return nil
+	}
+
+	err := runMaintAllDatabases(nil, &maintTask{
+		command:  "VACUUM",
+		options:  "(FULL)",
+		taskName: "Vacuuming",
+	})
+	if err == nil {
+		t.Fatal("runMaintAllDatabases should report partial failure")
+	}
+	if !strings.Contains(err.Error(), "broken") || !strings.Contains(err.Error(), "1/3") {
+		t.Fatalf("partial failure error should include failing database and count, got %v", err)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("maintenance should continue after a database failure, calls=%v", calls)
+	}
+	for _, call := range calls {
+		if !strings.Contains(call, "VACUUM (FULL)") {
+			t.Fatalf("maintenance call should use full SQL, got calls=%v", calls)
+		}
 	}
 }

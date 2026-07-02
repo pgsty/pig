@@ -27,12 +27,21 @@ func TestBuildKillSQL_Execute(t *testing.T) {
 	}
 }
 
-func TestBuildKillSQL_Pid(t *testing.T) {
+func TestBuildKillSQL_PidDryRunOnlyQueries(t *testing.T) {
 	opts := &KillOptions{Pid: 1234}
+	got := buildKillSQL("pg_cancel_backend", opts)
+	want := "SELECT pid, usename, datname, client_addr, state, LEFT(query, 40) AS query FROM pg_stat_activity WHERE pid = 1234"
+	if got != want {
+		t.Fatalf("buildKillSQL(pid dry-run)=%q, want %q", got, want)
+	}
+}
+
+func TestBuildKillSQL_PidExecuteCancels(t *testing.T) {
+	opts := &KillOptions{Pid: 1234, Execute: true}
 	got := buildKillSQL("pg_cancel_backend", opts)
 	want := "SELECT pg_cancel_backend(1234)"
 	if got != want {
-		t.Fatalf("buildKillSQL(pid)=%q, want %q", got, want)
+		t.Fatalf("buildKillSQL(pid execute)=%q, want %q", got, want)
 	}
 }
 

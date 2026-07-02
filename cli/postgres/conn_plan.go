@@ -24,6 +24,10 @@ func BuildKillPlan(cfg *Config, opts *KillOptions) *output.Plan {
 	actionVerb := "list matching sessions"
 	impact := "inspect"
 	expected := "Matching sessions are listed; no backend is terminated"
+	if opts.Pid > 0 && !opts.Execute {
+		actionVerb = fmt.Sprintf("list session with pid=%d", opts.Pid)
+		expected = "The selected session is listed; no backend is terminated"
+	}
 	if opts.Execute {
 		actionVerb = "execute " + killFunc + " on matching sessions"
 		impact = "terminate"

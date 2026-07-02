@@ -136,7 +136,10 @@ func buildKillWhereClause(opts *KillOptions) string {
 
 func buildKillSQL(killFunc string, opts *KillOptions) string {
 	if opts != nil && opts.Pid > 0 {
-		return fmt.Sprintf("SELECT %s(%d)", killFunc, opts.Pid)
+		if opts.Execute {
+			return fmt.Sprintf("SELECT %s(%d)", killFunc, opts.Pid)
+		}
+		return fmt.Sprintf("SELECT pid, usename, datname, client_addr, state, LEFT(query, 40) AS query FROM pg_stat_activity WHERE pid = %d", opts.Pid)
 	}
 
 	whereClause := buildKillWhereClause(opts)
@@ -149,7 +152,7 @@ func buildKillSQL(killFunc string, opts *KillOptions) string {
 }
 
 func shouldShowKillDryRunBanner(opts *KillOptions) bool {
-	return (opts == nil || !opts.Execute) && (opts == nil || opts.Pid == 0)
+	return opts == nil || !opts.Execute
 }
 
 // Kill kills PostgreSQL connections (dry-run by default)

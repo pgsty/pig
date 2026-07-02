@@ -62,6 +62,9 @@ func TestBuildRestartPlanFromState_Running(t *testing.T) {
 	if !containsRisk(plan.Risks, "connection") {
 		t.Error("Risks should mention connection termination")
 	}
+	if !containsRisk(plan.Risks, "Patroni") {
+		t.Error("Risks should mention Patroni lifecycle boundary")
+	}
 }
 
 func TestBuildRestartPlanFromState_NotRunning(t *testing.T) {
@@ -149,6 +152,9 @@ func TestBuildRestartRisks(t *testing.T) {
 	if len(risks) == 0 {
 		t.Error("Should have risks when running")
 	}
+	if !containsRisk(risks, "Patroni") {
+		t.Error("Restart risks should mention Patroni lifecycle boundary")
+	}
 
 	// Not running
 	risks = buildRestartRisks(false)
@@ -221,6 +227,9 @@ func TestBuildStopPlanFromState_Running(t *testing.T) {
 	if len(plan.Risks) == 0 {
 		t.Error("Risks should not be empty when instance is running")
 	}
+	if !containsRisk(plan.Risks, "Patroni") {
+		t.Error("Risks should mention Patroni lifecycle boundary")
+	}
 }
 
 func TestBuildStopPlanFromState_NotRunning(t *testing.T) {
@@ -292,6 +301,9 @@ func TestBuildStopRisks(t *testing.T) {
 	risks := buildStopRisks(true, "fast")
 	if len(risks) < 2 {
 		t.Errorf("Should have at least 2 base risks, got %d", len(risks))
+	}
+	if !containsRisk(risks, "Patroni") {
+		t.Error("Stop risks should mention Patroni lifecycle boundary")
 	}
 
 	// Running with smart mode

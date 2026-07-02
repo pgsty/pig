@@ -16,6 +16,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var (
+	maintGetAllDatabases    = GetAllDatabases
+	maintRunPsqlMaintenance = RunPsqlMaintenance
+)
+
 // ============================================================================
 // Common Maintenance Options
 // ============================================================================
@@ -127,21 +132,27 @@ END LOOP; END $$`, utils.EscapeSQLString(task.schema), utils.EscapeSQLString(bas
 
 // runMaintTask executes a maintenance task on a single database
 func runMaintTask(cfg *Config, dbname string, task *maintTask) error {
-	return RunPsqlMaintenance(cfg, dbname, buildMaintSQL(task))
+	return maintRunPsqlMaintenance(cfg, dbname, buildMaintSQL(task))
 }
 
 // runMaintAllDatabases executes a maintenance task on all databases
 func runMaintAllDatabases(cfg *Config, task *maintTask) error {
-	dbs, err := GetAllDatabases(cfg)
+	dbs, err := maintGetAllDatabases(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to get databases: %w", err)
 	}
+	var failures []string
 	for _, db := range dbs {
 		fmt.Printf("\n%s=== %s database: %s ===%s\n", utils.ColorCyan, task.taskName, db, utils.ColorReset)
-		sql := fmt.Sprintf("%s %s", task.command, task.options)
-		if err := RunPsqlMaintenance(cfg, db, sql); err != nil {
+		sql := buildMaintSQL(task)
+		if err := maintRunPsqlMaintenance(cfg, db, sql); err != nil {
 			logrus.Warnf("%s %s failed: %v", strings.ToLower(task.taskName), db, err)
+			failures = append(failures, fmt.Sprintf("%s: %v", db, err))
 		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%s failed for %d/%d database(s): %s",
+			strings.ToLower(task.taskName), len(failures), len(dbs), strings.Join(failures, "; "))
 	}
 	return nil
 }
@@ -314,7 +325,7 @@ func Freeze(cfg *Config, dbname string, opts *FreezeOptions) error {
 // RepackOptions contains options for Repack command
 type RepackOptions struct {
 	MaintOptions
-	Jobs   int  // number of parallel jobs
+	Jobs int  // number of parallel jobs
 	Plan bool // show what would be repacked without executing
 }
 

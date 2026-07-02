@@ -264,6 +264,7 @@ func Stop(cfg *Config, opts *StopOptions) error {
 	}
 
 	logrus.Infof("stopping PostgreSQL %d (%s): %s", pg.MajorVersion, mode, dataDir)
+	warnPatroniLifecycleRisk("stop", dataDir)
 	PrintHint(cmdArgs)
 	return utils.DBSUCommand(dbsu, cmdArgs)
 }
@@ -323,6 +324,7 @@ func Restart(cfg *Config, opts *RestartOptions) error {
 	}
 
 	logrus.Infof("restarting PostgreSQL %d (%s): %s", pg.MajorVersion, mode, dataDir)
+	warnPatroniLifecycleRisk("restart", dataDir)
 	PrintHint(cmdArgs)
 	return utils.DBSUCommand(dbsu, cmdArgs)
 }
@@ -453,6 +455,28 @@ func showServiceStatus(serviceName string) {
 	fmt.Printf("  %-16s %s%s%s\n", serviceName+":", statusColor, status, utils.ColorReset)
 }
 
+// PatroniActive reports whether the local Patroni systemd service is active.
+func PatroniActive() bool {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return false
+	}
+	return exec.Command("systemctl", "is-active", "--quiet", "patroni").Run() == nil
+}
+
+func warnPatroniLifecycleRisk(action, dataDir string) {
+	if !PatroniActive() {
+		return
+	}
+	utils.PrintWarn("%s", patroniLifecycleRiskWarning(action, dataDir))
+}
+
+func patroniLifecycleRiskWarning(action, dataDir string) string {
+	if dataDir == "" {
+		dataDir = DefaultPgData
+	}
+	return fmt.Sprintf("Patroni is active; pig pg %s uses pg_ctl directly on %s and does not coordinate DCS, failover, or client routing. Prefer pig pt switchover/failover or pig pitr when Patroni manages this PGDATA", action, dataDir)
+}
+
 // PromoteOptions contains options for Promote
 type PromoteOptions struct {
 	Timeout int
@@ -488,6 +512,7 @@ func Promote(cfg *Config, opts *PromoteOptions) error {
 	}
 
 	logrus.Infof("promoting PostgreSQL %d: %s", pg.MajorVersion, dataDir)
+	warnPatroniLifecycleRisk("promote", dataDir)
 	PrintHint(cmdArgs)
 	return utils.DBSUCommand(dbsu, cmdArgs)
 }
