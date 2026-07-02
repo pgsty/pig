@@ -20,7 +20,13 @@ coverage.out
 .hugo_build.lock
 public/
 bin/
-docs/
+docs/*
+!docs/spec/
+docs/spec/*
+!docs/spec/pg.md
+!docs/spec/pb.md
+!docs/spec/pt.md
+!docs/spec/pitr.md
 
 _bmad
 _bmad-output
