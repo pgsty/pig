@@ -7,9 +7,11 @@ All operations use the default log directory: /pg/log/postgres
 package postgres
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -155,6 +157,9 @@ func getLatestLogFile(logDir string) (string, error) {
 	}
 
 	sort.Slice(files, func(i, j int) bool {
+		if files[i].ModTime().Equal(files[j].ModTime()) {
+			return files[i].Name() > files[j].Name()
+		}
 		return files[i].ModTime().After(files[j].ModTime())
 	})
 
@@ -312,27 +317,13 @@ func writeCSVLogJSONL(w io.Writer, logFile string, lines int) error {
 		return err
 	}
 
-	reader := csv.NewReader(newCSVRecordLimitReader(f, maxCSVLogRecordBytes))
-	reader.FieldsPerRecord = -1
-
-	var records [][]string
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return closeLogReader(f, fmt.Errorf("parse csv log %s: %w", logFile, err))
-		}
-		records = append(records, record)
-		if len(records) > lines {
-			copy(records, records[1:])
-			records = records[:lines]
-		}
+	entries, err := readCSVLogEntries(f, lines)
+	if err != nil {
+		return closeLogReader(f, err)
 	}
 
-	for _, record := range records {
-		row := csvLogRecordToMap(record)
+	for _, entry := range entries {
+		row := entry.toMap()
 		data, err := json.Marshal(row)
 		if err != nil {
 			return closeLogReader(f, err)
@@ -344,80 +335,106 @@ func writeCSVLogJSONL(w io.Writer, logFile string, lines int) error {
 	return closeLogReader(f, nil)
 }
 
+type csvLogEntry struct {
+	record    []string
+	malformed *malformedCSVLogEntry
+}
+
+type malformedCSVLogEntry struct {
+	raw      string
+	parseErr string
+}
+
+func (e csvLogEntry) toMap() interface{} {
+	if e.malformed != nil {
+		return map[string]interface{}{
+			"component":   "postgres",
+			"malformed":   true,
+			"raw":         e.malformed.raw,
+			"parse_error": e.malformed.parseErr,
+		}
+	}
+	return csvLogRecordToMap(e.record)
+}
+
+func readCSVLogEntries(r io.Reader, lines int) ([]csvLogEntry, error) {
+	reader := bufio.NewReader(r)
+	var entries []csvLogEntry
+	pending := ""
+	appendEntry := func(entry csvLogEntry) {
+		entries = append(entries, entry)
+		if len(entries) > lines {
+			copy(entries, entries[1:])
+			entries = entries[:lines]
+		}
+	}
+	for {
+		raw, err := reader.ReadString('\n')
+		if len(raw) > 0 {
+			raw = strings.TrimRight(raw, "\r\n")
+			if raw != "" || pending != "" {
+				if pending == "" {
+					pending = raw
+				} else {
+					pending += "\n" + raw
+				}
+				entry, parseErr := parseCSVLogEntry(pending)
+				switch {
+				case parseErr == nil:
+					appendEntry(entry)
+					pending = ""
+				case strings.Contains(parseErr.Error(), "exceeds"):
+					return nil, parseErr
+				case isContinuableCSVParseError(parseErr) && err != io.EOF:
+					// PostgreSQL CSV fields can contain quoted newlines; keep
+					// accumulating physical lines until the record is complete.
+				default:
+					appendEntry(csvLogEntry{malformed: &malformedCSVLogEntry{raw: pending, parseErr: parseErr.Error()}})
+					pending = ""
+				}
+			}
+		}
+		if err == io.EOF {
+			if pending != "" {
+				if entry, parseErr := parseCSVLogEntry(pending); parseErr == nil {
+					appendEntry(entry)
+				} else {
+					appendEntry(csvLogEntry{malformed: &malformedCSVLogEntry{raw: pending, parseErr: parseErr.Error()}})
+				}
+			}
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return entries, nil
+}
+
+func isContinuableCSVParseError(err error) bool {
+	var parseErr *csv.ParseError
+	return errors.As(err, &parseErr) && parseErr.Err == csv.ErrQuote
+}
+
+func parseCSVLogEntry(raw string) (csvLogEntry, error) {
+	if len(raw) > maxCSVLogRecordBytes {
+		return csvLogEntry{}, fmt.Errorf("csv log record exceeds %d bytes", maxCSVLogRecordBytes)
+	}
+	reader := csv.NewReader(strings.NewReader(raw))
+	reader.FieldsPerRecord = -1
+	record, err := reader.Read()
+	if err != nil {
+		return csvLogEntry{}, err
+	}
+	return csvLogEntry{record: record}, nil
+}
+
 func closeLogReader(r io.Closer, err error) error {
 	closeErr := r.Close()
 	if err != nil {
 		return err
 	}
 	return closeErr
-}
-
-type csvRecordLimitReader struct {
-	r            io.Reader
-	max          int
-	current      int
-	inQuotes     bool
-	quotePending bool
-	atFieldStart bool
-	err          error
-}
-
-func newCSVRecordLimitReader(r io.Reader, max int) io.Reader {
-	return &csvRecordLimitReader{r: r, max: max, atFieldStart: true}
-}
-
-func (r *csvRecordLimitReader) Read(p []byte) (int, error) {
-	if r.err != nil {
-		return 0, r.err
-	}
-	n, err := r.r.Read(p)
-	for i := 0; i < n; i++ {
-		r.current++
-		if r.max > 0 && r.current > r.max {
-			r.err = fmt.Errorf("csv log record exceeds %d bytes", r.max)
-			if i == 0 {
-				return 0, r.err
-			}
-			return i, nil
-		}
-		r.observeCSVByte(p[i])
-	}
-	return n, err
-}
-
-func (r *csvRecordLimitReader) observeCSVByte(b byte) {
-	for {
-		if r.quotePending {
-			r.quotePending = false
-			if b == '"' {
-				r.atFieldStart = false
-				return
-			}
-			r.inQuotes = false
-			continue
-		}
-		if r.inQuotes {
-			if b == '"' {
-				r.quotePending = true
-			}
-			return
-		}
-		switch b {
-		case '"':
-			if r.atFieldStart {
-				r.inQuotes = true
-			}
-			r.atFieldStart = false
-		case ',':
-			r.atFieldStart = true
-		case '\n', '\r':
-			r.current = 0
-			r.atFieldStart = true
-		default:
-			r.atFieldStart = false
-		}
-		return
-	}
 }
 
 func csvLogRecordToMap(record []string) map[string]string {

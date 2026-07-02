@@ -95,6 +95,31 @@ func TestLogShowJSONLReadsThroughFallbackReader(t *testing.T) {
 	}
 }
 
+func TestGetLatestLogFileTiesByName(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "postgresql-aa.csv")
+	second := filepath.Join(dir, "postgresql-zz.csv")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, []byte("row\n"), 0644); err != nil {
+			t.Fatalf("write log %s: %v", path, err)
+		}
+	}
+	sameTime := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	for _, path := range []string{first, second} {
+		if err := os.Chtimes(path, sameTime, sameTime); err != nil {
+			t.Fatalf("chtimes log %s: %v", path, err)
+		}
+	}
+
+	got, err := getLatestLogFile(dir)
+	if err != nil {
+		t.Fatalf("getLatestLogFile returned error: %v", err)
+	}
+	if got != second {
+		t.Fatalf("getLatestLogFile = %q, want deterministic name tie-break %q", got, second)
+	}
+}
+
 func TestWriteCSVLogJSONLRejectsNonPositiveLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "postgresql-2026-06-30.csv")
@@ -104,6 +129,60 @@ func TestWriteCSVLogJSONLRejectsNonPositiveLines(t *testing.T) {
 	err := writeCSVLogJSONL(&out, path, 0)
 	if err == nil || !strings.Contains(err.Error(), "lines must be positive") {
 		t.Fatalf("expected positive line count error, got %v", err)
+	}
+}
+
+func TestWriteCSVLogJSONLDegradesMalformedRows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "postgresql-2026-07-02.csv")
+	rawLine := `2026-07-02 12:00:00.000 CST,alice,appdb,12345,"unterminated`
+	if err := os.WriteFile(path, []byte(rawLine+"\n"), 0644); err != nil {
+		t.Fatalf("write malformed csv log: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := writeCSVLogJSONL(&out, path, 1); err != nil {
+		t.Fatalf("writeCSVLogJSONL should degrade malformed row instead of failing: %v", err)
+	}
+
+	var row map[string]interface{}
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &row); err != nil {
+		t.Fatalf("invalid json row: %v, row=%q", err, out.String())
+	}
+	if malformed, _ := row["malformed"].(bool); !malformed {
+		t.Fatalf("expected malformed=true row, got %v", row)
+	}
+	if raw, _ := row["raw"].(string); !strings.Contains(raw, "unterminated") {
+		t.Fatalf("malformed row should preserve raw content, got %v", row)
+	}
+	if parseErr, _ := row["parse_error"].(string); parseErr == "" {
+		t.Fatalf("malformed row should include parse_error, got %v", row)
+	}
+}
+
+func TestWriteCSVLogJSONLPreservesMultilineCSVRecord(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "postgresql-2026-07-02.csv")
+	writeCSVLogRows(t, path, [][]string{minimalCSVLogRow("first line\nsecond line")})
+
+	var out bytes.Buffer
+	if err := writeCSVLogJSONL(&out, path, 1); err != nil {
+		t.Fatalf("writeCSVLogJSONL returned error for multiline csv record: %v", err)
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(out.Bytes()), []byte("\n"))
+	if len(lines) != 1 {
+		t.Fatalf("expected one JSONL row for one multiline CSV record, got %d: %q", len(lines), out.String())
+	}
+	var row map[string]interface{}
+	if err := json.Unmarshal(lines[0], &row); err != nil {
+		t.Fatalf("invalid json row: %v, row=%q", err, lines[0])
+	}
+	if row["message"] != "first line\nsecond line" {
+		t.Fatalf("message = %v, want multiline message", row["message"])
+	}
+	if malformed, _ := row["malformed"].(bool); malformed {
+		t.Fatalf("valid multiline CSV record should not be marked malformed: %v", row)
 	}
 }
 
