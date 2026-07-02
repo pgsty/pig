@@ -754,13 +754,11 @@ Examples:
 		if len(args) > 0 {
 			listType = args[0]
 		}
-		return runLegacyStructured(legacyModulePb, "pig pgbackrest ls", args, map[string]interface{}{
-			"type": listType,
-		}, func() error {
-			return pgbackrest.Ls(pbConfig, &pgbackrest.LsOptions{
-				Type: listType,
-			})
-		})
+		opts := &pgbackrest.LsOptions{Type: listType}
+		if config.IsStructuredOutput() {
+			return handleAuxResult(pgbackrest.LsResult(pbConfig, opts))
+		}
+		return pgbackrest.Ls(pbConfig, opts)
 	},
 }
 
