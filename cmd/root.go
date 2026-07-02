@@ -167,6 +167,7 @@ func Execute() {
 	args := reorderOutputBeforeHelp(os.Args[1:])
 	rootCmd.SetArgs(args)
 	prepareEarlyOutputSettings(args)
+	wrapSilentExitSilence(rootCmd)
 
 	// Setup ANCS-aware help after all commands are registered to avoid recursion.
 	ancs.SetupHelp(rootCmd)
@@ -359,4 +360,5 @@ func init() {
 		versionCmd,
 		updateCmd,
 	)
+	wrapSilentExitSilence(rootCmd)
 }

@@ -204,3 +204,24 @@ func TestCategoryExtraction(t *testing.T) {
 		}
 	}
 }
+
+// NN=99 is reserved for the generic fallback codes minted by cmd-layer
+// envelope helpers; guard the derivation and the no-collision invariant.
+func TestGenericFallbackCodes(t *testing.T) {
+	if got := GenericParamError(MODULE_PT); got != 150199 {
+		t.Errorf("GenericParamError(MODULE_PT) = %d, want 150199", got)
+	}
+	if got := GenericOpFailed(MODULE_PT); got != 150899 {
+		t.Errorf("GenericOpFailed(MODULE_PT) = %d, want 150899", got)
+	}
+	if GenericOpFailed(MODULE_PT) == CodePtListFailed || GenericOpFailed(MODULE_PG) == CodePgStartFailed {
+		t.Error("generic op-failed codes must not collide with specific NN=1 codes")
+	}
+	// Category (and thus exit-code) mapping is preserved.
+	if got := ExitCode(GenericParamError(MODULE_PT)); got != 2 {
+		t.Errorf("param fallback should map to exit 2, got %d", got)
+	}
+	if got := ExitCode(GenericOpFailed(MODULE_PT)); got != 1 {
+		t.Errorf("operation fallback should map to exit 1, got %d", got)
+	}
+}

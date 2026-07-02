@@ -151,6 +151,26 @@ func TestPtFailoverResultData_Text_MinimalFields(t *testing.T) {
 // FailoverResult Precondition Tests
 // ============================================================================
 
+// TestFailoverResultRejectsEmptyCandidate: the no-candidate invariant is also
+// enforced at the exported API boundary, not only by the cmd layer.
+func TestFailoverResultRejectsEmptyCandidate(t *testing.T) {
+	var captured []string
+	stubPatroniResultDeps(t, "pg-nms", nil, &captured)
+
+	for _, opts := range []*FailoverOptions{nil, {Force: true}} {
+		result := FailoverResult("postgres", opts)
+		if result.Success {
+			t.Fatalf("FailoverResult without candidate should fail, opts=%+v", opts)
+		}
+		if result.Code != output.GenericParamError(output.MODULE_PT) {
+			t.Fatalf("code = %d, want %d", result.Code, output.GenericParamError(output.MODULE_PT))
+		}
+		if captured != nil {
+			t.Fatalf("patronictl must not execute without candidate, captured=%v", captured)
+		}
+	}
+}
+
 func TestFailoverResultUsesResolvedClusterName(t *testing.T) {
 	var captured []string
 	stubPatroniResultDeps(t, "pg-nms", nil, &captured)
@@ -165,31 +185,6 @@ func TestFailoverResultUsesResolvedClusterName(t *testing.T) {
 	assertArgPrefixStr(t, captured, []string{"/usr/bin/patronictl", "-c", DefaultConfigPath, "failover", "pg-nms", "--force"})
 	assertContainsStr(t, captured, "--candidate")
 	assertContainsStr(t, captured, "pg-nms-2")
-}
-
-func TestFailoverResultRequiresForce(t *testing.T) {
-	tests := []struct {
-		name string
-		opts *FailoverOptions
-	}{
-		{name: "nil opts", opts: nil},
-		{name: "force false", opts: &FailoverOptions{Force: false}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var captured []string
-			stubPatroniResultDeps(t, "pg-nms", nil, &captured)
-
-			result := FailoverResult("postgres", tt.opts)
-			if result.Code != output.CodePtConfirmationRequired {
-				t.Fatalf("code = %d, want %d", result.Code, output.CodePtConfirmationRequired)
-			}
-			if captured != nil {
-				t.Fatalf("patronictl should not execute without --force, captured=%v", captured)
-			}
-		})
-	}
 }
 
 // ============================================================================
@@ -291,8 +286,8 @@ func TestBuildFailoverPlan_FullOpts(t *testing.T) {
 	if !strings.Contains(plan.Command, "--candidate") {
 		t.Errorf("plan.Command missing --candidate: %q", plan.Command)
 	}
-	if !strings.Contains(plan.Command, "--yes") {
-		t.Errorf("plan.Command missing --yes: %q", plan.Command)
+	if !strings.HasSuffix(plan.Command, "--plan") {
+		t.Errorf("plan.Command should be the --plan preview form: %q", plan.Command)
 	}
 
 	if len(plan.Actions) == 0 {
@@ -324,83 +319,45 @@ func TestBuildFailoverPlan_RisksContainDataLossWarning(t *testing.T) {
 	}
 }
 
-func TestBuildFailoverPlan_ForceAddsRisk(t *testing.T) {
-	opts := &FailoverOptions{Force: true}
-	plan := BuildFailoverPlan(opts)
+// TestBuildFailoverPlanCommandForms: plan.Command is the replayable preview
+// form (--plan), the first next action is the --yes execute form.
+func TestBuildFailoverPlanCommandForms(t *testing.T) {
+	plan := BuildFailoverPlan(&FailoverOptions{Candidate: "pg-2", Force: true})
 	if plan == nil {
 		t.Fatal("BuildFailoverPlan returned nil")
 	}
-
-	hasForceRisk := false
-	for _, risk := range plan.Risks {
-		if strings.Contains(risk, "force") || strings.Contains(risk, "skip") {
-			hasForceRisk = true
-			break
-		}
+	if !strings.HasSuffix(plan.Command, "--plan") || strings.Contains(plan.Command, "--yes") {
+		t.Errorf("plan.Command should be the --plan preview form: %q", plan.Command)
 	}
-	if !hasForceRisk {
-		t.Error("plan.Risks should mention force mode when Force=true")
+	if len(plan.NextActions) == 0 {
+		t.Fatal("plan should carry next actions")
+	}
+	execute := plan.NextActions[0]
+	if !execute.Required || !strings.Contains(execute.Command, "--yes") || strings.Contains(execute.Command, "--plan") {
+		t.Errorf("first next action should be the required --yes execute form: %+v", execute)
 	}
 }
 
 // ============================================================================
-// buildFailoverCommand Tests
+// FailoverCommand Tests
 // ============================================================================
 
-func TestBuildFailoverCommand(t *testing.T) {
-	tests := []struct {
-		name     string
-		opts     *FailoverOptions
-		contains []string
-		excludes []string
-	}{
-		{
-			name:     "nil opts",
-			opts:     nil,
-			contains: []string{"pig", "pt", "failover"},
-			excludes: []string{"--candidate", "--yes", "--force"},
-		},
-		{
-			name: "all options",
-			opts: &FailoverOptions{
-				Candidate: "pg-2",
-				Force:     true,
-			},
-			contains: []string{"--candidate", "pg-2", "--yes"},
-			excludes: []string{"--force"},
-		},
-		{
-			name: "only candidate",
-			opts: &FailoverOptions{
-				Candidate: "pg-2",
-			},
-			contains: []string{"--candidate", "pg-2"},
-			excludes: []string{"--yes", "--force"},
-		},
-		{
-			name: "only force",
-			opts: &FailoverOptions{
-				Force: true,
-			},
-			contains: []string{"--yes"},
-			excludes: []string{"--candidate", "--force"},
-		},
+func TestFailoverCommand(t *testing.T) {
+	if got := FailoverCommand(nil, false, false); got != "pig pt failover" {
+		t.Errorf("nil opts = %q, want %q", got, "pig pt failover")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := buildFailoverCommand(tt.opts)
-			for _, c := range tt.contains {
-				if !strings.Contains(cmd, c) {
-					t.Errorf("command should contain %q: %q", c, cmd)
-				}
-			}
-			for _, e := range tt.excludes {
-				if strings.Contains(cmd, e) {
-					t.Errorf("command should not contain %q: %q", e, cmd)
-				}
-			}
-		})
+	opts := &FailoverOptions{Candidate: "pg-2"}
+	if got, want := FailoverCommand(opts, false, true), "pig pt failover --candidate pg-2 --yes"; got != want {
+		t.Errorf("execute form = %q, want %q", got, want)
+	}
+	if got, want := FailoverCommand(opts, true, false), "pig pt failover --candidate pg-2 --plan"; got != want {
+		t.Errorf("plan form = %q, want %q", got, want)
+	}
+
+	// Force never leaks into rendered commands; --yes is an explicit marker.
+	if got := FailoverCommand(&FailoverOptions{Force: true}, false, false); strings.Contains(got, "--yes") || strings.Contains(got, "--force") {
+		t.Errorf("Force option must not leak into command: %q", got)
 	}
 }
 

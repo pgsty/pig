@@ -114,7 +114,7 @@ func runLegacyStructuredWithNextActions(module int, command string, args []strin
 	}
 
 	if err != nil {
-		result := output.Fail(module+output.CAT_OPERATION+1, command+" failed").
+		result := output.Fail(output.GenericOpFailed(module), command+" failed").
 			WithDetail(err.Error()).
 			WithData(data)
 		return handleAuxResult(result)
@@ -144,6 +144,25 @@ func silenceCobraOnSilentExit(cmd *cobra.Command, err error) error {
 	return err
 }
 
+// wrapSilentExitSilence wraps every RunE in the command tree so a silent
+// ExitCodeError (subprocess output already streamed to the terminal) also
+// silences cobra's duplicate "Error: ..." line — individual RunEs never need
+// to remember this. Idempotent: it runs at registration (cmd package init)
+// and again in Execute() to catch subcommands attached by later init() funcs.
+var silentExitWrapped = map[*cobra.Command]bool{}
+
+func wrapSilentExitSilence(cmd *cobra.Command) {
+	for _, sub := range cmd.Commands() {
+		wrapSilentExitSilence(sub)
+	}
+	if run := cmd.RunE; run != nil && !silentExitWrapped[cmd] {
+		silentExitWrapped[cmd] = true
+		cmd.RunE = func(c *cobra.Command, args []string) error {
+			return silenceCobraOnSilentExit(c, run(c, args))
+		}
+	}
+}
+
 func structuredParamError(module int, command, message, detail string, args []string, params map[string]interface{}) error {
 	if !config.IsStructuredOutput() {
 		return fmt.Errorf("%s", detail)
@@ -154,7 +173,7 @@ func structuredParamError(module int, command, message, detail string, args []st
 		Params:  normalizeParams(params),
 	}
 	return handleAuxResult(
-		output.Fail(module+output.CAT_PARAM+1, message).
+		output.Fail(output.GenericParamError(module), message).
 			WithDetail(detail).
 			WithData(data),
 	)

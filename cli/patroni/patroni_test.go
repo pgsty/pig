@@ -193,9 +193,10 @@ func TestBuildRestartArgs(t *testing.T) {
 func TestBuildReloadArgs(t *testing.T) {
 	const cluster = "pg-nms"
 
+	// --force is mandatory (B04): patronictl reload prompts without it.
 	got := buildReloadArgs(cluster)
-	if len(got) != 2 || got[0] != "reload" || got[1] != cluster {
-		t.Errorf("want [reload %s], got %v", cluster, got)
+	if len(got) != 3 || got[0] != "reload" || got[1] != cluster || got[2] != "--force" {
+		t.Errorf("want [reload %s --force], got %v", cluster, got)
 	}
 }
 
@@ -465,76 +466,110 @@ func TestBuildSwitchoverPlanEmptyOpts(t *testing.T) {
 	}
 }
 
-func TestBuildSwitchoverPlanForceOption(t *testing.T) {
-	opts := &SwitchoverOptions{
-		Force: true,
-	}
-	plan := BuildSwitchoverPlan(opts)
+// TestBuildSwitchoverPlanCommandForms: plan.Command is the replayable preview
+// form (--plan), the first next action is the --yes execute form.
+func TestBuildSwitchoverPlanCommandForms(t *testing.T) {
+	plan := BuildSwitchoverPlan(&SwitchoverOptions{Candidate: "pg-2", Force: true})
 	if plan == nil {
 		t.Fatal("BuildSwitchoverPlan returned nil")
 	}
-	if !strings.Contains(plan.Command, "--yes") {
-		t.Errorf("plan.Command should include --yes: %q", plan.Command)
+	if !strings.HasSuffix(plan.Command, "--plan") || strings.Contains(plan.Command, "--yes") {
+		t.Errorf("plan.Command should be the --plan preview form: %q", plan.Command)
 	}
-	// Risks should mention force mode
-	hasForceRisk := false
-	for _, risk := range plan.Risks {
-		if strings.Contains(risk, "force") || strings.Contains(risk, "skip") {
-			hasForceRisk = true
-			break
-		}
+	if len(plan.NextActions) == 0 {
+		t.Fatal("plan should carry next actions")
 	}
-	if !hasForceRisk {
-		t.Error("plan.Risks should mention force mode")
+	execute := plan.NextActions[0]
+	if !execute.Required || !strings.Contains(execute.Command, "--yes") || strings.Contains(execute.Command, "--plan") {
+		t.Errorf("first next action should be the required --yes execute form: %+v", execute)
 	}
 }
 
-func TestBuildSwitchoverCommand(t *testing.T) {
-	tests := []struct {
-		name     string
-		opts     *SwitchoverOptions
-		contains []string
-		excludes []string
-	}{
-		{
-			name:     "nil opts",
-			opts:     nil,
-			contains: []string{"pig", "pt", "switchover"},
-			excludes: []string{"--leader", "--candidate", "--scheduled", "--yes", "--force"},
-		},
-		{
-			name: "all options",
-			opts: &SwitchoverOptions{
-				Leader:    "pg-1",
-				Candidate: "pg-2",
-				Scheduled: "2026-02-03T12:00:00",
-				Force:     true,
-			},
-			contains: []string{"--leader", "pg-1", "--candidate", "pg-2", "--scheduled", "--yes"},
-			excludes: []string{"--force"},
-		},
-		{
-			name: "only candidate",
-			opts: &SwitchoverOptions{
-				Candidate: "pg-2",
-			},
-			contains: []string{"--candidate", "pg-2"},
-			excludes: []string{"--leader", "--scheduled", "--yes", "--force"},
-		},
+func TestSwitchoverCommand(t *testing.T) {
+	if got := SwitchoverCommand(nil, false, false); got != "pig pt switchover" {
+		t.Errorf("nil opts = %q, want %q", got, "pig pt switchover")
 	}
 
+	opts := &SwitchoverOptions{Leader: "pg-1", Candidate: "pg-2", Scheduled: "2026-02-03T12:00:00"}
+	got := SwitchoverCommand(opts, false, true)
+	want := "pig pt switchover --leader pg-1 --candidate pg-2 --scheduled 2026-02-03T12:00:00 --yes"
+	if got != want {
+		t.Errorf("execute form = %q, want %q", got, want)
+	}
+	if got := SwitchoverCommand(opts, true, false); !strings.HasSuffix(got, "--plan") || strings.Contains(got, "--yes") {
+		t.Errorf("plan form should end with --plan and omit --yes: %q", got)
+	}
+
+	// Force never leaks into rendered commands; --yes is an explicit marker.
+	if got := SwitchoverCommand(&SwitchoverOptions{Force: true}, false, false); strings.Contains(got, "--yes") || strings.Contains(got, "--force") {
+		t.Errorf("Force option must not leak into command: %q", got)
+	}
+
+	// Values with spaces stay shell-safe (copy-paste replayable).
+	quoted := SwitchoverCommand(&SwitchoverOptions{Scheduled: "2026-02-03 12:00:00"}, false, true)
+	if !strings.Contains(quoted, "'2026-02-03 12:00:00'") {
+		t.Errorf("scheduled value with spaces should be quoted: %q", quoted)
+	}
+}
+
+func TestRestartCommand(t *testing.T) {
+	if got := RestartCommand(nil, false, false); got != "pig pt restart" {
+		t.Errorf("nil opts = %q, want %q", got, "pig pt restart")
+	}
+	opts := &RestartOptions{Member: "pg-1", Role: "replica", Pending: true, Force: true}
+	if got, want := RestartCommand(opts, false, true), "pig pt restart pg-1 --role replica --pending --yes"; got != want {
+		t.Errorf("execute form = %q, want %q", got, want)
+	}
+	if got, want := RestartCommand(&RestartOptions{}, true, false), "pig pt restart --plan"; got != want {
+		t.Errorf("plan form = %q, want %q", got, want)
+	}
+}
+
+func TestReinitCommand(t *testing.T) {
+	opts := &ReinitOptions{Member: "pg-2", Wait: true, Force: true}
+	if got, want := ReinitCommand(opts, false, true), "pig pt reinit pg-2 --wait --yes"; got != want {
+		t.Errorf("execute form = %q, want %q", got, want)
+	}
+	if got, want := ReinitCommand(opts, true, false), "pig pt reinit pg-2 --wait --plan"; got != want {
+		t.Errorf("plan form = %q, want %q", got, want)
+	}
+}
+
+// TestBuildRestartPlanConfirmationTiers mirrors the D2 conditional tier: an
+// unscoped rolling restart needs consent, a pinned member or pending apply
+// executes directly.
+func TestBuildRestartPlanConfirmationTiers(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    *RestartOptions
+		confirm string
+	}{
+		{name: "cluster-wide", opts: nil, confirm: "required"},
+		{name: "role filtered", opts: &RestartOptions{Role: "replica"}, confirm: "required"},
+		{name: "explicit member", opts: &RestartOptions{Member: "pg-1"}, confirm: "none"},
+		{name: "pending apply", opts: &RestartOptions{Pending: true}, confirm: "none"},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := buildSwitchoverCommand(tt.opts)
-			for _, c := range tt.contains {
-				if !strings.Contains(cmd, c) {
-					t.Errorf("command should contain %q: %q", c, cmd)
-				}
+			plan := BuildRestartPlan(tt.opts)
+			if plan == nil {
+				t.Fatal("BuildRestartPlan returned nil")
 			}
-			for _, e := range tt.excludes {
-				if strings.Contains(cmd, e) {
-					t.Errorf("command should not contain %q: %q", e, cmd)
-				}
+			if plan.Confirmation != tt.confirm {
+				t.Fatalf("confirmation = %q, want %q", plan.Confirmation, tt.confirm)
+			}
+			if !strings.HasSuffix(plan.Command, "--plan") {
+				t.Fatalf("plan.Command should be the preview form: %q", plan.Command)
+			}
+			if len(plan.NextActions) == 0 || !plan.NextActions[0].Required {
+				t.Fatalf("first next action should be the required execute form: %+v", plan.NextActions)
+			}
+			// The execute action carries --yes exactly when the scope is gated:
+			// a confirmation-free plan must not point at a --yes command.
+			hasYes := strings.Contains(plan.NextActions[0].Command, "--yes")
+			if gated := tt.confirm == "required"; hasYes != gated {
+				t.Fatalf("execute action --yes = %v, want %v (confirmation=%q): %+v",
+					hasYes, gated, tt.confirm, plan.NextActions[0])
 			}
 		})
 	}

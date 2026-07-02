@@ -356,7 +356,9 @@ func TestPatroniStructuredNeedYesGate(t *testing.T) {
 
 	var runErr error
 	raw := capturePtStdout(t, func() {
-		runErr = requirePatroniStructuredYes(false, patroni.RestartNeedYesResult())
+		runErr = requirePtClusterConfirmation(false, "restart", "high",
+			"This will rolling-restart PostgreSQL on ALL cluster members",
+			"pig pt restart --yes", "pig pt restart --plan")
 	})
 	if runErr == nil {
 		t.Fatal("structured Patroni command without --yes should fail")
@@ -374,6 +376,15 @@ func TestPatroniStructuredNeedYesGate(t *testing.T) {
 	}
 	if msg, _ := payload["message"].(string); !strings.Contains(msg, "--yes (-y)") {
 		t.Fatalf("gate message must reference --yes (-y), got %q", msg)
+	}
+	// Refusal next_actions must carry real replayable commands, no placeholders.
+	actions, _ := payload["next_actions"].([]interface{})
+	if len(actions) < 2 {
+		t.Fatalf("refusal should carry execute and plan next actions, got %v", payload["next_actions"])
+	}
+	first, _ := actions[0].(map[string]interface{})
+	if cmd := ptAsString(first["command"]); cmd != "pig pt restart --yes" {
+		t.Fatalf("execute next action = %q, want replayable command", cmd)
 	}
 }
 
@@ -545,6 +556,7 @@ func TestPatroniTextConfirmClusterOps(t *testing.T) {
 		_ = patroniReinitCmd.Flags().Set("yes", "false")
 		_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
 		_ = patroniFailoverCmd.Flags().Set("yes", "false")
+		_ = patroniFailoverCmd.Flags().Set("candidate", "")
 	}()
 	config.OutputFormat = config.OUTPUT_TEXT
 	patroniPlan = false
@@ -567,11 +579,13 @@ func TestPatroniTextConfirmClusterOps(t *testing.T) {
 		name    string
 		cmd     *cobra.Command
 		args    []string
+		flags   map[string]string
 		warning string
 	}{
 		{name: "reinit", cmd: patroniReinitCmd, args: []string{"pg-test-2"}, warning: "WIPE and rebuild member pg-test-2"},
 		{name: "switchover", cmd: patroniSwitchoverCmd, args: nil, warning: "transfer cluster leadership"},
-		{name: "failover", cmd: patroniFailoverCmd, args: nil, warning: "data loss possible"},
+		{name: "failover", cmd: patroniFailoverCmd, args: nil,
+			flags: map[string]string{"candidate": "pg-test-2"}, warning: "data loss possible"},
 	}
 
 	for _, tt := range tests {
@@ -584,6 +598,9 @@ func TestPatroniTextConfirmClusterOps(t *testing.T) {
 				return errors.New(tt.name + " cancelled by user")
 			}
 			_ = tt.cmd.Flags().Set("yes", "false")
+			for k, v := range tt.flags {
+				_ = tt.cmd.Flags().Set(k, v)
+			}
 			if err := tt.cmd.RunE(tt.cmd, tt.args); err == nil {
 				t.Fatalf("%s must abort on rejected confirmation", tt.name)
 			}
@@ -668,6 +685,7 @@ func TestPatroniFailoverSilentExitSilencesCobraOutput(t *testing.T) {
 		patroniFailoverCmd.SilenceErrors = origSilenceErrors
 		patroniFailoverCmd.SilenceUsage = origSilenceUsage
 		_ = patroniFailoverCmd.Flags().Set("yes", "false")
+		_ = patroniFailoverCmd.Flags().Set("candidate", "")
 	}()
 
 	config.OutputFormat = config.OUTPUT_TEXT
@@ -675,6 +693,7 @@ func TestPatroniFailoverSilentExitSilencesCobraOutput(t *testing.T) {
 	patroniFailoverCmd.SilenceErrors = false
 	patroniFailoverCmd.SilenceUsage = false
 	_ = patroniFailoverCmd.Flags().Set("yes", "false")
+	_ = patroniFailoverCmd.Flags().Set("candidate", "pg-test-2")
 	highRiskTextConfirm = func(warning, action string) error { return nil }
 	patroniFailoverExec = func(dbsu string, opts *patroni.FailoverOptions) error {
 		return &utils.ExitCodeError{
@@ -933,4 +952,189 @@ func ptAsString(v interface{}) string {
 		return s
 	}
 	return ""
+}
+
+// TestPatroniRestartPendingSkipsGate (D2): --pending applies restarts already
+// scoped by a prior config change, so it executes directly in both modes.
+func TestPatroniRestartPendingSkipsGate(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	origExec := patroniRestartExec
+	origConfirm := highRiskTextConfirm
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		patroniRestartExec = origExec
+		highRiskTextConfirm = origConfirm
+		_ = patroniRestartCmd.Flags().Set("yes", "false")
+		_ = patroniRestartCmd.Flags().Set("pending", "false")
+	}()
+	patroniPlan = false
+	highRiskTextConfirm = func(warning, action string) error {
+		t.Fatal("--pending restart must not prompt for confirmation")
+		return nil
+	}
+	_ = patroniRestartCmd.Flags().Set("yes", "false")
+	_ = patroniRestartCmd.Flags().Set("pending", "true")
+
+	for _, mode := range []string{config.OUTPUT_TEXT, config.OUTPUT_JSON} {
+		t.Run(mode, func(t *testing.T) {
+			config.OutputFormat = mode
+			var gotOpts *patroni.RestartOptions
+			patroniRestartExec = func(dbsu string, opts *patroni.RestartOptions) error {
+				gotOpts = opts
+				return nil
+			}
+			var runErr error
+			_ = capturePtStdout(t, func() {
+				runErr = patroniRestartCmd.RunE(patroniRestartCmd, nil)
+			})
+			if runErr != nil {
+				t.Fatalf("pending restart should execute directly: %v", runErr)
+			}
+			if gotOpts == nil || !gotOpts.Pending || !gotOpts.Force {
+				t.Fatalf("pending restart should run with --pending and --force, got %+v", gotOpts)
+			}
+		})
+	}
+}
+
+// TestPatroniRestartPlanPreview: --plan renders a side-effect-free plan whose
+// confirmation tier matches D2 and whose commands are replayable.
+func TestPatroniRestartPlanPreview(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	origExec := patroniRestartExec
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		patroniRestartExec = origExec
+	}()
+	config.OutputFormat = config.OUTPUT_JSON
+	patroniPlan = true
+	patroniRestartExec = func(dbsu string, opts *patroni.RestartOptions) error {
+		t.Fatal("--plan must not execute patronictl restart")
+		return nil
+	}
+
+	raw := capturePtStdout(t, func() {
+		if err := patroniRestartCmd.RunE(patroniRestartCmd, nil); err != nil {
+			t.Fatalf("pt restart --plan should not fail: %v", err)
+		}
+	})
+	var plan output.Plan
+	if err := json.Unmarshal(ptBytesTrimSpace([]byte(raw)), &plan); err != nil {
+		t.Fatalf("invalid plan json: %v raw=%q", err, raw)
+	}
+	if plan.Confirmation != "required" {
+		t.Fatalf("cluster-wide restart plan confirmation = %q, want required", plan.Confirmation)
+	}
+	if !strings.HasSuffix(plan.Command, "--plan") {
+		t.Fatalf("plan.Command should be the preview form: %q", plan.Command)
+	}
+	if !ptPlanHasNextAction(plan, "pig pt restart --yes") {
+		t.Fatalf("plan should carry the --yes execute action, got %+v", plan.NextActions)
+	}
+}
+
+// TestPatroniFailoverRequiresCandidate: Patroni fails over only to an explicit
+// candidate, so pig fails fast in both output modes.
+func TestPatroniFailoverRequiresCandidate(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	origExec := patroniFailoverExec
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		patroniFailoverExec = origExec
+		_ = patroniFailoverCmd.Flags().Set("candidate", "")
+	}()
+	patroniPlan = false
+	patroniFailoverExec = func(dbsu string, opts *patroni.FailoverOptions) error {
+		t.Fatal("failover without --candidate must not execute")
+		return nil
+	}
+	_ = patroniFailoverCmd.Flags().Set("candidate", "")
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	if err := patroniFailoverCmd.RunE(patroniFailoverCmd, nil); err == nil || !strings.Contains(err.Error(), "--candidate") {
+		t.Fatalf("text mode should fail mentioning --candidate, got %v", err)
+	}
+
+	config.OutputFormat = config.OUTPUT_JSON
+	var runErr error
+	raw := capturePtStdout(t, func() {
+		runErr = patroniFailoverCmd.RunE(patroniFailoverCmd, nil)
+	})
+	if runErr == nil {
+		t.Fatal("structured failover without --candidate should fail")
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(ptBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if code, _ := payload["code"].(float64); int(code) != output.GenericParamError(output.MODULE_PT) {
+		t.Fatalf("code = %v, want %d", payload["code"], output.GenericParamError(output.MODULE_PT))
+	}
+}
+
+// TestPatroniRestartRejectsInvalidRole: --role is validated against the
+// documented enum before anything executes.
+func TestPatroniRestartRejectsInvalidRole(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	origExec := patroniRestartExec
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		patroniRestartExec = origExec
+		_ = patroniRestartCmd.Flags().Set("role", "")
+	}()
+	config.OutputFormat = config.OUTPUT_TEXT
+	patroniPlan = false
+	patroniRestartExec = func(dbsu string, opts *patroni.RestartOptions) error {
+		t.Fatal("invalid role must not execute")
+		return nil
+	}
+	_ = patroniRestartCmd.Flags().Set("role", "bogus")
+
+	if err := patroniRestartCmd.RunE(patroniRestartCmd, nil); err == nil || !strings.Contains(err.Error(), "bogus") {
+		t.Fatalf("invalid role should fail fast, got %v", err)
+	}
+}
+
+// TestPatroniConfigNoArgsDefaultsToShow: `pig pt config` routes to show-config
+// in text mode too (parity with structured mode and the spec).
+func TestPatroniConfigNoArgsDefaultsToShow(t *testing.T) {
+	origFormat := config.OutputFormat
+	origDBSU := patroniDBSU
+	origUser := config.CurrentUser
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniDBSU = origDBSU
+		config.CurrentUser = origUser
+	}()
+	config.OutputFormat = config.OUTPUT_TEXT
+	// Run patronictl directly (IsDBSU short-circuit), no sudo/su indirection.
+	config.CurrentUser = "testuser"
+	patroniDBSU = "testuser"
+
+	dir := t.TempDir()
+	record := filepath.Join(dir, "patronictl.args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + record + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "patronictl"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake patronictl: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := patroniConfigCmd.RunE(patroniConfigCmd, nil); err != nil {
+		t.Fatalf("pt config without args should default to show: %v", err)
+	}
+	got, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("fake patronictl was not invoked: %v", err)
+	}
+	if !strings.Contains(string(got), "show-config") {
+		t.Fatalf("expected show-config invocation, got %q", got)
+	}
 }

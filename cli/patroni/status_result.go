@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"pig/internal/output"
-	"pig/internal/utils"
 )
 
 // PtStatusResultData contains comprehensive Patroni cluster status in an agent-friendly format.
@@ -59,7 +58,7 @@ func StatusResult(dbsu string) *output.Result {
 	statusData := &PtStatusResultData{}
 
 	// 1. Check patronictl existence
-	binPath, err := exec.LookPath("patronictl")
+	binPath, err := patroniLookPath("patronictl")
 	if err != nil {
 		return output.Fail(output.CodePtNotFound, "patronictl not found in PATH").
 			WithData(statusData)
@@ -73,7 +72,7 @@ func StatusResult(dbsu string) *output.Result {
 
 	// 4. Get cluster member information
 	args := []string{binPath, "-c", DefaultConfigPath, "list", "-f", "json"}
-	jsonOutput, err := utils.DBSUCommandOutput(dbsu, args)
+	jsonOutput, err := patroniDBSUCommandOutput(dbsu, args)
 	if err != nil {
 		if isPermissionDenied(err, jsonOutput) {
 			return output.Fail(output.CodePtPermDenied, "Permission denied executing patronictl list").

@@ -156,31 +156,6 @@ func TestSwitchoverResultUsesResolvedClusterName(t *testing.T) {
 	assertContains(t, captured, "pg-nms-2")
 }
 
-func TestSwitchoverResultRequiresForce(t *testing.T) {
-	tests := []struct {
-		name string
-		opts *SwitchoverOptions
-	}{
-		{name: "nil opts", opts: nil},
-		{name: "force false", opts: &SwitchoverOptions{Force: false}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var captured []string
-			stubPatroniResultDeps(t, "pg-nms", nil, &captured)
-
-			result := SwitchoverResult("postgres", tt.opts)
-			if result.Code != output.CodePtConfirmationRequired {
-				t.Fatalf("code = %d, want %d", result.Code, output.CodePtConfirmationRequired)
-			}
-			if captured != nil {
-				t.Fatalf("patronictl should not execute without --force, captured=%v", captured)
-			}
-		})
-	}
-}
-
 func TestSwitchoverResultRejectsInvalidResolvedClusterName(t *testing.T) {
 	tests := []struct {
 		name    string

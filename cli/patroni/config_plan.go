@@ -83,10 +83,8 @@ func configPlanNextActions(action string, analysis PGConfigAnalysis) []output.Ne
 }
 
 func buildConfigCommand(action string, kvPairs []string) string {
-	parts := []string{"pig", "pt", "config", action}
-	parts = append(parts, kvPairs...)
-	parts = append(parts, "--plan")
-	return strings.Join(parts, " ")
+	parts := append([]string{"pig", "pt", "config", action}, kvPairs...)
+	return renderCommand(parts, true, false)
 }
 
 func normalizeConfigPairs(kvPairs []string) []string {

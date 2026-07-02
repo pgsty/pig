@@ -41,10 +41,14 @@ func (d *PtSwitchoverResultData) Text() string {
 	return sb.String()
 }
 
-// SwitchoverResult executes patronictl switchover and returns a structured result.
-// It requires --yes (mapped by cmd to opts.Force=true) since structured output
-// mode cannot handle interactive confirmation prompts (B04).
+// SwitchoverResult executes patronictl switchover and returns a structured
+// result. Confirmation is owned by the cmd-layer gate (B04); patronictl
+// always receives --force and never prompts.
 func SwitchoverResult(dbsu string, opts *SwitchoverOptions) *output.Result {
+	if opts == nil {
+		opts = &SwitchoverOptions{}
+	}
+
 	// 1. Check patronictl existence
 	binPath, err := patroniLookPath("patronictl")
 	if err != nil {
@@ -57,27 +61,14 @@ func SwitchoverResult(dbsu string, opts *SwitchoverOptions) *output.Result {
 			fmt.Sprintf("Patroni config not found: %s", DefaultConfigPath))
 	}
 
-	// 3. Structured output mode requires --yes (cannot handle interactive prompts)
-	if opts == nil || !opts.Force {
-		return output.Fail(output.CodePtConfirmationRequired,
-			"switchover requires --yes (-y) flag in structured output mode").
-			WithNextActions(
-				output.NextAction{Command: "pig pt switchover ... --yes", Reason: "execute switchover after explicit confirmation", Required: true},
-				output.NextAction{Command: "pig pt switchover ... --plan", Reason: "preview switchover without executing", Required: false},
-			)
-	}
-
-	// 4. Resolve cluster name and build command arguments
-	cluster, err := patroniGetClusterName(dbsu)
+	// 3. Resolve cluster name and build command arguments
+	cluster, err := resolveClusterName(dbsu, "switchover")
 	if err != nil {
-		return clusterNameErrorResult(err)
-	}
-	if err := validateResolvedClusterName(cluster); err != nil {
 		return clusterNameErrorResult(err)
 	}
 	args := buildSwitchoverResultArgs(binPath, cluster, opts)
 
-	// 5. Execute and capture output
+	// 4. Execute and capture output
 	cmdOutput, err := patroniDBSUCommandOutput(dbsu, args)
 
 	data := &PtSwitchoverResultData{

@@ -39,10 +39,22 @@ func (d *PtFailoverResultData) Text() string {
 	return sb.String()
 }
 
-// FailoverResult executes patronictl failover and returns a structured result.
-// It requires --yes (mapped by cmd to opts.Force=true) since structured output
-// mode cannot handle interactive confirmation prompts (B04).
+// FailoverResult executes patronictl failover and returns a structured
+// result. Confirmation is owned by the cmd-layer gate (B04); patronictl
+// always receives --force and never prompts.
 func FailoverResult(dbsu string, opts *FailoverOptions) *output.Result {
+	if opts == nil {
+		opts = &FailoverOptions{}
+	}
+
+	// Patroni's REST API only performs failover to an explicit candidate; the
+	// cmd layer validates this too, but keep the invariant at the API boundary.
+	if opts.Candidate == "" {
+		return output.Fail(output.GenericParamError(output.MODULE_PT),
+			"failover requires an explicit candidate").
+			WithDetail("set FailoverOptions.Candidate (--candidate <member>)")
+	}
+
 	// 1. Check patronictl existence
 	binPath, err := patroniLookPath("patronictl")
 	if err != nil {
@@ -55,34 +67,21 @@ func FailoverResult(dbsu string, opts *FailoverOptions) *output.Result {
 			fmt.Sprintf("Patroni config not found: %s", DefaultConfigPath))
 	}
 
-	// 3. Structured output mode requires --yes (cannot handle interactive prompts)
-	if opts == nil || !opts.Force {
-		return output.Fail(output.CodePtConfirmationRequired,
-			"failover requires --yes (-y) flag in structured output mode").
-			WithNextActions(
-				output.NextAction{Command: "pig pt failover ... --yes", Reason: "execute failover after explicit confirmation", Required: true},
-				output.NextAction{Command: "pig pt failover ... --plan", Reason: "preview failover without executing", Required: false},
-			)
-	}
-
-	// 4. Resolve cluster name and build command arguments
-	cluster, err := patroniGetClusterName(dbsu)
+	// 3. Resolve cluster name and build command arguments
+	cluster, err := resolveClusterName(dbsu, "failover")
 	if err != nil {
-		return clusterNameErrorResult(err)
-	}
-	if err := validateResolvedClusterName(cluster); err != nil {
 		return clusterNameErrorResult(err)
 	}
 	args := buildFailoverResultArgs(binPath, cluster, opts)
 
-	// 5. Execute and capture output
+	// 4. Execute and capture output
 	cmdOutput, err := patroniDBSUCommandOutput(dbsu, args)
 
 	data := &PtFailoverResultData{
 		Command:   strings.Join(args, " "),
 		Output:    strings.TrimSpace(cmdOutput),
 		Candidate: opts.Candidate,
-		Force:     opts.Force,
+		Force:     true, // no-prompt invariant (B04): patronictl always runs --force
 	}
 
 	if err != nil {

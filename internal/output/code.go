@@ -39,6 +39,19 @@ const (
 	CAT_CONFIRM   = 1000 // Confirmation required (destructive op, fail-closed)
 )
 
+// Generic fallback codes: NN=99 is reserved in CAT_PARAM and CAT_OPERATION of
+// every module for cmd-layer envelope errors that carry no more specific
+// classification. Named Code* constants must never allocate NN=99, so these
+// derived codes cannot collide with them. (The envelope helpers previously
+// minted NN=1, which collided with codes like CodePgStartFailed and
+// CodePtListFailed, and reused retired values.)
+
+// GenericParamError returns the module's reserved generic parameter-error code (MM_01_99).
+func GenericParamError(module int) int { return module + CAT_PARAM + 99 }
+
+// GenericOpFailed returns the module's reserved generic operation-failure code (MM_08_99).
+func GenericOpFailed(module int) int { return module + CAT_OPERATION + 99 }
+
 // Confirmation-required codes (CAT_CONFIRM, CC=10): a destructive command was
 // invoked in structured output mode without --yes/--force. Mapped to exit code 7,
 // distinct from parameter errors (exit 2), so automation can tell "retry the

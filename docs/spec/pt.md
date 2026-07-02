@@ -46,7 +46,7 @@ Logs:
 
 High-risk cluster actions and DCS mutations should present a structured `state -> plan -> precheck -> execute -> verify -> result -> next_actions` contract. In JSON/YAML mode, unsafe execution requires explicit `--yes` confirmation, while read-only commands such as `pt list`, `pt status`, and `pt config show` remain confirmation-free. Plan output is side-effect-free and may include `boundary`, `confirmation`, `preconditions`, `verifications`, and `next_actions` in addition to the existing plan fields.
 
-Pig owns confirmation for cluster operations (B04): `patronictl` always runs with its own `--force` flag and never prompts interactively. In text mode, `pt reinit`, `pt switchover`, `pt failover`, and cluster-wide `pt restart` ask a one-line `y/yes` confirmation at the pig layer unless `--yes/-y` is given. In structured (JSON/YAML) mode the same commands are fail-closed: without `--yes` Pig returns a structured confirmation-required result. `pt restart` uses a conditional tier (D2): an explicit single member executes directly in both modes; only the cluster-wide rolling restart (no member argument) requires confirmation. `pt reinit`, `pt switchover`, and `pt failover` also expose `--plan` previews.
+Pig owns confirmation for cluster operations (B04): `patronictl` always runs with its own `--force` flag and never prompts interactively (this includes `pt reload`, whose underlying `patronictl reload` would otherwise prompt for member confirmation). In text mode, `pt reinit`, `pt switchover`, `pt failover`, and cluster-wide `pt restart` ask a one-line `y/yes` confirmation at the pig layer unless `--yes/-y` is given. In structured (JSON/YAML) mode the same commands are fail-closed through the shared `requireStructuredConfirmation` gate (same envelope as `pg`/`pb`): without `--yes` Pig returns a confirmation-required result whose `data.operation` carries the operation metadata and whose `next_actions` carry replayable `--yes` execute and `--plan` preview commands rendered by the same builders the plans use. `pt restart` uses a conditional tier (D2): an explicit single member and `--pending` (already scoped by a prior config change) execute directly in both modes; only the unscoped cluster-wide rolling restart requires confirmation. `pt restart`, `pt reinit`, `pt switchover`, and `pt failover` all expose `--plan` previews; every `Plan.Command` is the replayable `--plan` preview form, and the first plan next action is the execute form — carrying `--yes` exactly when the scope is gated, so a `confirmation: none` plan never points at a confirmation-flagged command.
 
 
 ## Overview
@@ -55,9 +55,9 @@ Pig owns confirmation for cluster operations (B04): `patronictl` always runs wit
 
 | Command | Alias | Description | Implementation |
 |:--------|:------|:------------|:---------------|
-| `pt list [cluster]` | `ls, l` | List cluster members | `patronictl list [cluster] -e -t` |
+| `pt list [cluster]` | `ls` | List cluster members | `patronictl list [cluster] -e -t` |
 | `pt restart` | `rst` | Restart PostgreSQL instance | `patronictl restart` |
-| `pt reload` | `rl` | Reload PostgreSQL config | `patronictl reload <scope>` |
+| `pt reload` | `rl` | Reload PostgreSQL config | `patronictl reload <scope> --force` |
 | `pt reinit` | `ri` | Reinitialize member | `patronictl reinit` |
 | `pt switchover` | `sw` | Planned switchover | `patronictl switchover` |
 | `pt failover` | `fo` | Manual failover | `patronictl failover` |
@@ -70,7 +70,7 @@ Pig owns confirmation for cluster operations (B04): `patronictl` always runs wit
 
 | Command | Alias | Description | Implementation |
 |:--------|:------|:------------|:---------------|
-| `pt status` | `st` | Show service status | `systemctl status patroni` |
+| `pt status` | `st` | Comprehensive status (service + processes + cluster) | `systemctl status` + `ps` + `patronictl list` |
 | `pt log` | `l, lg` | View Patroni logs | `journalctl -u patroni` |
 {.full-width}
 
@@ -99,13 +99,14 @@ pig pt list -W                 # Continuous watch mode
 pig pt list -w 5               # Refresh every 5 seconds
 
 # View and modify cluster config
-pig pt config                  # Show current cluster config
-pig pt config ttl=60           # Modify single config item (immediate effect)
-pig pt config ttl=60 loop_wait=15  # Modify multiple config items
+pig pt config                  # Show current cluster config (defaults to show)
+pig pt config set ttl=60       # Modify single config item (immediate effect)
+pig pt config set ttl=60 loop_wait=15  # Modify multiple config items
 
 # Cluster operations
 pig pt restart                 # Rolling restart ALL members (asks confirmation)
 pig pt restart pg-test-1       # Restart specific member (direct)
+pig pt restart --pending       # Apply pending restarts (direct)
 pig pt restart -y              # Cluster-wide restart, skip confirmation
 pig pt switchover              # Planned switchover (asks confirmation)
 pig pt pause                   # Pause auto-failover
@@ -153,7 +154,7 @@ pig pt list pg-test -W -w 3    # Watch pg-test cluster, 3s refresh
 | `--interval` | `-w` | Watch refresh interval (seconds) |
 {.full-width}
 
-**Argument policy:** `pt list` accepts at most one optional cluster positional. `pt restart` accepts at most one member positional. `pt reinit` requires exactly one member positional. `pt reload`, `pt switchover`, `pt failover`, `pt pause`, and `pt resume` do not accept positionals; `pt reload` resolves the current cluster scope from Patroni config, and switchover/failover target selection uses `--leader` or `--candidate`.
+**Argument policy:** `pt list` accepts at most one optional cluster positional. `pt restart` accepts at most one member positional. `pt reinit` requires exactly one member positional. `pt reload`, `pt switchover`, `pt failover`, `pt pause`, and `pt resume` do not accept positionals; `pt reload` resolves the current cluster scope from Patroni config, switchover target selection uses `--leader`/`--candidate`, and failover requires `--candidate` (Patroni's REST API only fails over to an explicit candidate).
 
 
 ### pt restart
@@ -164,8 +165,9 @@ Restart PostgreSQL instance via Patroni. This triggers a rolling restart of Post
 pig pt restart                   # Rolling restart ALL members (asks confirmation)
 pig pt restart -y                # Cluster-wide restart, skip confirmation
 pig pt restart pg-test-1         # Restart specific member (direct execution)
-pig pt restart --role=replica    # Restart replicas only
-pig pt restart --pending         # Restart pending members
+pig pt restart --role=replica    # Restart replicas only (asks confirmation)
+pig pt restart --pending         # Apply pending restarts (direct execution)
+pig pt restart --plan            # Preview restart plan without executing
 ```
 
 **Options:**
@@ -173,11 +175,12 @@ pig pt restart --pending         # Restart pending members
 | Option | Short | Description |
 |:-------|:------|:------------|
 | `--yes` | `-y` | Skip confirmation prompt |
-| `--role` | `-r` | Filter by role (leader/replica/any) |
+| `--role` | `-r` | Filter by role (leader/replica/any, validated) |
 | `--pending` | `-p` | Restart only pending members |
+| `--plan` | | Preview restart plan without executing |
 {.full-width}
 
-**Confirmation tier (D2, conditional):** an explicit single member executes directly in both output modes. A cluster-wide rolling restart (no member argument) is T2: text mode asks a pig-level confirmation unless `--yes`; JSON/YAML mode is fail-closed and returns a confirmation-required result without `--yes`. `patronictl restart` always receives `--force` and never prompts (B04).
+**Confirmation tier (D2, conditional):** an explicit single member executes directly in both output modes, and so does `--pending` — it only restarts members already flagged by a prior (operator-initiated) config change, making it the friction-free follow-up that `pt config pg` suggests in `next_actions`. An unscoped cluster-wide rolling restart (no member, no `--pending`, with or without `--role`) is T2: text mode asks a pig-level confirmation unless `--yes`; JSON/YAML mode is fail-closed and returns a confirmation-required result without `--yes`. `patronictl restart` always receives `--force` and never prompts (B04).
 
 
 ### pt reload
@@ -185,9 +188,11 @@ pig pt restart --pending         # Restart pending members
 Reload PostgreSQL configuration via Patroni. Triggers config reload on all members.
 
 `pig pt reload` does not accept a cluster positional. It reads `scope:` from
-`/etc/patroni/patroni.yml` and executes `patronictl reload <scope>` internally,
-because `patronictl reload` requires `CLUSTER_NAME` even when `-c` points at the
-Patroni config file.
+`/etc/patroni/patroni.yml` and executes `patronictl reload <scope> --force`
+internally, because `patronictl reload` requires `CLUSTER_NAME` even when `-c`
+points at the Patroni config file, and because it would otherwise prompt its own
+interactive member confirmation (B04: pig owns confirmation; reload is a
+low-risk primitive that runs without one).
 
 ```bash
 pig pt reload
@@ -245,12 +250,15 @@ Text mode asks a pig-level confirmation ("This will transfer cluster leadership"
 
 ### pt failover
 
-Perform manual failover. Used when primary is unavailable.
+Perform manual failover. Used when primary is unavailable. `--candidate` is
+required: Patroni's REST API only performs failover to an explicit candidate,
+so pig fails fast (structured mode returns a parameter error) instead of
+leaving the rejection to patronictl.
 
 ```bash
-pig pt failover                   # Manual failover (asks confirmation)
-pig pt failover -y                # Skip confirmation
-pig pt failover --candidate pg-2  # Specify new primary
+pig pt failover --candidate pg-2      # Manual failover (asks confirmation)
+pig pt failover --candidate pg-2 -y   # Skip confirmation
+pig pt failover --candidate pg-2 --plan  # Preview failover plan
 ```
 
 **Options:**
@@ -258,7 +266,7 @@ pig pt failover --candidate pg-2  # Specify new primary
 | Option | Short | Description |
 |:-------|:------|:------------|
 | `--yes` | `-y` | Skip confirmation prompt |
-| `--candidate` | | Specify candidate new primary (long-only, B17) |
+| `--candidate` | | Candidate new primary (required, long-only, B17) |
 | `--plan` | | Show execution plan only, don't execute |
 {.full-width}
 
@@ -303,7 +311,9 @@ pig pt resume --wait              # Wait for confirmation
 
 ### pt config
 
-Show or modify cluster configuration. Without parameters shows current config, with `key=value` parameters modifies config.
+Show or modify cluster configuration. Without an action it defaults to `show`
+in both output modes; modifications go through the explicit `set` (Patroni
+config) and `pg` (PostgreSQL parameters) actions with `key=value` pairs.
 
 ```bash
 pig pt config                           # Show current cluster config
@@ -454,13 +464,22 @@ pig pt svc status                # Show service status
 | `CodePtConfigReadFailed` | Patroni config exists or was attempted but could not be read for a non-permission, non-not-found reason |
 | `CodePtConfirmationRequired` | Structured cluster-wide `pt restart` / `pt reinit` / `pt switchover` / `pt failover` invoked without `--yes` |
 | `CodePtWatchModeUnsupported` | `pt list --watch/-W` is incompatible with structured output |
+| `150199` (generic param error) | Invalid parameters rejected by the cmd envelope: bad `--role`, `failover` without `--candidate`, non-`key=value` config args, unsupported log modes |
+| `150899` (generic op failure) | A wrapped patronictl/systemctl operation failed without a more specific classification |
 {.full-width}
+
+`NN=99` is reserved in every module's param/operation category for these
+generic envelope codes (`output.GenericParamError` / `output.GenericOpFailed`),
+so they can never collide with named `CodePt*` constants.
 
 **Permission Handling:**
 
 - If current user is DBSU: execute commands directly
 - If current user is root: use `su - postgres -c "..."` to execute
 - Other users: use `sudo -inu postgres -- ...` to execute
+- systemctl actions escalate via sudo for non-root users, except the read-only
+  `status` action, which runs unprivileged (with `--no-pager -l`) so it works
+  without sudo rights
 
 **Platform Support:**
 

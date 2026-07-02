@@ -51,6 +51,7 @@ Service Management (via systemctl):
   pig pt svc start (pig pt start)  start patroni service
   pig pt svc stop  (pig pt stop)   stop patroni service
   pig pt svc restart               restart patroni service
+  pig pt svc reload                reload patroni service
   pig pt svc status                show patroni service status
 
 Logs:
@@ -85,6 +86,7 @@ func registerPatroniFlags() {
 	patroniRestartCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
 	patroniRestartCmd.Flags().BoolP("pending", "p", false, "Only restart members with pending restart")
 	patroniRestartCmd.Flags().StringP("role", "r", "", "Filter by role: leader, replica, any")
+	patroniRestartCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
 	// reinit subcommand flags (B12: --wait is long-only)
 	patroniReinitCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
@@ -99,7 +101,7 @@ func registerPatroniFlags() {
 	patroniSwitchoverCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
 	// failover subcommand flags (B17: --candidate is long-only)
-	patroniFailoverCmd.Flags().String("candidate", "", "Candidate to promote")
+	patroniFailoverCmd.Flags().String("candidate", "", "Candidate to promote (required)")
 	patroniFailoverCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
 	patroniFailoverCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
@@ -223,16 +225,17 @@ PostgreSQL instances. Unlike 'pig pt svc restart' which restarts the
 Patroni daemon itself, this command restarts the PostgreSQL database
 while keeping Patroni running.
 
-Confirmation tier is conditional (D2): restarting a single explicit
-member executes directly; a cluster-wide rolling restart (no member
-argument) asks for confirmation unless --yes is given. patronictl
-always runs with --force; pig owns the confirmation prompt.`,
+Confirmation tier is conditional (D2): an explicit single member or a
+--pending apply (scoped by a prior config change) executes directly; an
+unscoped cluster-wide rolling restart asks for confirmation unless --yes
+is given. patronictl always runs with --force; pig owns the prompt.`,
 	Example: `
   pig pt restart                   # rolling restart ALL members (asks confirmation)
   pig pt restart -y                # cluster-wide restart, skip confirmation
   pig pt restart pg-test-1         # restart specific member (direct)
   pig pt restart --role=replica    # restart replicas only
-  pig pt restart --pending         # restart members with pending restart`,
+  pig pt restart --pending         # apply pending restarts (direct)
+  pig pt restart --plan            # show execution plan without running`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		member := ""
 		if len(args) > 0 {
@@ -242,25 +245,39 @@ always runs with --force; pig owns the confirmation prompt.`,
 		pending, _ := cmd.Flags().GetBool("pending")
 		role, _ := cmd.Flags().GetString("role")
 
-		// D2 conditional tier: cluster-wide rolling restart (no member) is T2;
-		// an explicit single member executes directly in both modes.
-		if member == "" {
-			if err := requirePatroniStructuredYes(yes, patroni.RestartNeedYesResult()); err != nil {
-				return err
+		switch role {
+		case "", "leader", "replica", "any":
+		default:
+			return structuredParamError(output.MODULE_PT, "pig patroni restart",
+				"invalid --role value",
+				fmt.Sprintf("--role must be one of leader, replica, any; got %q", role),
+				args, map[string]interface{}{"role": role})
+		}
+
+		// B04: patronictl never prompts; pig owns the confirmation below.
+		opts := &patroni.RestartOptions{Member: member, Role: role, Force: true, Pending: pending}
+
+		if patroniPlan {
+			return handlePlanOutput(patroni.BuildRestartPlan(opts))
+		}
+
+		// D2 conditional tier: an explicit member or a --pending apply
+		// (already scoped by a prior config change) executes directly;
+		// an unscoped cluster-wide rolling restart requires consent.
+		if member == "" && !pending {
+			warning := "This will rolling-restart PostgreSQL on ALL cluster members"
+			if role != "" {
+				warning = fmt.Sprintf("This will rolling-restart PostgreSQL on all %s members", role)
 			}
-			if err := requireTextHighRiskConfirmation(yes,
-				"This will rolling-restart PostgreSQL on ALL cluster members",
-				"cluster-wide restart"); err != nil {
+			if err := requirePtClusterConfirmation(yes, "restart", "high", warning,
+				patroni.RestartCommand(opts, false, true),
+				patroni.RestartCommand(opts, true, false),
+				output.NextAction{Command: "pig pt restart <member>", Reason: "restart a single explicit member directly", Required: false},
+			); err != nil {
 				return err
 			}
 		}
 
-		opts := &patroni.RestartOptions{
-			Member:  member,
-			Role:    role,
-			Force:   true, // B04: patronictl never prompts; pig owns confirmation
-			Pending: pending,
-		}
 		return runLegacyStructured(legacyModulePt, "pig patroni restart", args, map[string]interface{}{
 			"member":  member,
 			"yes":     yes,
@@ -272,14 +289,23 @@ always runs with --force; pig owns the confirmation prompt.`,
 	},
 }
 
-// requirePatroniStructuredYes is the fail-closed structured-mode gate for
-// destructive pt commands: without --yes, emit the confirmation-required
-// result instead of executing (B04).
-func requirePatroniStructuredYes(yes bool, result *output.Result) error {
-	if !config.IsStructuredOutput() || yes {
-		return nil
+// requirePtClusterConfirmation is the T2 gate for Patroni cluster operations
+// in both output modes (B04: pig owns confirmation, patronictl always runs
+// with --force). Structured mode is fail-closed without --yes; text mode asks
+// a one-line confirmation. executeCmd/planCmd come from the patroni command
+// renderers so refusals always carry replayable commands.
+func requirePtClusterConfirmation(yes bool, action, risk, warning, executeCmd, planCmd string, extra ...output.NextAction) error {
+	if config.IsStructuredOutput() {
+		if yes {
+			return nil
+		}
+		return requireStructuredConfirmation("pt",
+			output.CodePtConfirmationRequired,
+			action+" requires --yes (-y) flag in structured output mode",
+			action, "pt:patroni-cluster", risk,
+			executeCmd, planCmd, extra...)
 	}
-	return handleAuxResult(result)
+	return requireTextHighRiskConfirmation(yes, warning, action)
 }
 
 // Execution seams for cluster operations, stubbed in tests so RunE-level
@@ -291,10 +317,11 @@ var (
 	patroniFailoverExec   = patroni.Failover
 )
 
-// splitConfigKVPairs partitions config args into key=value pairs and invalid tokens.
+// splitConfigKVPairs partitions config args into key=value pairs (non-empty
+// key required) and invalid tokens.
 func splitConfigKVPairs(args []string) (pairs []string, invalid []string) {
 	for _, arg := range args {
-		if strings.Contains(arg, "=") {
+		if key, _, ok := strings.Cut(arg, "="); ok && key != "" {
 			pairs = append(pairs, arg)
 		} else {
 			invalid = append(invalid, arg)
@@ -341,23 +368,19 @@ from scratch using pg_basebackup from the current leader.`,
 		yes, _ := cmd.Flags().GetBool("yes")
 		wait, _ := cmd.Flags().GetBool("wait")
 
-		opts := &patroni.ReinitOptions{
-			Member: args[0],
-			Force:  yes,
-			Wait:   wait,
-		}
+		// B04: patronictl never prompts; pig owns the confirmation below.
+		opts := &patroni.ReinitOptions{Member: args[0], Force: true, Wait: wait}
+
 		if patroniPlan {
 			return handlePlanOutput(patroni.BuildReinitPlan(opts))
 		}
-		if err := requirePatroniStructuredYes(yes, patroni.ReinitNeedYesResult()); err != nil {
-			return err
-		}
-		if err := requireTextHighRiskConfirmation(yes,
+		if err := requirePtClusterConfirmation(yes, "reinit", "critical",
 			fmt.Sprintf("This will WIPE and rebuild member %s from a replica copy", args[0]),
-			"reinit"); err != nil {
+			patroni.ReinitCommand(opts, false, true),
+			patroni.ReinitCommand(opts, true, false),
+		); err != nil {
 			return err
 		}
-		opts.Force = true // B04: patronictl never prompts; pig owns confirmation
 		return runLegacyStructured(legacyModulePt, "pig patroni reinit", args, map[string]interface{}{
 			"member": args[0],
 			"yes":    yes,
@@ -391,33 +414,30 @@ The old leader becomes a replica after switchover.`,
 		yes, _ := cmd.Flags().GetBool("yes")
 		scheduled, _ := cmd.Flags().GetString("scheduled")
 
+		// B04: patronictl never prompts; pig owns the confirmation below.
 		opts := &patroni.SwitchoverOptions{
 			Leader:    leader,
 			Candidate: candidate,
-			Force:     yes,
+			Force:     true,
 			Scheduled: scheduled,
 		}
 
-		// Plan mode (highest priority)
 		if patroniPlan {
-			plan := patroni.BuildSwitchoverPlan(opts)
-			return output.RenderPlan(plan)
+			return handlePlanOutput(patroni.BuildSwitchoverPlan(opts))
 		}
 
-		// Structured output mode (fail-closed without --yes inside SwitchoverResult)
-		if config.IsStructuredOutput() {
-			result := patroni.SwitchoverResult(utils.GetDBSU(patroniDBSU), opts)
-			return handleAuxResult(result)
-		}
-
-		// Text mode: pig owns confirmation; patronictl never prompts (B04)
-		if err := requireTextHighRiskConfirmation(yes,
+		if err := requirePtClusterConfirmation(yes, "switchover", "high",
 			"This will transfer cluster leadership (planned switchover)",
-			"switchover"); err != nil {
+			patroni.SwitchoverCommand(opts, false, true),
+			patroni.SwitchoverCommand(opts, true, false),
+		); err != nil {
 			return err
 		}
-		opts.Force = true
-		return silenceCobraOnSilentExit(cmd, patroniSwitchoverExec(utils.GetDBSU(patroniDBSU), opts))
+
+		if config.IsStructuredOutput() {
+			return handleAuxResult(patroni.SwitchoverResult(utils.GetDBSU(patroniDBSU), opts))
+		}
+		return patroniSwitchoverExec(utils.GetDBSU(patroniDBSU), opts)
 	},
 }
 
@@ -431,46 +451,49 @@ var patroniFailoverCmd = &cobra.Command{
 
 Unlike switchover, failover is used when the current leader is unhealthy
 or unavailable. This may result in data loss if there are unreplicated
-transactions.
+transactions. Patroni performs failover only to an explicit candidate,
+so --candidate is required.
 
 WARNING: Use switchover for planned maintenance. Only use failover when
 the leader is truly unavailable.`,
 	Example: `
-  pig pt failover                          # manual failover (asks confirmation)
-  pig pt failover --candidate pg-test-2    # failover to specific member
-  pig pt failover -y                       # failover without confirmation
-  pig pt failover -y -o json               # structured JSON output
-  pig pt failover --plan                   # show execution plan`,
+  pig pt failover --candidate pg-test-2         # failover to member (asks confirmation)
+  pig pt failover --candidate pg-test-2 -y      # failover without confirmation
+  pig pt failover --candidate pg-test-2 -o json # structured JSON output
+  pig pt failover --candidate pg-test-2 --plan  # show execution plan`,
 	Annotations: ancsAnn("pig patroni failover", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 300000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		candidate, _ := cmd.Flags().GetString("candidate")
 		yes, _ := cmd.Flags().GetBool("yes")
 
-		opts := &patroni.FailoverOptions{
-			Candidate: candidate,
-			Force:     yes,
+		// Patroni's REST API only performs failover to an explicit candidate;
+		// fail fast instead of leaving the rejection to patronictl.
+		if candidate == "" {
+			return structuredParamError(output.MODULE_PT, "pig patroni failover",
+				"failover requires --candidate",
+				"specify the member to promote with --candidate <member>, or use 'pig pt switchover' for planned leader transfer",
+				args, nil)
 		}
 
-		// Plan mode (highest priority)
+		// B04: patronictl never prompts; pig owns the confirmation below.
+		opts := &patroni.FailoverOptions{Candidate: candidate, Force: true}
+
 		if patroniPlan {
-			plan := patroni.BuildFailoverPlan(opts)
-			return output.RenderPlan(plan)
+			return handlePlanOutput(patroni.BuildFailoverPlan(opts))
 		}
 
-		// Structured output mode (fail-closed without --yes inside FailoverResult)
-		if config.IsStructuredOutput() {
-			result := patroni.FailoverResult(utils.GetDBSU(patroniDBSU), opts)
-			return handleAuxResult(result)
-		}
-
-		// Text mode: pig owns confirmation; patronictl never prompts (B04)
-		if err := requireTextHighRiskConfirmation(yes,
+		if err := requirePtClusterConfirmation(yes, "failover", "critical",
 			"This will force leadership transfer (failover, data loss possible)",
-			"failover"); err != nil {
+			patroni.FailoverCommand(opts, false, true),
+			patroni.FailoverCommand(opts, true, false),
+		); err != nil {
 			return err
 		}
-		opts.Force = true
-		return silenceCobraOnSilentExit(cmd, patroniFailoverExec(utils.GetDBSU(patroniDBSU), opts))
+
+		if config.IsStructuredOutput() {
+			return handleAuxResult(patroni.FailoverResult(utils.GetDBSU(patroniDBSU), opts))
+		}
+		return patroniFailoverExec(utils.GetDBSU(patroniDBSU), opts)
 	},
 }
 
@@ -554,12 +577,7 @@ restart-required. After changing those parameters, inspect the cluster with
 		dbsu := utils.GetDBSU(patroniDBSU)
 
 		if len(args) == 0 {
-			// No args: structured output defaults to show, text mode shows help
-			if config.IsStructuredOutput() {
-				result := patroni.ConfigShowResult(dbsu)
-				return handleAuxResult(result)
-			}
-			return cmd.Help()
+			args = []string{"show"} // default action in both output modes
 		}
 
 		action := args[0]
@@ -682,11 +700,11 @@ var patroniLogCmd = &cobra.Command{
 	Annotations: ancsAnn("pig patroni log", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Long:        `View patroni service logs using journalctl.`,
 	Example: `
-	  pig pt log          # View recent logs
-	  pig pt log -f       # Follow logs
-	  pig pt log tail     # Follow logs
-	  pig pt log show     # View recent logs
-	  pig pt log -n 100   # Show last 100 lines`,
+  pig pt log          # View recent logs
+  pig pt log -f       # Follow logs
+  pig pt log tail     # Follow logs
+  pig pt log show     # View recent logs
+  pig pt log -n 100   # Show last 100 lines`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateLogLines(patroniLogLines); err != nil {

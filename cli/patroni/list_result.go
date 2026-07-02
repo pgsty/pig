@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"pig/internal/output"
@@ -63,14 +64,17 @@ func (d *PtListResultData) Text() string {
 }
 
 // PatroniListEntry represents the raw JSON output from patronictl list -f json.
-// Note: patronictl uses PascalCase keys and "Lag in MB" with spaces.
+// Note: patronictl uses PascalCase keys and "Lag in MB" with spaces. Lag and
+// pending restart are loosely typed: patronictl renders them as numbers,
+// booleans, or strings ("unknown", "*") depending on member state.
 type PatroniListEntry struct {
+	Cluster              string      `json:"Cluster"`
 	Member               string      `json:"Member"`
 	Host                 string      `json:"Host"`
 	Role                 string      `json:"Role"`
 	State                string      `json:"State"`
 	TL                   int         `json:"TL"`
-	LagInMB              *int        `json:"Lag in MB"`
+	LagInMB              interface{} `json:"Lag in MB"`
 	PendingRestart       interface{} `json:"Pending restart"`
 	PendingRestartReason string      `json:"Pending restart reason"`
 }
@@ -113,10 +117,11 @@ func ListResult(dbsu string, cluster string) *output.Result {
 			WithDetail(err.Error())
 	}
 
-	// Try to get cluster name from config
+	// Prefer the explicit argument, then the Cluster column parsed from the
+	// patronictl JSON; only fall back to reading the Patroni config file.
 	if cluster != "" {
 		data.Cluster = cluster
-	} else {
+	} else if data.Cluster == "" {
 		data.Cluster = getClusterName(dbsu)
 	}
 
@@ -143,19 +148,37 @@ func parsePatroniListJSON(jsonStr string) (*PtListResultData, error) {
 	}
 
 	for _, e := range entries {
+		if data.Cluster == "" {
+			data.Cluster = e.Cluster
+		}
 		data.Members = append(data.Members, PtMemberSummary{
 			Member:               e.Member,
 			Host:                 e.Host,
 			Role:                 normalizeRole(e.Role),
 			State:                e.State,
 			TL:                   e.TL,
-			Lag:                  e.LagInMB,
+			Lag:                  parseLagMB(e.LagInMB),
 			PendingRestart:       parsePendingRestart(e.PendingRestart),
 			PendingRestartReason: e.PendingRestartReason,
 		})
 	}
 
 	return data, nil
+}
+
+// parseLagMB tolerates the loose lag typing of patronictl JSON: numeric lag is
+// returned as MB, anything unparseable (leader, "unknown") becomes nil.
+func parseLagMB(value interface{}) *int {
+	switch v := value.(type) {
+	case float64:
+		n := int(v)
+		return &n
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return &n
+		}
+	}
+	return nil
 }
 
 func parsePendingRestart(value interface{}) bool {

@@ -26,9 +26,6 @@ const (
 // DefaultConfigPath is the fixed patroni config file path
 const DefaultConfigPath = "/etc/patroni/patroni.yml"
 
-// DefaultDBSU is the default database superuser
-const DefaultDBSU = "postgres"
-
 // GetClusterName returns the cluster scope name read from `scope:` in the
 // patroni config file. Required for patronictl subcommands that take a
 // positional CLUSTER_NAME (reload, restart, reinit, switchover, failover); the
@@ -40,7 +37,7 @@ func GetClusterName(dbsu string) (string, error) {
 	content, err := patroniReadFile(DefaultConfigPath)
 	if err != nil {
 		if dbsu == "" {
-			dbsu = DefaultDBSU
+			dbsu = utils.DefaultDBSU
 		}
 		text, dbsuErr := patroniDBSUCommandOutput(dbsu, []string{"cat", DefaultConfigPath})
 		if dbsuErr != nil {
@@ -141,8 +138,10 @@ func ConfigPG(dbsu string, kvPairs []string) error {
 
 // buildReloadArgs builds the positional args for `patronictl reload`.
 // patronictl reload requires CLUSTER_NAME as the first positional argument.
+// --force is mandatory (B04): patronictl reload otherwise prompts its own
+// interactive member confirmation, which hangs hidden in structured mode.
 func buildReloadArgs(cluster string) []string {
-	return []string{"reload", cluster}
+	return []string{"reload", cluster, "--force"}
 }
 
 // Reload reloads PostgreSQL configuration via patronictl reload.
@@ -360,6 +359,91 @@ type RestartOptions struct {
 	Pending bool   // only restart members with pending restart
 }
 
+// renderCommand joins a replayable pig pt invocation, appending the --plan
+// preview or --yes confirmation marker and shell-quoting arguments. Shared by
+// plans and confirmation gates, mirroring the pb command builders.
+func renderCommand(parts []string, plan, yes bool) string {
+	if plan {
+		parts = append(parts, "--plan")
+	}
+	if yes {
+		parts = append(parts, "--yes")
+	}
+	return utils.ShellQuoteArgs(parts)
+}
+
+// RestartCommand renders a replayable `pig pt restart` invocation.
+func RestartCommand(opts *RestartOptions, plan, yes bool) string {
+	parts := []string{"pig", "pt", "restart"}
+	if opts != nil {
+		if opts.Member != "" {
+			parts = append(parts, opts.Member)
+		}
+		if opts.Role != "" {
+			parts = append(parts, "--role", opts.Role)
+		}
+		if opts.Pending {
+			parts = append(parts, "--pending")
+		}
+	}
+	return renderCommand(parts, plan, yes)
+}
+
+// BuildRestartPlan builds a structured execution plan for restarting
+// PostgreSQL through Patroni (rolling restart when no member is pinned).
+func BuildRestartPlan(opts *RestartOptions) *output.Plan {
+	if opts == nil {
+		opts = &RestartOptions{}
+	}
+	scope := "all members (rolling restart)"
+	confirmation := "required"
+	switch {
+	case opts.Member != "":
+		scope = "member " + opts.Member
+		confirmation = "none" // D2: explicit single member executes directly
+	case opts.Pending:
+		scope = "members with pending restart"
+		confirmation = "none" // D2: already scoped by a prior config change
+	case opts.Role != "":
+		scope = opts.Role + " members"
+	}
+	// The execute action carries --yes exactly when the scope is gated, so a
+	// confirmation-free plan never points at a confirmation-flagged command.
+	execute := output.NextAction{Command: RestartCommand(opts, false, true), Reason: "execute restart after explicit confirmation", Required: true}
+	if confirmation == "none" {
+		execute = output.NextAction{Command: RestartCommand(opts, false, false), Reason: "execute restart (this scope runs without confirmation)", Required: true}
+	}
+	return &output.Plan{
+		Command:      RestartCommand(opts, true, false),
+		Boundary:     "pt:patroni-cluster",
+		Confirmation: confirmation,
+		Actions: []output.Action{
+			{Step: 1, Description: "Resolve cluster scope from Patroni config"},
+			{Step: 2, Description: "Execute patronictl restart for " + scope},
+			{Step: 3, Description: "Verify members return to running state"},
+		},
+		Affects: []output.Resource{
+			{Type: "cluster", Name: "patroni", Impact: "postgresql restart", Detail: scope},
+		},
+		Expected: "PostgreSQL is restarted on " + scope + " while Patroni keeps running",
+		Risks: []string{
+			"Connections on restarted members are reset.",
+			"Restarting the leader causes a brief write interruption.",
+		},
+		Preconditions: []output.Check{
+			{Name: "patronictl", Status: "required", Detail: "available on PATH"},
+			{Name: "patroni config", Status: "required", Detail: DefaultConfigPath},
+		},
+		Verifications: []output.Check{
+			{Name: "cluster list", Status: "manual", Detail: "pig pt list"},
+		},
+		NextActions: []output.NextAction{
+			execute,
+			{Command: "pig pt list", Reason: "verify member state after restart", Required: false},
+		},
+	}
+}
+
 // buildRestartArgs builds the positional + flag args for `patronictl restart`.
 // patronictl restart requires CLUSTER_NAME as the first positional argument
 // (the `-c <config>` flag does NOT supply scope here, unlike pause/resume/list).
@@ -400,19 +484,31 @@ type ReinitOptions struct {
 	Wait   bool   // wait for reinit to complete
 }
 
+// ReinitCommand renders a replayable `pig pt reinit` invocation.
+func ReinitCommand(opts *ReinitOptions, plan, yes bool) string {
+	parts := []string{"pig", "pt", "reinit"}
+	if opts != nil {
+		if opts.Member != "" {
+			parts = append(parts, opts.Member)
+		}
+		if opts.Wait {
+			parts = append(parts, "--wait")
+		}
+	}
+	return renderCommand(parts, plan, yes)
+}
+
 // BuildReinitPlan builds a structured execution plan for reinitializing a Patroni member.
 func BuildReinitPlan(opts *ReinitOptions) *output.Plan {
 	if opts == nil {
 		opts = &ReinitOptions{}
 	}
-	nextOpts := *opts
-	nextOpts.Force = true
 	member := opts.Member
 	if member == "" {
 		member = "required-member"
 	}
 	return &output.Plan{
-		Command:      buildReinitCommand(opts),
+		Command:      ReinitCommand(opts, true, false),
 		Boundary:     "pt:patroni-cluster",
 		Confirmation: "required",
 		Actions: []output.Action{
@@ -440,30 +536,10 @@ func BuildReinitPlan(opts *ReinitOptions) *output.Plan {
 			{Name: "member status", Status: "manual", Detail: "target member should be running as replica"},
 		},
 		NextActions: []output.NextAction{
-			{Command: buildReinitExecuteCommand(&nextOpts), Reason: "execute member rebuild after explicit confirmation", Required: true},
+			{Command: ReinitCommand(opts, false, true), Reason: "execute member rebuild after explicit confirmation", Required: true},
 			{Command: "pig pt list", Reason: "verify member state after reinit", Required: false},
 		},
 	}
-}
-
-func buildReinitExecuteCommand(opts *ReinitOptions) string {
-	args := []string{"pig", "pt", "reinit"}
-	if opts != nil && opts.Member != "" {
-		args = append(args, opts.Member)
-	}
-	if opts != nil && opts.Force {
-		args = append(args, "--yes")
-	}
-	if opts != nil && opts.Wait {
-		args = append(args, "--wait")
-	}
-	return strings.Join(args, " ")
-}
-
-func buildReinitCommand(opts *ReinitOptions) string {
-	args := []string{buildReinitExecuteCommand(opts)}
-	args = append(args, "--plan")
-	return strings.Join(args, " ")
 }
 
 // buildReinitArgs builds the positional + flag args for `patronictl reinit`.
@@ -505,14 +581,29 @@ type SwitchoverOptions struct {
 	Scheduled string // scheduled time (e.g., "2024-01-01T12:00:00")
 }
 
+// SwitchoverCommand renders a replayable `pig pt switchover` invocation.
+func SwitchoverCommand(opts *SwitchoverOptions, plan, yes bool) string {
+	parts := []string{"pig", "pt", "switchover"}
+	if opts != nil {
+		if opts.Leader != "" {
+			parts = append(parts, "--leader", opts.Leader)
+		}
+		if opts.Candidate != "" {
+			parts = append(parts, "--candidate", opts.Candidate)
+		}
+		if opts.Scheduled != "" {
+			parts = append(parts, "--scheduled", opts.Scheduled)
+		}
+	}
+	return renderCommand(parts, plan, yes)
+}
+
 // BuildSwitchoverPlan builds a structured execution plan for switchover.
 // Returns a Plan with default values if opts is nil.
 func BuildSwitchoverPlan(opts *SwitchoverOptions) *output.Plan {
 	if opts == nil {
 		opts = &SwitchoverOptions{}
 	}
-	nextOpts := *opts
-	nextOpts.Force = true
 	actions := []output.Action{
 		{Step: 1, Description: "Validate switchover parameters"},
 		{Step: 2, Description: "Execute patronictl switchover"},
@@ -523,21 +614,21 @@ func BuildSwitchoverPlan(opts *SwitchoverOptions) *output.Plan {
 		{Type: "cluster", Name: "patroni", Impact: "role change", Detail: "leader switchover"},
 	}
 
-	if opts != nil && opts.Leader != "" {
+	if opts.Leader != "" {
 		affects = append(affects, output.Resource{
 			Type:   "node",
 			Name:   opts.Leader,
 			Impact: "leader demote",
 		})
 	}
-	if opts != nil && opts.Candidate != "" {
+	if opts.Candidate != "" {
 		affects = append(affects, output.Resource{
 			Type:   "node",
 			Name:   opts.Candidate,
 			Impact: "leader promote",
 		})
 	}
-	if opts != nil && opts.Scheduled != "" {
+	if opts.Scheduled != "" {
 		affects = append(affects, output.Resource{
 			Type:   "schedule",
 			Name:   opts.Scheduled,
@@ -546,7 +637,7 @@ func BuildSwitchoverPlan(opts *SwitchoverOptions) *output.Plan {
 	}
 
 	expected := "Leadership transferred to target candidate; old leader becomes replica"
-	if opts != nil && opts.Candidate != "" {
+	if opts.Candidate != "" {
 		expected = fmt.Sprintf("Leadership transferred to %s; old leader becomes replica", opts.Candidate)
 	}
 
@@ -554,12 +645,9 @@ func BuildSwitchoverPlan(opts *SwitchoverOptions) *output.Plan {
 		"Brief write downtime during leader transition",
 		"Clients may need to reconnect after switchover",
 	}
-	if opts != nil && opts.Force {
-		risks = append(risks, "Confirmation is skipped (--yes)")
-	}
 
 	return &output.Plan{
-		Command:      buildSwitchoverCommand(opts),
+		Command:      SwitchoverCommand(opts, true, false),
 		Boundary:     "pt:patroni-cluster",
 		Confirmation: "required",
 		Actions:      actions,
@@ -577,30 +665,10 @@ func BuildSwitchoverPlan(opts *SwitchoverOptions) *output.Plan {
 			{Name: "local role", Status: "manual", Detail: "pig pg role on affected members"},
 		},
 		NextActions: []output.NextAction{
-			{Command: buildSwitchoverCommand(&nextOpts), Reason: "execute planned Patroni switchover after explicit confirmation", Required: true},
+			{Command: SwitchoverCommand(opts, false, true), Reason: "execute planned Patroni switchover after explicit confirmation", Required: true},
 			{Command: "pig pt list", Reason: "verify Patroni cluster roles after switchover", Required: false},
 		},
 	}
-}
-
-func buildSwitchoverCommand(opts *SwitchoverOptions) string {
-	args := []string{"pig", "pt", "switchover"}
-	if opts == nil {
-		return strings.Join(args, " ")
-	}
-	if opts.Leader != "" {
-		args = append(args, "--leader", opts.Leader)
-	}
-	if opts.Candidate != "" {
-		args = append(args, "--candidate", opts.Candidate)
-	}
-	if opts.Scheduled != "" {
-		args = append(args, "--scheduled", opts.Scheduled)
-	}
-	if opts.Force {
-		args = append(args, "--yes")
-	}
-	return strings.Join(args, " ")
 }
 
 // buildSwitchoverArgs builds the args for `patronictl switchover`.
@@ -640,14 +708,21 @@ type FailoverOptions struct {
 	Force     bool   // pass --force to patronictl (pig owns confirmation, B04)
 }
 
+// FailoverCommand renders a replayable `pig pt failover` invocation.
+func FailoverCommand(opts *FailoverOptions, plan, yes bool) string {
+	parts := []string{"pig", "pt", "failover"}
+	if opts != nil && opts.Candidate != "" {
+		parts = append(parts, "--candidate", opts.Candidate)
+	}
+	return renderCommand(parts, plan, yes)
+}
+
 // BuildFailoverPlan builds a structured execution plan for failover.
 // Returns a Plan with default values if opts is nil.
 func BuildFailoverPlan(opts *FailoverOptions) *output.Plan {
 	if opts == nil {
 		opts = &FailoverOptions{}
 	}
-	nextOpts := *opts
-	nextOpts.Force = true
 	actions := []output.Action{
 		{Step: 1, Description: "Validate failover parameters and candidate availability"},
 		{Step: 2, Description: "Execute patronictl failover to promote candidate"},
@@ -676,12 +751,9 @@ func BuildFailoverPlan(opts *FailoverOptions) *output.Plan {
 		"Clients will experience downtime during failover",
 		"All connections will be reset after failover",
 	}
-	if opts.Force {
-		risks = append(risks, "Confirmation is skipped (--yes)")
-	}
 
 	return &output.Plan{
-		Command:      buildFailoverCommand(opts),
+		Command:      FailoverCommand(opts, true, false),
 		Boundary:     "pt:patroni-cluster",
 		Confirmation: "required",
 		Actions:      actions,
@@ -699,24 +771,10 @@ func BuildFailoverPlan(opts *FailoverOptions) *output.Plan {
 			{Name: "application writes", Status: "manual", Detail: "verify clients reconnect to the new leader"},
 		},
 		NextActions: []output.NextAction{
-			{Command: buildFailoverCommand(&nextOpts), Reason: "execute emergency Patroni failover after explicit confirmation", Required: true},
+			{Command: FailoverCommand(opts, false, true), Reason: "execute emergency Patroni failover after explicit confirmation", Required: true},
 			{Command: "pig pt list", Reason: "verify Patroni cluster roles after failover", Required: false},
 		},
 	}
-}
-
-func buildFailoverCommand(opts *FailoverOptions) string {
-	args := []string{"pig", "pt", "failover"}
-	if opts == nil {
-		return strings.Join(args, " ")
-	}
-	if opts.Candidate != "" {
-		args = append(args, "--candidate", opts.Candidate)
-	}
-	if opts.Force {
-		args = append(args, "--yes")
-	}
-	return strings.Join(args, " ")
 }
 
 func valueOrAuto(value string) string {

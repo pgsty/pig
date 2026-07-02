@@ -12,13 +12,17 @@ import (
 )
 
 // RunSystemctl runs systemctl command as root (via sudo if needed).
+// The read-only status action runs unprivileged so it works without sudo rights.
 // Returns ExitCodeError if the command exits with non-zero status.
 func RunSystemctl(action, service string) error {
 	cmdArgs := []string{"systemctl", action, service}
+	if action == "status" {
+		cmdArgs = append(cmdArgs, "--no-pager", "-l")
+	}
 	PrintHint(cmdArgs)
 
 	var cmd *exec.Cmd
-	if os.Geteuid() == 0 {
+	if os.Geteuid() == 0 || action == "status" {
 		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
 	} else {
 		cmd = exec.Command("sudo", cmdArgs...)
