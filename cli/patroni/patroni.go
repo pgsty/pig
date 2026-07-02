@@ -1,12 +1,14 @@
 package patroni
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
+	"time"
 
 	"pig/internal/output"
 	"pig/internal/utils"
@@ -14,7 +16,12 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var patroniRunJournalctlOutput = runJournalctlOutput
+var patroniReadJournalctlLines = readPatroniJournalctlLines
+
+const (
+	patroniJournalctlPath = "/usr/bin/journalctl"
+	patroniJournalUnit    = "patroni"
+)
 
 // DefaultConfigPath is the fixed patroni config file path
 const DefaultConfigPath = "/etc/patroni/patroni.yml"
@@ -207,20 +214,20 @@ func Log(follow bool, lines int) error {
 	if lines <= 0 {
 		return fmt.Errorf("lines must be positive")
 	}
-	args := []string{"-u", "patroni"}
-	if follow {
-		args = append(args, "-f")
-	}
-	args = append(args, "-n", strconv.Itoa(lines))
 
-	cmdArgs := append([]string{"journalctl"}, args...)
+	cmdArgs := []string{"sudo", patroniJournalctlPath, "-u", patroniJournalUnit}
 	utils.PrintHint(cmdArgs)
-	logrus.Debugf("journalctl %s", strings.Join(args, " "))
-	cmd := exec.Command("journalctl", args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	logrus.Debugf("sudo %s -u %s", patroniJournalctlPath, patroniJournalUnit)
+
+	if follow {
+		return followPatroniJournal(lines)
+	}
+	rows, _, err := patroniReadJournalctlLines(lines)
+	if err != nil {
+		return err
+	}
+	printJournalLines(rows)
+	return nil
 }
 
 // LogJSONL outputs recent patroni journal lines as JSONL.
@@ -228,26 +235,110 @@ func LogJSONL(lines int) error {
 	if lines <= 0 {
 		return fmt.Errorf("lines must be positive")
 	}
-	args := []string{"-u", "patroni", "-n", strconv.Itoa(lines), "--no-pager", "-o", "cat"}
-	logrus.Debugf("journalctl %s", strings.Join(args, " "))
-	stdout, stderr, err := patroniRunJournalctlOutput(args)
+	logrus.Debugf("sudo %s -u %s", patroniJournalctlPath, patroniJournalUnit)
+	rows, _, err := patroniReadJournalctlLines(lines)
 	if err != nil {
-		if errText := strings.TrimSpace(stderr); errText != "" {
-			return fmt.Errorf("%w: %s", err, errText)
-		}
 		return err
 	}
-	return utils.PrintLogMessagesJSONL("patroni", filterJournalNoEntries(stdout))
+	return utils.PrintLogMessagesJSONL("patroni", filterJournalNoEntries(strings.Join(rows, "\n")))
 }
 
-func runJournalctlOutput(args []string) (string, string, error) {
-	cmd := exec.Command("journalctl", args...)
-	var stdout bytes.Buffer
+func readPatroniJournalctlLines(limit int) ([]string, int, error) {
+	cmd := exec.Command("sudo", patroniJournalctlPath, "-u", patroniJournalUnit)
+	cmd.Env = append(os.Environ(), "SYSTEMD_PAGER=cat", "PAGER=cat", "LESS=FRXMK")
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, 0, err
+	}
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return stdout.String(), stderr.String(), err
+	if err := cmd.Start(); err != nil {
+		return nil, 0, err
+	}
+
+	rows, total, readErr := tailReaderLines(stdout, limit)
+	waitErr := cmd.Wait()
+	if readErr != nil {
+		return nil, total, readErr
+	}
+	if waitErr != nil {
+		if errText := strings.TrimSpace(stderr.String()); errText != "" {
+			return nil, total, fmt.Errorf("%w: %s", waitErr, errText)
+		}
+		return nil, total, waitErr
+	}
+	return rows, total, nil
+}
+
+func tailReaderLines(r io.Reader, limit int) ([]string, int, error) {
+	reader := bufio.NewReader(r)
+	var rows []string
+	total := 0
+	for {
+		row, err := reader.ReadString('\n')
+		if len(row) > 0 {
+			row = strings.TrimRight(row, "\r\n")
+			total++
+			if limit <= 0 || len(rows) < limit {
+				rows = append(rows, row)
+			} else {
+				copy(rows, rows[1:])
+				rows[len(rows)-1] = row
+			}
+		}
+		if err == io.EOF {
+			return rows, total, nil
+		}
+		if err != nil {
+			return rows, total, err
+		}
+	}
+}
+
+func followPatroniJournal(lines int) error {
+	rows, seen, err := patroniReadJournalctlLines(lines)
+	if err != nil {
+		return err
+	}
+	printJournalLines(rows)
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		rows, total, err := patroniReadJournalctlLines(0)
+		if err != nil {
+			return err
+		}
+		if total < seen {
+			rows, seen = followRowsSince(rows, 0)
+			printJournalLines(rows)
+			continue
+		}
+		rows, seen = followRowsSince(rows, seen)
+		if len(rows) == 0 {
+			continue
+		}
+		printJournalLines(rows)
+	}
+	return nil
+}
+
+func followRowsSince(rows []string, seen int) ([]string, int) {
+	total := len(rows)
+	if seen < 0 || seen > total {
+		return rows, total
+	}
+	if seen == total {
+		return nil, total
+	}
+	return rows[seen:], total
+}
+
+func printJournalLines(rows []string) {
+	for _, row := range rows {
+		fmt.Fprintln(os.Stdout, row)
+	}
 }
 
 func filterJournalNoEntries(text string) string {

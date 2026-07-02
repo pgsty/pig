@@ -65,14 +65,14 @@ func TestLogRejectsNonPositiveLines(t *testing.T) {
 	}
 }
 
-func TestLogJSONLUsesCatOutputAndPrintsJSONL(t *testing.T) {
-	origRun := patroniRunJournalctlOutput
-	defer func() { patroniRunJournalctlOutput = origRun }()
+func TestLogJSONLUsesSudoJournalctlRowsAndPrintsJSONL(t *testing.T) {
+	origRead := patroniReadJournalctlLines
+	defer func() { patroniReadJournalctlLines = origRead }()
 
-	var gotArgs []string
-	patroniRunJournalctlOutput = func(args []string) (string, string, error) {
-		gotArgs = append([]string(nil), args...)
-		return "patroni started\nleader lock acquired\n", "", nil
+	gotLimit := 0
+	patroniReadJournalctlLines = func(limit int) ([]string, int, error) {
+		gotLimit = limit
+		return []string{"patroni started", "leader lock acquired"}, 2, nil
 	}
 
 	var out bytes.Buffer
@@ -82,8 +82,8 @@ func TestLogJSONLUsesCatOutputAndPrintsJSONL(t *testing.T) {
 		}
 	})
 
-	if !argsHasInOrder(gotArgs, "-u", "patroni", "-n", "2", "--no-pager", "-o", "cat") {
-		t.Fatalf("journalctl args = %v, want patroni line count with cat output", gotArgs)
+	if gotLimit != 2 {
+		t.Fatalf("journalctl line limit = %d, want 2", gotLimit)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if len(lines) != 2 {
@@ -99,11 +99,11 @@ func TestLogJSONLUsesCatOutputAndPrintsJSONL(t *testing.T) {
 }
 
 func TestLogJSONLSkipsNoEntriesSentinel(t *testing.T) {
-	origRun := patroniRunJournalctlOutput
-	defer func() { patroniRunJournalctlOutput = origRun }()
+	origRead := patroniReadJournalctlLines
+	defer func() { patroniReadJournalctlLines = origRead }()
 
-	patroniRunJournalctlOutput = func(args []string) (string, string, error) {
-		return "-- No entries --\npatroni started\n", "", nil
+	patroniReadJournalctlLines = func(limit int) ([]string, int, error) {
+		return []string{"-- No entries --", "patroni started"}, 2, nil
 	}
 
 	var out bytes.Buffer
