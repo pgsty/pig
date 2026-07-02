@@ -141,7 +141,7 @@ func registerPatroniCommands() {
 		patroniConfigCmd,
 		patroniLogCmd,
 		patroniStatusCmd,
-		// Hidden stubs routing removed shortcuts to svc (B03)
+		// Hidden top-level shortcuts for service start/stop (B03)
 		patroniStartCmd,
 		patroniStopCmd,
 		// Service management (systemctl)
@@ -202,7 +202,7 @@ var patroniListCmd = &cobra.Command{
 // patroniRestartCmd: pig pt restart [member] - restart PostgreSQL via patronictl
 var patroniRestartCmd = &cobra.Command{
 	Use:     "restart [member]",
-	Aliases: []string{"reboot", "rt"},
+	Aliases: []string{"rst"},
 	Short:   "Restart PostgreSQL instance(s) via Patroni",
 	Args:    cobra.MaximumNArgs(1),
 	Annotations: mergeAnn(
@@ -301,7 +301,7 @@ func splitConfigKVPairs(args []string) (pairs []string, invalid []string) {
 // patroniReloadCmd: pig pt reload - reload PostgreSQL config via patronictl
 var patroniReloadCmd = &cobra.Command{
 	Use:         "reload",
-	Aliases:     []string{"rl", "hup"},
+	Aliases:     []string{"rl"},
 	Short:       "Reload PostgreSQL configuration via Patroni",
 	Args:        cobra.NoArgs,
 	Annotations: ancsAnn("pig patroni reload", "action", "volatile", "restricted", true, "low", "none", "dbsu", 5000),
@@ -732,7 +732,7 @@ var patroniLogTailCmd = &cobra.Command{
 // patroniStatusCmd: pig pt status - comprehensive status check
 var patroniStatusCmd = &cobra.Command{
 	Use:     "status",
-	Aliases: []string{"st", "stat"},
+	Aliases: []string{"st"},
 	Short:   "Show comprehensive patroni status",
 	Long: `Show comprehensive Patroni status including:
   1. Patroni service status (systemctl status patroni)
@@ -740,8 +740,7 @@ var patroniStatusCmd = &cobra.Command{
   3. Patroni cluster status (patronictl list)`,
 	Example: `
   pig pt status          # Show comprehensive status
-  pig pt status -o json  # Structured JSON output
-  pig pt st              # Same as above (shortcut)`,
+  pig pt status -o json  # Structured JSON output`,
 	Annotations: ancsAnn("pig patroni status", "query", "stable", "safe", true, "safe", "none", "dbsu", 3000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbsu := utils.GetDBSU(patroniDBSU)
@@ -758,36 +757,38 @@ var patroniStatusCmd = &cobra.Command{
 }
 
 // ============================================================================
-// Removed Service Shortcuts (B03) - hidden landing-pad stubs
+// Service Shortcuts (B03) - hidden top-level aliases
 // ============================================================================
 
-// patroniDaemonMovedErr is the exact one-line route printed when the removed
-// top-level shortcuts are invoked (B03; wording is guarded by T1 tests).
-const patroniDaemonMovedErr = "daemon control moved: use pig pt svc start|stop"
-
-// patroniStartCmd: hidden stub for the removed 'pig pt start' shortcut.
+// patroniStartCmd: hidden shortcut for 'pig pt svc start'.
 var patroniStartCmd = &cobra.Command{
 	Use:          "start",
-	Aliases:      []string{"boot", "up"},
+	Aliases:      []string{"up"},
 	Hidden:       true,
 	SilenceUsage: true,
-	Short:        "(moved) use 'pig pt svc start'",
-	Args:         cobra.ArbitraryArgs,
+	Short:        "Start patroni service",
+	Long:         `Hidden shortcut for 'pig pt svc start'. Starts the Patroni daemon service through systemctl.`,
+	Example: `
+  pig pt start       # Shortcut for pig pt svc start`,
+	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("%s", patroniDaemonMovedErr)
+		return runPatroniSvcAction("start", args)
 	},
 }
 
-// patroniStopCmd: hidden stub for the removed 'pig pt stop' shortcut.
+// patroniStopCmd: hidden shortcut for 'pig pt svc stop'.
 var patroniStopCmd = &cobra.Command{
 	Use:          "stop",
-	Aliases:      []string{"halt", "dn", "down"},
+	Aliases:      []string{"down"},
 	Hidden:       true,
 	SilenceUsage: true,
-	Short:        "(moved) use 'pig pt svc stop'",
-	Args:         cobra.ArbitraryArgs,
+	Short:        "Stop patroni service",
+	Long:         `Hidden shortcut for 'pig pt svc stop'. Stops the Patroni daemon service through systemctl.`,
+	Example: `
+  pig pt stop        # Shortcut for pig pt svc stop`,
+	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("%s", patroniDaemonMovedErr)
+		return runPatroniSvcAction("stop", args)
 	},
 }
 
@@ -810,60 +811,56 @@ instances it manages. For PostgreSQL operations, use:
 
 var patroniSvcStartCmd = &cobra.Command{
 	Use:         "start",
-	Aliases:     []string{"boot", "up"},
+	Aliases:     []string{"up"},
 	Short:       "Start patroni service",
 	Annotations: ancsAnn("pig patroni service start", "action", "volatile", "unsafe", true, "medium", "none", "root", 10000),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePt, "pig patroni service start", args, nil, func() error {
-			return patroni.Systemctl("start")
-		})
+		return runPatroniSvcAction("start", args)
 	},
 }
 
 var patroniSvcStopCmd = &cobra.Command{
 	Use:         "stop",
-	Aliases:     []string{"halt", "dn", "down"},
+	Aliases:     []string{"down"},
 	Short:       "Stop patroni service",
 	Annotations: ancsAnn("pig patroni service stop", "action", "volatile", "unsafe", true, "high", "recommended", "root", 10000),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePt, "pig patroni service stop", args, nil, func() error {
-			return patroni.Systemctl("stop")
-		})
+		return runPatroniSvcAction("stop", args)
 	},
 }
 
 var patroniSvcRestartCmd = &cobra.Command{
 	Use:         "restart",
-	Aliases:     []string{"reboot", "rt"},
+	Aliases:     []string{"rst"},
 	Short:       "Restart patroni service",
 	Annotations: ancsAnn("pig patroni service restart", "action", "volatile", "unsafe", false, "high", "recommended", "root", 30000),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePt, "pig patroni service restart", args, nil, func() error {
-			return patroni.Systemctl("restart")
-		})
+		return runPatroniSvcAction("restart", args)
 	},
 }
 
 var patroniSvcReloadCmd = &cobra.Command{
 	Use:         "reload",
-	Aliases:     []string{"rl", "hup"},
+	Aliases:     []string{"rl"},
 	Short:       "Reload patroni service",
 	Annotations: ancsAnn("pig patroni service reload", "action", "volatile", "restricted", true, "low", "none", "root", 1000),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePt, "pig patroni service reload", args, nil, func() error {
-			return patroni.Systemctl("reload")
-		})
+		return runPatroniSvcAction("reload", args)
 	},
 }
 
 var patroniSvcStatusCmd = &cobra.Command{
 	Use:         "status",
-	Aliases:     []string{"st", "stat"},
+	Aliases:     []string{"st"},
 	Short:       "Show patroni service status",
 	Annotations: ancsAnn("pig patroni service status", "query", "volatile", "safe", true, "safe", "none", "root", 500),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePt, "pig patroni service status", args, nil, func() error {
-			return patroni.Systemctl("status")
-		})
+		return runPatroniSvcAction("status", args)
 	},
+}
+
+func runPatroniSvcAction(action string, args []string) error {
+	return runLegacyStructured(legacyModulePt, "pig patroni service "+action, args, nil, func() error {
+		return patroni.Systemctl(action)
+	})
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"io"
 	"os"
+	"path/filepath"
 	"pig/cli/patroni"
 	"pig/internal/config"
 	"pig/internal/output"
@@ -476,29 +477,91 @@ func TestPatroniTextConfirmClusterOps(t *testing.T) {
 	}
 }
 
-// TestPatroniStartStopStubs (B03): the removed top-level start/stop shortcuts
-// stay as hidden stubs that print nothing to stdout and route to pt svc.
-func TestPatroniStartStopStubs(t *testing.T) {
-	for _, cmd := range []*cobra.Command{patroniStartCmd, patroniStopCmd} {
-		t.Run(cmd.Name(), func(t *testing.T) {
+// TestPatroniStartStopShortcutsRouteToSvc (B03): top-level start/stop stay
+// hidden, but execute the same Patroni service action as pt svc start/stop.
+func TestPatroniStartStopShortcutsRouteToSvc(t *testing.T) {
+	tests := []struct {
+		name   string
+		cmd    *cobra.Command
+		action string
+	}{
+		{name: "start", cmd: patroniStartCmd, action: "start"},
+		{name: "stop", cmd: patroniStopCmd, action: "stop"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := tt.cmd
 			if !cmd.Hidden {
-				t.Errorf("pt %s stub must be hidden", cmd.Name())
+				t.Errorf("pt %s shortcut must remain hidden", cmd.Name())
 			}
+			recordFile := installFakeSystemctl(t)
 			var runErr error
-			raw := capturePtStdout(t, func() {
+			_ = capturePtStdout(t, func() {
 				runErr = cmd.RunE(cmd, nil)
 			})
-			if runErr == nil {
-				t.Fatalf("pt %s stub must return an error", cmd.Name())
+			if runErr != nil {
+				t.Fatalf("pt %s shortcut should execute pt svc %s: %v", cmd.Name(), tt.action, runErr)
 			}
-			if !strings.Contains(runErr.Error(), "pig pt svc") {
-				t.Errorf("pt %s stub must route to pig pt svc, got %q", cmd.Name(), runErr)
+			recorded, err := os.ReadFile(recordFile)
+			if err != nil {
+				t.Fatalf("read fake systemctl record: %v", err)
 			}
-			if runErr.Error() != "daemon control moved: use pig pt svc start|stop" {
-				t.Errorf("pt %s stub wording drifted: %q", cmd.Name(), runErr)
+			if got, want := strings.TrimSpace(string(recorded)), "systemctl "+tt.action+" patroni"; got != want {
+				t.Errorf("pt %s shortcut command = %q, want %q", cmd.Name(), got, want)
 			}
-			if strings.TrimSpace(raw) != "" {
-				t.Errorf("pt %s stub must print nothing to stdout, got %q", cmd.Name(), raw)
+		})
+	}
+}
+
+func TestPatroniStartStopShortcutHelpMentionsSvcTarget(t *testing.T) {
+	tests := []struct {
+		name   string
+		cmd    *cobra.Command
+		target string
+		alias  string
+	}{
+		{name: "start", cmd: patroniStartCmd, target: "pig pt svc start", alias: "pig pt up"},
+		{name: "stop", cmd: patroniStopCmd, target: "pig pt svc stop", alias: "pig pt down"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.Contains(tt.cmd.Long, tt.target) {
+				t.Fatalf("pt %s long help must mention %q, got %q", tt.name, tt.target, tt.cmd.Long)
+			}
+			if !strings.Contains(tt.cmd.Example, tt.target) {
+				t.Fatalf("pt %s examples must mention %q, got %q", tt.name, tt.target, tt.cmd.Example)
+			}
+			if strings.Contains(tt.cmd.Example, tt.alias) {
+				t.Fatalf("pt %s examples must not advertise alias %q, got %q", tt.name, tt.alias, tt.cmd.Example)
+			}
+		})
+	}
+}
+
+func TestPatroniServiceAliasesStayMinimal(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+		want []string
+	}{
+		{name: "pt start", cmd: patroniStartCmd, want: []string{"up"}},
+		{name: "pt stop", cmd: patroniStopCmd, want: []string{"down"}},
+		{name: "pt restart", cmd: patroniRestartCmd, want: []string{"rst"}},
+		{name: "pt reload", cmd: patroniReloadCmd, want: []string{"rl"}},
+		{name: "pt status", cmd: patroniStatusCmd, want: []string{"st"}},
+		{name: "pt svc start", cmd: patroniSvcStartCmd, want: []string{"up"}},
+		{name: "pt svc stop", cmd: patroniSvcStopCmd, want: []string{"down"}},
+		{name: "pt svc restart", cmd: patroniSvcRestartCmd, want: []string{"rst"}},
+		{name: "pt svc reload", cmd: patroniSvcReloadCmd, want: []string{"rl"}},
+		{name: "pt svc status", cmd: patroniSvcStatusCmd, want: []string{"st"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := strings.Join(tt.cmd.Aliases, ","); got != strings.Join(tt.want, ",") {
+				t.Fatalf("%s aliases = %v, want %v", tt.name, tt.cmd.Aliases, tt.want)
 			}
 		})
 	}
@@ -586,6 +649,22 @@ func capturePtStdout(t *testing.T, fn func()) string {
 	raw, _ := io.ReadAll(r)
 	_ = r.Close()
 	return string(raw)
+}
+
+func installFakeSystemctl(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	recordFile := filepath.Join(dir, "systemctl.args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + recordFile + "\n"
+
+	for _, name := range []string{"systemctl", "sudo"} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			t.Fatalf("write fake %s: %v", name, err)
+		}
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return recordFile
 }
 
 func ptBytesTrimSpace(b []byte) []byte {

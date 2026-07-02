@@ -37,8 +37,8 @@ Logs:
   pig pt log show [-n 100]         show patroni log snapshot
 ```
 
-> **B03**: the former top-level shortcuts `pt start` / `pt stop` are removed. They remain as
-> hidden stubs that fail with a one-line route: `daemon control moved: use pig pt svc start|stop`.
+> **B03**: `pt start` / `pt stop` are hidden shortcuts for `pt svc start` / `pt svc stop`.
+> `pt svc` remains the documented Patroni daemon control surface.
 
 ## Primitive Contract
 
@@ -56,8 +56,8 @@ Pig owns confirmation for cluster operations (B04): `patronictl` always runs wit
 | Command | Alias | Description | Implementation |
 |:--------|:------|:------------|:---------------|
 | `pt list [cluster]` | `ls, l` | List cluster members | `patronictl list [cluster] -e -t` |
-| `pt restart` | `reboot, rt` | Restart PostgreSQL instance | `patronictl restart` |
-| `pt reload` | `rl, hup` | Reload PostgreSQL config | `patronictl reload <scope>` |
+| `pt restart` | `rst` | Restart PostgreSQL instance | `patronictl restart` |
+| `pt reload` | `rl` | Reload PostgreSQL config | `patronictl reload <scope>` |
 | `pt reinit` | `ri` | Reinitialize member | `patronictl reinit` |
 | `pt switchover` | `sw` | Planned switchover | `patronictl switchover` |
 | `pt failover` | `fo` | Manual failover | `patronictl failover` |
@@ -70,22 +70,22 @@ Pig owns confirmation for cluster operations (B04): `patronictl` always runs wit
 
 | Command | Alias | Description | Implementation |
 |:--------|:------|:------------|:---------------|
-| `pt status` | `st, stat` | Show service status | `systemctl status patroni` |
+| `pt status` | `st` | Show service status | `systemctl status patroni` |
 | `pt log` | `l, lg` | View Patroni logs | `journalctl -u patroni` |
 {.full-width}
 
-The former top-level shortcuts `pt start` / `pt stop` are removed (B03). Hidden stubs keep the
-old tokens routable: invoking them fails with `daemon control moved: use pig pt svc start|stop`.
+The top-level `pt start` / `pt stop` shortcuts remain hidden (B03), but execute the same actions as
+`pt svc start` / `pt svc stop`. `pt svc` stays the documented, explicit Patroni daemon control surface.
 
 **Service Subcommand** (`pt svc`):
 
 | Command | Alias | Description |
 |:--------|:------|:------------|
-| `pt svc start` | `boot, up` | Start Patroni service |
-| `pt svc stop` | `halt, dn, down` | Stop Patroni service |
-| `pt svc restart` | `reboot, rt` | Restart Patroni service |
-| `pt svc reload` | `rl, hup` | Reload Patroni service |
-| `pt svc status` | `st, stat` | Show service status |
+| `pt svc start` | `up` | Start Patroni service |
+| `pt svc stop` | `down` | Stop Patroni service |
+| `pt svc restart` | `rst` | Restart Patroni service |
+| `pt svc reload` | `rl` | Reload Patroni service |
+| `pt svc status` | `st` | Show service status |
 {.full-width}
 
 
@@ -113,6 +113,8 @@ pig pt resume                  # Resume auto-failover
 
 # Manage Patroni service
 pig pt status                  # Check service status
+pig pt start                   # Hidden shortcut for pig pt svc start
+pig pt stop                    # Hidden shortcut for pig pt svc stop
 pig pt svc start               # Start service
 pig pt svc stop                # Stop service
 pig pt log -f                  # Real-time log viewing
@@ -337,18 +339,20 @@ pig pt config pg max_connections=200    # Modify PostgreSQL parameter
 
 ## Service Commands
 
-### pt start / pt stop (removed, B03)
+### pt start / pt stop (hidden shortcuts, B03)
 
-The top-level `pt start` / `pt stop` shortcuts are removed. Daemon control lives under `pt svc`:
+The top-level `pt start` / `pt stop` shortcuts are hidden from help, but execute the same service
+actions as `pt svc start` / `pt svc stop`:
 
 ```bash
+pig pt start                     # Hidden shortcut for pig pt svc start
+pig pt stop                      # Hidden shortcut for pig pt svc stop
 pig pt svc start                 # Start Patroni service
 pig pt svc stop                  # Stop Patroni service
 ```
 
-Hidden landing-pad stubs keep the old tokens (and their aliases `boot/up`, `halt/dn/down`)
-routable: invoking them prints nothing to stdout and fails with the exact one-line route
-`daemon control moved: use pig pt svc start|stop`.
+The aliases stay minimal and aligned with the `pt svc` commands: `up` routes to start, and
+`down` routes to stop.
 
 **Note:** Stopping Patroni service will also stop the PostgreSQL instance on this node (depending on Patroni configuration).
 
@@ -393,7 +397,8 @@ Text mode is equivalent to `journalctl -u patroni [-f] [-n N]`. JSONL mode is eq
 
 ## pt svc Subcommand
 
-`pt svc` provides the same functionality as top-level service commands, for explicitly operating on the Patroni daemon:
+`pt svc` is the explicit command group for operating on the Patroni daemon. Hidden top-level
+`pt start` / `pt stop` shortcuts map to its start/stop actions:
 
 ```bash
 pig pt svc start                 # Start Patroni service
@@ -407,11 +412,11 @@ pig pt svc status                # Show service status
 
 | Command | Alias |
 |:--------|:------|
-| `pt svc start` | `boot, up` |
-| `pt svc stop` | `halt, dn, down` |
-| `pt svc restart` | `reboot, rt` |
-| `pt svc reload` | `rl, hup` |
-| `pt svc status` | `st, stat` |
+| `pt svc start` | `up` |
+| `pt svc stop` | `down` |
+| `pt svc restart` | `rst` |
+| `pt svc reload` | `rl` |
+| `pt svc status` | `st` |
 {.full-width}
 
 
