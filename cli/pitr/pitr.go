@@ -263,14 +263,7 @@ func withQuietStderr(fn func() *output.Result) *output.Result {
 // ============================================================================
 
 func preCheck(opts *Options) (*SystemState, error) {
-	// Validate recovery target
-	if err := validateRecoveryTarget(opts); err != nil {
-		return nil, &PITRError{Code: output.CodePITRInvalidArgs, Err: err}
-	}
-	if err := pgbackrest.ValidateRestoreOptions(restoreOptionsFromPITR(opts)); err != nil {
-		return nil, &PITRError{Code: output.CodePITRInvalidArgs, Err: err}
-	}
-	if err := validatePITRTargetActionPolicy(opts); err != nil {
+	if err := ValidateOptions(opts); err != nil {
 		return nil, &PITRError{Code: output.CodePITRInvalidArgs, Err: err}
 	}
 
@@ -498,6 +491,19 @@ func validateRecoveryTarget(opts *Options) error {
 	}
 	if targets > 1 {
 		return fmt.Errorf("multiple recovery targets specified, choose only one")
+	}
+	return nil
+}
+
+func ValidateOptions(opts *Options) error {
+	if err := validateRecoveryTarget(opts); err != nil {
+		return err
+	}
+	if err := pgbackrest.ValidateRestoreOptions(restoreOptionsFromPITR(opts)); err != nil {
+		return err
+	}
+	if err := validatePITRTargetActionPolicy(opts); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1051,28 +1057,11 @@ func classifyRestoreError(err error) int {
 	return output.CodePITRRestoreFailed
 }
 
+// isNoBackupError delegates to the shared pgbackrest compound matcher so both
+// layers classify backup-not-found identically. The former loose clause
+// ("backup" + "not found") is dropped: it could misfire on unrelated errors.
 func isNoBackupError(message string) bool {
-	msg := strings.ToLower(message)
-
-	if strings.Contains(msg, "no prior backup exists") {
-		return true
-	}
-	if strings.Contains(msg, "unable to find backup") {
-		return true
-	}
-	if strings.Contains(msg, "no backup set") {
-		return true
-	}
-	if strings.Contains(msg, "backup set") &&
-		(strings.Contains(msg, "not found") || strings.Contains(msg, "does not exist") || strings.Contains(msg, "is not valid")) {
-		return true
-	}
-	if strings.Contains(msg, "backup") &&
-		(strings.Contains(msg, "not found") || strings.Contains(msg, "does not exist")) {
-		return true
-	}
-
-	return false
+	return pgbackrest.IsBackupNotFoundError(message)
 }
 
 // ============================================================================

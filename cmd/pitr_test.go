@@ -200,9 +200,39 @@ func TestPITRStructuredExecutionRequiresExplicitYes(t *testing.T) {
 	if success, _ := payload["success"].(bool); success {
 		t.Fatalf("expected success=false, got %v", payload)
 	}
-	data, _ := payload["data"].(map[string]interface{})
-	if !resultDataHasNextAction(data, "--yes") {
-		t.Fatalf("expected next action mentioning --yes, got data=%v", data)
+	if !resultDataHasNextAction(payload, "--yes") {
+		t.Fatalf("expected envelope next action mentioning --yes, got %v", payload)
+	}
+}
+
+func TestPITRStructuredRejectsExtraArgsBeforeDash(t *testing.T) {
+	origFormat := config.OutputFormat
+	origOpts := *pitrOpts
+	defer func() {
+		config.OutputFormat = origFormat
+		*pitrOpts = origOpts
+	}()
+
+	config.OutputFormat = config.OUTPUT_JSON
+	*pitrOpts = pitr.Options{Default: true, Plan: true}
+
+	var runErr error
+	raw := captureStdout(t, func() {
+		runErr = pitrCmd.RunE(pitrCmd, []string{"--delta"})
+	})
+	if runErr == nil {
+		t.Fatal("pitr should reject extra args that are not after --")
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(bytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if success, _ := payload["success"].(bool); success {
+		t.Fatalf("expected success=false, got %v", payload)
+	}
+	if !strings.Contains(asString(payload["detail"]), "after --") {
+		t.Fatalf("detail should mention -- separator, got %v", payload)
 	}
 }
 

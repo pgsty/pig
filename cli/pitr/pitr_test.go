@@ -518,6 +518,28 @@ func TestPITRError_InvalidArgs(t *testing.T) {
 	}
 }
 
+func TestValidateOptionsRejectsInvalidTimeAndRestoreExtraArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *Options
+	}{
+		{name: "invalid time", opts: &Options{Time: "2025-01-01 12:00:00junk"}},
+		{name: "target extra arg", opts: &Options{Default: true, ExtraArgs: []string{"--target-action=promote"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateOptions(tt.opts)
+			if err == nil {
+				t.Fatal("ValidateOptions should reject invalid PITR input")
+			}
+			if !strings.Contains(err.Error(), "invalid time format") && !strings.Contains(err.Error(), "conflicts with pig restore flags") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 // TestPITRError_PrecheckFailed verifies precheck failures return 160601
 func TestPITRError_PrecheckFailed(t *testing.T) {
 	pitrErr := &PITRError{Code: output.CodePITRPrecheckFailed, Err: fmt.Errorf("data directory /pg/data does not exist")}

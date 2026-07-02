@@ -143,6 +143,12 @@ The command uses the same execution privilege strategy as other pig commands:
 				Err:  &pitr.PITRError{Code: output.CodePITRInvalidArgs, Err: fmt.Errorf("invalid or missing recovery target")},
 			}
 		}
+		if err := rejectRestoreExtraArgsBeforeDash(cmd, args, output.CodePITRInvalidArgs); err != nil {
+			return err
+		}
+		if err := pitr.ValidateOptions(pitrOpts); err != nil {
+			return restoreInvalidParamsError(output.CodePITRInvalidArgs, err)
+		}
 
 		// Plan mode: show plan and exit
 		if pitrOpts.Plan {
@@ -157,7 +163,7 @@ The command uses the same execution privilege strategy as other pig commands:
 		if config.IsStructuredOutput() {
 			if !pitrOpts.Yes {
 				return structuredConfirmationError(
-					output.CodePITRInvalidArgs,
+					output.CodePITRConfirmationRequired,
 					"pitr requires explicit confirmation",
 					"structured output mode does not prompt interactively; rerun with --yes to execute or --plan to preview",
 					output.OperationMeta{
