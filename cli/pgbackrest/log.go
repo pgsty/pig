@@ -10,6 +10,11 @@ import (
 	"pig/internal/utils"
 )
 
+var (
+	logReadDir           = os.ReadDir
+	logDBSUCommandStdout = utils.DBSUCommandStdout
+)
+
 // LogDir returns the pgbackrest log directory from config or Pigsty default.
 func LogDir(configPath, dbsu string) string {
 	logDir, _ := ResolveLogDir(configPath, dbsu, false)
@@ -128,7 +133,7 @@ func getLogFiles(logDir, dbsu string) ([]string, error) {
 	}
 
 	// Try direct read if we have permission
-	if entries, err := os.ReadDir(logDir); err == nil {
+	if entries, err := logReadDir(logDir); err == nil {
 		var infos []os.FileInfo
 		for _, entry := range entries {
 			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".log") {
@@ -153,7 +158,7 @@ func getLogFiles(logDir, dbsu string) ([]string, error) {
 	}
 
 	// Permission denied - use DBSU privilege escalation
-	output, err := utils.DBSUCommandStdout(dbsu, []string{"ls", "-1t", logDir})
+	output, err := logDBSUCommandStdout(dbsu, []string{"ls", "-1t", logDir})
 	if err != nil {
 		return nil, fmt.Errorf("cannot read log directory: %w", err)
 	}
@@ -166,7 +171,6 @@ func getLogFiles(logDir, dbsu string) ([]string, error) {
 		}
 	}
 
-	sort.Sort(sort.Reverse(sort.StringSlice(files)))
 	return files, nil
 }
 

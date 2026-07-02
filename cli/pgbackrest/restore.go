@@ -1,10 +1,10 @@
 package pgbackrest
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -64,6 +64,10 @@ func Restore(cfg *Config, opts *RestoreOptions) error {
 	}
 
 	normalizedTime := normalizeTime(opts.Time)
+
+	if err := checkPatroniManagedRestore(effCfg, opts); err != nil {
+		return err
+	}
 
 	// Check PostgreSQL is stopped
 	if err := checkPostgresStopped(effCfg, opts.DataDir); err != nil {
@@ -138,8 +142,12 @@ func ValidateRestoreOptions(opts *RestoreOptions) error {
 		}
 	}
 
-	if opts.Time != "" && !isValidTimeFormat(opts.Time) {
-		logrus.Warnf("time format '%s' may not be recognized, proceeding anyway", opts.Time)
+	if err := validateRestoreTime(opts.Time); err != nil {
+		return err
+	}
+
+	if err := ValidateRestoreExtraArgs(opts.ExtraArgs); err != nil {
+		return err
 	}
 
 	if opts.TargetTimeline != "" && !timelineRegex.MatchString(opts.TargetTimeline) {
@@ -164,11 +172,94 @@ func validateRestoreOptions(opts *RestoreOptions) error {
 	return ValidateRestoreOptions(opts)
 }
 
+func validateRestoreTime(value string) error {
+	if value == "" {
+		return nil
+	}
+	if isValidTimeFormat(value) {
+		return nil
+	}
+	return fmt.Errorf("invalid time format: %s (use YYYY-MM-DD, HH:MM:SS, or YYYY-MM-DD HH:MM:SS[timezone])", value)
+}
+
 // isValidTimeFormat checks if time string matches any known pattern.
 func isValidTimeFormat(t string) bool {
-	return dateOnlyRegex.MatchString(t) ||
-		timeOnlyRegex.MatchString(t) ||
-		dateTimeRegex.MatchString(t)
+	for _, layout := range []string{
+		"2006-01-02",
+		"15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+	} {
+		if _, err := time.ParseInLocation(layout, t, time.Local); err == nil {
+			return true
+		}
+	}
+	for _, layout := range []string{
+		"2006-01-02 15:04:05-07",
+		"2006-01-02 15:04:05-0700",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05Z07",
+		"2006-01-02 15:04:05Z0700",
+		"2006-01-02 15:04:05Z07:00",
+		"2006-01-02T15:04:05-07",
+		"2006-01-02T15:04:05-0700",
+		"2006-01-02T15:04:05-07:00",
+		"2006-01-02T15:04:05Z07",
+		"2006-01-02T15:04:05Z0700",
+		"2006-01-02T15:04:05Z07:00",
+	} {
+		if _, err := time.Parse(layout, t); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+var blockedRestoreExtraArgs = map[string]struct{}{
+	"--type":             {},
+	"--target":           {},
+	"--target-action":    {},
+	"--target-exclusive": {},
+	"--target-timeline":  {},
+	"--set":              {},
+	"--pg1-path":         {},
+}
+
+func ValidateRestoreExtraArgs(args []string) error {
+	for _, arg := range args {
+		name := restoreExtraArgName(arg)
+		if _, blocked := blockedRestoreExtraArgs[name]; blocked {
+			return fmt.Errorf("extra restore arg %q conflicts with pig restore flags; use pig's restore target/lifecycle flags instead", arg)
+		}
+	}
+	return nil
+}
+
+func checkPatroniManagedRestore(cfg *Config, opts *RestoreOptions) error {
+	return patroniManagedRestoreError(cfg, opts, postgres.PatroniActive())
+}
+
+func patroniManagedRestoreError(cfg *Config, opts *RestoreOptions, patroniActive bool) error {
+	if !patroniActive {
+		return nil
+	}
+	optDataDir := ""
+	if opts != nil {
+		optDataDir = opts.DataDir
+	}
+	targetDir := getDataDir(cfg, optDataDir)
+	managedDir := getDataDir(cfg, "")
+	if filepath.Clean(targetDir) != filepath.Clean(managedDir) {
+		return nil
+	}
+	return fmt.Errorf("cannot run pb restore while Patroni is active for managed PGDATA %s; use pig pitr for Patroni-aware restore orchestration", targetDir)
+}
+
+func restoreExtraArgName(arg string) string {
+	if i := strings.Index(arg, "="); i >= 0 {
+		return arg[:i]
+	}
+	return arg
 }
 
 // normalizeTime normalizes time input for pgBackRest.
@@ -308,26 +399,11 @@ func ResolveDataDir(cfg *Config, optDataDir string) string {
 	return getDataDir(cfg, optDataDir)
 }
 
-// ConfirmDestructive requires an explicit "yes" before destructive actions.
+// ConfirmDestructive requires explicit confirmation before destructive actions.
+// Deprecated: thin alias of utils.Confirm (B38: unified y/yes grammar); call
+// utils.Confirm directly in new code.
 func ConfirmDestructive(warning, action string) error {
-	fmt.Fprintf(os.Stderr, "\n%sWARNING: %s%s\n", utils.ColorYellow, warning, utils.ColorReset)
-	fmt.Fprintf(os.Stderr, "Type %syes%s to start %s: ", utils.ColorBold, utils.ColorReset, action)
-
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
-	if err != nil && len(input) == 0 {
-		return fmt.Errorf("%s cancelled: %w", action, err)
-	}
-	if !isDestructiveConfirmationAccepted(input) {
-		fmt.Fprintf(os.Stderr, "\n%s cancelled.\n", action)
-		return fmt.Errorf("%s cancelled by user", action)
-	}
-	fmt.Fprintln(os.Stderr)
-	return nil
-}
-
-func isDestructiveConfirmationAccepted(input string) bool {
-	return strings.EqualFold(strings.TrimSpace(input), "yes")
+	return utils.Confirm(warning, action)
 }
 
 // ConfirmWithCountdown shows a warning and countdown, returns error if cancelled.

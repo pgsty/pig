@@ -84,8 +84,8 @@ func checkPrimaryRole() error {
 
 // ExpireOptions holds options for expire command.
 type ExpireOptions struct {
-	Set    string // Specific backup set to delete
-	Plan bool // Preview cleanup plan without deleting backups
+	Set  string // Specific backup set to delete
+	Plan bool   // Preview cleanup plan without deleting backups
 }
 
 // Expire cleans up expired backups according to retention policy.

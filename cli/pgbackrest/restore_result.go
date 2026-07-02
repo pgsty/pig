@@ -7,6 +7,7 @@ package pgbackrest
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"pig/cli/postgres"
@@ -16,6 +17,24 @@ import (
 
 	"github.com/sirupsen/logrus"
 )
+
+// IsBackupNotFoundError reports whether a pgBackRest error message indicates the
+// requested backup set does not exist. Requires backup-specific compound phrases:
+// generic substrings like "not found" alone (e.g. "pgbackrest not found",
+// "path '/x' does not exist") must NOT classify as backup-not-found, so that
+// automation branching on the error code is not sent chasing the wrong cause.
+func IsBackupNotFoundError(message string) bool {
+	msg := strings.ToLower(message)
+	if strings.Contains(msg, "no prior backup exists") ||
+		strings.Contains(msg, "unable to find backup") ||
+		strings.Contains(msg, "no backup set") {
+		return true
+	}
+	return strings.Contains(msg, "backup set") &&
+		(strings.Contains(msg, "not found") ||
+			strings.Contains(msg, "does not exist") ||
+			strings.Contains(msg, "is not valid"))
+}
 
 // PbRestoreResultData contains restore operation result in an agent-friendly format.
 // This struct is used as the Data field in output.Result for structured output of pb restore.
@@ -66,6 +85,10 @@ func RestoreResult(cfg *Config, opts *RestoreOptions) *output.Result {
 	// Get data directory
 	dataDir := getDataDir(effCfg, opts.DataDir)
 
+	if err := checkPatroniManagedRestore(effCfg, opts); err != nil {
+		return patroniManagedRestoreResult(err)
+	}
+
 	// Check PostgreSQL is stopped
 	if err := checkPostgresStoppedResult(effCfg, opts.DataDir); err != nil {
 		return err
@@ -88,7 +111,7 @@ func RestoreResult(cfg *Config, opts *RestoreOptions) *output.Result {
 		errMsg := combineCommandError(restoreOutput, restoreErr)
 
 		// Check for specific error conditions
-		if containsAny(errMsg, "backup set", "not found", "does not exist", "unable to find backup") {
+		if IsBackupNotFoundError(errMsg) {
 			return output.Fail(output.CodePbBackupNotFound, "Specified backup not found").
 				WithDetail(errMsg)
 		}
@@ -130,6 +153,14 @@ func determineTargetAction(opts *RestoreOptions) string {
 		return ""
 	}
 	return action
+}
+
+func patroniManagedRestoreResult(err error) *output.Result {
+	if err == nil {
+		return nil
+	}
+	return output.Fail(output.CodePbPatroniActive, "Patroni is active for managed PGDATA").
+		WithDetail(err.Error())
 }
 
 // checkPostgresStoppedResult checks if PostgreSQL is stopped and returns a Result on error.

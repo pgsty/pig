@@ -1,8 +1,10 @@
 package pgbackrest
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +90,31 @@ func TestFindLatestLogUsesModificationTime(t *testing.T) {
 	}
 	if got != "aa-new.log" {
 		t.Fatalf("findLatestLog = %q, want newest by mtime", got)
+	}
+}
+
+func TestGetLogFilesPrivilegedFallbackKeepsLsTimeOrder(t *testing.T) {
+	origReadDir := logReadDir
+	origOutput := logDBSUCommandStdout
+	defer func() {
+		logReadDir = origReadDir
+		logDBSUCommandStdout = origOutput
+	}()
+
+	logReadDir = func(string) ([]os.DirEntry, error) {
+		return nil, fs.ErrPermission
+	}
+	logDBSUCommandStdout = func(_ string, _ []string) (string, error) {
+		return "newest.log\nolder.log\nignored.txt\noldest.log\n", nil
+	}
+
+	got, err := getLogFiles("/pg/log/pgbackrest", "postgres")
+	if err != nil {
+		t.Fatalf("getLogFiles returned error: %v", err)
+	}
+	want := []string{"newest.log", "older.log", "oldest.log"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("getLogFiles fallback = %v, want ls -1t order %v", got, want)
 	}
 }
 

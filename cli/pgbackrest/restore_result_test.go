@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"pig/internal/output"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -233,6 +235,91 @@ func TestDetermineTargetType(t *testing.T) {
 				t.Errorf("determineTargetType() = %q, want %q", got, tt.wantType)
 			}
 		})
+	}
+}
+
+func TestValidateRestoreOptionsRejectsInvalidTime(t *testing.T) {
+	tests := []string{
+		"2025-13-01",
+		"2025-01-01 12:00:00junk",
+		"25:00:00",
+	}
+
+	for _, value := range tests {
+		t.Run(value, func(t *testing.T) {
+			err := ValidateRestoreOptions(&RestoreOptions{Time: value})
+			if err == nil {
+				t.Fatalf("ValidateRestoreOptions should reject invalid --time %q", value)
+			}
+			if !strings.Contains(err.Error(), "invalid time format") {
+				t.Fatalf("error should mention invalid time format, got %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateRestoreOptionsRejectsTargetExtraArgs(t *testing.T) {
+	tests := [][]string{
+		{"--type=time"},
+		{"--target", "2025-01-01 00:00:00+08"},
+		{"--target-action=promote"},
+		{"--target-timeline", "latest"},
+		{"--pg1-path=/tmp/restore"},
+		{"--set=20250101-010101F"},
+	}
+
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			err := ValidateRestoreOptions(&RestoreOptions{Default: true, ExtraArgs: args})
+			if err == nil {
+				t.Fatalf("ValidateRestoreOptions should reject conflicting extra args %v", args)
+			}
+			if !strings.Contains(err.Error(), "conflicts with pig restore flags") {
+				t.Fatalf("error should explain conflicting extra args, got %v", err)
+			}
+		})
+	}
+}
+
+func TestPatroniManagedRestoreErrorRejectsActiveManagedDataDir(t *testing.T) {
+	t.Setenv("PGDATA", "")
+
+	err := patroniManagedRestoreError(DefaultConfig(), &RestoreOptions{Default: true}, true)
+	if err == nil {
+		t.Fatal("active Patroni should block pb restore for managed PGDATA")
+	}
+	for _, want := range []string{"Patroni", "/pg/data", "pig pitr"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q should contain %q", err.Error(), want)
+		}
+	}
+}
+
+func TestPatroniManagedRestoreErrorAllowsInactiveOrCustomDataDir(t *testing.T) {
+	t.Setenv("PGDATA", "")
+
+	if err := patroniManagedRestoreError(DefaultConfig(), &RestoreOptions{Default: true}, false); err != nil {
+		t.Fatalf("inactive Patroni should not block managed restore: %v", err)
+	}
+	if err := patroniManagedRestoreError(DefaultConfig(), &RestoreOptions{Default: true, DataDir: "/tmp/pig-restore"}, true); err != nil {
+		t.Fatalf("active Patroni should not block custom restore target: %v", err)
+	}
+}
+
+func TestPatroniManagedRestoreResultUsesStateCode(t *testing.T) {
+	err := patroniManagedRestoreError(DefaultConfig(), &RestoreOptions{Default: true}, true)
+	result := patroniManagedRestoreResult(err)
+	if result == nil {
+		t.Fatal("patroniManagedRestoreResult returned nil")
+	}
+	if result.Success {
+		t.Fatalf("Patroni restore guard result should fail: %+v", result)
+	}
+	if result.Code != output.CodePbPatroniActive {
+		t.Fatalf("result code = %d, want %d", result.Code, output.CodePbPatroniActive)
+	}
+	if !strings.Contains(result.Detail, "pig pitr") {
+		t.Fatalf("result detail should point to pig pitr, got %q", result.Detail)
 	}
 }
 
@@ -481,29 +568,6 @@ func TestPrintPostRestoreHintsManualTargetSuggestsPromote(t *testing.T) {
 	}
 }
 
-func TestDestructiveConfirmationRequiresExplicitYes(t *testing.T) {
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{input: "yes", want: true},
-		{input: "YES", want: true},
-		{input: " yes \n", want: true},
-		{input: "", want: false},
-		{input: "y", want: false},
-		{input: "restore", want: false},
-		{input: "no", want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			if got := isDestructiveConfirmationAccepted(tt.input); got != tt.want {
-				t.Fatalf("isDestructiveConfirmationAccepted(%q) = %v, want %v", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 func capturePgBackRestStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	oldStderr := os.Stderr
@@ -672,5 +736,33 @@ func TestPbRestoreResultData_BooleanFields(t *testing.T) {
 	}
 	if !containsStr(jsonStr, `"promote":true`) {
 		t.Errorf("JSON should contain promote:true, got: %s", jsonStr)
+	}
+}
+
+// TestIsBackupNotFoundError guards the compound classifier: generic substrings
+// like "not found" alone must not classify as backup-not-found (they previously
+// misrouted automation via OR-semantics containsAny).
+func TestIsBackupNotFoundError(t *testing.T) {
+	tests := []struct {
+		message string
+		want    bool
+	}{
+		{"ERROR: [037]: no prior backup exists", true},
+		{"unable to find backup set for stanza", true},
+		{"no backup set found to restore", true},
+		{"backup set 'foo' not found", true},
+		{"backup set 19000101-000000F does not exist", true},
+		{"backup set 19000101-000000F is not valid", true},
+		// Former false positives under OR-semantics:
+		{"pgbackrest not found (install with: pig ext add pgbackrest)", false},
+		{"path '/nonexistent' does not exist", false},
+		{"config file not found", false},
+		{"unable to find primary cluster", false},
+		{"restore process failed with timeout", false},
+	}
+	for _, tt := range tests {
+		if got := IsBackupNotFoundError(tt.message); got != tt.want {
+			t.Errorf("IsBackupNotFoundError(%q) = %v, want %v", tt.message, got, tt.want)
+		}
 	}
 }
