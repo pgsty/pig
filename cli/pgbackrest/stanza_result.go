@@ -6,6 +6,7 @@ pb stanza structured output result and DTO.
 package pgbackrest
 
 import (
+	"errors"
 	"strings"
 
 	"pig/internal/output"
@@ -126,6 +127,9 @@ func DeleteResult(cfg *Config, opts *DeleteOptions) *output.Result {
 	if opts == nil {
 		opts = &DeleteOptions{}
 	}
+	if stanzas, err := RequireExplicitStanza(cfg); err != nil {
+		return AmbiguousStanzaResult(cfg, stanzas, err)
+	}
 	if !opts.Yes {
 		return output.Fail(output.CodePbConfirmationRequired, "Stanza delete requires --yes flag").
 			WithDetail("Use --yes to confirm deletion of stanza and ALL its backups. This operation is IRREVERSIBLE.")
@@ -164,18 +168,32 @@ func DeleteResult(cfg *Config, opts *DeleteOptions) *output.Result {
 	return output.OK("Stanza deleted successfully", data)
 }
 
+// pbConfigErrorResult classifies configuration-resolution failures via the
+// package sentinel errors (errors.Is) instead of matching message substrings.
 func pbConfigErrorResult(err error, fallbackCode int, fallbackMessage string) *output.Result {
-	errMsg := err.Error()
-	if containsAny(errMsg, "config file not found", "config file not accessible") {
-		return output.Fail(output.CodePbConfigNotFound, "pgBackRest configuration not found").
-			WithDetail(errMsg)
+	if err == nil {
+		return output.Fail(fallbackCode, fallbackMessage)
 	}
-	if containsAny(errMsg, "no stanza found", "cannot detect stanza") {
+	if errors.Is(err, ErrConfigNotFound) {
+		return output.Fail(output.CodePbConfigNotFound, "pgBackRest configuration not found").
+			WithDetail(err.Error())
+	}
+	if errors.Is(err, ErrStanzaNotFound) {
 		return output.Fail(output.CodePbStanzaNotFound, "pgBackRest stanza not found").
-			WithDetail(errMsg)
+			WithDetail(err.Error())
 	}
 	return output.Fail(fallbackCode, fallbackMessage).
-		WithDetail(errMsg)
+		WithDetail(err.Error())
+}
+
+// AmbiguousStanzaResult refuses stanza deletion when multiple stanzas are
+// configured and none was named explicitly, listing per-stanza plan commands
+// (with the caller's --config/--repo/--dbsu preserved) so agents pick a
+// target deliberately instead of replaying an auto-detected one.
+func AmbiguousStanzaResult(cfg *Config, stanzas []string, err error) *output.Result {
+	return output.Fail(output.CodePbAmbiguousStanza, "Multiple stanzas configured, explicit --stanza required").
+		WithDetail(err.Error()).
+		WithNextActions(deletePlanPreviewActions(cfg, stanzas)...)
 }
 
 func isStanzaExistsMessage(message string) bool {

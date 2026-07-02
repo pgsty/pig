@@ -7,6 +7,7 @@ package pgbackrest
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -52,28 +53,35 @@ type PbRestoreResultData struct {
 	DurationSeconds int64  `json:"duration_seconds" yaml:"duration_seconds"`                   // Duration in seconds
 }
 
+// restoredBackupSetRegex extracts the backup set label pgBackRest actually
+// selected from restore INFO output (e.g. "restore backup set 20250101-120000F"
+// or an incr/diff label like "20250101-120000F_20250102-130000I").
+var restoredBackupSetRegex = regexp.MustCompile(`(?i)restore backup set\s+([0-9]{8}-[0-9]{6}[FDI](?:_[0-9]{8}-[0-9]{6}[FDI])?)`)
+
 // RestoreResult creates a structured result for pb restore command.
 // It validates preconditions, executes the restore, and returns the result.
 // Returns nil-safe Result on all paths.
+//
+// IMPORTANT: In structured output mode, --yes is required as an explicit
+// confirmation (B05): structured callers never get an interactive prompt, so
+// this is re-checked here even though the cmd layer gates earlier.
 func RestoreResult(cfg *Config, opts *RestoreOptions) *output.Result {
+	if opts == nil {
+		opts = &RestoreOptions{}
+	}
+	if !opts.Yes {
+		return output.Fail(output.CodePbConfirmationRequired, "Restore requires --yes flag").
+			WithDetail("Use --yes to confirm overwriting the target data directory with the restored backup.")
+	}
+
 	// Get effective config (validates config file exists, auto-detects stanza)
 	effCfg, err := GetEffectiveConfig(cfg)
 	if err != nil {
-		errMsg := err.Error()
-		if containsAny(errMsg, "config file not found", "config file not accessible") {
-			return output.Fail(output.CodePbConfigNotFound, "pgBackRest configuration not found").
-				WithDetail(errMsg)
-		}
-		if containsAny(errMsg, "no stanza found", "cannot detect stanza") {
-			return output.Fail(output.CodePbStanzaNotFound, "pgBackRest stanza not found").
-				WithDetail(errMsg)
-		}
-		return output.Fail(output.CodePbRestoreFailed, "Failed to get pgBackRest configuration").
-			WithDetail(errMsg)
+		return pbConfigErrorResult(err, output.CodePbRestoreFailed, "Failed to get pgBackRest configuration")
 	}
 
 	// Validate restore options
-	if err := validateRestoreOptions(opts); err != nil {
+	if err := ValidateRestoreOptions(opts); err != nil {
 		return output.Fail(output.CodePbInvalidRestoreParams, "Invalid restore parameters").
 			WithDetail(err.Error())
 	}
@@ -93,8 +101,11 @@ func RestoreResult(cfg *Config, opts *RestoreOptions) *output.Result {
 		return err
 	}
 
-	// Build restore arguments
-	args := buildRestoreArgs(effCfg, opts, normalizedTime)
+	// Build restore arguments. Force INFO console logging (unless the caller
+	// overrides it) so the captured output contains the line naming the backup
+	// set pgBackRest actually selected, regardless of the config file's
+	// console log level.
+	args := ensureConsoleInfoLog(buildRestoreArgs(effCfg, opts, normalizedTime))
 
 	// Record start time
 	startTime := time.Now()
@@ -127,11 +138,18 @@ func RestoreResult(cfg *Config, opts *RestoreOptions) *output.Result {
 		logrus.Debugf("pgbackrest restore output: %s", restoreOutput)
 	}
 
+	// Report the backup set pgBackRest actually selected when it can be
+	// parsed from the output; fall back to the user-requested --set.
+	restoredBackup := parseRestoredBackupSet(restoreOutput)
+	if restoredBackup == "" {
+		restoredBackup = opts.Set
+	}
+
 	// Build result data
 	data := &PbRestoreResultData{
 		Stanza:          effCfg.Stanza,
 		DataDir:         dataDir,
-		RestoredBackup:  opts.Set,
+		RestoredBackup:  restoredBackup,
 		TargetType:      determineTargetType(opts),
 		TargetValue:     determineTargetValue(opts, normalizedTime),
 		TargetAction:    determineTargetAction(opts),
@@ -142,7 +160,61 @@ func RestoreResult(cfg *Config, opts *RestoreOptions) *output.Result {
 		DurationSeconds: durationSeconds,
 	}
 
-	return output.OK("Restore completed successfully", data)
+	return output.OK("Restore completed successfully", data).
+		WithNextActions(restoreNextActions(effCfg, opts)...)
+}
+
+// ensureConsoleInfoLog appends --log-level-console=info unless the caller
+// already set a console log level via extra args (exact option match, so an
+// unrelated same-prefix option can never suppress the injection).
+func ensureConsoleInfoLog(args []string) []string {
+	for _, arg := range args {
+		if arg == "--log-level-console" || strings.HasPrefix(arg, "--log-level-console=") {
+			return args
+		}
+	}
+	return append(args, "--log-level-console=info")
+}
+
+// parseRestoredBackupSet extracts the selected backup set label from restore output.
+func parseRestoredBackupSet(output string) string {
+	matches := restoredBackupSetRegex.FindStringSubmatch(output)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
+}
+
+// restoreNextActions returns the structured counterpart of the text-mode
+// post-restore hints (printPostRestoreHints): start, verify, optionally
+// promote, and re-create the stanza.
+func restoreNextActions(cfg *Config, opts *RestoreOptions) []output.NextAction {
+	dataDir := getDataDir(cfg, opts.DataDir)
+	action := determineTargetAction(opts)
+	needsManualPromote := action != "promote" && !opts.Default
+	isCustomDataDir := opts.DataDir != "" && opts.DataDir != "/pg/data"
+
+	if isCustomDataDir {
+		actions := []output.NextAction{
+			{Command: fmt.Sprintf("pg_ctl -D %s start", dataDir), Reason: "start PostgreSQL with the restored data directory", Required: true},
+		}
+		if needsManualPromote {
+			actions = append(actions, output.NextAction{
+				Command: fmt.Sprintf("pg_ctl -D %s promote", dataDir), Reason: "promote to primary once the restored state is verified", Required: false})
+		}
+		return actions
+	}
+
+	actions := []output.NextAction{
+		{Command: "pig pg start", Reason: "start PostgreSQL on the restored data directory", Required: true},
+		{Command: "pig pg ps", Reason: "verify PostgreSQL is running and data is intact", Required: false},
+	}
+	if needsManualPromote {
+		actions = append(actions, output.NextAction{
+			Command: "pig pg promote", Reason: "promote to primary once the restored state is verified", Required: false})
+	}
+	return append(actions, output.NextAction{
+		Command: "pig pb create", Reason: "re-create the pgBackRest stanza if needed", Required: false})
 }
 
 func determineTargetAction(opts *RestoreOptions) string {

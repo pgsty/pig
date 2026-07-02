@@ -39,7 +39,7 @@ func Backup(cfg *Config, opts *BackupOptions) error {
 
 	// Check primary role (unless --force)
 	if !opts.Force {
-		if err := checkPrimaryRole(); err != nil {
+		if err := checkPrimaryRole(effCfg); err != nil {
 			return err
 		}
 	}
@@ -53,11 +53,29 @@ func Backup(cfg *Config, opts *BackupOptions) error {
 	return RunPgBackRest(effCfg, "backup", args, true)
 }
 
-// checkPrimaryRole verifies current instance is primary
-func checkPrimaryRole() error {
-	// Use postgres package role detection
+// backupRolePostgresConfig derives the postgres role-detection config from the
+// pgBackRest stanza: pg1-path when configured, and the pb-level DBSU. This
+// keeps the role probe pointed at the instance the backup actually targets on
+// hosts with non-default data directories.
+// NOTE: pg1-port is not wired through (postgres.Config has no port field);
+// SQL-based detection still probes the default port.
+func backupRolePostgresConfig(cfg *Config) *postgres.Config {
 	pgConfig := postgres.DefaultConfig()
-	roleResult, err := postgres.DetectRole(pgConfig, &postgres.RoleOptions{
+	if cfg == nil {
+		return pgConfig
+	}
+	if cfg.DbSU != "" {
+		pgConfig.DbSU = cfg.DbSU
+	}
+	if pgPath := GetPgPathFromConfig(cfg.ConfigPath, cfg.Stanza, cfg.DbSU); pgPath != "" {
+		pgConfig.PgData = pgPath
+	}
+	return pgConfig
+}
+
+// checkPrimaryRole verifies the instance behind the stanza is primary
+func checkPrimaryRole(cfg *Config) error {
+	roleResult, err := postgres.DetectRole(backupRolePostgresConfig(cfg), &postgres.RoleOptions{
 		Verbose: false,
 	})
 

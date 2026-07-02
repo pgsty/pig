@@ -16,7 +16,7 @@ Usage: pig pb <command>
 
 Info Commands:
   pig pb info                      show backup info
-  pig pb ls                        list backups (alias for info)
+  pig pb ls                        list backups
   pig pb ls repo                   list configured repos
   pig pb ls stanza                 list all stanzas
 
@@ -31,7 +31,7 @@ Restore Commands (low-level primitive):
   pig pb restore -I                restore to backup consistency point
   pig pb restore -t <time>         restore to specific time
   pig pb restore --name <name>     restore to named restore point
-  pig pb restore -b <set>          restore from specific backup set
+  pig pb restore -b <set> -d       restore specific backup set (requires a target)
 
 Stanza Management:
   pig pb create                    create stanza (first-time setup)
@@ -56,7 +56,7 @@ Log Commands:
 
 `pig pb` is the pgBackRest primitive layer. It manages repository, stanza, backup, expire, and restore operations through pgBackRest only. `pb restore` restores files and recovery targets; it does not stop Patroni, stop PostgreSQL, start PostgreSQL, promote, rejoin HA, or verify cluster health. Use `pig pitr` for managed recovery orchestration.
 
-High-risk pgBackRest actions expose a structured `state -> plan -> precheck -> execute -> verify -> result -> next_actions` contract. In JSON/YAML mode, destructive execution requires explicit `--yes`; missing confirmation returns a structured parameter error with `next_actions` instead of prompting. Plan output is side-effect-free and may include `boundary`, `confirmation`, `preconditions`, `verifications`, and `next_actions` in addition to the existing plan fields.
+High-risk pgBackRest actions expose a structured `state -> plan -> precheck -> execute -> verify -> result -> next_actions` contract. In JSON/YAML mode, destructive execution requires explicit `--yes`; missing confirmation returns a structured parameter error with `next_actions` instead of prompting. Confirmation errors and plans carry concrete, replayable commands that preserve `--stanza/--config/--repo/--dbsu` (the stanza is pinned from auto-detection when unspecified). Plan output never deletes or mutates managed data, and may include `boundary`, `confirmation`, `preconditions`, `verifications`, `next_actions`, and `dry_run_output` in addition to the existing plan fields. `dry_run_output` (currently on `pb expire --plan`) embeds a non-deleting native `pgbackrest expire --dry-run` preview, which does execute pgBackRest as DBSU (reads the repository and may write pgBackRest logs/locks). Plans resolve the effective config (read-only) so the displayed stanza and data directory match what execution would use; unresolvable configs are marked with a `config resolution: unresolved` precondition. Replayable commands quote arguments with POSIX single-quote escaping and canonicalize `--time` to its normalized, timezone-completed form so replays are deterministic. Successful `pb restore` results include `next_actions` mirroring the text-mode post-restore hints.
 
 
 ## Command Overview
@@ -174,8 +174,10 @@ pig pb info -r 2                     # View repo2 backup info
 Show detailed backup repository info including all backup sets and WAL archive status.
 
 ```bash
-pig pb info                          # Show all backup info
-pig pb info -o json                  # JSON format output
+pig pb info                          # Show all backup info (parsed view)
+pig pb info -o json                  # Structured output (Result wrapper, native JSON embedded)
+pig pb info -R                       # Raw pgbackrest text output
+pig pb info --raw --raw-output json  # Raw pgbackrest native JSON output
 pig pb info --set 20250101-120000F   # Show specific backup set details
 ```
 
@@ -183,9 +185,12 @@ pig pb info --set 20250101-120000F   # Show specific backup set details
 
 | Option | Short | Description |
 |:---|:---|:---|
-| `--output` | `-o` | Output format: text, json |
+| `--raw` | `-R` | Raw mode: pass through native pgbackrest output |
+| `--raw-output` | | Raw output format: text, json (only with `--raw`) |
 | `--set` | | Show specific backup set details |
 {.full-width}
+
+Structured output uses the global `-o/--output` flag (json/yaml/json-pretty): the Result envelope embeds pgBackRest's native info JSON in `data`. Raw mode bypasses the Result envelope and does not support YAML; invalid raw parameters return a structured `pb` parameter error in structured mode.
 
 
 ### pb ls
@@ -243,7 +248,7 @@ pig pb backup --force                # Skip primary role check
 
 **Primary Check:**
 
-Before backup, command auto-checks if current instance is primary. If replica, command exits with error. Use `--force` to skip this check.
+Before backup, command auto-checks if the instance is primary. If replica, command exits with error. Use `--force` to skip this check. The role probe targets the stanza's `pg1-path` (and the configured `--dbsu`) rather than the ambient default instance, so the check and the backup target cannot diverge on hosts with non-default data directories.
 
 
 ### pb expire
@@ -267,6 +272,8 @@ pig pb expire --plan                 # Preview expire plan
 {.full-width}
 
 **Safety:** `pb expire --set` can delete a specific backup set. Text mode prompts for confirmation unless `--yes` is provided. JSON/YAML mode requires `--yes`; otherwise it returns a structured confirmation-required error with a `--plan` next action.
+
+**Plan semantics:** `--plan` in text mode executes the native `pgbackrest expire --dry-run` directly. In structured mode it renders a Plan whose `dry_run_output` field embeds the same native dry-run output (when pgbackrest is available), so agents see the real expiration scope; a `dry run: unavailable` verification is reported otherwise.
 
 **Retention Policy:**
 
@@ -330,20 +337,24 @@ pig pb restore -y                    # Skip confirmation prompt
 | `--target-action` | | Action at target: `pause`, `promote`, or `shutdown` |
 | `--target-timeline` | `-T` | Timeline: `latest`, `current`, integer, or `0xHEX` |
 | `--yes` | `-y` | Skip confirmation prompt |
+| `--plan` | | Preview restore plan without executing |
 {.full-width}
 
-Raw pgBackRest restore arguments must be placed after `--`. Pig rejects passthrough arguments that override restore target or lifecycle flags, including `--type`, `--target`, `--target-action`, `--target-exclusive`, `--target-timeline`, `--set`, and `--pg1-path`; use Pig's first-class flags instead.
+Raw pgBackRest restore arguments must be placed after `--`; stray positionals before the separator are rejected. Pig rejects passthrough arguments that override restore target, lifecycle, or selection flags, including `--type`, `--target`, `--target-action`, `--target-exclusive`, `--target-timeline`, `--set`, `--recovery-option`, every spelling of the data directory option (`--pg-path`, `--pgN-path`, deprecated `--db[N]-path`), the **entire** repository option family (`--repo[N]-*`: path, host, type, s3/gcs/azure/sftp, cipher, ...), and config/selection redirection (`--stanza`, `--config`, `--config-path`, `--config-include-path`, `--repo`); repository identity comes from the config file plus Pig's `-r`/`-c` flags only. Relocation escape hatches (`--tablespace-map`, `--link-map`, `--link-all`) remain allowed: they neither move the declared PGDATA nor change the backup source.
 
 **Time Formats:**
 
-Supports multiple time format inputs with strict validation and timezone auto-completion (including non-integer-hour zones like +05:30):
+Supports multiple time format inputs with strict validation and timezone auto-completion (including non-integer-hour zones like +05:30). Every timezone-less input gets the operator's local offset appended, so the recovery point never silently shifts to the server timezone:
 
 | Format | Example | Description |
 |:---|:---|:---|
 | Full format | `2025-01-01 12:00:00+08` | Complete timestamp with timezone |
+| Datetime, no timezone | `2025-01-01 12:00:00` | Local timezone offset appended (`T` separator also accepted) |
 | Date only | `2025-01-01` | Auto-completes to 00:00:00 that day (local timezone) |
 | Time only | `12:00:00` | Auto-completes to today (local timezone) |
 {.full-width}
+
+Every accepted form is canonicalized to the space-separated `YYYY-MM-DD HH:MM:SS±HH[:MM]` spelling pgBackRest documents for `--target`: the `T` separator and `Z`/`±HHMM` offset spellings are rewritten (input offset preserved), because pgBackRest parses the value itself for backup-set selection and rejects non-canonical forms with `[029] time format must be ...`.
 
 **Restore Flow:**
 
@@ -427,7 +438,11 @@ pig pb delete --plan                 # Preview stanza deletion plan
 
 **Warning:** This is a **destructive and irreversible** operation! All backups will be permanently deleted.
 
-Safety mechanism: text mode prompts for typed `y`/`yes` confirmation unless `--yes` is provided (EOF aborts). JSON/YAML mode never prompts; without `--yes` it returns a structured confirmation-required error with `--yes`/`--plan` next actions.
+Safety mechanism: text mode prompts for typed `y`/`yes` confirmation unless `--yes` is provided (EOF aborts). JSON/YAML mode never prompts; without `--yes` it returns a structured confirmation-required error with replayable `--yes`/`--plan` next actions.
+
+**Multi-stanza guard:** when the config file defines more than one stanza and `--stanza` was not given, `pb delete` refuses in all modes (`CodePbAmbiguousStanza`) and lists per-stanza `--plan` preview commands — auto-detection never selects a deletion target. The `--plan` output marks stanza selection as `blocked` in this case.
+
+**Native `--force`:** pig always passes pgBackRest's native `--force` to `stanza-delete`, replacing the native stop-first interlock with pig's own `--yes` gate. This keeps `pig pb delete --yes` working while PostgreSQL is stopped without requiring a prior `pgbackrest stop`.
 
 
 ## Control Commands
@@ -550,10 +565,11 @@ For full `pgbackrest` functionality, use `pgbackrest` command directly.
 
 **Security Considerations:**
 
-- `pb delete` prompts for interactive `y`/`yes` confirmation unless `--yes` is given
+- `pb delete` prompts for interactive `y`/`yes` confirmation unless `--yes` is given, and refuses without explicit `--stanza` when multiple stanzas are configured
 - `pb expire --set` requires confirmation or `--yes`
-- `pb restore` requires an explicit recovery target, validates `--time`, and requires typed `yes` confirmation unless `--yes` is used
+- `pb restore` requires an explicit recovery target, validates `--time`, and requires typed `yes` confirmation unless `--yes` is used; the structured result builder re-checks `--yes` independently of the cmd-layer gate
 - `pb backup` checks primary role by default, prevents running on replica
+- Restore passthrough (`-- args`) rejects target/lifecycle/selection overrides and stray positionals before the `--` separator
 - Log command filename parameter filters paths to prevent path traversal attacks
 
 **Platform Support:**

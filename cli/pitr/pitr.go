@@ -140,7 +140,7 @@ func Execute(opts *Options) error {
 
 	// Confirm before destructive restore (unless --yes)
 	if !opts.Yes {
-		if err := pgbackrest.ConfirmDestructive("This will overwrite the current database!", "PITR"); err != nil {
+		if err := utils.Confirm("This will overwrite the current database!", "PITR"); err != nil {
 			return &utils.ExitCodeError{Code: output.ExitCode(output.CodePITRInvalidArgs), Err: &PITRError{Code: output.CodePITRInvalidArgs, Err: err}}
 		}
 	}
@@ -202,7 +202,7 @@ func executeResult(opts *Options) *output.Result {
 
 	// Confirm before destructive restore (unless --yes)
 	if !opts.Yes {
-		if err := pgbackrest.ConfirmDestructive("This will overwrite the current database!", "PITR"); err != nil {
+		if err := utils.Confirm("This will overwrite the current database!", "PITR"); err != nil {
 			return output.Fail(output.CodePITRInvalidArgs, "pitr confirmation cancelled").WithDetail(err.Error())
 		}
 	}

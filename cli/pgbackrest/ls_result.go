@@ -76,17 +76,7 @@ func LsResult(cfg *Config, opts *LsOptions) *output.Result {
 func backupListResult(cfg *Config) *output.Result {
 	effCfg, err := GetEffectiveConfig(cfg)
 	if err != nil {
-		errMsg := err.Error()
-		if containsAny(errMsg, "config file not found", "config file not accessible") {
-			return output.Fail(output.CodePbConfigNotFound, "pgBackRest configuration not found").
-				WithDetail(errMsg)
-		}
-		if containsAny(errMsg, "no stanza found", "cannot detect stanza") {
-			return output.Fail(output.CodePbStanzaNotFound, "pgBackRest stanza not found").
-				WithDetail(errMsg)
-		}
-		return output.Fail(output.CodePbInfoFailed, "Failed to get pgBackRest configuration").
-			WithDetail(errMsg)
+		return pbConfigErrorResult(err, output.CodePbInfoFailed, "Failed to get pgBackRest configuration")
 	}
 
 	jsonOutput, err := RunPgBackRestOutput(effCfg, "info", []string{"--output=json", "--log-level-console=error"})
@@ -120,15 +110,7 @@ func backupListResult(cfg *Config) *output.Result {
 }
 
 func listErrorResult(err error) *output.Result {
-	if err == nil {
-		return output.Fail(output.CodePbInfoFailed, "pgBackRest list failed")
-	}
-	errMsg := err.Error()
-	if containsAny(errMsg, "config file not found", "config file not accessible", "cannot read config file") {
-		return output.Fail(output.CodePbConfigNotFound, "pgBackRest configuration not found").
-			WithDetail(errMsg)
-	}
-	return output.Fail(output.CodePbInfoFailed, "pgBackRest list failed").WithDetail(errMsg)
+	return pbConfigErrorResult(err, output.CodePbInfoFailed, "pgBackRest list failed")
 }
 
 func normalizeLsType(opts *LsOptions) (string, error) {
@@ -155,7 +137,7 @@ func loadRepoList(cfg *Config) ([]RepoListItem, error) {
 	}
 	content, err := readConfigFile(effCfg.ConfigPath, effCfg.DbSU)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read config file: %w", err)
+		return nil, fmt.Errorf("%w: cannot read config file: %v", ErrConfigNotFound, err)
 	}
 	return parseRepoConfigs(content)
 }
@@ -167,7 +149,7 @@ func loadStanzaList(cfg *Config) ([]StanzaListItem, error) {
 	}
 	content, err := readConfigFile(effCfg.ConfigPath, effCfg.DbSU)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read config file: %w", err)
+		return nil, fmt.Errorf("%w: cannot read config file: %v", ErrConfigNotFound, err)
 	}
 	return parseStanzaConfigs(content)
 }

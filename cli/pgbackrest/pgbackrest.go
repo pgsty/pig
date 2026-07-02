@@ -3,6 +3,7 @@ package pgbackrest
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,6 +19,15 @@ import (
 const (
 	DefaultConfigPath = "/etc/pgbackrest/pgbackrest.conf"
 	DefaultLogDir     = "/pg/log/pgbackrest"
+)
+
+// Sentinel errors for configuration resolution. Result builders classify with
+// errors.Is instead of matching error message substrings.
+var (
+	// ErrConfigNotFound marks a missing or unreadable pgBackRest config file.
+	ErrConfigNotFound = errors.New("pgBackRest config not found")
+	// ErrStanzaNotFound marks a config file that defines no stanza.
+	ErrStanzaNotFound = errors.New("pgBackRest stanza not found")
 )
 
 // Config holds pgBackRest configuration.
@@ -56,7 +66,7 @@ func GetStanza(configPath, dbsu string) (string, error) {
 		return "", err
 	}
 	if len(stanzas) == 0 {
-		return "", fmt.Errorf("no stanza found in config file")
+		return "", fmt.Errorf("%w: no stanza defined in %s", ErrStanzaNotFound, configPath)
 	}
 	if len(stanzas) > 1 {
 		logrus.Warnf("multiple stanzas found: %v, using first: %s", stanzas, stanzas[0])
@@ -70,7 +80,7 @@ func GetStanza(configPath, dbsu string) (string, error) {
 func ListStanzaNames(configPath, dbsu string) ([]string, error) {
 	content, err := readConfigFile(configPath, dbsu)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read config file: %w", err)
+		return nil, fmt.Errorf("%w: cannot read config file: %v", ErrConfigNotFound, err)
 	}
 
 	var stanzas []string
@@ -191,15 +201,41 @@ func checkConfigExists(configPath, dbsu string) error {
 		return nil
 	} else if !os.IsPermission(err) {
 		// Not a permission error - file doesn't exist
-		return fmt.Errorf("config file not found: %s", configPath)
+		return fmt.Errorf("%w: config file not found: %s", ErrConfigNotFound, configPath)
 	}
 
 	// Permission denied - try reading with DBSU to verify existence
 	_, err := readConfigFile(configPath, dbsu)
 	if err != nil {
-		return fmt.Errorf("config file not accessible: %s", configPath)
+		return fmt.Errorf("%w: config file not accessible: %s", ErrConfigNotFound, configPath)
 	}
 	return nil
+}
+
+// RequireExplicitStanza returns the configured stanza names and an error when
+// cfg does not name a stanza explicitly while the config file defines more
+// than one. Destructive stanza-scoped commands (pb delete) call this so
+// auto-detection can never silently pick the first stanza as a deletion
+// target. Config read failures return nil: they surface with a precise error
+// through the normal resolution flow instead.
+func RequireExplicitStanza(cfg *Config) ([]string, error) {
+	if cfg != nil && cfg.Stanza != "" {
+		return nil, nil
+	}
+	configPath := DefaultConfigPath
+	dbsu := ""
+	if cfg != nil {
+		if cfg.ConfigPath != "" {
+			configPath = cfg.ConfigPath
+		}
+		dbsu = cfg.DbSU
+	}
+	stanzas, err := ListStanzaNames(configPath, dbsu)
+	if err != nil || len(stanzas) <= 1 {
+		return nil, nil
+	}
+	return stanzas, fmt.Errorf("%d stanzas configured (%s): specify --stanza explicitly to select the deletion target",
+		len(stanzas), strings.Join(stanzas, ", "))
 }
 
 // buildPgBackRestArgs builds the argument list for pgbackrest command.

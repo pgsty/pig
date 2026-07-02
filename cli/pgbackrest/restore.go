@@ -45,7 +45,6 @@ var (
 	lsnRegex      = regexp.MustCompile(`^[0-9A-Fa-f]+/[0-9A-Fa-f]+$`)
 	dateOnlyRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	timeOnlyRegex = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}$`)
-	dateTimeRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}`)
 	timelineRegex = regexp.MustCompile(`^(latest|current|[1-9][0-9]*|0x[0-9A-Fa-f]+)$`)
 )
 
@@ -76,7 +75,7 @@ func Restore(cfg *Config, opts *RestoreOptions) error {
 
 	// Confirmation with signal handling
 	if !opts.Yes {
-		if err := ConfirmDestructive(
+		if err := utils.Confirm(
 			fmt.Sprintf("This will overwrite data in %s", getDataDir(effCfg, opts.DataDir)),
 			"restore",
 		); err != nil {
@@ -165,10 +164,6 @@ func ValidateRestoreOptions(opts *RestoreOptions) error {
 	return nil
 }
 
-func validateRestoreOptions(opts *RestoreOptions) error {
-	return ValidateRestoreOptions(opts)
-}
-
 func validateRestoreTime(value string) error {
 	if value == "" {
 		return nil
@@ -184,14 +179,34 @@ func isValidTimeFormat(t string) bool {
 	for _, layout := range []string{
 		"2006-01-02",
 		"15:04:05",
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05",
 	} {
 		if _, err := time.ParseInLocation(layout, t, time.Local); err == nil {
 			return true
 		}
 	}
-	for _, layout := range []string{
+	for _, layout := range noTZDatetimeLayouts {
+		if _, err := time.ParseInLocation(layout, t, time.Local); err == nil {
+			return true
+		}
+	}
+	for _, layout := range tzDatetimeLayouts {
+		if _, err := time.Parse(layout, t); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// Datetime layouts shared by validation (isValidTimeFormat) and
+// normalization (normalizeTime): every accepted input form must have a
+// canonicalization path, or validation would admit values that pgBackRest
+// rejects at execution time.
+var (
+	noTZDatetimeLayouts = []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+	}
+	tzDatetimeLayouts = []string{
 		"2006-01-02 15:04:05-07",
 		"2006-01-02 15:04:05-0700",
 		"2006-01-02 15:04:05-07:00",
@@ -204,13 +219,8 @@ func isValidTimeFormat(t string) bool {
 		"2006-01-02T15:04:05Z07",
 		"2006-01-02T15:04:05Z0700",
 		"2006-01-02T15:04:05Z07:00",
-	} {
-		if _, err := time.Parse(layout, t); err == nil {
-			return true
-		}
 	}
-	return false
-}
+)
 
 var blockedRestoreExtraArgs = map[string]struct{}{
 	"--type":             {},
@@ -219,13 +229,42 @@ var blockedRestoreExtraArgs = map[string]struct{}{
 	"--target-exclusive": {},
 	"--target-timeline":  {},
 	"--set":              {},
-	"--pg1-path":         {},
+	// pig owns target selection via -s/-c/-r: passthrough overrides would
+	// silently desync the stanza/config/repo reported in plans and results.
+	// --config-path/--config-include-path redirect config loading like
+	// --config does.
+	"--stanza":              {},
+	"--config":              {},
+	"--config-path":         {},
+	"--config-include-path": {},
+	"--repo":                {},
+	// --recovery-option can set recovery_target* GUCs, redefining the
+	// recovery target behind the declared plan; use pig's target flags.
+	"--recovery-option": {},
 }
+
+// blockedPgPathArgRegex catches every spelling of the restore data directory
+// option: canonical --pg-path, indexed --pgN-path, and the deprecated
+// --db[N]-path aliases. Overriding it via passthrough would desync the
+// data_dir reported by --plan and JSON results from the directory pgBackRest
+// actually overwrites.
+var blockedPgPathArgRegex = regexp.MustCompile(`^--(pg|db)\d*-path$`)
+
+// blockedRepoArgRegex blocks the ENTIRE --repo[N]-* option family. Any of
+// path/host*/type/s3-*/gcs-*/azure-*/sftp-*/cipher-* redefines where backups
+// come from (or how they are read), desyncing the repository the plan
+// reported; enumerating "dangerous" members is unwinnable whack-a-mole, so
+// the boundary is: repository identity comes from config plus pig's -r/-c
+// flags only. Deliberately allowed: --tablespace-map / --link-map /
+// --link-all (relocation escape hatches that neither move the declared
+// PGDATA nor change the backup source).
+var blockedRepoArgRegex = regexp.MustCompile(`^--repo\d*-`)
 
 func ValidateRestoreExtraArgs(args []string) error {
 	for _, arg := range args {
 		name := restoreExtraArgName(arg)
-		if _, blocked := blockedRestoreExtraArgs[name]; blocked {
+		_, blocked := blockedRestoreExtraArgs[name]
+		if blocked || blockedPgPathArgRegex.MatchString(name) || blockedRepoArgRegex.MatchString(name) {
 			return fmt.Errorf("extra restore arg %q conflicts with pig restore flags; use pig's restore target/lifecycle flags instead", arg)
 		}
 	}
@@ -259,24 +298,76 @@ func restoreExtraArgName(arg string) string {
 	return arg
 }
 
+// normalizeTimeLocation is the timezone used to complete timezone-less time
+// inputs. A package var so DST-sensitive tests can pin a specific zone.
+var normalizeTimeLocation = time.Local
+
+// localOffsetSuffix renders the timezone offset of t itself, so DST zones get
+// the offset in effect AT THE TARGET DATE (e.g. -05 for a January target even
+// when invoked during -04 summer time), not the offset of "now".
+func localOffsetSuffix(t time.Time) string {
+	_, offset := t.Zone()
+	return utils.FormatTimezoneOffset(offset)
+}
+
 // normalizeTime normalizes time input for pgBackRest.
-// - Date only -> adds 00:00:00 with current timezone
-// - Time only -> adds today's date
+//   - Date only -> adds 00:00:00 with local timezone
+//   - Time only -> adds today's date with local timezone
+//   - Datetime without timezone -> appends local timezone
+//   - Datetime with timezone -> canonical separator/offset spelling (input
+//     offset preserved, never shifted to local time)
+//
+// Every timezone-less input gets the operator's local offset (as of the
+// target date) appended; otherwise pgBackRest/PostgreSQL would interpret it
+// in the server timezone, silently shifting the recovery point when the two
+// differ. Every output is canonicalized to the space-separated
+// "YYYY-MM-DD HH:MM:SS±HH[:MM]" form pgBackRest documents for --target: it
+// parses the value itself for backup-set selection and rejects the T
+// separator and bare "Z"/"±HHMM" offset spellings ("[029] time format must
+// be ...", verified against pgBackRest 2.58).
 func normalizeTime(t string) string {
 	if t == "" {
 		return ""
 	}
-
-	tzOffset := utils.CurrentTimezoneOffset()
+	loc := normalizeTimeLocation
 
 	// Date only: 2025-01-01 -> 2025-01-01 00:00:00+TZ
 	if dateOnlyRegex.MatchString(t) {
-		return fmt.Sprintf("%s 00:00:00%s", t, tzOffset)
+		if parsed, err := time.ParseInLocation("2006-01-02", t, loc); err == nil {
+			return parsed.Format("2006-01-02 15:04:05") + localOffsetSuffix(parsed)
+		}
+		return t
 	}
 
-	// Time only: 12:00:00 -> today 12:00:00+TZ
+	// Time only: 12:00:00 -> today 12:00:00+TZ. The target date is constructed
+	// explicitly: parsing a bare clock time would land in year 0, where Go
+	// resolves LMT offsets (e.g. +08:05 for Asia/Shanghai).
 	if timeOnlyRegex.MatchString(t) {
-		return fmt.Sprintf("%s %s%s", utils.TodayDate(), t, tzOffset)
+		if parsed, err := time.ParseInLocation("15:04:05", t, loc); err == nil {
+			now := time.Now().In(loc)
+			target := time.Date(now.Year(), now.Month(), now.Day(),
+				parsed.Hour(), parsed.Minute(), parsed.Second(), 0, loc)
+			return target.Format("2006-01-02 15:04:05") + localOffsetSuffix(target)
+		}
+		return t
+	}
+
+	// Datetime without timezone: 2025-01-01 12:00:00 -> 2025-01-01 12:00:00+TZ
+	for _, layout := range noTZDatetimeLayouts {
+		if parsed, err := time.ParseInLocation(layout, t, loc); err == nil {
+			return parsed.Format("2006-01-02 15:04:05") + localOffsetSuffix(parsed)
+		}
+	}
+
+	// Datetime WITH timezone: canonicalize into the documented space-separated
+	// "YYYY-MM-DD HH:MM:SS±HH[:MM]" form, preserving the INPUT's offset (never
+	// shifted to local time). pgBackRest 2.x rejects the T separator and bare
+	// "Z"/"±HHMM" spellings with "[029] time format must be ...", so passing
+	// them through would fail at execution despite passing pig's validation.
+	for _, layout := range tzDatetimeLayouts {
+		if parsed, err := time.Parse(layout, t); err == nil {
+			return parsed.Format("2006-01-02 15:04:05") + localOffsetSuffix(parsed)
+		}
 	}
 
 	return t
@@ -386,13 +477,6 @@ func getDataDir(cfg *Config, optDataDir string) string {
 // ResolveDataDir returns the effective data directory for restore callers.
 func ResolveDataDir(cfg *Config, optDataDir string) string {
 	return getDataDir(cfg, optDataDir)
-}
-
-// ConfirmDestructive requires explicit confirmation before destructive actions.
-// Deprecated: thin alias of utils.Confirm (B38: unified y/yes grammar); call
-// utils.Confirm directly in new code.
-func ConfirmDestructive(warning, action string) error {
-	return utils.Confirm(warning, action)
 }
 
 // printRestorePlan displays the restore plan to stderr.

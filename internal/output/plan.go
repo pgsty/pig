@@ -60,6 +60,10 @@ type Plan struct {
 	Preconditions []Check      `json:"preconditions,omitempty" yaml:"preconditions,omitempty"`
 	Verifications []Check      `json:"verifications,omitempty" yaml:"verifications,omitempty"`
 	NextActions   []NextAction `json:"next_actions,omitempty" yaml:"next_actions,omitempty"`
+	// DryRunOutput carries native dry-run output when the underlying tool can
+	// preview the operation without side effects (e.g. pgbackrest expire
+	// --dry-run), so structured plans are as informative as text mode.
+	DryRunOutput string `json:"dry_run_output,omitempty" yaml:"dry_run_output,omitempty"`
 }
 
 // Text returns a human-readable text representation of the Plan.
@@ -142,6 +146,15 @@ func (p *Plan) Text() string {
 	}
 	writeChecks("Preconditions", p.Preconditions)
 	writeChecks("Verifications", p.Verifications)
+
+	if p.DryRunOutput != "" {
+		sb.WriteString("\nDry Run Output:\n")
+		for _, line := range strings.Split(strings.TrimRight(p.DryRunOutput, "\n"), "\n") {
+			sb.WriteString("  ")
+			sb.WriteString(line)
+			sb.WriteString("\n")
+		}
+	}
 
 	if len(p.NextActions) > 0 {
 		sb.WriteString("\nNext Actions:\n")

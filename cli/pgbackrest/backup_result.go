@@ -46,17 +46,7 @@ func BackupResult(cfg *Config, opts *BackupOptions) *output.Result {
 	// Get effective config (validates config file exists, auto-detects stanza)
 	effCfg, err := GetEffectiveConfig(cfg)
 	if err != nil {
-		errMsg := err.Error()
-		if containsAny(errMsg, "config file not found", "config file not accessible") {
-			return output.Fail(output.CodePbConfigNotFound, "pgBackRest configuration not found").
-				WithDetail(errMsg)
-		}
-		if containsAny(errMsg, "no stanza found", "cannot detect stanza") {
-			return output.Fail(output.CodePbStanzaNotFound, "pgBackRest stanza not found").
-				WithDetail(errMsg)
-		}
-		return output.Fail(output.CodePbBackupFailed, "Failed to get pgBackRest configuration").
-			WithDetail(errMsg)
+		return pbConfigErrorResult(err, output.CodePbBackupFailed, "Failed to get pgBackRest configuration")
 	}
 
 	// Validate backup type if specified
@@ -67,7 +57,7 @@ func BackupResult(cfg *Config, opts *BackupOptions) *output.Result {
 
 	// Check primary role (unless --force)
 	if !opts.Force {
-		roleErr := checkPrimaryRoleResult()
+		roleErr := checkPrimaryRoleResult(effCfg)
 		if roleErr != nil {
 			return roleErr
 		}
@@ -116,10 +106,9 @@ func BackupResult(cfg *Config, opts *BackupOptions) *output.Result {
 	return output.OK("Backup completed successfully", backupData)
 }
 
-// checkPrimaryRoleResult checks if current instance is primary and returns a Result on error.
-func checkPrimaryRoleResult() *output.Result {
-	pgConfig := postgres.DefaultConfig()
-	roleResult, err := postgres.DetectRole(pgConfig, &postgres.RoleOptions{
+// checkPrimaryRoleResult checks if the stanza's instance is primary and returns a Result on error.
+func checkPrimaryRoleResult(cfg *Config) *output.Result {
+	roleResult, err := postgres.DetectRole(backupRolePostgresConfig(cfg), &postgres.RoleOptions{
 		Verbose: false,
 	})
 

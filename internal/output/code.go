@@ -131,11 +131,12 @@ const (
 // pgBackRest module specific codes (MODULE_PB = 140000)
 const (
 	// Parameter errors (14_01_xx - Param category)
-	CodePbInvalidBackupType         = MODULE_PB + CAT_PARAM + 1 // Invalid backup type specified
-	CodePbInvalidRestoreParams      = MODULE_PB + CAT_PARAM + 2 // Invalid restore parameters
+	CodePbInvalidBackupType    = MODULE_PB + CAT_PARAM + 1 // Invalid backup type specified
+	CodePbInvalidRestoreParams = MODULE_PB + CAT_PARAM + 2 // Invalid restore parameters
 	// NOTE: NN=3 was CodePbStanzaDeleteRequiresForce (pre-release), folded into
 	// CodePbConfirmationRequired (CAT_CONFIRM); value retired, do not reuse.
-	CodePbInvalidInfoParams         = MODULE_PB + CAT_PARAM + 4 // Invalid info command parameters
+	CodePbInvalidInfoParams = MODULE_PB + CAT_PARAM + 4 // Invalid info command parameters
+	CodePbAmbiguousStanza   = MODULE_PB + CAT_PARAM + 5 // Multiple stanzas configured, explicit --stanza required
 
 	// Permission errors (14_02_xx - Permission category)
 	CodePbPermissionDenied = MODULE_PB + CAT_PERM + 1 // Permission denied accessing pgBackRest

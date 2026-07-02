@@ -7,6 +7,8 @@ package pgbackrest
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 
 	"pig/internal/output"
@@ -196,37 +198,43 @@ func TestIsStanzaExistsMessage(t *testing.T) {
 func TestPbConfigErrorResult(t *testing.T) {
 	tests := []struct {
 		name         string
-		errMsg       string
+		err          error
 		fallbackCode int
 		wantCode     int
 	}{
 		{
-			name:         "config file not found",
-			errMsg:       "config file not found: /etc/pgbackrest/pgbackrest.conf",
+			name:         "config file not found sentinel",
+			err:          fmt.Errorf("%w: config file not found: /etc/pgbackrest/pgbackrest.conf", ErrConfigNotFound),
 			fallbackCode: output.CodePbStanzaCreateFailed,
 			wantCode:     output.CodePbConfigNotFound,
 		},
 		{
-			name:         "config file not accessible",
-			errMsg:       "config file not accessible: /etc/pgbackrest/pgbackrest.conf",
+			name:         "wrapped config sentinel through resolution chain",
+			err:          fmt.Errorf("cannot detect stanza: %w (use --stanza to specify)", fmt.Errorf("%w: cannot read config file: permission denied", ErrConfigNotFound)),
 			fallbackCode: output.CodePbStanzaCreateFailed,
 			wantCode:     output.CodePbConfigNotFound,
 		},
 		{
-			name:         "no stanza found",
-			errMsg:       "no stanza found in config file",
+			name:         "stanza not found sentinel",
+			err:          fmt.Errorf("%w: no stanza defined in /etc/pgbackrest/pgbackrest.conf", ErrStanzaNotFound),
 			fallbackCode: output.CodePbStanzaCreateFailed,
 			wantCode:     output.CodePbStanzaNotFound,
 		},
 		{
-			name:         "cannot detect stanza",
-			errMsg:       "cannot detect stanza: use --stanza to specify",
+			name:         "wrapped stanza sentinel through resolution chain",
+			err:          fmt.Errorf("cannot detect stanza: %w (use --stanza to specify)", fmt.Errorf("%w: no stanza defined in x.conf", ErrStanzaNotFound)),
 			fallbackCode: output.CodePbStanzaCreateFailed,
 			wantCode:     output.CodePbStanzaNotFound,
 		},
 		{
 			name:         "fallback for unknown error",
-			errMsg:       "some unknown error occurred",
+			err:          errors.New("some unknown error occurred"),
+			fallbackCode: output.CodePbStanzaCreateFailed,
+			wantCode:     output.CodePbStanzaCreateFailed,
+		},
+		{
+			name:         "message substrings alone no longer classify",
+			err:          errors.New("config file not found: /etc/pgbackrest/pgbackrest.conf"),
 			fallbackCode: output.CodePbStanzaCreateFailed,
 			wantCode:     output.CodePbStanzaCreateFailed,
 		},
@@ -234,8 +242,7 @@ func TestPbConfigErrorResult(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := &testError{msg: tt.errMsg}
-			result := pbConfigErrorResult(err, tt.fallbackCode, "test message")
+			result := pbConfigErrorResult(tt.err, tt.fallbackCode, "test message")
 			if result == nil {
 				t.Fatal("expected non-nil result")
 			}
@@ -244,13 +251,4 @@ func TestPbConfigErrorResult(t *testing.T) {
 			}
 		})
 	}
-}
-
-// testError implements error interface for testing
-type testError struct {
-	msg string
-}
-
-func (e *testError) Error() string {
-	return e.msg
 }

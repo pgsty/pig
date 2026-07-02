@@ -446,7 +446,7 @@ func TestAnnotationsSpecificCommands(t *testing.T) {
 		{"pig postgres promote", "action", "critical", "required", "dbsu", "false"},
 		{"pig postgres init", "action", "high", "recommended", "dbsu", "false"},
 		{"pig pgbackrest info", "query", "safe", "none", "dbsu", "true"},
-		{"pig pgbackrest backup", "action", "low", "none", "dbsu", "true"},
+		{"pig pgbackrest backup", "action", "low", "none", "dbsu", "false"},
 		{"pig pgbackrest restore", "action", "critical", "required", "dbsu", "false"},
 		{"pig patroni list", "query", "safe", "none", "dbsu", "true"},
 		{"pig patroni failover", "action", "critical", "required", "dbsu", "false"},

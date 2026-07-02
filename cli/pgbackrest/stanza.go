@@ -59,6 +59,10 @@ type DeleteOptions struct {
 // Delete removes a stanza and all its backups (stanza-delete).
 // WARNING: This is a destructive and irreversible operation!
 func Delete(cfg *Config, opts *DeleteOptions) error {
+	if _, err := RequireExplicitStanza(cfg); err != nil {
+		return err
+	}
+
 	effCfg, err := GetEffectiveConfig(cfg)
 	if err != nil {
 		return err

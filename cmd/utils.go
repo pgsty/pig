@@ -126,6 +126,9 @@ func runLegacyStructuredWithNextActions(module int, command string, args []strin
 	return handleAuxResult(result)
 }
 
+// highRiskTextConfirm seams utils.Confirm so tests can stub the prompt.
+var highRiskTextConfirm = utils.Confirm
+
 func requireTextHighRiskConfirmation(yes bool, warning, action string) error {
 	if config.IsStructuredOutput() || yes {
 		return nil
@@ -192,9 +195,17 @@ func requireStructuredConfirmation(module string, code int, message, command, bo
 // separator on pb restore / pitr: silently forwarding them to pgbackrest is
 // how a -d/-D typo tears down a cluster before failing. Shared by pb and pitr.
 func rejectRestoreExtraArgsBeforeDash(cmd *cobra.Command, args []string, code int) error {
-	if len(args) == 0 || (cmd != nil && cmd.ArgsLenAtDash() >= 0) {
+	if len(args) == 0 {
 		return nil
 	}
+	dashLen := -1
+	if cmd != nil {
+		dashLen = cmd.ArgsLenAtDash()
+	}
+	if dashLen == 0 {
+		return nil // every positional sits after the -- separator
+	}
+	// dashLen > 0: stray positionals before the --; dashLen == -1: no -- at all.
 	err := fmt.Errorf("extra pgBackRest restore arguments must be placed after --")
 	return restoreInvalidParamsError(code, err)
 }
