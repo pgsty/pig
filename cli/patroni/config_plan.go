@@ -10,15 +10,30 @@ import (
 func BuildConfigPlan(action string, kvPairs []string) *output.Plan {
 	scope := "patroni"
 	setFlag := "-s"
+	analysis := PGConfigAnalysis{}
 	if action == "pg" {
 		scope = "postgresql.parameters"
 		setFlag = "-p"
 	}
 
 	normalized := normalizeConfigPairs(kvPairs)
+	if action == "pg" {
+		analysis = AnalyzePGConfigPairs(normalized)
+	}
 	pairDetail := strings.Join(normalized, ", ")
 	if pairDetail == "" {
 		pairDetail = "no key=value pairs provided"
+	}
+	nextActions := configPlanNextActions(action, analysis)
+	risks := []string{"DCS configuration mistakes can affect every cluster member."}
+	if action == "pg" {
+		if analysis.RequiresRestart {
+			risks = append(risks, "PostgreSQL restart is required for: "+strings.Join(analysis.RestartParams, ", "))
+		} else {
+			risks = append(risks, "Some PostgreSQL parameters require reload or restart before they take effect.")
+		}
+	} else {
+		risks = append(risks, "Patroni dynamic configuration changes cluster behavior on every member.")
 	}
 
 	return &output.Plan{
@@ -34,10 +49,7 @@ func BuildConfigPlan(action string, kvPairs []string) *output.Plan {
 			{Type: "dcs_config", Name: scope, Impact: "update", Detail: pairDetail},
 		},
 		Expected: "Patroni dynamic configuration is updated in DCS; members apply changes according to Patroni/PostgreSQL rules",
-		Risks: []string{
-			"DCS configuration mistakes can affect every cluster member.",
-			"Some PostgreSQL parameters require reload or restart before they take effect.",
-		},
+		Risks:    risks,
 		Preconditions: []output.Check{
 			{Name: "config pairs", Status: "planned", Detail: pairDetail},
 			{Name: "patroni config", Status: "required", Detail: DefaultConfigPath},
@@ -47,11 +59,26 @@ func BuildConfigPlan(action string, kvPairs []string) *output.Plan {
 			{Name: "show config", Status: "manual", Detail: "pig pt config show"},
 			{Name: "member state", Status: "manual", Detail: "pig pt list"},
 		},
-		NextActions: []output.NextAction{
-			{Command: "pig pt reload", Reason: "reload PostgreSQL configuration after DCS parameter changes", Required: false},
-			{Command: "pig pt restart --pending", Reason: "restart members only if Patroni marks pending restart", Required: false},
-			{Command: "pig pt config show", Reason: "verify DCS config after change", Required: false},
-		},
+		NextActions: nextActions,
+	}
+}
+
+// ConfigPGNextActions returns machine-readable follow-up commands for a
+// PostgreSQL DCS parameter change.
+func ConfigPGNextActions(kvPairs []string) []output.NextAction {
+	return configPlanNextActions("pg", AnalyzePGConfigPairs(normalizeConfigPairs(kvPairs)))
+}
+
+func configPlanNextActions(action string, analysis PGConfigAnalysis) []output.NextAction {
+	if action == "pg" && analysis.RequiresRestart {
+		return []output.NextAction{
+			{Command: "pig pt list", Reason: "check members and pending restart state after config change", Required: false},
+			{Command: "pig pt restart --pending", Reason: "apply PostgreSQL postmaster parameters: " + strings.Join(analysis.RestartParams, ", "), Required: true},
+		}
+	}
+	return []output.NextAction{
+		{Command: "pig pt list", Reason: "check cluster member state after config change", Required: false},
+		{Command: "pig pt config show", Reason: "verify DCS config after change", Required: false},
 	}
 }
 

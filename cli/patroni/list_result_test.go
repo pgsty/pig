@@ -127,6 +127,46 @@ func TestParsePatroniListJSON_SingleMember(t *testing.T) {
 	}
 }
 
+func TestParsePatroniListJSON_PendingRestartFields(t *testing.T) {
+	input := `[
+  {
+    "Member": "pg-test-1",
+    "Host": "10.0.0.1",
+    "Role": "Leader",
+    "State": "running",
+    "TL": 1,
+    "Lag in MB": null,
+    "Pending restart": true,
+    "Pending restart reason": "shared_buffers: 128MB->4GB"
+  }
+]`
+	data, err := parsePatroniListJSON(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(data.Members) != 1 {
+		t.Fatalf("expected 1 member, got %d", len(data.Members))
+	}
+	member := data.Members[0]
+	if !member.PendingRestart {
+		t.Fatalf("expected pending restart to be true: %+v", member)
+	}
+	if member.PendingRestartReason != "shared_buffers: 128MB->4GB" {
+		t.Fatalf("pending_restart_reason = %q", member.PendingRestartReason)
+	}
+}
+
+func TestParsePatroniListJSON_PendingRestartAsterisk(t *testing.T) {
+	input := `[{"Member":"pg-test-1","Host":"10.0.0.1","Role":"Leader","State":"running","TL":1,"Lag in MB":null,"Pending restart":"*"}]`
+	data, err := parsePatroniListJSON(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !data.Members[0].PendingRestart {
+		t.Fatalf("expected asterisk pending restart to parse as true: %+v", data.Members[0])
+	}
+}
+
 func TestParsePatroniListJSON_StandbyLeader(t *testing.T) {
 	input := `[
   {

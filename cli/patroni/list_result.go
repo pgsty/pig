@@ -23,12 +23,14 @@ type PtListResultData struct {
 
 // PtMemberSummary represents a single Patroni cluster member.
 type PtMemberSummary struct {
-	Member string `json:"member" yaml:"member"`
-	Host   string `json:"host" yaml:"host"`
-	Role   string `json:"role" yaml:"role"`
-	State  string `json:"state" yaml:"state"`
-	TL     int    `json:"tl" yaml:"tl"`
-	Lag    *int   `json:"lag" yaml:"lag"` // null for leader
+	Member               string `json:"member" yaml:"member"`
+	Host                 string `json:"host" yaml:"host"`
+	Role                 string `json:"role" yaml:"role"`
+	State                string `json:"state" yaml:"state"`
+	TL                   int    `json:"tl" yaml:"tl"`
+	Lag                  *int   `json:"lag" yaml:"lag"` // null for leader
+	PendingRestart       bool   `json:"pending_restart,omitempty" yaml:"pending_restart,omitempty"`
+	PendingRestartReason string `json:"pending_restart_reason,omitempty" yaml:"pending_restart_reason,omitempty"`
 }
 
 // Text returns a human-readable representation of the list result data.
@@ -46,8 +48,16 @@ func (d *PtListResultData) Text() string {
 		if m.Lag != nil {
 			lagStr = fmt.Sprintf("%d MB", *m.Lag)
 		}
-		sb.WriteString(fmt.Sprintf("  %-20s %-15s %-15s %-10s TL=%d Lag=%s\n",
+		sb.WriteString(fmt.Sprintf("  %-20s %-15s %-15s %-10s TL=%d Lag=%s",
 			m.Member, m.Host, m.Role, m.State, m.TL, lagStr))
+		if m.PendingRestart {
+			sb.WriteString(" PendingRestart=true")
+			if m.PendingRestartReason != "" {
+				sb.WriteString(" Reason=")
+				sb.WriteString(m.PendingRestartReason)
+			}
+		}
+		sb.WriteString("\n")
 	}
 	return sb.String()
 }
@@ -55,12 +65,14 @@ func (d *PtListResultData) Text() string {
 // PatroniListEntry represents the raw JSON output from patronictl list -f json.
 // Note: patronictl uses PascalCase keys and "Lag in MB" with spaces.
 type PatroniListEntry struct {
-	Member  string `json:"Member"`
-	Host    string `json:"Host"`
-	Role    string `json:"Role"`
-	State   string `json:"State"`
-	TL      int    `json:"TL"`
-	LagInMB *int   `json:"Lag in MB"`
+	Member               string      `json:"Member"`
+	Host                 string      `json:"Host"`
+	Role                 string      `json:"Role"`
+	State                string      `json:"State"`
+	TL                   int         `json:"TL"`
+	LagInMB              *int        `json:"Lag in MB"`
+	PendingRestart       interface{} `json:"Pending restart"`
+	PendingRestartReason string      `json:"Pending restart reason"`
 }
 
 // ListResult creates a structured result for pt list command.
@@ -132,16 +144,32 @@ func parsePatroniListJSON(jsonStr string) (*PtListResultData, error) {
 
 	for _, e := range entries {
 		data.Members = append(data.Members, PtMemberSummary{
-			Member: e.Member,
-			Host:   e.Host,
-			Role:   normalizeRole(e.Role),
-			State:  e.State,
-			TL:     e.TL,
-			Lag:    e.LagInMB,
+			Member:               e.Member,
+			Host:                 e.Host,
+			Role:                 normalizeRole(e.Role),
+			State:                e.State,
+			TL:                   e.TL,
+			Lag:                  e.LagInMB,
+			PendingRestart:       parsePendingRestart(e.PendingRestart),
+			PendingRestartReason: e.PendingRestartReason,
 		})
 	}
 
 	return data, nil
+}
+
+func parsePendingRestart(value interface{}) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		v = strings.TrimSpace(v)
+		return v != "" && v != "false" && v != "0"
+	case float64:
+		return v != 0
+	default:
+		return false
+	}
 }
 
 // getClusterName reads the cluster name (scope) from the Patroni config file.

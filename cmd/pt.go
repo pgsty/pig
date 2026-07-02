@@ -20,6 +20,10 @@ var (
 	patroniLogLines   int
 )
 
+var (
+	patroniConfigPGExec = patroni.ConfigPG
+)
+
 // patroniCmd represents the patroni command
 var patroniCmd = &cobra.Command{
 	Use:         "patroni",
@@ -40,12 +44,12 @@ Cluster Operations (via patronictl):
   pig pt resume                    resume automatic failover
   pig pt switchover                perform planned switchover
   pig pt failover                  perform manual failover
-  pig pt config edit               edit cluster config
+  pig pt config <action>           manage cluster config (edit|show|set|pg)
 
 Service Management (via systemctl):
   pig pt status                    show comprehensive patroni status
-  pig pt svc start                 start patroni service
-  pig pt svc stop                  stop patroni service
+  pig pt svc start (pig pt start)  start patroni service
+  pig pt svc stop  (pig pt stop)   stop patroni service
   pig pt svc restart               restart patroni service
   pig pt svc status                show patroni service status
 
@@ -523,18 +527,22 @@ Actions:
   edit              Interactive config editor
   show              Display current configuration
   set  key=value    Set Patroni config (ttl, loop_wait, etc.)
-  pg   key=value    Set PostgreSQL config (max_connections, etc.)`,
-	Example: `
-  pig pt config edit                      # Interactive edit
-  pig pt config show                      # Show current config
-  pig pt config show -o json              # Show config as structured JSON
-  pig pt config set ttl=60                # Set Patroni config
-  pig pt config set ttl=60 loop_wait=15   # Set multiple values
-  pig pt config pg max_connections=200    # Set PostgreSQL config
-  pig pt config pg shared_buffers=4GB work_mem=256MB
-  pig pt config pg shared_preload_libraries='timescaledb, pg_stat_statements, auto_explain'
+  pg   key=value    Set PostgreSQL config (max_connections, shared_buffers, etc.)
 
+PostgreSQL parameters known to use postmaster context in PG14-19 are treated as
+restart-required. After changing those parameters, inspect the cluster with
+"pig pt list" and apply them with "pig pt restart --pending".
 `,
+	Example: `
+  pig pt config edit                                                        # Interactive edit
+  pig pt config show                                                        # Show current config
+  pig pt config show -o json                                                # Show config as JSON
+  pig pt config set ttl=60                                                  # Set Patroni config
+  pig pt config set ttl=60 loop_wait=15                                     # Set multiple values
+  pig pt config pg max_connections=200                                      # Restart-required PG config
+  pig pt config pg shared_buffers=4GB work_mem=256MB                        # Mixed PG parameters
+  pig pt config pg log_min_duration_statement=250ms                         # Logging parameter, no restart
+  pig pt config pg shared_preload_libraries='timescaledb,pg_stat_statements' # Restart-required preload`,
 	Annotations: mergeAnn(
 		ancsAnn("pig patroni config", "action", "volatile", "restricted", false, "medium", "recommended", "dbsu", 3000),
 		map[string]string{
@@ -624,11 +632,11 @@ Actions:
 				}
 				return handlePlanOutput(patroni.BuildConfigPlan(action, filteredKV))
 			}
-			return runLegacyStructured(legacyModulePt, "pig patroni config pg", args, map[string]interface{}{
+			return runLegacyStructuredWithNextActions(legacyModulePt, "pig patroni config pg", args, map[string]interface{}{
 				"action": action,
 				"pairs":  filteredKV,
-			}, func() error {
-				return patroni.ConfigPG(dbsu, filteredKV)
+			}, patroni.ConfigPGNextActions(filteredKV), func() error {
+				return runPatroniConfigPG(dbsu, filteredKV)
 			})
 		default:
 			if config.IsStructuredOutput() {
@@ -640,6 +648,30 @@ Actions:
 			return cmd.Help()
 		}
 	},
+}
+
+func runPatroniConfigPG(dbsu string, kvPairs []string) error {
+	if err := patroniConfigPGExec(dbsu, kvPairs); err != nil {
+		return err
+	}
+	printPatroniConfigPGHints(kvPairs)
+	return nil
+}
+
+func printPatroniConfigPGHints(kvPairs []string) {
+	if config.IsStructuredOutput() {
+		return
+	}
+	analysis := patroni.AnalyzePGConfigPairs(kvPairs)
+	if analysis.RequiresRestart {
+		utils.PrintWarn("PostgreSQL parameter change requires PostgreSQL restart: %s", strings.Join(analysis.RestartParams, ", "))
+		utils.PrintInfo("Next actions:")
+		utils.PrintHint([]string{"pig", "pt", "list"})
+		utils.PrintHint([]string{"pig", "pt", "restart", "--pending"})
+		return
+	}
+	utils.PrintInfo("Next action:")
+	utils.PrintHint([]string{"pig", "pt", "list"})
 }
 
 // patroniLogCmd: pig pt log

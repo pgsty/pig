@@ -88,6 +88,10 @@ func handlePlanOutput(plan *output.Plan) error {
 }
 
 func runLegacyStructured(module int, command string, args []string, params map[string]interface{}, fn func() error) error {
+	return runLegacyStructuredWithNextActions(module, command, args, params, nil, fn)
+}
+
+func runLegacyStructuredWithNextActions(module int, command string, args []string, params map[string]interface{}, nextActions []output.NextAction, fn func() error) error {
 	if fn == nil {
 		return fmt.Errorf("nil command executor for %s", command)
 	}
@@ -110,13 +114,16 @@ func runLegacyStructured(module int, command string, args []string, params map[s
 	}
 
 	if err != nil {
-		return handleAuxResult(
-			output.Fail(module+output.CAT_OPERATION+1, command+" failed").
-				WithDetail(err.Error()).
-				WithData(data),
-		)
+		result := output.Fail(module+output.CAT_OPERATION+1, command+" failed").
+			WithDetail(err.Error()).
+			WithData(data)
+		return handleAuxResult(result)
 	}
-	return handleAuxResult(output.OK(command+" completed", data))
+	result := output.OK(command+" completed", data)
+	if len(nextActions) > 0 {
+		result.WithNextActions(nextActions...)
+	}
+	return handleAuxResult(result)
 }
 
 func requireTextHighRiskConfirmation(yes bool, warning, action string) error {

@@ -106,8 +106,8 @@ func TestPatroniConfigPgPlanJSONContainsDiffAndNextActions(t *testing.T) {
 	if len(plan.Preconditions) == 0 || !strings.Contains(plan.Preconditions[0].Detail, "max_connections=200") {
 		t.Fatalf("expected config diff in preconditions, got %+v", plan.Preconditions)
 	}
-	if !ptPlanHasNextAction(plan, "pig pt reload") {
-		t.Fatalf("expected reload next action, got %+v", plan.NextActions)
+	if !ptPlanHasNextAction(plan, "pig pt restart --pending") {
+		t.Fatalf("expected restart next action, got %+v", plan.NextActions)
 	}
 }
 
@@ -182,6 +182,135 @@ func TestPatroniConfigRejectsNonKeyValueArgs(t *testing.T) {
 	}
 	if !strings.Contains(ptAsString(payload["detail"]), "loopwait") {
 		t.Fatalf("expected detail to name invalid token, got %v", payload)
+	}
+}
+
+func TestPatroniConfigPgTextPrintsRestartNextActions(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniConfigPlan
+	origExec := patroniConfigPGExec
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniConfigPlan = origPlan
+		patroniConfigPGExec = origExec
+	}()
+	config.OutputFormat = config.OUTPUT_TEXT
+	patroniConfigPlan = false
+
+	var gotPairs []string
+	patroniConfigPGExec = func(dbsu string, pairs []string) error {
+		gotPairs = append([]string(nil), pairs...)
+		return nil
+	}
+
+	var runErr error
+	stderr := capturePtStderr(t, func() {
+		runErr = patroniConfigCmd.RunE(patroniConfigCmd, []string{"pg", "shared_preload_libraries=pg_stat_statements"})
+	})
+	if runErr != nil {
+		t.Fatalf("pt config pg should execute with stubbed patronictl: %v", runErr)
+	}
+	if len(gotPairs) != 1 || gotPairs[0] != "shared_preload_libraries=pg_stat_statements" {
+		t.Fatalf("patroni config pg pairs = %v", gotPairs)
+	}
+	for _, want := range []string{
+		"requires PostgreSQL restart",
+		"shared_preload_libraries",
+		"pig pt list",
+		"pig pt restart --pending",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr should contain %q, got:\n%s", want, stderr)
+		}
+	}
+	if strings.Contains(stderr, "pig pt reload") {
+		t.Fatalf("restart parameter hint must not suggest pt reload, got:\n%s", stderr)
+	}
+}
+
+func TestPatroniConfigPgStructuredIncludesRestartNextActions(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniConfigPlan
+	origExec := patroniConfigPGExec
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniConfigPlan = origPlan
+		patroniConfigPGExec = origExec
+	}()
+	config.OutputFormat = config.OUTPUT_JSON
+	patroniConfigPlan = false
+
+	patroniConfigPGExec = func(dbsu string, pairs []string) error {
+		return nil
+	}
+
+	var runErr error
+	raw := capturePtStdout(t, func() {
+		runErr = patroniConfigCmd.RunE(patroniConfigCmd, []string{"pg", "shared_buffers=4GB"})
+	})
+	if runErr != nil {
+		t.Fatalf("pt config pg structured should execute with stubbed patronictl: %v", runErr)
+	}
+	var payload output.Result
+	if err := json.Unmarshal(ptBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if !payload.Success {
+		t.Fatalf("expected success=true, got %+v", payload)
+	}
+	if !resultHasRequiredNextAction(payload, "pig pt restart --pending") {
+		t.Fatalf("structured restart parameter result must require restart next action, got %+v", payload.NextActions)
+	}
+	if !resultHasNextAction(payload, "pig pt list") {
+		t.Fatalf("structured restart parameter result must include pt list next action, got %+v", payload.NextActions)
+	}
+}
+
+func TestPatroniConfigPgStructuredFailureOmitsRestartNextActions(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniConfigPlan
+	origExec := patroniConfigPGExec
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniConfigPlan = origPlan
+		patroniConfigPGExec = origExec
+	}()
+	config.OutputFormat = config.OUTPUT_JSON
+	patroniConfigPlan = false
+
+	patroniConfigPGExec = func(dbsu string, pairs []string) error {
+		return errors.New("patronictl edit-config failed")
+	}
+
+	var runErr error
+	raw := capturePtStdout(t, func() {
+		runErr = patroniConfigCmd.RunE(patroniConfigCmd, []string{"pg", "shared_buffers=4GB"})
+	})
+	if runErr == nil {
+		t.Fatal("pt config pg structured should fail when patronictl fails")
+	}
+	var payload output.Result
+	if err := json.Unmarshal(ptBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if payload.Success {
+		t.Fatalf("expected success=false, got %+v", payload)
+	}
+	if len(payload.NextActions) != 0 {
+		t.Fatalf("failed config change must not suggest restart next actions, got %+v", payload.NextActions)
+	}
+}
+
+func TestPatroniConfigHelpDocumentsComplexParameters(t *testing.T) {
+	for _, want := range []string{
+		"shared_preload_libraries",
+		"log_min_duration_statement",
+		"postmaster",
+		"pig pt restart --pending",
+	} {
+		if !strings.Contains(patroniConfigCmd.Long+patroniConfigCmd.Example, want) {
+			t.Fatalf("pt config help should mention %q\nLong:\n%s\nExample:\n%s", want, patroniConfigCmd.Long, patroniConfigCmd.Example)
+		}
 	}
 }
 
@@ -727,6 +856,24 @@ func ptPlanHasNextAction(plan output.Plan, needle string) bool {
 	return false
 }
 
+func resultHasNextAction(result output.Result, needle string) bool {
+	for _, action := range result.NextActions {
+		if strings.Contains(action.Command, needle) || strings.Contains(action.Reason, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func resultHasRequiredNextAction(result output.Result, needle string) bool {
+	for _, action := range result.NextActions {
+		if action.Required && (strings.Contains(action.Command, needle) || strings.Contains(action.Reason, needle)) {
+			return true
+		}
+	}
+	return false
+}
+
 var ptTestCommand = patroniCmd
 
 func capturePtStdout(t *testing.T, fn func()) string {
@@ -740,6 +887,22 @@ func capturePtStdout(t *testing.T, fn func()) string {
 	fn()
 	_ = w.Close()
 	os.Stdout = origStdout
+	raw, _ := io.ReadAll(r)
+	_ = r.Close()
+	return string(raw)
+}
+
+func capturePtStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe error: %v", err)
+	}
+	os.Stderr = w
+	fn()
+	_ = w.Close()
+	os.Stderr = origStderr
 	raw, _ := io.ReadAll(r)
 	_ = r.Close()
 	return string(raw)
