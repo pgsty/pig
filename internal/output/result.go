@@ -5,19 +5,26 @@ import (
 	"strings"
 )
 
+// APIVersion is the structured output envelope schema version, embedded in
+// every Result and Plan so programmatic consumers can detect contract changes.
+const APIVersion = 1
+
 // Result represents a unified response structure for all CLI commands.
 // It provides consistent structured output for both human and machine consumption.
 type Result struct {
-	Success bool        `json:"success" yaml:"success"`
-	Code    int         `json:"code" yaml:"code"`
-	Message string      `json:"message" yaml:"message"`
-	Detail  string      `json:"detail,omitempty" yaml:"detail,omitempty"`
-	Data    interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	API         int          `json:"api" yaml:"api"`
+	Success     bool         `json:"success" yaml:"success"`
+	Code        int          `json:"code" yaml:"code"`
+	Message     string       `json:"message" yaml:"message"`
+	Detail      string       `json:"detail,omitempty" yaml:"detail,omitempty"`
+	Data        interface{}  `json:"data,omitempty" yaml:"data,omitempty"`
+	NextActions []NextAction `json:"next_actions,omitempty" yaml:"next_actions,omitempty"`
 }
 
 // OK creates a successful Result with the given message and optional data.
 func OK(message string, data interface{}) *Result {
 	return &Result{
+		API:     APIVersion,
 		Success: true,
 		Code:    0,
 		Message: message,
@@ -28,10 +35,22 @@ func OK(message string, data interface{}) *Result {
 // Fail creates a failed Result with the given code and message.
 func Fail(code int, message string) *Result {
 	return &Result{
+		API:     APIVersion,
 		Success: false,
 		Code:    code,
 		Message: message,
 	}
+}
+
+// WithNextActions attaches machine-readable follow-up commands to the Result
+// envelope (e.g. "rerun with --yes" on a confirmation-required failure).
+// Returns nil if the receiver is nil.
+func (r *Result) WithNextActions(actions ...NextAction) *Result {
+	if r == nil {
+		return nil
+	}
+	r.NextActions = append(r.NextActions, actions...)
+	return r
 }
 
 // WithDetail adds detail information to the Result and returns it for chaining.

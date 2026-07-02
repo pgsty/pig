@@ -26,16 +26,29 @@ const (
 
 // Category codes (CC) - classifies the type of result/error
 const (
-	CAT_SUCCESS   = 0   // Success/informational
-	CAT_PARAM     = 100 // Parameter/usage errors
-	CAT_PERM      = 200 // Permission errors
-	CAT_DEPEND    = 300 // Dependency errors
-	CAT_NETWORK   = 400 // Network errors
-	CAT_RESOURCE  = 500 // Resource errors
-	CAT_STATE     = 600 // State errors
-	CAT_CONFIG    = 700 // Configuration errors
-	CAT_OPERATION = 800 // Operation errors
-	CAT_INTERNAL  = 900 // Internal errors
+	CAT_SUCCESS   = 0    // Success/informational
+	CAT_PARAM     = 100  // Parameter/usage errors
+	CAT_PERM      = 200  // Permission errors
+	CAT_DEPEND    = 300  // Dependency errors
+	CAT_NETWORK   = 400  // Network errors
+	CAT_RESOURCE  = 500  // Resource errors
+	CAT_STATE     = 600  // State errors
+	CAT_CONFIG    = 700  // Configuration errors
+	CAT_OPERATION = 800  // Operation errors
+	CAT_INTERNAL  = 900  // Internal errors
+	CAT_CONFIRM   = 1000 // Confirmation required (destructive op, fail-closed)
+)
+
+// Confirmation-required codes (CAT_CONFIRM, CC=10): a destructive command was
+// invoked in structured output mode without --yes/--force. Mapped to exit code 7,
+// distinct from parameter errors (exit 2), so automation can tell "retry the
+// identical command with --yes" apart from "arguments invalid, do not retry".
+const (
+	CodePgConfirmationRequired   = MODULE_PG + CAT_CONFIRM + 1   // 131001
+	CodePbConfirmationRequired   = MODULE_PB + CAT_CONFIRM + 1   // 141001
+	CodePtConfirmationRequired   = MODULE_PT + CAT_CONFIRM + 1   // 151001
+	CodePITRConfirmationRequired = MODULE_PITR + CAT_CONFIRM + 1 // 161001
+	CodeForkConfirmationRequired = MODULE_FORK + CAT_CONFIRM + 1 // 191001
 )
 
 // Extension module specific codes (MODULE_EXT = 100000)
@@ -134,10 +147,11 @@ const (
 	CodePbBackupNotFound = MODULE_PB + CAT_RESOURCE + 2 // Specified backup not found
 
 	// State errors (14_06_xx - State category)
-	CodePbNotPrimary   = MODULE_PB + CAT_STATE + 1 // Instance is not primary, backup requires primary
-	CodePbPgNotRunning = MODULE_PB + CAT_STATE + 2 // PostgreSQL is not running
-	CodePbPgRunning    = MODULE_PB + CAT_STATE + 3 // PostgreSQL is running (cannot restore)
-	CodePbStanzaExists = MODULE_PB + CAT_STATE + 4 // Stanza already exists (use --force)
+	CodePbNotPrimary    = MODULE_PB + CAT_STATE + 1 // Instance is not primary, backup requires primary
+	CodePbPgNotRunning  = MODULE_PB + CAT_STATE + 2 // PostgreSQL is not running
+	CodePbPgRunning     = MODULE_PB + CAT_STATE + 3 // PostgreSQL is running (cannot restore)
+	CodePbStanzaExists  = MODULE_PB + CAT_STATE + 4 // Stanza already exists (use --force)
+	CodePbPatroniActive = MODULE_PB + CAT_STATE + 5 // Patroni is active for managed PGDATA (use pig pitr)
 
 	// Configuration errors (14_07_xx - Config category)
 	CodePbConfigNotFound = MODULE_PB + CAT_CONFIG + 1 // pgBackRest configuration file not found
@@ -168,9 +182,6 @@ const (
 	CodePtConfigResolveFailed = MODULE_PT + CAT_CONFIG + 3 // Patroni cluster scope resolution failed
 	CodePtConfigReadFailed    = MODULE_PT + CAT_CONFIG + 4 // Patroni config read failed
 
-	// Parameter errors (15_01_xx - Param category)
-	CodePtSwitchoverNeedForce = MODULE_PT + CAT_PARAM + 1 // switchover requires --force in structured output mode
-
 	// Operation errors (15_08_xx - Operation category)
 	CodePtListFailed       = MODULE_PT + CAT_OPERATION + 1 // patronictl list execution failed
 	CodePtParseFailed      = MODULE_PT + CAT_OPERATION + 2 // patronictl output parse failed
@@ -180,7 +191,8 @@ const (
 	CodePtFailoverFailed   = MODULE_PT + CAT_OPERATION + 6 // patronictl failover execution failed
 
 	// Parameter errors (15_01_xx - Param category)
-	CodePtFailoverNeedForce    = MODULE_PT + CAT_PARAM + 2 // failover requires --force in structured output mode
+	// NOTE: NN=1,2,5,6 were the pre-release *NeedForce codes, folded into
+	// CodePtConfirmationRequired (CAT_CONFIRM); values retired, do not reuse.
 	CodePtInvalidConfigAction  = MODULE_PT + CAT_PARAM + 3 // invalid pt config action
 	CodePtWatchModeUnsupported = MODULE_PT + CAT_PARAM + 4 // watch mode is unsupported in structured output
 )
@@ -284,6 +296,8 @@ func ExitCode(code int) int {
 		return 8
 	case 8, 9: // Operation/Internal errors
 		return 1
+	case 10: // Confirmation required (fail-closed destructive gate)
+		return 7
 	default:
 		return 1
 	}

@@ -49,6 +49,7 @@ type OperationMeta struct {
 
 // Plan represents an execution plan for a dangerous operation.
 type Plan struct {
+	API           int          `json:"api" yaml:"api"`
 	Command       string       `json:"command" yaml:"command"`
 	Boundary      string       `json:"boundary,omitempty" yaml:"boundary,omitempty"`
 	Confirmation  string       `json:"confirmation,omitempty" yaml:"confirmation,omitempty"`
@@ -188,6 +189,11 @@ func (p *Plan) JSONPretty() ([]byte, error) {
 func (p *Plan) Render(format string) ([]byte, error) {
 	if p == nil {
 		return nil, fmt.Errorf("cannot render nil Plan")
+	}
+	if p.API == 0 {
+		// Plans are built as literals across cli/*; stamp the envelope schema
+		// version at render time so every constructor gets it for free.
+		p.API = APIVersion
 	}
 	switch format {
 	case "yaml":

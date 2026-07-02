@@ -144,7 +144,8 @@ func TestExitCodeEdgeCases(t *testing.T) {
 	}{
 		{"negative code defaults to 1", -1, 1},
 		{"very large code", 9999999, 1},
-		{"unknown category defaults to 1", 1099, 1}, // Category 10 doesn't exist
+		{"confirmation category maps to 7", 131001, 7}, // CAT_CONFIRM (CC=10)
+		{"unknown category defaults to 1", 1199, 1},    // Category 11 doesn't exist
 	}
 
 	for _, tt := range tests {
@@ -188,12 +189,12 @@ func TestCategoryExtraction(t *testing.T) {
 		expectedCategory int
 		expectedExit     int
 	}{
-		{100101, 1, 2},  // EXT + PARAM + 01 → category 1 → exit 2
-		{110205, 2, 3},  // REPO + PERM + 05 → category 2 → exit 3
-		{130600, 6, 9},  // PG + STATE + 00 → category 6 → exit 9
-		{990999, 9, 1},  // SYSTEM + INTERNAL + 99 → category 9 → exit 1
-		{120301, 3, 4},  // BUILD + DEPEND + 01 → category 3 → exit 4
-		{170701, 7, 8},  // PE + CONFIG + 01 → category 7 → exit 8
+		{100101, 1, 2}, // EXT + PARAM + 01 → category 1 → exit 2
+		{110205, 2, 3}, // REPO + PERM + 05 → category 2 → exit 3
+		{130600, 6, 9}, // PG + STATE + 00 → category 6 → exit 9
+		{990999, 9, 1}, // SYSTEM + INTERNAL + 99 → category 9 → exit 1
+		{120301, 3, 4}, // BUILD + DEPEND + 01 → category 3 → exit 4
+		{170701, 7, 8}, // PE + CONFIG + 01 → category 7 → exit 8
 	}
 
 	for _, tt := range tests {
