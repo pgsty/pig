@@ -497,5 +497,14 @@ func LogGrep(logDir, pattern, file string, ignoreCase bool, context int) error {
 	}
 	cmdArgs = append(cmdArgs, pattern, logFile)
 	PrintHint(cmdArgs)
-	return RunWithSudoFallback(cmdArgs)
+	err := RunWithSudoFallback(cmdArgs)
+	if isGrepNoMatch(err) {
+		return &utils.ExitCodeError{Code: 1, Err: err, Silent: true}
+	}
+	return err
+}
+
+func isGrepNoMatch(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }

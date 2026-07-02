@@ -1,6 +1,12 @@
 package postgres
 
-import "testing"
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"pig/internal/utils"
+	"testing"
+)
 
 func TestResolveRequestedLogFileValid(t *testing.T) {
 	got, err := resolveRequestedLogFile("/pg/log/postgres", "postgresql-2026-02-11.csv")
@@ -43,5 +49,22 @@ func TestResolveRequestedLogFileRejectsTraversal(t *testing.T) {
 func TestLogCatRejectsTraversalPath(t *testing.T) {
 	if err := LogCat("/pg/log/postgres", "../../../etc/hosts", 1); err == nil {
 		t.Fatalf("expected LogCat to reject traversal path")
+	}
+}
+
+func TestLogGrepNoMatchReturnsSilentExitCode(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "postgresql-2026-07-02.csv")
+	if err := os.WriteFile(logPath, []byte("LOG,startup complete\n"), 0644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	err := LogGrep(dir, "ERROR", "", false, 0)
+	var exitErr *utils.ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("LogGrep returned %T, want ExitCodeError", err)
+	}
+	if exitErr.Code != 1 || !exitErr.Silent {
+		t.Fatalf("LogGrep no-match exit = code %d silent %v, want code 1 silent true", exitErr.Code, exitErr.Silent)
 	}
 }

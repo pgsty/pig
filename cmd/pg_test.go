@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/pflag"
 	"io"
 	"os"
+	"path/filepath"
 	postgrescli "pig/cli/postgres"
 	"pig/internal/config"
 	"pig/internal/output"
@@ -618,6 +619,58 @@ func TestCommonLogCommandsExposeConsistentSnapshotAndTailAPI(t *testing.T) {
 				t.Fatalf("%s log should keep cat as a compatibility alias, found=%v err=%v", tt.name, found, err)
 			}
 		})
+	}
+}
+
+func TestPgLogGrepNoMatchSilencesCobraError(t *testing.T) {
+	origFormat := config.OutputFormat
+	origLogDir := pgConfig.LogDir
+	origSilenceErrors := pgLogGrepCmd.SilenceErrors
+	origSilenceUsage := pgLogGrepCmd.SilenceUsage
+	origIgnoreCase := pgLogGrepIgnoreCase
+	origContext := pgLogGrepContext
+	defer func() {
+		config.OutputFormat = origFormat
+		pgConfig.LogDir = origLogDir
+		pgLogGrepCmd.SilenceErrors = origSilenceErrors
+		pgLogGrepCmd.SilenceUsage = origSilenceUsage
+		pgLogGrepIgnoreCase = origIgnoreCase
+		pgLogGrepContext = origContext
+	}()
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "postgresql-2026-07-02.csv")
+	if err := os.WriteFile(logPath, []byte("LOG,startup complete\n"), 0644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pgConfig.LogDir = dir
+	pgLogGrepCmd.SilenceErrors = false
+	pgLogGrepCmd.SilenceUsage = false
+	pgLogGrepIgnoreCase = false
+	pgLogGrepContext = 0
+
+	err := pgLogGrepCmd.RunE(pgLogGrepCmd, []string{"ERROR"})
+	var exitErr *utils.ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("pg log grep returned %T, want ExitCodeError", err)
+	}
+	if exitErr.Code != 1 || !exitErr.Silent {
+		t.Fatalf("pg log grep no-match exit = code %d silent %v, want code 1 silent true", exitErr.Code, exitErr.Silent)
+	}
+	if !pgLogGrepCmd.SilenceErrors {
+		t.Fatal("pg log grep no-match should silence Cobra error printing")
+	}
+	if !pgLogGrepCmd.SilenceUsage {
+		t.Fatal("pg log grep no-match should silence Cobra usage printing")
+	}
+
+	if err := pgLogGrepCmd.Args(pgLogGrepCmd, nil); err == nil {
+		t.Fatal("pg log grep without pattern should still reject arguments")
+	}
+	if pgLogGrepCmd.SilenceErrors || pgLogGrepCmd.SilenceUsage {
+		t.Fatal("pg log grep argument validation should reset silent no-match flags")
 	}
 }
 

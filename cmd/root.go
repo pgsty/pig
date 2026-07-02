@@ -194,6 +194,9 @@ func emitStructuredExecutionError(err error, args []string) (int, bool) {
 	if err == nil || !isStructuredOutputRequested(args) {
 		return 0, false
 	}
+	if utils.IsSilentExit(err) {
+		return utils.ExitCode(err), true
+	}
 	var exitCodeErr *utils.ExitCodeError
 	if errors.As(err, &exitCodeErr) {
 		return 0, false
@@ -212,6 +215,9 @@ func emitStructuredExecutionError(err error, args []string) (int, bool) {
 
 func shouldLogExecutionError(err error) bool {
 	if err == nil {
+		return false
+	}
+	if utils.IsSilentExit(err) {
 		return false
 	}
 	if !config.IsStructuredOutput() {

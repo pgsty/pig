@@ -1661,7 +1661,11 @@ var pgLogGrepCmd = &cobra.Command{
 	Short:       "Search log files",
 	Aliases:     []string{"g", "search"},
 	Annotations: ancsAnn("pig postgres log grep", "query", "volatile", "safe", true, "safe", "none", "dbsu", 5000),
-	Args:        cobra.RangeArgs(1, 2),
+	Args: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceErrors = false
+		cmd.SilenceUsage = false
+		return cobra.RangeArgs(1, 2)(cmd, args)
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		file := ""
 		if len(args) > 1 {
@@ -1690,7 +1694,12 @@ var pgLogGrepCmd = &cobra.Command{
 			"ignore_case": pgLogGrepIgnoreCase,
 			"context":     pgLogGrepContext,
 		}, func() error {
-			return postgres.LogGrep(postgres.GetLogDir(pgConfig), args[0], file, pgLogGrepIgnoreCase, pgLogGrepContext)
+			err := postgres.LogGrep(postgres.GetLogDir(pgConfig), args[0], file, pgLogGrepIgnoreCase, pgLogGrepContext)
+			if utils.IsSilentExit(err) {
+				cmd.SilenceErrors = true
+				cmd.SilenceUsage = true
+			}
+			return err
 		})
 	},
 }

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,8 +19,9 @@ const DefaultDBSU = "postgres"
 // ExitCodeError represents an error with an associated exit code.
 // Use this when you want to propagate subprocess exit codes to callers.
 type ExitCodeError struct {
-	Code int
-	Err  error
+	Code   int
+	Err    error
+	Silent bool
 }
 
 func (e *ExitCodeError) Error() string {
@@ -33,12 +35,18 @@ func (e *ExitCodeError) Unwrap() error {
 	return e.Err
 }
 
+func IsSilentExit(err error) bool {
+	var exitErr *ExitCodeError
+	return errors.As(err, &exitErr) && exitErr.Silent
+}
+
 // ExitCode returns the exit code from an ExitCodeError, or 1 if not an ExitCodeError.
 func ExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	if exitErr, ok := err.(*ExitCodeError); ok {
+	var exitErr *ExitCodeError
+	if errors.As(err, &exitErr) {
 		return exitErr.Code
 	}
 	return 1

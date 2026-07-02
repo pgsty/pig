@@ -292,6 +292,11 @@ func TestShouldLogExecutionError(t *testing.T) {
 		t.Fatal("structured mode should not log ExitCodeError failures")
 	}
 
+	config.OutputFormat = config.OUTPUT_TEXT
+	if shouldLogExecutionError(&utils.ExitCodeError{Code: 1, Silent: true}) {
+		t.Fatal("silent exit code should not be logged")
+	}
+
 	if shouldLogExecutionError(nil) {
 		t.Fatal("nil error should not be logged")
 	}
@@ -378,6 +383,25 @@ func TestEmitStructuredExecutionErrorSkipExitCodeError(t *testing.T) {
 	exitCode, handled := emitStructuredExecutionError(&utils.ExitCodeError{Code: 2, Err: fmt.Errorf("boom")}, args)
 	if handled || exitCode != 0 {
 		t.Fatalf("expected ExitCodeError to be skipped, got handled=%v exitCode=%d", handled, exitCode)
+	}
+}
+
+func TestEmitStructuredExecutionErrorSilentExitCode(t *testing.T) {
+	origFormat := config.OutputFormat
+	defer func() {
+		config.OutputFormat = origFormat
+	}()
+
+	args := []string{"status", "-o", "json"}
+	prepareEarlyOutputSettings(args)
+	out := captureStdout(t, func() {
+		exitCode, handled := emitStructuredExecutionError(&utils.ExitCodeError{Code: 1, Silent: true}, args)
+		if !handled || exitCode != 1 {
+			t.Fatalf("expected silent exit code to be handled as exit 1, got handled=%v exitCode=%d", handled, exitCode)
+		}
+	})
+	if out != "" {
+		t.Fatalf("silent exit should not print structured output, got %q", out)
 	}
 }
 
