@@ -2,12 +2,13 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"pig/cli/pgbackrest"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 // ============================================================================
@@ -386,22 +387,23 @@ The restore process:
 
 IMPORTANT: PostgreSQL must be stopped before restore.`,
 	Example: `
-  pig pb restore -d                # restore to latest (end of WAL)
-  pig pb restore -I                # restore to consistency point
-  pig pb restore -t "2025-01-01 12:00:00+08"   # restore to time
-  pig pb restore -t "2025-01-01"   # restore to start of day
-  pig pb restore -t "12:00:00"     # restore to time today
-  pig pb restore --name my-savepoint   # restore to named point
-  pig pb restore --lsn "0/7C82CB8" # restore to LSN
-  pig pb restore -b 20251225-120000F -d        # restore specific backup to latest
+  pig pb restore -d                         # restore to latest (end of WAL)
+  pig pb restore -I                         # restore to consistency point
+  pig pb restore -t "2025-01-01 12:00:00+08"  # restore to time
+  pig pb restore -t "2025-01-01"            # restore to start of day
+  pig pb restore -t "12:00:00"              # restore to time today
+  pig pb restore --name my-savepoint        # restore to named point
+  pig pb restore --lsn "0/7C82CB8"          # restore to LSN
+  pig pb restore -b 20251225-120000F -d     # restore specific backup to latest
 
-	  # Options
-	  pig pb restore -t "2025-01-01 12:00:00" -X  # exclusive (stop before target)
-	  pig pb restore -t "2025-01-01 12:00:00" --target-action=promote  # promote after reaching target
-	  pig pb restore -t "2025-01-01 12:00:00" -T current  # recover along current timeline
-	  pig pb restore -d -y             # skip confirmation
-	  pig pb restore -d -D /data/pg    # restore to custom data directory
-	  pig pb restore -d -- --delta     # pass extra pgBackRest restore args after --`,
+# Options
+
+  pig pb restore -t "2025-01-01 12:00:00" -X  # exclusive (stop before target)
+  pig pb restore -t "2025-01-01 12:00:00" --target-action=promote  # promote after reaching target
+  pig pb restore -t "2025-01-01 12:00:00" -T current  # recover along current timeline
+  pig pb restore -d -y                      # skip confirmation
+  pig pb restore -d -D /data/pg             # restore to custom data directory
+  pig pb restore -d -- --delta              # pass extra pgBackRest restore args after --`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check if any recovery target is specified
 		hasTarget := pbRestoreDefault || pbRestoreImmediate ||
@@ -419,9 +421,12 @@ IMPORTANT: PostgreSQL must be stopped before restore.`,
 			if err := cmd.Help(); err != nil {
 				return err
 			}
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
 			return &utils.ExitCodeError{
-				Code: output.ExitCode(output.CodePbInvalidRestoreParams),
-				Err:  fmt.Errorf("invalid or missing recovery target"),
+				Code:   output.ExitCode(output.CodePbInvalidRestoreParams),
+				Err:    fmt.Errorf("invalid or missing recovery target"),
+				Silent: true,
 			}
 		}
 

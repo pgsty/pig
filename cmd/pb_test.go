@@ -472,6 +472,8 @@ func TestPbRestoreMissingTargetTextReturnsInvalidArgs(t *testing.T) {
 	origXID := pbRestoreXID
 	origOut := pbRestoreCmd.OutOrStdout()
 	origErr := pbRestoreCmd.ErrOrStderr()
+	origSilenceUsage := pbRestoreCmd.SilenceUsage
+	origSilenceErrors := pbRestoreCmd.SilenceErrors
 	defer func() {
 		config.OutputFormat = origFormat
 		pbRestoreDefault = origDefault
@@ -482,6 +484,8 @@ func TestPbRestoreMissingTargetTextReturnsInvalidArgs(t *testing.T) {
 		pbRestoreXID = origXID
 		pbRestoreCmd.SetOut(origOut)
 		pbRestoreCmd.SetErr(origErr)
+		pbRestoreCmd.SilenceUsage = origSilenceUsage
+		pbRestoreCmd.SilenceErrors = origSilenceErrors
 	}()
 
 	config.OutputFormat = config.OUTPUT_TEXT
@@ -493,6 +497,8 @@ func TestPbRestoreMissingTargetTextReturnsInvalidArgs(t *testing.T) {
 	pbRestoreXID = ""
 	pbRestoreCmd.SetOut(io.Discard)
 	pbRestoreCmd.SetErr(io.Discard)
+	pbRestoreCmd.SilenceUsage = false
+	pbRestoreCmd.SilenceErrors = false
 
 	err := pbRestoreCmd.RunE(pbRestoreCmd, nil)
 	if err == nil {
@@ -506,6 +512,13 @@ func TestPbRestoreMissingTargetTextReturnsInvalidArgs(t *testing.T) {
 	if exitErr.Code != output.ExitCode(output.CodePbInvalidRestoreParams) {
 		t.Fatalf("unexpected exit code: got %d, want %d",
 			exitErr.Code, output.ExitCode(output.CodePbInvalidRestoreParams))
+	}
+	if !exitErr.Silent {
+		t.Fatal("missing-target help path should return a silent exit after printing help")
+	}
+	if !pbRestoreCmd.SilenceUsage || !pbRestoreCmd.SilenceErrors {
+		t.Fatalf("missing-target help path should silence Cobra duplicate output, got usage=%v errors=%v",
+			pbRestoreCmd.SilenceUsage, pbRestoreCmd.SilenceErrors)
 	}
 }
 
