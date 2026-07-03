@@ -48,7 +48,7 @@ func TestBuildKillSQL_PidExecuteCancels(t *testing.T) {
 func TestBuildKillWhereClause_QueryEscaping(t *testing.T) {
 	opts := &KillOptions{Query: "foo%bar_baz"}
 	got := buildKillWhereClause(opts)
-	want := "pid <> pg_backend_pid() AND backend_type = 'client backend' AND query ILIKE '%foo\\%bar\\_baz%' ESCAPE '\\\\'"
+	want := "pid <> pg_backend_pid() AND backend_type = 'client backend' AND query ILIKE '%foo\\%bar\\_baz%' ESCAPE '\\'"
 	if got != want {
 		t.Fatalf("buildKillWhereClause(query)=%q, want %q", got, want)
 	}

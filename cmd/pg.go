@@ -140,6 +140,12 @@ Connection & Query:
   pig pg psql     [db] [-c cmd]             connect to database via psql
   pig pg ps       [-a] [-u user]            show current connections
   pig pg kill     [-x] [-u user]            terminate connections (dry-run by default)
+  pig pg clone    <src> [dst]               clone database with CREATE DATABASE TEMPLATE
+
+Instance Fork:
+  pig pg fork init <name> [-D datadir]      fork PGDATA into /pg/data-<name>
+  pig pg fork list                          list managed forks
+  pig pg fork start|stop|rm <name>          manage fork lifecycle
 
 Database Maintenance:
   pig pg vacuum   [db] [-a] [-t table]      vacuum tables
@@ -148,7 +154,7 @@ Database Maintenance:
   pig pg repack   [db] [-a] [-t table]      repack tables (online rebuild)
 
 Tuning:
-  pig pg tune     [-p profile] [-n]        generate optimized parameters
+  pig pg tune     [-p profile]              generate optimized parameters
 
 Utilities:
   pig pg log <list|tail|cat|less|grep>      view PostgreSQL logs

@@ -221,6 +221,28 @@ func TestClonePreflightWarningsPassForPG18CloneCOW(t *testing.T) {
 	}
 }
 
+func TestConfirmCloneWarningsPromptsEvenWithoutPreflightWarnings(t *testing.T) {
+	oldStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe failed: %v", err)
+	}
+	_ = w.Close()
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		_ = r.Close()
+	})
+
+	err = confirmCloneWarnings(nil, "CLONE")
+	if err == nil {
+		t.Fatal("clone confirmation should fail closed on EOF even when preflight has no warnings")
+	}
+	if !strings.Contains(err.Error(), "CLONE cancelled") {
+		t.Fatalf("unexpected confirmation error: %v", err)
+	}
+}
+
 func TestNormalizeCloneAllowsGeneratedDestination(t *testing.T) {
 	n, err := NormalizeCloneOptions(&CloneOptions{
 		SourceDB: "app",

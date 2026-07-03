@@ -7,9 +7,11 @@ package postgres
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"pig/internal/output"
+	"pig/internal/utils"
 )
 
 const patroniPgCtlPrimitiveRisk = "This pg_ctl primitive does not coordinate Patroni, DCS, failover, or client routing; use pig pt or pig pitr when Patroni manages this PGDATA"
@@ -33,8 +35,28 @@ func BuildRestartPlan(cfg *Config, opts *RestartOptions) *output.Plan {
 		mode = strings.ToLower(opts.Mode)
 	}
 
-	// Build the plan
-	return buildRestartPlanFromState(dataDir, running, pid, mode)
+	plan := buildRestartPlanFromState(dataDir, running, pid, mode)
+	plan.Command = buildRestartCommandFor(cfg, opts, true)
+	plan.Boundary = pgLocalBoundary
+	plan.Confirmation = "recommended"
+	runningDetail := fmt.Sprintf("pid=%d", pid)
+	if !running {
+		runningDetail = "not running; restart requires a running PostgreSQL server"
+	}
+	plan.Preconditions = append(plan.Preconditions,
+		output.Check{Name: "data_dir", Status: "planned", Detail: dataDir},
+		output.Check{Name: "postgres running", Status: boolStatus(running), Detail: runningDetail},
+		output.Check{Name: "boundary", Status: "local-only", Detail: "does not manage Patroni, DCS, VIP, or client routing"},
+	)
+	restartNext := output.NextAction{Command: buildRestartCommandFor(cfg, opts, false), Reason: "execute restart after reviewing the plan", Required: running}
+	if !running {
+		restartNext.Reason = "not running; restart execution will be refused until PostgreSQL is started"
+	}
+	plan.NextActions = append(plan.NextActions,
+		restartNext,
+		output.NextAction{Command: "pig pt restart --plan", Reason: "preview Patroni-managed restart when Patroni owns this instance", Required: false},
+	)
+	return plan
 }
 
 // buildRestartPlanFromState constructs a restart plan from given state.
@@ -58,13 +80,15 @@ func buildRestartActions(running bool, mode string) []output.Action {
 	actions := []output.Action{}
 	step := 1
 
-	if running {
-		actions = append(actions, output.Action{
-			Step:        step,
-			Description: fmt.Sprintf("Stop PostgreSQL server (mode: %s)", mode),
-		})
-		step++
+	if !running {
+		return actions
 	}
+
+	actions = append(actions, output.Action{
+		Step:        step,
+		Description: fmt.Sprintf("Stop PostgreSQL server (mode: %s)", mode),
+	})
+	step++
 
 	actions = append(actions, output.Action{
 		Step:        step,
@@ -108,7 +132,7 @@ func buildRestartExpected(dataDir string, running bool) string {
 	if running {
 		return fmt.Sprintf("PostgreSQL restarted (data_dir: %s)", dataDir)
 	}
-	return fmt.Sprintf("PostgreSQL started (data_dir: %s)", dataDir)
+	return fmt.Sprintf("PostgreSQL is not running; restart will be refused (data_dir: %s; use 'pig pg start' to start a stopped server)", dataDir)
 }
 
 func buildRestartRisks(running bool) []string {
@@ -124,7 +148,29 @@ func buildRestartRisks(running bool) []string {
 }
 
 func buildRestartCommand(mode string) string {
-	return fmt.Sprintf("pig pg restart -m %s", mode)
+	return buildRestartCommandFor(nil, &RestartOptions{Mode: mode}, false)
+}
+
+func buildRestartCommandFor(cfg *Config, opts *RestartOptions, includePlan bool) string {
+	args := appendPgTargetCommandFlags([]string{"pig", "pg", "restart"}, cfg)
+	mode := DefaultStopMode
+	if opts != nil && opts.Mode != "" {
+		mode = strings.ToLower(opts.Mode)
+	}
+	args = append(args, "-m", mode)
+	if opts != nil && opts.Timeout > 0 {
+		args = append(args, "-t", strconv.Itoa(opts.Timeout))
+	}
+	if opts != nil && opts.NoWait {
+		args = append(args, "--no-wait")
+	}
+	if opts != nil && opts.Options != "" {
+		args = append(args, "-O", opts.Options)
+	}
+	if includePlan {
+		args = append(args, "--plan")
+	}
+	return utils.ShellQuoteArgs(args)
 }
 
 // ============================================================================
@@ -146,8 +192,20 @@ func BuildStopPlan(cfg *Config, opts *StopOptions) *output.Plan {
 		mode = strings.ToLower(opts.Mode)
 	}
 
-	// Build the plan
-	return buildStopPlanFromState(dataDir, running, pid, mode)
+	plan := buildStopPlanFromState(dataDir, running, pid, mode)
+	plan.Command = buildStopCommandFor(cfg, opts, true)
+	plan.Boundary = pgLocalBoundary
+	plan.Confirmation = "recommended"
+	plan.Preconditions = append(plan.Preconditions,
+		output.Check{Name: "data_dir", Status: "planned", Detail: dataDir},
+		output.Check{Name: "postgres running", Status: boolStatus(running), Detail: fmt.Sprintf("pid=%d", pid)},
+		output.Check{Name: "boundary", Status: "local-only", Detail: "does not manage Patroni, DCS, VIP, or client routing"},
+	)
+	plan.NextActions = append(plan.NextActions,
+		output.NextAction{Command: buildStopCommandFor(cfg, opts, false), Reason: "execute stop after reviewing the plan", Required: running},
+		output.NextAction{Command: "pig pt pause --plan", Reason: "preview Patroni-managed lifecycle changes when Patroni owns this instance", Required: false},
+	)
+	return plan
 }
 
 // buildStopPlanFromState constructs a stop plan from given state.
@@ -239,5 +297,40 @@ func buildStopRisks(running bool, mode string) []string {
 }
 
 func buildStopCommand(mode string) string {
-	return fmt.Sprintf("pig pg stop -m %s", mode)
+	return buildStopCommandFor(nil, &StopOptions{Mode: mode}, false)
+}
+
+func buildStopCommandFor(cfg *Config, opts *StopOptions, includePlan bool) string {
+	args := appendPgTargetCommandFlags([]string{"pig", "pg", "stop"}, cfg)
+	mode := DefaultStopMode
+	if opts != nil && opts.Mode != "" {
+		mode = strings.ToLower(opts.Mode)
+	}
+	args = append(args, "-m", mode)
+	if opts != nil && opts.Timeout > 0 {
+		args = append(args, "-t", strconv.Itoa(opts.Timeout))
+	}
+	if opts != nil && opts.NoWait {
+		args = append(args, "--no-wait")
+	}
+	if includePlan {
+		args = append(args, "--plan")
+	}
+	return utils.ShellQuoteArgs(args)
+}
+
+func appendPgTargetCommandFlags(args []string, cfg *Config) []string {
+	if cfg == nil {
+		return args
+	}
+	if cfg.PgVersion > 0 {
+		args = append(args, "--version", strconv.Itoa(cfg.PgVersion))
+	}
+	if cfg.PgData != "" && cfg.PgData != DefaultPgData {
+		args = append(args, "-D", cfg.PgData)
+	}
+	if cfg.DbSU != "" {
+		args = append(args, "--dbsu", cfg.DbSU)
+	}
+	return args
 }

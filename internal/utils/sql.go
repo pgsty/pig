@@ -21,12 +21,12 @@ var SQLLikePatternRegex = regexp.MustCompile(`^[a-zA-Z0-9_\s%*.,;:!?@#$^&()\[\]{
 
 // ValidStateValues contains valid PostgreSQL connection states for pg_stat_activity.
 var ValidStateValues = map[string]bool{
-	"active":                          true,
-	"idle":                            true,
-	"idle in transaction":             true,
-	"idle in transaction (aborted)":   true,
-	"fastpath function call":          true,
-	"disabled":                        true,
+	"active":                        true,
+	"idle":                          true,
+	"idle in transaction":           true,
+	"idle in transaction (aborted)": true,
+	"fastpath function call":        true,
+	"disabled":                      true,
 }
 
 // ValidateIdentifier checks if a string is a valid PostgreSQL identifier.
@@ -64,7 +64,7 @@ func EscapeSQLString(s string) string {
 
 // EscapeSQLLikePattern escapes special characters in a LIKE pattern.
 // This handles: backslash (escape char), % and _ (LIKE wildcards), and single quotes (SQL string).
-// Use with ESCAPE '\\' clause in LIKE expressions.
+// Use with SQL-level ESCAPE '\' clause in LIKE expressions.
 func EscapeSQLLikePattern(s string) string {
 	// Order matters: escape backslash first since it's the escape character
 	s = strings.ReplaceAll(s, "\\", "\\\\")

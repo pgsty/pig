@@ -21,12 +21,17 @@ func stubCtlChecks(t *testing.T, exists, initialized, running bool, pid int) {
 	t.Helper()
 	origDataDir := ctlCheckDataDir
 	origRunning := ctlCheckRunning
+	origRunningState := ctlCheckRunningState
 	t.Cleanup(func() {
 		ctlCheckDataDir = origDataDir
 		ctlCheckRunning = origRunning
+		ctlCheckRunningState = origRunningState
 	})
 	ctlCheckDataDir = func(dbsu, dataDir string) (bool, bool) { return exists, initialized }
 	ctlCheckRunning = func(dbsu, dataDir string) (bool, int) { return running, pid }
+	ctlCheckRunningState = func(dbsu, dataDir string) (bool, int, string, error) {
+		return running, pid, "", nil
+	}
 }
 
 func captureCtlStdout(t *testing.T, fn func()) string {
@@ -105,5 +110,40 @@ func TestStopTextInvalidModeStillFails(t *testing.T) {
 	err := Stop(nil, &StopOptions{Mode: "bogus"})
 	if err == nil || !strings.Contains(err.Error(), "invalid stop mode") {
 		t.Fatalf("pg stop with invalid mode should fail, got %v", err)
+	}
+}
+
+func TestRestartTextStoppedFailsInsteadOfStarting(t *testing.T) {
+	stubCtlChecks(t, true, true, false, 0)
+
+	err := Restart(nil, &RestartOptions{Mode: "fast"})
+	if err == nil || !strings.Contains(err.Error(), "not running") {
+		t.Fatalf("pg restart on stopped server should fail before pg_ctl restart, got %v", err)
+	}
+}
+
+func TestRestartTextStatusCheckErrorIsNotReportedAsStopped(t *testing.T) {
+	origRunning := ctlCheckRunning
+	origRunningState := ctlCheckRunningState
+	t.Cleanup(func() {
+		ctlCheckRunning = origRunning
+		ctlCheckRunningState = origRunningState
+	})
+	ctlCheckRunning = func(dbsu, dataDir string) (bool, int) {
+		return false, 0
+	}
+	ctlCheckRunningState = func(dbsu, dataDir string) (bool, int, string, error) {
+		return false, 0, "", os.ErrPermission
+	}
+
+	err := Restart(&Config{PgData: "/pg/data", DbSU: config.CurrentUser}, &RestartOptions{Mode: "fast"})
+	if err == nil {
+		t.Fatal("expected status check error")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("restart should preserve status check error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "use 'pig pg start'") {
+		t.Fatalf("restart should not report permission errors as stopped instance: %v", err)
 	}
 }

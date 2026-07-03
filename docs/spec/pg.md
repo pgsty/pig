@@ -26,12 +26,19 @@ Connection & Query (via psql):
   pig pg psql [db] [-c sql]        connect to postgres
   pig pg ps                        show current connections
   pig pg kill [-a] [-x] [-u user] [-d db] [-q sql] [--watch secs]
+  pig pg clone <src> [dst]         clone database with CREATE DATABASE TEMPLATE
+
+Instance Fork:
+  pig pg fork init <name>          fork PGDATA into /pg/data-<name>
+  pig pg fork list                 list managed forks
+  pig pg fork start|stop|rm <name> manage fork lifecycle
 
 Maintenance (via psql & pg_repack):
   pig pg vacuum  [db] [-a]         vacuum database
   pig pg analyze [db] [-a]         analyze database
   pig pg freeze  [db] [-a]         vacuum freeze tables
   pig pg repack  [db] [-a]         online repack database
+  pig pg tune [-p profile]         print tuned PostgreSQL parameters
 
 Log Commands:
   pig pg log                       show latest log lines
@@ -79,6 +86,18 @@ High-risk primitives expose a structured `state -> plan -> precheck -> execute -
 | `pg psql` | `sql, connect` | Connect to database | Wraps psql |
 | `pg ps` | `activity, act` | Show current connections | Queries pg_stat_activity |
 | `pg kill` | `k` | Terminate connections | Default dry-run mode |
+| `pg clone` | | Clone database | Terminates source sessions before `CREATE DATABASE ... TEMPLATE` |
+{.full-width}
+
+**Instance Fork**:
+
+| Command | Alias | Description | Notes |
+|:--------|:------|:------------|:------|
+| `pg fork init` | `pg fork <name>` | Fork PGDATA | Managed destination defaults to `/pg/data-<name>` |
+| `pg fork list` | `ls` | List managed forks | Scans managed `/pg/data-*` forks |
+| `pg fork start` | | Start a fork | Uses fork metadata or `--dst-data` |
+| `pg fork stop` | | Stop a fork | Uses `pg_ctl stop` |
+| `pg fork rm` | `remove, delete` | Remove a fork | Destructive; structured mode requires `--yes` or `--force` |
 {.full-width}
 
 **Database Maintenance**:
@@ -89,6 +108,7 @@ High-risk primitives expose a structured `state -> plan -> precheck -> execute -
 | `pg analyze` | `ana, az` | Analyze tables | Executes maintenance SQL through psql |
 | `pg freeze` | `frz` | Freeze vacuum | Executes maintenance SQL through psql |
 | `pg repack` | `rp` | Online table repacking | Requires pg_repack extension |
+| `pg tune` | | Generate parameter advice | Prints tuned settings; does not apply them |
 {.full-width}
 
 **Log Tools**:
@@ -131,11 +151,17 @@ pig pg psql                       # Connect to postgres database
 pig pg psql mydb                  # Connect to specific database
 pig pg ps                         # View current connections
 pig pg kill -x                    # Terminate connections (requires -x to execute)
+pig pg clone meta meta_dev        # Clone one database inside an instance
+
+# Instance fork
+pig pg fork init dev --start      # Fork PGDATA into /pg/data-dev and start it
+pig pg fork list                  # List managed forks
 
 # Database maintenance
 pig pg vacuum mydb                # Vacuum specific database
 pig pg analyze mydb               # Analyze specific database
 pig pg repack mydb                # Online repack database
+pig pg tune -p oltp               # Generate PostgreSQL parameter advice
 
 # Log viewing
 pig pg log                        # Show latest log lines
@@ -263,6 +289,8 @@ pig pg restart -O "-p 5433"       # Restart with new options
 
 **Options:** Same as `pg stop`, plus `--options` (`-O`) to pass to postgres.
 
+**Precondition:** `pg restart` requires the target PostgreSQL instance to be running. It refuses a stopped data directory instead of treating restart as start; use `pig pg start` for stopped instances.
+
 
 ### pg reload
 
@@ -348,6 +376,66 @@ pig pg role -D /data/pg17         # Specify data directory
 1. **Process detection**: Check for `walreceiver`, `recovery` processes
 2. **SQL query**: Execute `pg_is_in_recovery()` (requires PostgreSQL running)
 3. **Data directory check**: Check for `standby.signal`, `recovery.signal`, `recovery.conf` files
+
+
+## Database Clone & Instance Fork
+
+### pg clone
+
+Clone a database inside the current PostgreSQL instance.
+
+```bash
+pig pg clone meta                       # Clone meta to the next meta_N name
+pig pg clone meta meta_dev              # Clone meta to meta_dev
+pig pg clone meta meta_dev --owner dba  # Change owner after clone
+pig pg clone meta meta_dev --port 5433  # Use a non-default local source port
+pig pg clone meta meta_dev --plan       # Preview clone plan
+pig pg clone meta meta_dev -y           # Skip text confirmation
+```
+
+**Options:**
+
+| Option | Description |
+|:---|:---|
+| `--port` | Source instance port (default: 5432 or `$PG_PORT`) |
+| `--conn-db` | Database used to run `CREATE DATABASE` |
+| `--owner` | Best-effort owner change after clone |
+| `--conn-limit` | Connection limit for cloned database (`-1` no limit, `0` disallow) |
+| `--plan` | Preview clone plan without executing |
+| `--yes` / `-y` | Skip text confirmation |
+{.full-width}
+
+**Safety:** `pg clone` terminates active sessions on the source database immediately before `CREATE DATABASE ... TEMPLATE`. Text mode prompts unless `--yes` is passed; JSON/YAML mode refuses destructive execution without `--yes`. The plan includes source, destination, connection commands, and filesystem/preflight warnings.
+
+
+### pg fork
+
+Fork a local PostgreSQL data directory into a separate instance. Managed forks live under `/pg/data-<name>` and carry `fork.json` metadata; unmanaged forks use `--dst-data` and are not listed by `pg fork list`.
+
+```bash
+pig pg fork init dev                    # Fork /pg/data to /pg/data-dev
+pig pg fork dev                         # Shorthand for pg fork init dev
+pig pg fork init dev -D /pg/data2 --src-port 15431
+pig pg fork init dev --start --dst-port 15440
+pig pg fork init dev --dst-data /tmp/dev-fork
+pig pg fork list
+pig pg fork start dev
+pig pg fork stop dev
+pig pg fork rm dev --stop -f
+pig pg fork init dev --plan
+```
+
+**Key Semantics:**
+
+- Running sources use PostgreSQL non-exclusive backup mode around the copy.
+- The hot-copy path runs `pg_backup_stop`, copies source `pg_wal` into the target again to include the backup-end WAL record, then writes the returned `labelfile` into target `backup_label` before the fork starts.
+- CoW filesystems (`xfs` reflink / `btrfs`) are preferred; regular copy fallback can be slow and space-heavy.
+- Sources with external WAL directories exposed as a `pg_wal` symlink are rejected.
+- Sources with external tablespaces under `pg_tblspc` are rejected; tablespace remapping is not implemented by `pg fork`.
+- `--force` replaces an existing stopped destination; running destinations are refused unless the lifecycle command explicitly stops them.
+- `pg fork rm` is destructive. Structured mode requires `--yes` or `--force`.
+
+**Boundary:** `pg fork` is a local PGDATA primitive. It does not coordinate Patroni, backup retention, VIPs, load balancers, or application traffic. Hot fork depends on WAL retained in the source `pg_wal` when backup mode stops; prefer `pg_basebackup` or pgBackRest workflows when correctness depends on archive-backed WAL retention, replication slots, remote hosts, external WAL directories, or tablespace mapping.
 
 
 ## Connection & Query Commands
@@ -516,6 +604,32 @@ pig pg repack mydb --plan         # Show tables to be repacked
 {.full-width}
 
 
+### pg tune
+
+Generate PostgreSQL configuration advice from hardware inputs and workload profile. This command prints recommendations only; it does not write `postgresql.auto.conf`.
+
+```bash
+pig pg tune                         # Auto-detect, OLTP profile
+pig pg tune -p olap                 # Use OLAP profile
+pig pg tune -c 8 -m 32768 -d 500    # Override CPU/memory/disk inputs
+pig pg tune -C 500                  # Override max_connections
+pig pg tune -R 0.3                  # Override shared_buffers ratio
+pig pg tune -o json                 # Structured output
+```
+
+**Options:**
+
+| Option | Short | Description |
+|:---|:---|:---|
+| `--profile` | `-p` | Tuning profile: `oltp`, `olap`, `tiny`, `crit` |
+| `--cpu` | `-c` | CPU cores (`0` = auto-detect) |
+| `--mem` | `-m` | Total memory in MB (`0` = auto-detect) |
+| `--disk` | `-d` | Data disk size in GB (`0` = auto-detect) |
+| `--max-conn` | `-C` | Override max_connections |
+| `--shmem-ratio` | `-R` | shared_buffers fraction of memory |
+{.full-width}
+
+
 ## Log Commands
 
 Log commands view PostgreSQL CSV log files. Default log directory is `/pg/log/postgres`, can be changed via `--log-dir`. The default `pg log` action shows the latest CSV log snapshot; use `pg log -f` or `pg log tail` for real-time output. Use `-o json` to convert CSV log rows to JSONL records; `yaml` and `json-pretty` are not supported for log snapshots.
@@ -655,6 +769,7 @@ pig pg svc status                # Show service status
 - Connection management commands (psql/ps/kill) call `psql`
 - Maintenance commands (vacuum/analyze/freeze) execute SQL through `psql`
 - repack command calls `pg_repack`
+- clone and fork commands use PostgreSQL database/template clone and PGDATA copy primitives
 - Log commands call system tools like `tail`, `less`, `grep`
 
 For full native tool functionality, call the respective commands directly.

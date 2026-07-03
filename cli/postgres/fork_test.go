@@ -1,6 +1,8 @@
 package postgres
 
 import (
+	"bufio"
+	"bytes"
 	"io"
 	"os"
 	"os/exec"
@@ -455,10 +457,95 @@ func TestBuildBackupSQLDoesNotEmbedShellCopy(t *testing.T) {
 	}
 }
 
+func TestBuildBackupStopSQLSelectsOnlyBackupLabel(t *testing.T) {
+	for _, version := range []int{140000, 180000} {
+		sql := buildBackupStopSQL(backupFunctionNames(version))
+		if !strings.Contains(sql, "SELECT labelfile FROM") {
+			t.Fatalf("buildBackupStopSQL(%d) should return only labelfile, got:\n%s", version, sql)
+		}
+		if strings.Contains(sql, "SELECT *") {
+			t.Fatalf("buildBackupStopSQL(%d) must not use SELECT * because psql output is ambiguous:\n%s", version, sql)
+		}
+	}
+}
+
+func TestHotBackupReturnsBackupLabelFromStop(t *testing.T) {
+	session := &fakeBackupSession{
+		outputs: []string{"180000", "", "START WAL LOCATION: 0/1000028\nLABEL: label\n"},
+	}
+	copyFn := func() error { return nil }
+
+	label, err := runHotBackupCopy(session, "label", copyFn)
+	if err != nil {
+		t.Fatalf("runHotBackupCopy returned error: %v", err)
+	}
+	if !strings.Contains(label, "START WAL LOCATION") || !strings.Contains(label, "LABEL: label") {
+		t.Fatalf("backup label was not returned from pg_backup_stop: %q", label)
+	}
+}
+
+func TestWriteBackupLabelWritesBackupLabelFileAsDBSU(t *testing.T) {
+	originalWrite := forkWriteFileAsDBSU
+	t.Cleanup(func() {
+		forkWriteFileAsDBSU = originalWrite
+	})
+
+	var gotPath, gotContent, gotDBSU string
+	forkWriteFileAsDBSU = func(path, content, dbsu string) error {
+		gotPath = path
+		gotContent = content
+		gotDBSU = dbsu
+		return nil
+	}
+
+	if err := writeBackupLabelAsDBSU("postgres", "/pg/data-dev", "LABEL: label\n"); err != nil {
+		t.Fatalf("writeBackupLabelAsDBSU returned error: %v", err)
+	}
+	if gotPath != "/pg/data-dev/backup_label" {
+		t.Fatalf("backup_label path = %q, want /pg/data-dev/backup_label", gotPath)
+	}
+	if gotContent != "LABEL: label\n" {
+		t.Fatalf("backup_label content = %q", gotContent)
+	}
+	if gotDBSU != "postgres" {
+		t.Fatalf("dbsu = %q, want postgres", gotDBSU)
+	}
+}
+
+func TestHotBackupRecoveryFilesCopyWalBeforeBackupLabel(t *testing.T) {
+	originalCommand := forkDBSUCommand
+	originalWrite := forkWriteFileAsDBSU
+	t.Cleanup(func() {
+		forkDBSUCommand = originalCommand
+		forkWriteFileAsDBSU = originalWrite
+	})
+
+	events := []string{}
+	forkDBSUCommand = func(dbsu string, args []string) error {
+		events = append(events, "cmd:"+strings.Join(args, " "))
+		return nil
+	}
+	forkWriteFileAsDBSU = func(path, content, dbsu string) error {
+		events = append(events, "write:"+path)
+		return nil
+	}
+
+	if err := writeHotBackupRecoveryFilesAsDBSU("postgres", "/pg/data", "/pg/data-dev", "LABEL: label\n"); err != nil {
+		t.Fatalf("writeHotBackupRecoveryFilesAsDBSU returned error: %v", err)
+	}
+	want := []string{
+		"cmd:cp -a --reflink=auto /pg/data/pg_wal/. /pg/data-dev/pg_wal/",
+		"write:/pg/data-dev/backup_label",
+	}
+	if strings.Join(events, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("events = %#v, want %#v", events, want)
+	}
+}
+
 func TestHotBackupRunsCopyBetweenStartAndStopOnSameSession(t *testing.T) {
 	var events []string
 	session := &fakeBackupSession{
-		outputs: []string{"180000", ""},
+		outputs: []string{"180000", "", "LABEL: label\n"},
 		onExec: func(sql string) {
 			switch {
 			case strings.Contains(sql, "server_version_num"):
@@ -475,7 +562,7 @@ func TestHotBackupRunsCopyBetweenStartAndStopOnSameSession(t *testing.T) {
 		return nil
 	}
 
-	if err := runHotBackupCopy(session, "label", copyFn); err != nil {
+	if _, err := runHotBackupCopy(session, "label", copyFn); err != nil {
 		t.Fatalf("runHotBackupCopy returned error: %v", err)
 	}
 	want := strings.Join([]string{"version", "start", "copy", "stop"}, ",")
@@ -490,7 +577,7 @@ func TestHotBackupRunsCopyBetweenStartAndStopOnSameSession(t *testing.T) {
 func TestHotBackupStopsBackupWhenCopyFails(t *testing.T) {
 	var events []string
 	session := &fakeBackupSession{
-		outputs: []string{"180000", ""},
+		outputs: []string{"180000", "", "LABEL: label\n"},
 		onExec: func(sql string) {
 			if strings.Contains(sql, "pg_backup_start") {
 				events = append(events, "start")
@@ -505,13 +592,46 @@ func TestHotBackupStopsBackupWhenCopyFails(t *testing.T) {
 		return os.ErrPermission
 	}
 
-	err := runHotBackupCopy(session, "label", copyFn)
+	_, err := runHotBackupCopy(session, "label", copyFn)
 	if err == nil {
 		t.Fatal("expected copy error")
 	}
 	want := strings.Join([]string{"start", "copy", "stop"}, ",")
 	if got := strings.Join(events, ","); got != want {
 		t.Fatalf("events = %s, want %s", got, want)
+	}
+}
+
+type discardWriteCloser struct{}
+
+func (discardWriteCloser) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (discardWriteCloser) Close() error {
+	return nil
+}
+
+func TestPsqlBackupSessionExecCapturesMultilineOutput(t *testing.T) {
+	out := strings.Join([]string{
+		"START WAL LOCATION: 0/1000028",
+		"LABEL: pig_fork_dev",
+		"__PIG_FORK_SQL_DONE_1__",
+		"",
+	}, "\n")
+	session := &psqlBackupSession{
+		stdin:  discardWriteCloser{},
+		out:    bufio.NewScanner(strings.NewReader(out)),
+		errbuf: &bytes.Buffer{},
+	}
+
+	got, err := session.Exec("SELECT labelfile FROM pg_backup_stop(wait_for_archive => false);")
+	if err != nil {
+		t.Fatalf("Exec returned error: %v", err)
+	}
+	want := "START WAL LOCATION: 0/1000028\nLABEL: pig_fork_dev"
+	if got != want {
+		t.Fatalf("Exec output = %q, want %q", got, want)
 	}
 }
 
@@ -523,6 +643,75 @@ func TestRegularCopyFallbackIsAllowedButWarns(t *testing.T) {
 	}
 	if reason := forkCountdownReason(&State{CloneMode: CloneModeCOW, FS: "xfs"}); reason != "" {
 		t.Fatalf("CoW clone should not warn, got %q", reason)
+	}
+}
+
+func TestPrecheckInstanceRejectsSourceTablespaces(t *testing.T) {
+	dbsu := withCurrentUserAsDBSU(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "data")
+	dest := filepath.Join(root, "data-dev")
+	if err := os.MkdirAll(filepath.Join(source, "pg_tblspc", "12345"), 0755); err != nil {
+		t.Fatalf("mkdir pg_tblspc entry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "PG_VERSION"), []byte("18\n"), 0644); err != nil {
+		t.Fatalf("write PG_VERSION: %v", err)
+	}
+
+	_, err := precheckInstance(&Options{
+		Kind: KindInstance,
+		DbSU: dbsu,
+		Instance: InstanceOptions{
+			Name:       "dev",
+			SourceData: source,
+			DestData:   dest,
+			SourcePort: 5432,
+			DestPort:   15432,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected source tablespaces to be rejected")
+	}
+	if !strings.Contains(err.Error(), "tablespace") || !strings.Contains(err.Error(), "pg_tblspc") {
+		t.Fatalf("tablespace error should mention pg_tblspc, got %v", err)
+	}
+}
+
+func TestPrecheckInstanceRejectsExternalWALSymlink(t *testing.T) {
+	dbsu := withCurrentUserAsDBSU(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "data")
+	wal := filepath.Join(root, "wal")
+	dest := filepath.Join(root, "data-dev")
+	if err := os.MkdirAll(source, 0755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	if err := os.MkdirAll(wal, 0755); err != nil {
+		t.Fatalf("mkdir wal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "PG_VERSION"), []byte("18\n"), 0644); err != nil {
+		t.Fatalf("write PG_VERSION: %v", err)
+	}
+	if err := os.Symlink(wal, filepath.Join(source, "pg_wal")); err != nil {
+		t.Fatalf("symlink pg_wal: %v", err)
+	}
+
+	_, err := precheckInstance(&Options{
+		Kind: KindInstance,
+		DbSU: dbsu,
+		Instance: InstanceOptions{
+			Name:       "dev",
+			SourceData: source,
+			DestData:   dest,
+			SourcePort: 5432,
+			DestPort:   15432,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected external WAL symlink to be rejected")
+	}
+	if !strings.Contains(err.Error(), "external WAL") || !strings.Contains(err.Error(), "pg_wal") {
+		t.Fatalf("external WAL error should mention pg_wal, got %v", err)
 	}
 }
 

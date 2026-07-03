@@ -111,8 +111,8 @@ const (
 	CodePgStatusPermissionDenied = MODULE_PG + CAT_PERM + 1     // Permission denied reading status
 
 	// Control operation state errors (13_06_xx - State category)
-	CodePgAlreadyRunning      = MODULE_PG + CAT_STATE + 3 // PostgreSQL is already running (start failed)
-	CodePgAlreadyStopped      = MODULE_PG + CAT_STATE + 4 // PostgreSQL is already stopped (stop failed)
+	CodePgAlreadyRunning      = MODULE_PG + CAT_STATE + 3 // retired: start already-running is OK with already=true; value reserved, do not reuse
+	CodePgAlreadyStopped      = MODULE_PG + CAT_STATE + 4 // retired: stop already-stopped is OK with already=true; value reserved, do not reuse
 	CodePgNotRunning          = MODULE_PG + CAT_STATE + 5 // PostgreSQL not running (reload/restart failed)
 	CodePgInitRunningConflict = MODULE_PG + CAT_STATE + 6 // PostgreSQL running, cannot init with --force
 

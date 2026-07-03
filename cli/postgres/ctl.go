@@ -305,6 +305,14 @@ func Restart(cfg *Config, opts *RestartOptions) error {
 		return fmt.Errorf("invalid stop mode: %s (use smart/fast/immediate)", mode)
 	}
 
+	running, _, _, err := ctlCheckRunningState(dbsu, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to check PostgreSQL status in %s: %w", dataDir, err)
+	}
+	if !running {
+		return fmt.Errorf("postgresql is not running in %s; use 'pig pg start' to start a stopped server", dataDir)
+	}
+
 	// Find PostgreSQL
 	pg, err := GetPgInstall(cfg)
 	if err != nil {

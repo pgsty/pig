@@ -129,7 +129,7 @@ func buildKillWhereClause(opts *KillOptions) string {
 	if opts != nil && opts.Query != "" {
 		// Escape LIKE wildcards and single quotes for safe pattern matching.
 		escapedQuery := utils.EscapeSQLLikePattern(opts.Query)
-		conditions = append(conditions, fmt.Sprintf("query ILIKE '%%%s%%' ESCAPE '\\\\'", escapedQuery))
+		conditions = append(conditions, fmt.Sprintf("query ILIKE '%%%s%%' ESCAPE '\\'", escapedQuery))
 	}
 	return strings.Join(conditions, " AND ")
 }

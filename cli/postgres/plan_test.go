@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"pig/internal/config"
 	"pig/internal/output"
 )
 
@@ -73,17 +74,15 @@ func TestBuildRestartPlanFromState_NotRunning(t *testing.T) {
 		t.Fatal("buildRestartPlanFromState returned nil")
 	}
 
-	// Only start action when not running
-	if len(plan.Actions) != 1 {
-		t.Errorf("Expected 1 action (start only), got %d", len(plan.Actions))
+	if len(plan.Actions) != 0 {
+		t.Errorf("Expected no restart actions for stopped instance, got %d", len(plan.Actions))
 	}
-	if !containsAction(plan.Actions, "Start PostgreSQL") {
-		t.Error("Actions should include start step")
+	if containsAction(plan.Actions, "Start PostgreSQL") {
+		t.Error("restart plan must not advertise start when restart execution refuses stopped instances")
 	}
 
-	// Expected should say "started" not "restarted"
-	if !strings.Contains(plan.Expected, "started") {
-		t.Errorf("Expected should mention 'started', got %q", plan.Expected)
+	if !strings.Contains(plan.Expected, "not running") {
+		t.Errorf("Expected should mention stopped precondition, got %q", plan.Expected)
 	}
 
 	// No risks when not running
@@ -99,10 +98,10 @@ func TestBuildRestartActions(t *testing.T) {
 		t.Errorf("Expected 2 actions for running instance, got %d", len(actions))
 	}
 
-	// Not running: 1 action
+	// Not running: restart refuses stopped instances.
 	actions = buildRestartActions(false, "fast")
-	if len(actions) != 1 {
-		t.Errorf("Expected 1 action for stopped instance, got %d", len(actions))
+	if len(actions) != 0 {
+		t.Errorf("Expected no restart actions for stopped instance, got %d", len(actions))
 	}
 }
 
@@ -141,8 +140,8 @@ func TestBuildRestartExpected(t *testing.T) {
 
 	// Not running
 	expected = buildRestartExpected("/pg/data", false)
-	if !strings.Contains(expected, "started") && strings.Contains(expected, "restarted") {
-		t.Errorf("Expected 'started' for stopped instance, got %q", expected)
+	if !strings.Contains(expected, "not running") || strings.Contains(expected, "started") {
+		t.Errorf("Expected stopped precondition for stopped instance, got %q", expected)
 	}
 }
 
@@ -181,6 +180,40 @@ func TestBuildRestartCommand(t *testing.T) {
 		if !strings.Contains(cmd, "pig pg restart") {
 			t.Errorf("buildRestartCommand should contain 'pig pg restart', got %q", cmd)
 		}
+	}
+}
+
+func TestBuildRestartPlanCommandIncludesTargetOptions(t *testing.T) {
+	cfg := &Config{PgVersion: 18, PgData: "/tmp/no such dir", DbSU: config.CurrentUser}
+	plan := BuildRestartPlan(cfg, &RestartOptions{
+		Mode:    "immediate",
+		Timeout: 7,
+		NoWait:  true,
+		Options: "-p 5433",
+	})
+	for _, want := range []string{
+		"pig pg restart",
+		"--plan",
+		"--version 18",
+		"-D '/tmp/no such dir'",
+		"--dbsu " + config.CurrentUser,
+		"-m immediate",
+		"-t 7",
+		"--no-wait",
+		"-O '-p 5433'",
+	} {
+		if !strings.Contains(plan.Command, want) {
+			t.Fatalf("restart plan command %q missing %q", plan.Command, want)
+		}
+	}
+	if len(plan.NextActions) == 0 {
+		t.Fatal("restart plan should include next actions")
+	}
+	if plan.NextActions[0].Required {
+		t.Fatalf("restart next action should not be required when postgres is not running: %#v", plan.NextActions[0])
+	}
+	if !strings.Contains(plan.NextActions[0].Reason, "not running") {
+		t.Fatalf("restart next action should explain stopped precondition, got %#v", plan.NextActions[0])
 	}
 }
 
@@ -342,6 +375,29 @@ func TestBuildStopCommand(t *testing.T) {
 		}
 		if !strings.Contains(cmd, "pig pg stop") {
 			t.Errorf("buildStopCommand should contain 'pig pg stop', got %q", cmd)
+		}
+	}
+}
+
+func TestBuildStopPlanCommandIncludesTargetOptions(t *testing.T) {
+	cfg := &Config{PgVersion: 18, PgData: "/tmp/no such dir", DbSU: config.CurrentUser}
+	plan := BuildStopPlan(cfg, &StopOptions{
+		Mode:    "immediate",
+		Timeout: 7,
+		NoWait:  true,
+	})
+	for _, want := range []string{
+		"pig pg stop",
+		"--plan",
+		"--version 18",
+		"-D '/tmp/no such dir'",
+		"--dbsu " + config.CurrentUser,
+		"-m immediate",
+		"-t 7",
+		"--no-wait",
+	} {
+		if !strings.Contains(plan.Command, want) {
+			t.Fatalf("stop plan command %q missing %q", plan.Command, want)
 		}
 	}
 }

@@ -3,10 +3,8 @@ package postgres
 import (
 	"fmt"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"pig/cli/ext"
@@ -211,7 +209,7 @@ func ExecuteClone(opts *CloneOptions) error {
 	}
 	printClonePreflight(n.Preflight, n.Warnings)
 	if !n.Yes {
-		if err := confirmCloneWarnings(n.Warnings, "CLONE", 10); err != nil {
+		if err := confirmCloneWarnings(n.Warnings, "CLONE"); err != nil {
 			return exitCloneError(output.CodeForkInvalidArgs, err)
 		}
 	}
@@ -587,31 +585,19 @@ func runCloneSQLFile(dbsu string, args []string, sql string) error {
 	return utils.DBSUCommand(dbsu, args)
 }
 
-func confirmCloneWarnings(warnings []string, action string, seconds int) error {
-	if len(warnings) == 0 {
-		return nil
-	}
-	fmt.Fprintf(os.Stderr, "\n%sWARNING: preflight warnings above mean this may become a heavy production file copy.%s\n", utils.ColorYellow, utils.ColorReset)
-	fmt.Fprintln(os.Stderr, "Press Ctrl+C to cancel, or wait for countdown...")
+func confirmCloneWarnings(warnings []string, action string) error {
+	return utils.Confirm(cloneConfirmationWarning(warnings), action)
+}
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	defer func() {
-		signal.Stop(sigChan)
-		close(sigChan)
-	}()
-
-	for i := seconds; i > 0; i-- {
-		select {
-		case <-sigChan:
-			fmt.Fprintf(os.Stderr, "\n%s cancelled.\n", action)
-			return fmt.Errorf("%s cancelled by user", action)
-		case <-time.After(time.Second):
-			fmt.Fprintf(os.Stderr, "\rStarting %s in %d seconds... ", action, i)
-		}
+func cloneConfirmationWarning(warnings []string) string {
+	lines := []string{
+		"database clone terminates active sessions on the source database before CREATE DATABASE",
 	}
-	fmt.Fprintln(os.Stderr)
-	return nil
+	if len(warnings) > 0 {
+		lines = append(lines, "preflight warnings indicate this may become a heavy production file copy")
+		lines = append(lines, warnings...)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func detectDatabaseCloneMode(path string) (DatabaseCloneMode, string, error) {

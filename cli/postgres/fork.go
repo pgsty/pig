@@ -1149,6 +1149,14 @@ func precheckInstance(opts *Options) (*State, error) {
 	if !exists || !initialized {
 		return nil, &ForkError{Code: output.CodeForkSourceNotFound, Err: fmt.Errorf("source data directory is not initialized: %s\nHint: pass a valid source with -D/--src-data, or initialize the source before forking", inst.SourceData)}
 	}
+	if sourceUsesExternalWALAsDBSU(opts.DbSU, inst.SourceData) {
+		return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("source data directory uses an external WAL directory via pg_wal: %s\nHint: pig pg fork cannot isolate external WAL directories yet; use pg_basebackup/pgBackRest or a source with WAL inside PGDATA", filepath.Join(inst.SourceData, "pg_wal"))}
+	}
+	if hasTablespaces, entry, err := sourceHasTablespacesAsDBSU(opts.DbSU, inst.SourceData); err != nil {
+		return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: err}
+	} else if hasTablespaces {
+		return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("source data directory uses external tablespaces via pg_tblspc: %s\nHint: pig pg fork cannot isolate external tablespaces yet; use pg_basebackup/pgBackRest with tablespace mapping, or move/drop external tablespaces before forking", entry)}
+	}
 
 	if destExists, _ := CheckDataDirAsDBSU(opts.DbSU, inst.DestData); destExists {
 		if running, pid := CheckPostgresRunningAsDBSU(opts.DbSU, inst.DestData); running {
@@ -1262,11 +1270,15 @@ func hotCopy(dbsu string, inst InstanceOptions) error {
 		}
 		return ctx.Err()
 	}
-	if err := runHotBackupCopy(session, label, copyFn); err != nil {
+	backupLabel, err := runHotBackupCopy(session, label, copyFn)
+	if err != nil {
 		var copyErr copyPhaseError
 		if errors.As(err, &copyErr) {
 			return forkSubprocessError(output.CodeForkCopyFailed, copyErr.Err)
 		}
+		return &ForkError{Code: output.CodeForkBackupFailed, Err: err}
+	}
+	if err := writeHotBackupRecoveryFilesAsDBSU(dbsu, inst.SourceData, inst.DestData, backupLabel); err != nil {
 		return &ForkError{Code: output.CodeForkBackupFailed, Err: err}
 	}
 	if err := forkDBSUCommand(dbsu, []string{"test", "-f", filepath.Join(inst.DestData, "PG_VERSION")}); err != nil {
@@ -1315,24 +1327,56 @@ func (e copyPhaseError) Unwrap() error {
 	return e.Err
 }
 
-func runHotBackupCopy(session backupSession, label string, copyFn func() error) error {
+func runHotBackupCopy(session backupSession, label string, copyFn func() error) (string, error) {
 	version, err := backupServerVersion(session)
 	if err != nil {
-		return err
+		return "", err
 	}
 	names := backupFunctionNames(version)
 	if _, err := session.Exec(buildBackupStartSQL(label, names)); err != nil {
-		return err
+		return "", err
 	}
 	copyErr := copyFn()
-	_, stopErr := session.Exec(buildBackupStopSQL(names))
+	backupLabel, stopErr := session.Exec(buildBackupStopSQL(names))
 	if copyErr != nil {
 		if stopErr != nil {
-			return copyPhaseError{Err: fmt.Errorf("copy failed: %w; backup stop also failed: %v", copyErr, stopErr)}
+			return "", copyPhaseError{Err: fmt.Errorf("copy failed: %w; backup stop also failed: %v", copyErr, stopErr)}
 		}
-		return copyPhaseError{Err: copyErr}
+		return "", copyPhaseError{Err: copyErr}
 	}
-	return stopErr
+	if stopErr != nil {
+		return "", stopErr
+	}
+	if strings.TrimSpace(backupLabel) == "" {
+		return "", fmt.Errorf("%s returned empty backup_label", names.stop)
+	}
+	return backupLabel, nil
+}
+
+func writeBackupLabelAsDBSU(dbsu, dataDir, content string) error {
+	if strings.TrimSpace(content) == "" {
+		return fmt.Errorf("backup_label content is empty")
+	}
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return forkWriteFileAsDBSU(filepath.Join(dataDir, "backup_label"), content, dbsu)
+}
+
+func writeHotBackupRecoveryFilesAsDBSU(dbsu, sourceData, destData, backupLabel string) error {
+	// Refresh the WAL tail written by pg_backup_stop. The initial datadir copy
+	// still needs to include the backup start segment; heavy-write sources that
+	// may recycle it require a streaming/archive-backed backup workflow.
+	if err := copyBackupWALAsDBSU(dbsu, sourceData, destData); err != nil {
+		return err
+	}
+	return writeBackupLabelAsDBSU(dbsu, destData, backupLabel)
+}
+
+func copyBackupWALAsDBSU(dbsu, sourceData, destData string) error {
+	srcWAL := filepath.Join(sourceData, "pg_wal") + string(os.PathSeparator) + "."
+	dstWAL := filepath.Join(destData, "pg_wal") + string(os.PathSeparator)
+	return forkDBSUCommand(dbsu, []string{"cp", "-a", "--reflink=auto", srcWAL, dstWAL})
 }
 
 func backupServerVersion(session backupSession) (int, error) {
@@ -1363,9 +1407,9 @@ func buildBackupStartSQL(label string, names backupFunctions) string {
 
 func buildBackupStopSQL(names backupFunctions) string {
 	if names.legacy {
-		return fmt.Sprintf("SELECT * FROM %s(false, false);\n", names.stop)
+		return fmt.Sprintf("SELECT labelfile FROM %s(false, false);\n", names.stop)
 	}
-	return fmt.Sprintf("SELECT * FROM %s(wait_for_archive => false);\n", names.stop)
+	return fmt.Sprintf("SELECT labelfile FROM %s(wait_for_archive => false);\n", names.stop)
 }
 
 type psqlBackupSession struct {
@@ -1664,6 +1708,24 @@ func isPortFree(port int) bool {
 func hasPostmasterPID(dbsu, dataDir string) bool {
 	_, err := utils.DBSUCommandOutput(dbsu, []string{"cat", filepath.Join(dataDir, "postmaster.pid")})
 	return err == nil
+}
+
+func sourceUsesExternalWALAsDBSU(dbsu, dataDir string) bool {
+	err := forkDBSUCommand(dbsu, []string{"test", "-L", filepath.Join(dataDir, "pg_wal")})
+	return err == nil
+}
+
+func sourceHasTablespacesAsDBSU(dbsu, dataDir string) (bool, string, error) {
+	tblspc := filepath.Join(dataDir, "pg_tblspc")
+	if err := forkDBSUCommand(dbsu, []string{"test", "-d", tblspc}); err != nil {
+		return false, "", nil
+	}
+	out, err := forkDBSUCommandOutput(dbsu, []string{"find", tblspc, "-mindepth", "1", "-maxdepth", "1", "-print", "-quit"})
+	if err != nil {
+		return false, "", err
+	}
+	entry := strings.TrimSpace(out)
+	return entry != "", entry, nil
 }
 
 func validateForkDataPaths(src, dst string) (string, string, error) {
