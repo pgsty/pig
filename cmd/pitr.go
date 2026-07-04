@@ -140,8 +140,9 @@ The command uses the same execution privilege strategy as other pig commands:
 				return err
 			}
 			return &utils.ExitCodeError{
-				Code: output.ExitCode(output.CodePITRInvalidArgs),
-				Err:  &pitr.PITRError{Code: output.CodePITRInvalidArgs, Err: fmt.Errorf("invalid or missing recovery target")},
+				Code:   output.ExitCode(output.CodePITRInvalidArgs),
+				Err:    &pitr.PITRError{Code: output.CodePITRInvalidArgs, Err: fmt.Errorf("invalid or missing recovery target")},
+				Silent: true,
 			}
 		}
 		if err := rejectRestoreExtraArgsBeforeDash(cmd, args, output.CodePITRInvalidArgs); err != nil {

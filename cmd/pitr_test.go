@@ -142,17 +142,23 @@ func TestPITRMissingTargetTextReturnsInvalidArgs(t *testing.T) {
 	origOpts := *pitrOpts
 	origOut := pitrCmd.OutOrStdout()
 	origErr := pitrCmd.ErrOrStderr()
+	origSilenceUsage := pitrCmd.SilenceUsage
+	origSilenceErrors := pitrCmd.SilenceErrors
 	defer func() {
 		config.OutputFormat = origFormat
 		*pitrOpts = origOpts
 		pitrCmd.SetOut(origOut)
 		pitrCmd.SetErr(origErr)
+		pitrCmd.SilenceUsage = origSilenceUsage
+		pitrCmd.SilenceErrors = origSilenceErrors
 	}()
 
 	config.OutputFormat = config.OUTPUT_TEXT
 	*pitrOpts = pitr.Options{}
 	pitrCmd.SetOut(io.Discard)
 	pitrCmd.SetErr(io.Discard)
+	pitrCmd.SilenceUsage = false
+	pitrCmd.SilenceErrors = false
 
 	err := pitrCmd.RunE(pitrCmd, nil)
 	if err == nil {
@@ -166,6 +172,15 @@ func TestPITRMissingTargetTextReturnsInvalidArgs(t *testing.T) {
 	if exitErr.Code != output.ExitCode(output.CodePITRInvalidArgs) {
 		t.Fatalf("unexpected exit code: got %d, want %d",
 			exitErr.Code, output.ExitCode(output.CodePITRInvalidArgs))
+	}
+	if !exitErr.Silent {
+		t.Fatal("missing-target text error should be silent after help is printed")
+	}
+	if !pitrCmd.SilenceUsage {
+		t.Fatal("missing-target text error should silence Cobra usage after printing help")
+	}
+	if !pitrCmd.SilenceErrors {
+		t.Fatal("missing-target text error should silence Cobra error after printing help")
 	}
 }
 
@@ -326,12 +341,14 @@ func TestPITRTextRuntimeErrorSilencesUsageAfterValidation(t *testing.T) {
 	origFormat := config.OutputFormat
 	origOpts := *pitrOpts
 	origSilenceUsage := pitrCmd.SilenceUsage
+	origSilenceErrors := pitrCmd.SilenceErrors
 	origOut := pitrCmd.OutOrStdout()
 	origErr := pitrCmd.ErrOrStderr()
 	defer func() {
 		config.OutputFormat = origFormat
 		*pitrOpts = origOpts
 		pitrCmd.SilenceUsage = origSilenceUsage
+		pitrCmd.SilenceErrors = origSilenceErrors
 		pitrCmd.SetOut(origOut)
 		pitrCmd.SetErr(origErr)
 	}()
@@ -354,12 +371,16 @@ func TestPITRTextRuntimeErrorSilencesUsageAfterValidation(t *testing.T) {
 	}
 
 	pitrCmd.SilenceUsage = false
+	pitrCmd.SilenceErrors = false
 	*pitrOpts = pitr.Options{}
 	if err := pitrCmd.RunE(pitrCmd, nil); err == nil {
 		t.Fatal("expected missing-target error")
 	}
-	if pitrCmd.SilenceUsage {
-		t.Fatal("missing target should keep help/usage behavior")
+	if !pitrCmd.SilenceUsage {
+		t.Fatal("missing target should silence Cobra usage after printing help")
+	}
+	if !pitrCmd.SilenceErrors {
+		t.Fatal("missing target should silence Cobra error after printing help")
 	}
 }
 
