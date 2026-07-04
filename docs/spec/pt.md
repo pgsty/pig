@@ -36,10 +36,11 @@ Logs:
   pig pt log [-f] [-n 50]          view patroni logs
   pig pt log tail [-n 50]          follow patroni logs
   pig pt log show [-n 50]          show patroni log snapshot
+  pig pt log grep <pattern>        search patroni logs
 ```
 
 > **B03**: `pt start` / `pt stop` are hidden shortcuts for `pt svc start` / `pt svc stop`.
-> `pt svc` remains the documented Patroni daemon control surface.
+> `pt service` is the official command name; `pt svc` is the short alias used in operator-facing examples.
 
 ## Primitive Contract
 
@@ -78,13 +79,13 @@ Switch preflight contract: before executing or asking for confirmation for `pt s
 | `pt start` | `up` | Start Patroni service | `systemctl start patroni` |
 | `pt stop` | `dn` | Stop Patroni service | `systemctl stop patroni` |
 | `pt status` | `st` | Show comprehensive status | `systemctl status` + `ps` + `patronictl list` |
-| `pt log` | `l` | View Patroni logs | `journalctl -u patroni` |
+| `pt log` | `l` | View Patroni logs | `tail` / `grep` local log files |
 {.full-width}
 
 The top-level `pt start` / `pt stop` shortcuts remain hidden (B03), but execute the same actions as
-`pt svc start` / `pt svc stop`. `pt svc` stays the documented, explicit Patroni daemon control surface.
+`pt svc start` / `pt svc stop`. `pt service` is the official command name; `pt svc` is the short alias used in examples.
 
-**Service Subcommand** (`pt svc`):
+**Service Subcommand** (`pt service`, alias `pt svc`):
 
 | Command | Alias | Description |
 |:--------|:------|:------------|
@@ -403,33 +404,49 @@ pig pt status
 
 ### pt log
 
-View Patroni service logs. Use `-o json` with `pt log` or `pt log show` for JSONL log records; `yaml` and `json-pretty` are not supported for log snapshots. JSONL mode reads journal messages with `journalctl -o cat` so each JSONL `message` field contains the raw log message. Structured output is not supported for follow/tail mode.
+View the current Patroni local log file. Pig resolves the log directory from `log.dir` in `/etc/patroni/patroni.yml`; if the config cannot provide it, Pig falls back to `/pg/log/patroni`. `pt log` only reads the active `patroni.log` file in that directory; it does not list or inspect rotated log files. Use `--log-dir` to override the directory for non-standard deployments.
+
+Use `-o json` with `pt log` or `pt log show` for JSONL log records; `yaml` and `json-pretty` are not supported for log snapshots. JSONL mode wraps each raw log line as a JSONL record whose `message` field preserves the original file content. Structured output is not supported for follow/tail or grep mode.
 
 ```bash
 pig pt log                     # Show last 50 log lines
 pig pt log -f                  # Real-time log following
 pig pt log tail                # Real-time log following
-pig pt log show                # Show last 50 log lines
+pig pt log show                # Show last 50 log lines from patroni.log
+pig pt log grep ERROR          # Search patroni.log, case-insensitive
+pig pt log grep -n 500 ERROR   # Search only the last 500 lines
 pig pt log -n 100              # Show last 100 log lines
 pig pt log -f -n 200           # Show last 200 lines and follow
 ```
+
+**Subcommands:**
+
+| Subcommand | Aliases | Description |
+|:---|:---|:---|
+| `tail` | `t`, `f`, `follow` | Real-time follow `patroni.log` |
+| `show` | `cat`, `c`, `s` | Show `patroni.log` |
+| `grep <pattern>` | `g`, `search` | Case-insensitive search of `patroni.log` |
+{.full-width}
 
 **Options:**
 
 | Option | Short | Default | Description |
 |:-------|:------|:--------|:------------|
 | `--follow` | `-f` | false | Real-time log following |
-| `--lines` | `-n` | 50 | Number of log lines to show |
+| `--lines` | `-n` | 50 for show/tail, unset for grep | Number of log lines to show, or grep search range when explicitly supplied |
+| `--log-dir` | | resolved from config, else `/pg/log/patroni` | Patroni log directory |
 {.full-width}
 
 `pt log tail` also accepts `--follow/-f` as a documented no-op (B16): tail always follows.
 
-Text mode is equivalent to `journalctl -u patroni [-f] [-n N]`. JSONL mode is equivalent to `journalctl -u patroni -n N --no-pager -o cat` followed by JSONL wrapping.
+Log file reads execute as the configured database superuser (`--dbsu`, default `postgres`). If the current user is the DBSU, Pig runs file tools directly. If the current user is root, Pig uses `su - <dbsu> -c ...`. Other users use `sudo -inu <dbsu> -- ...`.
+
+Text snapshot mode is equivalent to `tail -n N <log-dir>/patroni.log`. Follow mode is equivalent to `tail -n N -f <log-dir>/patroni.log`. JSONL mode is equivalent to `tail -n N <log-dir>/patroni.log` followed by JSONL wrapping. Grep mode is case-insensitive by default; without `-n`, it searches the whole `patroni.log`; with `-n N`, it searches only the last N lines.
 
 
-## pt svc Subcommand
+## pt service Subcommand
 
-`pt svc` (also `pt service`) is the explicit command group for operating on the Patroni daemon. Hidden top-level
+`pt service` is the official command group for operating on the Patroni daemon. `pt svc` is the short alias used in operator-facing examples. Hidden top-level
 `pt start` / `pt stop` shortcuts map to its start/stop actions:
 
 ```bash
@@ -444,6 +461,7 @@ pig pt svc status                # Show service status
 
 | Command | Alias |
 |:--------|:------|
+| `pt service` | `svc` |
 | `pt svc start` | `up` |
 | `pt svc stop` | `dn` |
 | `pt svc restart` | `rs` |
@@ -461,7 +479,7 @@ pig pt svc status                # Show service status
 - Cluster management: `restart`, `reload`, `reinit`, `switchover`, `failover`, `pause`, `resume`
 - Config modification: `config set`, `config edit`
 - Service commands (start/stop/restart/reload/status) call `systemctl`
-- `log` command calls `journalctl`
+- Log commands read local Patroni log files under the resolved `log.dir`
 
 **Default Config Paths:**
 
@@ -469,6 +487,8 @@ pig pt svc status                # Show service status
 |:-------|:--------|
 | Patroni config file | `/etc/patroni/patroni.yml` |
 | Service name | `patroni` |
+| Patroni log directory | `log.dir` from Patroni config, else `/pg/log/patroni` |
+| Patroni log file | `patroni.log` |
 {.full-width}
 
 **Cluster Scope Resolution:**
@@ -506,4 +526,4 @@ so they can never collide with named `CodePt*` constants.
 
 **Platform Support:**
 
-This command is designed for Linux systems, depends on `systemctl` and `journalctl`.
+This command is designed for Linux systems, depends on `systemctl` for service operations and standard local file tools such as `tail` and `grep` for log operations.

@@ -22,7 +22,9 @@ var (
 	patroniStat              = os.Stat
 	patroniGetClusterName    = GetClusterName
 	patroniRunPatronictl     = runPatronictl
+	patroniDBSUCommand       = utils.DBSUCommand
 	patroniDBSUCommandOutput = utils.DBSUCommandOutput
+	patroniDBSUCommandStdout = utils.DBSUCommandStdout
 )
 
 var (

@@ -4,53 +4,58 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"pig/internal/config"
 )
 
-func TestLogTextUsesExactSudoJournalctlAndTailsLocally(t *testing.T) {
+func TestLogTextUsesLocalFileDirectlyWhenAlreadyDBSU(t *testing.T) {
 	tmp := t.TempDir()
-	sudoArgs := filepath.Join(tmp, "sudo-args")
-	directJournalctl := filepath.Join(tmp, "direct-journalctl")
+	logDir := filepath.Join(tmp, "log")
+	if err := os.Mkdir(logDir, 0755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, DefaultLogFile), []byte("line1\nline2\nline3\n"), 0644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
 
-	writeTestCommand(t, tmp, "sudo", "printf '%s\\n' \"$*\" > "+shellQuote(sudoArgs)+"\nprintf 'line1\\nline2\\nline3\\n'\n")
-	writeTestCommand(t, tmp, "journalctl", ": > "+shellQuote(directJournalctl)+"\n")
-	t.Setenv("PATH", tmp)
+	fakeBin := filepath.Join(tmp, "bin")
+	if err := os.Mkdir(fakeBin, 0755); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	sudoMarker := filepath.Join(tmp, "sudo-called")
+	suMarker := filepath.Join(tmp, "su-called")
+	writeTestCommand(t, fakeBin, "sudo", ": > "+shellQuote(sudoMarker)+"\nexit 1\n")
+	writeTestCommand(t, fakeBin, "su", ": > "+shellQuote(suMarker)+"\nexit 1\n")
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	origUser := config.CurrentUser
+	origFormat := config.OutputFormat
+	t.Cleanup(func() {
+		config.CurrentUser = origUser
+		config.OutputFormat = origFormat
+	})
+	config.CurrentUser = "postgres"
+	config.OutputFormat = config.OUTPUT_TEXT
 
 	var out bytes.Buffer
 	withPatroniStdout(t, &out, func() {
-		if err := Log(false, 2); err != nil {
-			t.Fatalf("Log returned error: %v", err)
+		if err := LogCat(logDir, "postgres", 2); err != nil {
+			t.Fatalf("LogCat returned error: %v", err)
 		}
 	})
 
-	if _, err := os.Stat(directJournalctl); err == nil {
-		t.Fatal("Log should use sudo journalctl instead of calling journalctl directly")
+	if _, err := os.Stat(sudoMarker); err == nil {
+		t.Fatal("LogCat should not call sudo when current user is already DBSU")
 	} else if !os.IsNotExist(err) {
-		t.Fatalf("checking direct journalctl marker: %v", err)
+		t.Fatalf("checking sudo marker: %v", err)
 	}
-
-	rawArgs, err := os.ReadFile(sudoArgs)
-	if err != nil {
-		t.Fatalf("sudo was not called: %v", err)
-	}
-	if got := strings.TrimSpace(string(rawArgs)); got != "/usr/bin/journalctl -u patroni" {
-		t.Fatalf("sudo args = %q, want exact journalctl command", got)
+	if _, err := os.Stat(suMarker); err == nil {
+		t.Fatal("LogCat should not call su when current user is already DBSU")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("checking su marker: %v", err)
 	}
 	if got := out.String(); got != "line2\nline3\n" {
-		t.Fatalf("Log output = %q, want local tail of journal output", got)
-	}
-}
-
-func TestFollowRowsSinceKeepsAllRowsAddedAfterInitialTail(t *testing.T) {
-	rows := []string{"old1", "old2", "new1", "new2", "new3"}
-
-	got, next := followRowsSince(rows, 2)
-
-	if next != 5 {
-		t.Fatalf("next seen = %d, want 5", next)
-	}
-	if strings.Join(got, "\n") != "new1\nnew2\nnew3" {
-		t.Fatalf("follow rows = %v, want all rows after previous total", got)
+		t.Fatalf("LogCat output = %q, want local tail of log file", got)
 	}
 }

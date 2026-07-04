@@ -6,8 +6,11 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"pig/internal/utils"
 )
 
 // argsHas reports whether `want` appears at args[i] for any i. argsHasInOrder
@@ -56,34 +59,65 @@ func argsHasInOrder(args []string, wants ...string) bool {
 
 func TestLogRejectsNonPositiveLines(t *testing.T) {
 	for _, n := range []int{0, -1} {
-		if err := Log(false, n); err == nil || !strings.Contains(err.Error(), "lines must be positive") {
-			t.Fatalf("Log(false, %d) = %v, want positive line count error", n, err)
+		if err := LogCat("", "", n); err == nil || !strings.Contains(err.Error(), "lines must be positive") {
+			t.Fatalf("LogCat(%d) = %v, want positive line count error", n, err)
 		}
-		if err := LogJSONL(n); err == nil || !strings.Contains(err.Error(), "lines must be positive") {
-			t.Fatalf("LogJSONL(%d) = %v, want positive line count error", n, err)
+		if err := LogTail("", "", n); err == nil || !strings.Contains(err.Error(), "lines must be positive") {
+			t.Fatalf("LogTail(%d) = %v, want positive line count error", n, err)
+		}
+		if err := LogShowJSONL("", "", n); err == nil || !strings.Contains(err.Error(), "lines must be positive") {
+			t.Fatalf("LogShowJSONL(%d) = %v, want positive line count error", n, err)
 		}
 	}
 }
 
-func TestLogJSONLUsesSudoJournalctlRowsAndPrintsJSONL(t *testing.T) {
-	origRead := patroniReadJournalctlLines
-	defer func() { patroniReadJournalctlLines = origRead }()
+func TestLogDirUsesPatroniConfigLogDir(t *testing.T) {
+	origRead := patroniReadFile
+	defer func() { patroniReadFile = origRead }()
 
-	gotLimit := 0
-	patroniReadJournalctlLines = func(limit int) ([]string, int, error) {
-		gotLimit = limit
-		return []string{"patroni started", "leader lock acquired"}, 2, nil
+	patroniReadFile = func(path string) ([]byte, error) {
+		if path != DefaultConfigPath {
+			t.Fatalf("read path = %q, want %q", path, DefaultConfigPath)
+		}
+		return []byte("scope: pg-meta\nlog:\n  dir: /custom/patroni\n"), nil
+	}
+
+	if got := LogDir("", "postgres"); got != "/custom/patroni" {
+		t.Fatalf("LogDir() = %q, want custom Patroni log dir", got)
+	}
+}
+
+func TestLogDirOverrideWinsOverConfig(t *testing.T) {
+	if got := LogDir("/tmp/patroni-log", "postgres"); got != "/tmp/patroni-log" {
+		t.Fatalf("LogDir(override) = %q, want override", got)
+	}
+}
+
+func TestLogShowJSONLReadsLocalFileThroughDBSU(t *testing.T) {
+	origOutput := patroniDBSUCommandStdout
+	defer func() { patroniDBSUCommandStdout = origOutput }()
+
+	var gotDBSU string
+	var gotArgs []string
+	patroniDBSUCommandStdout = func(dbsu string, args []string) (string, error) {
+		gotDBSU = dbsu
+		gotArgs = append([]string(nil), args...)
+		return "patroni started\nleader lock acquired\n", nil
 	}
 
 	var out bytes.Buffer
 	withPatroniStdout(t, &out, func() {
-		if err := LogJSONL(2); err != nil {
-			t.Fatalf("LogJSONL returned error: %v", err)
+		if err := LogShowJSONL("/pg/log/patroni", "postgres", 2); err != nil {
+			t.Fatalf("LogShowJSONL returned error: %v", err)
 		}
 	})
 
-	if gotLimit != 2 {
-		t.Fatalf("journalctl line limit = %d, want 2", gotLimit)
+	if gotDBSU != "postgres" {
+		t.Fatalf("dbsu = %q, want postgres", gotDBSU)
+	}
+	wantArgs := []string{"tail", "-n", "2", filepath.Join("/pg/log/patroni", DefaultLogFile)}
+	if strings.Join(gotArgs, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("tail args = %v, want %v", gotArgs, wantArgs)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if len(lines) != 2 {
@@ -98,31 +132,63 @@ func TestLogJSONLUsesSudoJournalctlRowsAndPrintsJSONL(t *testing.T) {
 	}
 }
 
-func TestLogJSONLSkipsNoEntriesSentinel(t *testing.T) {
-	origRead := patroniReadJournalctlLines
-	defer func() { patroniReadJournalctlLines = origRead }()
+func TestLogGrepUsesDBSUAndSilencesNoMatch(t *testing.T) {
+	origCommand := patroniDBSUCommand
+	defer func() { patroniDBSUCommand = origCommand }()
 
-	patroniReadJournalctlLines = func(limit int) ([]string, int, error) {
-		return []string{"-- No entries --", "patroni started"}, 2, nil
+	var gotArgs []string
+	patroniDBSUCommand = func(_ string, args []string) error {
+		gotArgs = append([]string(nil), args...)
+		return &utils.ExitCodeError{Code: 1, Err: errors.New("grep no match")}
 	}
 
-	var out bytes.Buffer
-	withPatroniStdout(t, &out, func() {
-		if err := LogJSONL(2); err != nil {
-			t.Fatalf("LogJSONL returned error: %v", err)
-		}
-	})
+	err := LogGrep("/pg/log/patroni", "postgres", "ERROR", 0)
 
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("expected one JSONL line after skipping sentinel, got %d: %q", len(lines), out.String())
+	var exitErr *utils.ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("LogGrep returned %T, want ExitCodeError", err)
 	}
-	var row map[string]string
-	if err := json.Unmarshal([]byte(lines[0]), &row); err != nil {
-		t.Fatalf("invalid JSONL row: %v", err)
+	if exitErr.Code != 1 || !exitErr.Silent {
+		t.Fatalf("grep no-match exit = code %d silent %v, want silent code 1", exitErr.Code, exitErr.Silent)
 	}
-	if row["message"] != "patroni started" {
-		t.Fatalf("unexpected JSONL message: %v", row)
+	wantArgs := []string{"grep", "--color=auto", "-i", "--", "ERROR", filepath.Join("/pg/log/patroni", DefaultLogFile)}
+	if strings.Join(gotArgs, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("grep args = %v, want %v", gotArgs, wantArgs)
+	}
+}
+
+func TestLogGrepLimitsSearchToRecentLines(t *testing.T) {
+	origCommand := patroniDBSUCommand
+	origOutput := patroniDBSUCommandStdout
+	defer func() {
+		patroniDBSUCommand = origCommand
+		patroniDBSUCommandStdout = origOutput
+	}()
+
+	var testArgs []string
+	patroniDBSUCommandStdout = func(_ string, args []string) (string, error) {
+		testArgs = append([]string(nil), args...)
+		return "", nil
+	}
+
+	var grepArgs []string
+	patroniDBSUCommand = func(_ string, args []string) error {
+		grepArgs = append([]string(nil), args...)
+		return nil
+	}
+
+	if err := LogGrep("/pg/log/patroni", "postgres", "ERROR", 500); err != nil {
+		t.Fatalf("LogGrep returned error: %v", err)
+	}
+
+	logFile := filepath.Join("/pg/log/patroni", DefaultLogFile)
+	wantTest := []string{"test", "-r", logFile}
+	if strings.Join(testArgs, "\x00") != strings.Join(wantTest, "\x00") {
+		t.Fatalf("readability test args = %v, want %v", testArgs, wantTest)
+	}
+	wantGrep := []string{"bash", "-o", "pipefail", "-c", `tail -n "$1" "$2" | grep --color=auto -i -- "$3"`, "bash", "500", logFile, "ERROR"}
+	if strings.Join(grepArgs, "\x00") != strings.Join(wantGrep, "\x00") {
+		t.Fatalf("limited grep args = %v, want %v", grepArgs, wantGrep)
 	}
 }
 

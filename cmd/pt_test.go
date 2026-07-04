@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"pig/cli/patroni"
+	"pig/internal/ancs"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
@@ -21,6 +22,104 @@ func TestPatroniLogRejectsExtraArgs(t *testing.T) {
 	}
 	if err := patroniLogCmd.Args(patroniLogCmd, []string{"bogus"}); err == nil {
 		t.Fatal("expected pt log to reject unexpected positional argument")
+	}
+}
+
+func TestPatroniLogCommandsExposeLocalFileAPI(t *testing.T) {
+	if patroniLogCmd.RunE == nil {
+		t.Fatal("pt log should support a default recent-log action")
+	}
+	if flag := lookupLocalOrPersistentFlag(patroniLogCmd, "lines"); flag == nil || flag.Shorthand != "n" {
+		t.Fatal("pt log should expose -n/--lines on the parent command")
+	}
+	if flag := patroniLogCmd.Flags().Lookup("follow"); flag == nil || flag.Shorthand != "f" {
+		t.Fatal("pt log should expose -f/--follow on the parent command")
+	}
+	if flag := lookupLocalOrPersistentFlag(patroniLogCmd, "log-dir"); flag == nil {
+		t.Fatal("pt log should expose --log-dir")
+	}
+	for _, sub := range []string{"show", "tail", "grep"} {
+		if found, _, err := patroniLogCmd.Find([]string{sub}); err != nil || found == patroniLogCmd {
+			t.Fatalf("pt log should expose %q subcommand, found=%v err=%v", sub, found, err)
+		}
+	}
+	if found, _, err := patroniLogCmd.Find([]string{"list"}); err == nil && found != patroniLogCmd {
+		t.Fatalf("pt log should not expose multi-file list command, found=%v", found)
+	}
+	if found, _, err := patroniLogCmd.Find([]string{"cat"}); err != nil || found == patroniLogCmd {
+		t.Fatalf("pt log should keep cat as a compatibility alias, found=%v err=%v", found, err)
+	}
+	if patroniLogCatCmd.Use != "show" {
+		t.Fatalf("pt log show use = %q, want show", patroniLogCatCmd.Use)
+	}
+	if patroniLogCatCmd.Args == nil || patroniLogCatCmd.Args(patroniLogCatCmd, []string{"patroni.log.1"}) == nil {
+		t.Fatal("pt log show should only read patroni.log and reject file args")
+	}
+	if patroniLogTailCmd.Use != "tail" {
+		t.Fatalf("pt log tail use = %q, want tail", patroniLogTailCmd.Use)
+	}
+	if patroniLogTailCmd.Args == nil || patroniLogTailCmd.Args(patroniLogTailCmd, []string{"patroni.log.1"}) == nil {
+		t.Fatal("pt log tail should only read patroni.log and reject file args")
+	}
+	if patroniLogGrepCmd.Use != "grep <pattern>" {
+		t.Fatalf("pt log grep use = %q, want grep <pattern>", patroniLogGrepCmd.Use)
+	}
+	if patroniLogGrepCmd.Args == nil || patroniLogGrepCmd.Args(patroniLogGrepCmd, []string{"ERROR", "patroni.log.1"}) == nil {
+		t.Fatal("pt log grep should only search patroni.log and reject file args")
+	}
+	if flag := patroniLogGrepCmd.Flags().Lookup("lines"); flag == nil || flag.Shorthand != "n" {
+		t.Fatal("pt log grep should reuse -n/--lines as the optional search range")
+	}
+}
+
+func TestPatroniLogGrepNoMatchSilencesCobraError(t *testing.T) {
+	origUser := config.CurrentUser
+	origFormat := config.OutputFormat
+	origDBSU := patroniDBSU
+	origLogDir := patroniLogDir
+	origSilenceErrors := patroniLogGrepCmd.SilenceErrors
+	origSilenceUsage := patroniLogGrepCmd.SilenceUsage
+	defer func() {
+		config.CurrentUser = origUser
+		config.OutputFormat = origFormat
+		patroniDBSU = origDBSU
+		patroniLogDir = origLogDir
+		patroniLogGrepCmd.SilenceErrors = origSilenceErrors
+		patroniLogGrepCmd.SilenceUsage = origSilenceUsage
+	}()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "patroni.log"), []byte("INFO: startup complete\n"), 0644); err != nil {
+		t.Fatalf("write patroni log: %v", err)
+	}
+
+	config.CurrentUser = "postgres"
+	config.OutputFormat = config.OUTPUT_TEXT
+	patroniDBSU = "postgres"
+	patroniLogDir = dir
+	patroniLogGrepCmd.SilenceErrors = false
+	patroniLogGrepCmd.SilenceUsage = false
+
+	err := patroniLogGrepCmd.RunE(patroniLogGrepCmd, []string{"ERROR"})
+	var exitErr *utils.ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("pt log grep returned %T, want ExitCodeError", err)
+	}
+	if exitErr.Code != 1 || !exitErr.Silent {
+		t.Fatalf("pt log grep no-match exit = code %d silent %v, want code 1 silent true", exitErr.Code, exitErr.Silent)
+	}
+	if !patroniLogGrepCmd.SilenceErrors {
+		t.Fatal("pt log grep no-match should silence Cobra error printing")
+	}
+	if !patroniLogGrepCmd.SilenceUsage {
+		t.Fatal("pt log grep no-match should silence Cobra usage printing")
+	}
+
+	if err := patroniLogGrepCmd.Args(patroniLogGrepCmd, nil); err == nil {
+		t.Fatal("pt log grep without pattern should still reject arguments")
+	}
+	if patroniLogGrepCmd.SilenceErrors || patroniLogGrepCmd.SilenceUsage {
+		t.Fatal("pt log grep argument validation should reset silent no-match flags")
 	}
 }
 
@@ -980,6 +1079,23 @@ func TestPatroniStartStopShortcutHelpMentionsSvcTarget(t *testing.T) {
 	}
 }
 
+func TestPatroniRootHelpUsesHabitualSvcExamples(t *testing.T) {
+	for _, want := range []string{
+		"pig pt svc start",
+		"pig pt svc stop",
+		"pig pt svc restart",
+		"pig pt svc reload",
+		"pig pt svc status",
+	} {
+		if !strings.Contains(patroniCmd.Long, want) {
+			t.Fatalf("pt root long help should mention habitual command %q, got:\n%s", want, patroniCmd.Long)
+		}
+	}
+	if strings.Contains(patroniCmd.Long, "pig pt service start") {
+		t.Fatalf("pt root long help should keep operator examples on pt svc, got:\n%s", patroniCmd.Long)
+	}
+}
+
 func TestPatroniAliasesMatchContract(t *testing.T) {
 	tests := []struct {
 		name string
@@ -999,14 +1115,15 @@ func TestPatroniAliasesMatchContract(t *testing.T) {
 		{name: "pt stop", cmd: patroniStopCmd, want: []string{"dn"}},
 		{name: "pt status", cmd: patroniStatusCmd, want: []string{"st"}},
 		{name: "pt log", cmd: patroniLogCmd, want: []string{"l"}},
-		{name: "pt log show", cmd: patroniLogCatCmd, want: []string{"s"}},
-		{name: "pt log tail", cmd: patroniLogTailCmd, want: []string{"t"}},
-		{name: "pt svc", cmd: patroniSvcCmd, want: []string{"service"}},
-		{name: "pt svc start", cmd: patroniSvcStartCmd, want: []string{"up"}},
-		{name: "pt svc stop", cmd: patroniSvcStopCmd, want: []string{"dn"}},
-		{name: "pt svc restart", cmd: patroniSvcRestartCmd, want: []string{"rs"}},
-		{name: "pt svc reload", cmd: patroniSvcReloadCmd, want: []string{"rl"}},
-		{name: "pt svc status", cmd: patroniSvcStatusCmd, want: []string{"st"}},
+		{name: "pt log show", cmd: patroniLogCatCmd, want: []string{"cat", "c", "s"}},
+		{name: "pt log tail", cmd: patroniLogTailCmd, want: []string{"t", "f", "follow"}},
+		{name: "pt log grep", cmd: patroniLogGrepCmd, want: []string{"g", "search"}},
+		{name: "pt service", cmd: patroniSvcCmd, want: []string{"svc"}},
+		{name: "pt service start", cmd: patroniSvcStartCmd, want: []string{"up"}},
+		{name: "pt service stop", cmd: patroniSvcStopCmd, want: []string{"dn"}},
+		{name: "pt service restart", cmd: patroniSvcRestartCmd, want: []string{"rs"}},
+		{name: "pt service reload", cmd: patroniSvcReloadCmd, want: []string{"rl"}},
+		{name: "pt service status", cmd: patroniSvcStatusCmd, want: []string{"st"}},
 	}
 
 	for _, tt := range tests {
@@ -1015,6 +1132,72 @@ func TestPatroniAliasesMatchContract(t *testing.T) {
 				t.Fatalf("%s aliases = %v, want %v", tt.name, tt.cmd.Aliases, tt.want)
 			}
 		})
+	}
+}
+
+func TestPatroniServiceSchemaUsesServicePrimaryName(t *testing.T) {
+	schema := ancs.FromCommand(patroniSvcCmd)
+	if schema == nil {
+		t.Fatal("pt service schema should not be nil")
+	}
+	if schema.Name != "pig patroni service" {
+		t.Fatalf("pt service command schema name = %q, want pig patroni service", schema.Name)
+	}
+	if schema.Use != "service" {
+		t.Fatalf("pt service command schema use = %q, want service", schema.Use)
+	}
+	if schema.Schema == nil || schema.Schema.Name != "pig patroni service" {
+		t.Fatalf("pt service annotation schema name = %+v, want pig patroni service", schema.Schema)
+	}
+}
+
+func TestPatroniSvcAliasResolvesToServiceCommand(t *testing.T) {
+	found, remaining, err := patroniCmd.Find([]string{"svc"})
+	if err != nil {
+		t.Fatalf("pt svc alias should resolve without error: %v", err)
+	}
+	if found != patroniSvcCmd {
+		t.Fatalf("pt svc resolved to %q, want service command", found.CommandPath())
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("pt svc alias should not leave remaining args, got %v", remaining)
+	}
+	if found.Name() != "service" {
+		t.Fatalf("pt svc alias resolved command name = %q, want service", found.Name())
+	}
+}
+
+func TestPatroniServiceStructuredCommandUsesServicePrimaryName(t *testing.T) {
+	origFormat := config.OutputFormat
+	defer func() {
+		config.OutputFormat = origFormat
+	}()
+	config.OutputFormat = config.OUTPUT_JSON
+
+	recordFile := installFakeSystemctl(t)
+	var runErr error
+	raw := capturePtStdout(t, func() {
+		runErr = patroniSvcStartCmd.RunE(patroniSvcStartCmd, nil)
+	})
+	if runErr != nil {
+		t.Fatalf("pt service start structured run should execute fake systemctl: %v", runErr)
+	}
+	if recorded, err := os.ReadFile(recordFile); err != nil {
+		t.Fatalf("read fake systemctl record: %v", err)
+	} else if got, want := strings.TrimSpace(string(recorded)), "systemctl start patroni"; got != want {
+		t.Fatalf("pt service start systemctl command = %q, want %q", got, want)
+	}
+
+	var payload output.Result
+	if err := json.Unmarshal(ptBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	data, ok := payload.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("structured data = %T, want map", payload.Data)
+	}
+	if cmd := ptAsString(data["command"]); cmd != "pig patroni service start" {
+		t.Fatalf("structured service command = %q, want pig patroni service start", cmd)
 	}
 }
 

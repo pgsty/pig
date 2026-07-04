@@ -18,6 +18,7 @@ var (
 	patroniConfigPlan bool
 	patroniLogFollow  bool
 	patroniLogLines   int
+	patroniLogDir     string
 )
 
 var (
@@ -31,7 +32,7 @@ var patroniCmd = &cobra.Command{
 	Aliases:     []string{"pt"},
 	GroupID:     "pigsty",
 	Annotations: ancsAnn("pig patroni", "query", "stable", "safe", true, "safe", "none", "current", 100),
-	Long: `Manage Patroni cluster using patronictl commands.
+	Long: `pig pt - Manage Patroni cluster using patronictl commands.
 
 Cluster Operations (via patronictl):
   pig pt list [cluster]            list cluster members
@@ -56,7 +57,8 @@ Logs:
   pig pt log [-f] [-n 50]          view patroni logs
   pig pt log tail [-n 50]          follow patroni logs
   pig pt log show [-n 50]          show patroni log snapshot
-	`,
+  pig pt log grep <pattern>        search patroni logs
+		`,
 }
 
 // ============================================================================
@@ -111,15 +113,17 @@ func registerPatroniFlags() {
 	patroniConfigCmd.Flags().BoolVar(&patroniConfigPlan, "plan", false, "preview config changes without executing")
 
 	// log subcommand flags
+	patroniLogCmd.PersistentFlags().StringVar(&patroniLogDir, "log-dir", "", "log directory (default: from /etc/patroni/patroni.yml log.dir, fallback /pg/log/patroni)")
 	patroniLogCmd.Flags().BoolVarP(&patroniLogFollow, "follow", "f", false, "follow log output")
 	patroniLogCmd.Flags().IntVarP(&patroniLogLines, "lines", "n", 50, "number of lines to show")
 	patroniLogTailCmd.Flags().IntVarP(&patroniLogLines, "lines", "n", 50, "number of lines to show")
 	patroniLogTailCmd.Flags().BoolP("follow", "f", false, "(no-op: tail always follows)")
 	patroniLogCatCmd.Flags().IntVarP(&patroniLogLines, "lines", "n", 50, "number of lines to show")
+	patroniLogGrepCmd.Flags().IntP("lines", "n", 0, "search only the last N lines")
 }
 
 func registerPatroniSvcCommands() {
-	// Build svc subcommand group
+	// Build service subcommand group
 	patroniSvcCmd.AddCommand(
 		patroniSvcStartCmd,
 		patroniSvcStopCmd,
@@ -130,7 +134,7 @@ func registerPatroniSvcCommands() {
 }
 
 func registerPatroniCommands() {
-	patroniLogCmd.AddCommand(patroniLogCatCmd, patroniLogTailCmd)
+	patroniLogCmd.AddCommand(patroniLogCatCmd, patroniLogTailCmd, patroniLogGrepCmd)
 
 	// Add all subcommands to patroni command
 	patroniCmd.AddCommand(
@@ -799,13 +803,14 @@ var patroniLogCmd = &cobra.Command{
 	Aliases:     []string{"l"},
 	Short:       "View patroni logs",
 	Annotations: ancsAnn("pig patroni log", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
-	Long:        `View patroni service logs using journalctl.`,
+	Long:        `View and search Patroni log files from the resolved Patroni log directory.`,
 	Example: `
-  pig pt log          # View recent logs
-  pig pt log -f       # Follow logs
-  pig pt log tail     # Follow logs
-  pig pt log show     # View recent logs
-  pig pt log -n 100   # Show last 100 lines`,
+	  pig pt log             # View recent logs
+	  pig pt log -f          # Follow logs
+	  pig pt log tail        # Follow logs
+	  pig pt log show        # View recent logs
+	  pig pt log grep ERROR  # Search logs
+	  pig pt log -n 100      # Show last 100 lines`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateLogLines(patroniLogLines); err != nil {
@@ -825,20 +830,25 @@ var patroniLogCmd = &cobra.Command{
 			return err
 		}
 		if isJSONLogOutput() {
-			return patroni.LogJSONL(patroniLogLines)
+			return patroni.LogShowJSONL(patroniLogDir, patroniDBSU, patroniLogLines)
 		}
+		logDir := patroni.LogDir(patroniLogDir, patroniDBSU)
 		return runLegacyStructured(legacyModulePt, "pig patroni log", args, map[string]interface{}{
-			"follow": patroniLogFollow,
-			"lines":  patroniLogLines,
+			"log_dir": logDir,
+			"follow":  patroniLogFollow,
+			"lines":   patroniLogLines,
 		}, func() error {
-			return patroni.Log(patroniLogFollow, patroniLogLines)
+			if patroniLogFollow {
+				return patroni.LogTail(logDir, patroniDBSU, patroniLogLines)
+			}
+			return patroni.LogCat(logDir, patroniDBSU, patroniLogLines)
 		})
 	},
 }
 
 var patroniLogCatCmd = &cobra.Command{
 	Use:         "show",
-	Aliases:     []string{"s"},
+	Aliases:     []string{"cat", "c", "s"},
 	Short:       "Output recent patroni logs",
 	Annotations: ancsAnn("pig patroni log show", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Args:        cobra.NoArgs,
@@ -850,19 +860,21 @@ var patroniLogCatCmd = &cobra.Command{
 			return err
 		}
 		if isJSONLogOutput() {
-			return patroni.LogJSONL(patroniLogLines)
+			return patroni.LogShowJSONL(patroniLogDir, patroniDBSU, patroniLogLines)
 		}
+		logDir := patroni.LogDir(patroniLogDir, patroniDBSU)
 		return runLegacyStructured(legacyModulePt, "pig patroni log show", args, map[string]interface{}{
-			"lines": patroniLogLines,
+			"log_dir": logDir,
+			"lines":   patroniLogLines,
 		}, func() error {
-			return patroni.Log(false, patroniLogLines)
+			return patroni.LogCat(logDir, patroniDBSU, patroniLogLines)
 		})
 	},
 }
 
 var patroniLogTailCmd = &cobra.Command{
 	Use:         "tail",
-	Aliases:     []string{"t"},
+	Aliases:     []string{"t", "f", "follow"},
 	Short:       "Tail patroni logs",
 	Annotations: ancsAnn("pig patroni log tail", "query", "volatile", "safe", true, "safe", "none", "dbsu", 0),
 	Args:        cobra.NoArgs,
@@ -880,7 +892,59 @@ var patroniLogTailCmd = &cobra.Command{
 				map[string]interface{}{"lines": patroniLogLines},
 			)
 		}
-		return patroni.Log(true, patroniLogLines)
+		return patroni.LogTail(patroniLogDir, patroniDBSU, patroniLogLines)
+	},
+}
+
+var patroniLogGrepCmd = &cobra.Command{
+	Use:         "grep <pattern>",
+	Aliases:     []string{"g", "search"},
+	Short:       "Search patroni log files",
+	Annotations: ancsAnn("pig patroni log grep", "query", "volatile", "safe", true, "safe", "none", "dbsu", 5000),
+	Args: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceErrors = false
+		cmd.SilenceUsage = false
+		return cobra.ExactArgs(1)(cmd, args)
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		lines := 0
+		if cmd.Flags().Changed("lines") {
+			var err error
+			lines, err = cmd.Flags().GetInt("lines")
+			if err != nil {
+				return err
+			}
+			if err := validateLogLines(lines); err != nil {
+				return err
+			}
+		}
+		logDir := patroni.LogDir(patroniLogDir, patroniDBSU)
+		if config.IsStructuredOutput() {
+			return structuredParamError(
+				output.MODULE_PT,
+				"pig patroni log grep",
+				"log grep is not supported in structured output",
+				"use VictoriaLogs for structured log filtering",
+				args,
+				map[string]interface{}{
+					"log_dir": logDir,
+					"pattern": args[0],
+					"lines":   lines,
+				},
+			)
+		}
+		return runLegacyStructured(legacyModulePt, "pig patroni log grep", args, map[string]interface{}{
+			"log_dir": logDir,
+			"pattern": args[0],
+			"lines":   lines,
+		}, func() error {
+			err := patroni.LogGrep(logDir, patroniDBSU, args[0], lines)
+			if utils.IsSilentExit(err) {
+				cmd.SilenceErrors = true
+				cmd.SilenceUsage = true
+			}
+			return err
+		})
 	},
 }
 
@@ -948,14 +1012,14 @@ var patroniStopCmd = &cobra.Command{
 }
 
 // ============================================================================
-// Service Management (via systemctl) - pig pt svc
+// Service Management (via systemctl) - pig pt service (alias: pig pt svc)
 // ============================================================================
 
 var patroniSvcCmd = &cobra.Command{
 	Use:         "service",
-	Aliases:     []string{"svc", "sv"},
+	Aliases:     []string{"svc"},
 	Short:       "Manage patroni daemon service",
-	Annotations: ancsAnn("pig patroni svc", "query", "stable", "safe", true, "safe", "none", "root", 100),
+	Annotations: ancsAnn("pig patroni service", "query", "stable", "safe", true, "safe", "none", "root", 100),
 	Long: `Manage the Patroni daemon service using systemctl.
 
 These commands control the Patroni process itself, not the PostgreSQL
@@ -968,7 +1032,7 @@ var patroniSvcStartCmd = &cobra.Command{
 	Use:         "start",
 	Aliases:     []string{"up"},
 	Short:       "Start patroni service",
-	Annotations: ancsAnn("pig patroni svc start", "action", "volatile", "unsafe", true, "medium", "none", "root", 10000),
+	Annotations: ancsAnn("pig patroni service start", "action", "volatile", "unsafe", true, "medium", "none", "root", 10000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("start", args)
 	},
@@ -978,7 +1042,7 @@ var patroniSvcStopCmd = &cobra.Command{
 	Use:         "stop",
 	Aliases:     []string{"dn"},
 	Short:       "Stop patroni service",
-	Annotations: ancsAnn("pig patroni svc stop", "action", "volatile", "unsafe", true, "high", "recommended", "root", 10000),
+	Annotations: ancsAnn("pig patroni service stop", "action", "volatile", "unsafe", true, "high", "recommended", "root", 10000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("stop", args)
 	},
@@ -988,7 +1052,7 @@ var patroniSvcRestartCmd = &cobra.Command{
 	Use:         "restart",
 	Aliases:     []string{"rs"},
 	Short:       "Restart patroni service",
-	Annotations: ancsAnn("pig patroni svc restart", "action", "volatile", "unsafe", false, "high", "recommended", "root", 30000),
+	Annotations: ancsAnn("pig patroni service restart", "action", "volatile", "unsafe", false, "high", "recommended", "root", 30000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("restart", args)
 	},
@@ -998,7 +1062,7 @@ var patroniSvcReloadCmd = &cobra.Command{
 	Use:         "reload",
 	Aliases:     []string{"rl"},
 	Short:       "Reload patroni service",
-	Annotations: ancsAnn("pig patroni svc reload", "action", "volatile", "restricted", true, "low", "none", "root", 1000),
+	Annotations: ancsAnn("pig patroni service reload", "action", "volatile", "restricted", true, "low", "none", "root", 1000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("reload", args)
 	},
@@ -1008,14 +1072,14 @@ var patroniSvcStatusCmd = &cobra.Command{
 	Use:         "status",
 	Aliases:     []string{"st"},
 	Short:       "Show patroni service status",
-	Annotations: ancsAnn("pig patroni svc status", "query", "volatile", "safe", true, "safe", "none", "root", 500),
+	Annotations: ancsAnn("pig patroni service status", "query", "volatile", "safe", true, "safe", "none", "root", 500),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("status", args)
 	},
 }
 
 func runPatroniSvcAction(action string, args []string) error {
-	return runLegacyStructured(legacyModulePt, "pig patroni svc "+action, args, nil, func() error {
+	return runLegacyStructured(legacyModulePt, "pig patroni service "+action, args, nil, func() error {
 		return patroni.Systemctl(action)
 	})
 }

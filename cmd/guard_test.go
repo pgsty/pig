@@ -108,6 +108,7 @@ var shorthandPermitTable = map[string]string{
 	"patroni list -w":        "interval",
 	"patroni log -f":         "follow",
 	"patroni log -n":         "lines",
+	"patroni log grep -n":    "lines",
 	"patroni log show -n":    "lines",
 	"patroni log tail -f":    "follow",
 	"patroni log tail -n":    "lines",

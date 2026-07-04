@@ -1,26 +1,23 @@
 package patroni
 
 import (
-	"bufio"
-	"bytes"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
-	"time"
 
 	"pig/internal/output"
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 )
 
-var patroniReadJournalctlLines = readPatroniJournalctlLines
-
 const (
-	patroniJournalctlPath = "/usr/bin/journalctl"
-	patroniJournalUnit    = "patroni"
+	DefaultLogDir  = "/pg/log/patroni"
+	DefaultLogFile = "patroni.log"
 )
 
 // DefaultConfigPath is the fixed patroni config file path
@@ -208,147 +205,148 @@ func Status(dbsu string) error {
 	return utils.DBSUCommand(dbsu, cmdArgs)
 }
 
-// Log views patroni logs using journalctl.
-func Log(follow bool, lines int) error {
+// LogDir returns the Patroni log directory from an explicit override, Patroni
+// config, or the Pigsty default.
+func LogDir(override string, dbsu string) string {
+	logDir, _ := ResolveLogDir(override, dbsu, false)
+	return logDir
+}
+
+// ResolveLogDir resolves Patroni's file log directory. When requireConfig is
+// true, config read/parse errors are returned instead of silently falling back.
+func ResolveLogDir(override string, dbsu string, requireConfig bool) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+
+	content, err := readPatroniLogConfig(dbsu)
+	if err != nil {
+		if requireConfig {
+			return "", err
+		}
+		return DefaultLogDir, nil
+	}
+
+	var cfg struct {
+		Log struct {
+			Dir string `yaml:"dir"`
+		} `yaml:"log"`
+	}
+	if err := yaml.Unmarshal(content, &cfg); err != nil {
+		if requireConfig {
+			return "", fmt.Errorf("cannot parse Patroni config %s: %w", DefaultConfigPath, err)
+		}
+		return DefaultLogDir, nil
+	}
+	if strings.TrimSpace(cfg.Log.Dir) != "" {
+		return strings.TrimSpace(cfg.Log.Dir), nil
+	}
+	return DefaultLogDir, nil
+}
+
+func readPatroniLogConfig(dbsu string) ([]byte, error) {
+	content, err := patroniReadFile(DefaultConfigPath)
+	if err == nil {
+		return content, nil
+	}
+	if !os.IsPermission(err) {
+		return nil, err
+	}
+	if dbsu == "" {
+		dbsu = utils.GetDBSU("")
+	}
+	text, dbsuErr := patroniDBSUCommandOutput(dbsu, []string{"cat", DefaultConfigPath})
+	if dbsuErr != nil {
+		return nil, fmt.Errorf("cannot read Patroni config %s: direct: %v; as %s: %w", DefaultConfigPath, err, dbsu, dbsuErr)
+	}
+	return []byte(text), nil
+}
+
+func resolveCurrentLogFile(logDir string) string {
+	return filepath.Join(filepath.Clean(logDir), DefaultLogFile)
+}
+
+func logDirForCommand(override string, dbsu string) string {
+	return LogDir(override, dbsu)
+}
+
+// LogTail follows a Patroni log file.
+func LogTail(logDirOverride string, dbsu string, lines int) error {
 	if lines <= 0 {
 		return fmt.Errorf("lines must be positive")
 	}
-
-	cmdArgs := []string{"sudo", patroniJournalctlPath, "-u", patroniJournalUnit}
-	utils.PrintHint(cmdArgs)
-	logrus.Debugf("sudo %s -u %s", patroniJournalctlPath, patroniJournalUnit)
-
-	if follow {
-		return followPatroniJournal(lines)
+	if dbsu == "" {
+		dbsu = utils.GetDBSU("")
 	}
-	rows, _, err := patroniReadJournalctlLines(lines)
-	if err != nil {
-		return err
-	}
-	printJournalLines(rows)
-	return nil
+	logDir := logDirForCommand(logDirOverride, dbsu)
+	logFile := resolveCurrentLogFile(logDir)
+	args := []string{"tail", "-n", fmt.Sprintf("%d", lines), "-f", logFile}
+	utils.PrintHint(args)
+	return patroniDBSUCommand(dbsu, args)
 }
 
-// LogJSONL outputs recent patroni journal lines as JSONL.
-func LogJSONL(lines int) error {
+// LogCat displays recent Patroni log file lines.
+func LogCat(logDirOverride string, dbsu string, lines int) error {
 	if lines <= 0 {
 		return fmt.Errorf("lines must be positive")
 	}
-	logrus.Debugf("sudo %s -u %s", patroniJournalctlPath, patroniJournalUnit)
-	rows, _, err := patroniReadJournalctlLines(lines)
+	if dbsu == "" {
+		dbsu = utils.GetDBSU("")
+	}
+	logDir := logDirForCommand(logDirOverride, dbsu)
+	logFile := resolveCurrentLogFile(logDir)
+	args := []string{"tail", "-n", fmt.Sprintf("%d", lines), logFile}
+	utils.PrintHint(args)
+	return patroniDBSUCommand(dbsu, args)
+}
+
+// LogShowJSONL outputs recent Patroni log lines as JSONL.
+func LogShowJSONL(logDirOverride string, dbsu string, lines int) error {
+	if lines <= 0 {
+		return fmt.Errorf("lines must be positive")
+	}
+	if dbsu == "" {
+		dbsu = utils.GetDBSU("")
+	}
+	logDir := logDirForCommand(logDirOverride, dbsu)
+	logFile := resolveCurrentLogFile(logDir)
+	out, err := patroniDBSUCommandStdout(dbsu, []string{"tail", "-n", fmt.Sprintf("%d", lines), logFile})
 	if err != nil {
 		return err
 	}
-	return utils.PrintLogMessagesJSONL("patroni", filterJournalNoEntries(strings.Join(rows, "\n")))
+	return utils.PrintLogMessagesJSONL("patroni", out)
 }
 
-func readPatroniJournalctlLines(limit int) ([]string, int, error) {
-	cmd := exec.Command("sudo", patroniJournalctlPath, "-u", patroniJournalUnit)
-	cmd.Env = append(os.Environ(), "SYSTEMD_PAGER=cat", "PAGER=cat", "LESS=FRXMK")
+// LogGrep searches the current Patroni log file. If lines is positive, only
+// the most recent N lines are searched; otherwise the whole file is searched.
+func LogGrep(logDirOverride string, dbsu string, pattern string, lines int) error {
+	if lines < 0 {
+		return fmt.Errorf("lines must be positive")
+	}
+	if dbsu == "" {
+		dbsu = utils.GetDBSU("")
+	}
+	logDir := logDirForCommand(logDirOverride, dbsu)
+	logFile := resolveCurrentLogFile(logDir)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, 0, err
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return nil, 0, err
-	}
-
-	rows, total, readErr := tailReaderLines(stdout, limit)
-	waitErr := cmd.Wait()
-	if readErr != nil {
-		return nil, total, readErr
-	}
-	if waitErr != nil {
-		if errText := strings.TrimSpace(stderr.String()); errText != "" {
-			return nil, total, fmt.Errorf("%w: %s", waitErr, errText)
+	args := []string{"grep", "--color=auto", "-i", "--", pattern, logFile}
+	if lines > 0 {
+		if _, err := patroniDBSUCommandStdout(dbsu, []string{"test", "-r", logFile}); err != nil {
+			return fmt.Errorf("cannot read log file %s: %w", logFile, err)
 		}
-		return nil, total, waitErr
-	}
-	return rows, total, nil
-}
-
-func tailReaderLines(r io.Reader, limit int) ([]string, int, error) {
-	reader := bufio.NewReader(r)
-	var rows []string
-	total := 0
-	for {
-		row, err := reader.ReadString('\n')
-		if len(row) > 0 {
-			row = strings.TrimRight(row, "\r\n")
-			total++
-			if limit <= 0 || len(rows) < limit {
-				rows = append(rows, row)
-			} else {
-				copy(rows, rows[1:])
-				rows[len(rows)-1] = row
-			}
-		}
-		if err == io.EOF {
-			return rows, total, nil
-		}
-		if err != nil {
-			return rows, total, err
+		args = []string{
+			"bash", "-o", "pipefail", "-c",
+			`tail -n "$1" "$2" | grep --color=auto -i -- "$3"`,
+			"bash", fmt.Sprintf("%d", lines), logFile, pattern,
 		}
 	}
-}
-
-func followPatroniJournal(lines int) error {
-	rows, seen, err := patroniReadJournalctlLines(lines)
-	if err != nil {
-		return err
+	utils.PrintHint(args)
+	err := patroniDBSUCommand(dbsu, args)
+	var exitErr *utils.ExitCodeError
+	if errors.As(err, &exitErr) && exitErr.Code == 1 {
+		return &utils.ExitCodeError{Code: 1, Err: err, Silent: true}
 	}
-	printJournalLines(rows)
-
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
-		rows, total, err := patroniReadJournalctlLines(0)
-		if err != nil {
-			return err
-		}
-		if total < seen {
-			rows, seen = followRowsSince(rows, 0)
-			printJournalLines(rows)
-			continue
-		}
-		rows, seen = followRowsSince(rows, seen)
-		if len(rows) == 0 {
-			continue
-		}
-		printJournalLines(rows)
-	}
-	return nil
-}
-
-func followRowsSince(rows []string, seen int) ([]string, int) {
-	total := len(rows)
-	if seen < 0 || seen > total {
-		return rows, total
-	}
-	if seen == total {
-		return nil, total
-	}
-	return rows[seen:], total
-}
-
-func printJournalLines(rows []string) {
-	for _, row := range rows {
-		fmt.Fprintln(os.Stdout, row)
-	}
-}
-
-func filterJournalNoEntries(text string) string {
-	var lines []string
-	for _, line := range strings.Split(text, "\n") {
-		if strings.TrimSpace(line) == "-- No entries --" {
-			continue
-		}
-		lines = append(lines, line)
-	}
-	return strings.Join(lines, "\n")
+	return err
 }
 
 // RestartOptions holds options for patronictl restart
