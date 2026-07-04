@@ -8,11 +8,13 @@ package pgbackrest
 import (
 	"errors"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"pig/internal/config"
 	"pig/internal/output"
 )
 
@@ -544,8 +546,56 @@ func TestRestoreNextActionsMirrorTextHints(t *testing.T) {
 	// Custom data dir: pg_ctl commands instead of pig pg.
 	actions = restoreNextActions(&Config{}, &RestoreOptions{Time: "2025-01-01", DataDir: "/data/side"})
 	joined = joinActionCommands(actions)
-	if !strings.Contains(joined, "pg_ctl -D /data/side start") || !strings.Contains(joined, "pg_ctl -D /data/side promote") {
+	if !strings.Contains(joined, "pg_ctl -D /data/side -o \"-p 5433\" start") ||
+		!strings.Contains(joined, "pg_ctl -D /data/side status") ||
+		!strings.Contains(joined, "pg_ctl -D /data/side promote") ||
+		!strings.Contains(joined, "pgbackrest --pg1-path=/data/side stanza-create") {
 		t.Errorf("custom-dir actions should use pg_ctl with the side directory: %q", joined)
+	}
+
+	cfg := &Config{
+		ConfigPath: writeTestConfig(t, "[pg-meta]\npg1-path=/pg/data\n"),
+		Stanza:     "pg-meta",
+	}
+	actions = restoreNextActions(cfg, &RestoreOptions{Time: "2025-01-01", DataDir: "/data/side path"})
+	joined = joinActionCommands(actions)
+	if !strings.Contains(joined, "pgbackrest --stanza=pg-meta") ||
+		!strings.Contains(joined, "--config="+cfg.ConfigPath) ||
+		!strings.Contains(joined, "--pg1-path='/data/side path' stanza-create") {
+		t.Errorf("custom-dir stanza-create should preserve stanza/config and quote pg1-path: %q", joined)
+	}
+
+	// Explicit data dir equal to non-/pg/data managed pg1-path is still managed.
+	cfg = &Config{ConfigPath: writeTestConfig(t, "[pg-meta]\npg1-path=/var/lib/pgsql/18/data\n"), Stanza: "pg-meta"}
+	actions = restoreNextActions(cfg, &RestoreOptions{Default: true, DataDir: "/var/lib/pgsql/18/data"})
+	joined = joinActionCommands(actions)
+	if !strings.Contains(joined, "pig pg start -D /var/lib/pgsql/18/data") ||
+		!strings.Contains(joined, "pig pg status -D /var/lib/pgsql/18/data") ||
+		strings.Contains(joined, "pg_ctl -D /var/lib/pgsql/18/data") {
+		t.Errorf("managed non-/pg/data actions should use pig pg commands: %+v", actions)
+	}
+}
+
+func TestRestoreNextActionsTreatSymlinkToManagedDataDirAsManaged(t *testing.T) {
+	dbsu := withCurrentUserAsPgBackRestDBSU(t)
+	managedDir := filepath.Join(t.TempDir(), "managed")
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatalf("mkdir managed dir: %v", err)
+	}
+	linkDir := filepath.Join(t.TempDir(), "managed-link")
+	if err := os.Symlink(managedDir, linkDir); err != nil {
+		t.Fatalf("symlink managed dir: %v", err)
+	}
+	cfg := &Config{
+		ConfigPath: writeTestConfig(t, "[pg-meta]\npg1-path="+managedDir+"\n"),
+		Stanza:     "pg-meta",
+		DbSU:       dbsu,
+	}
+
+	actions := restoreNextActions(cfg, &RestoreOptions{Default: true, DataDir: linkDir})
+	joined := joinActionCommands(actions)
+	if !strings.Contains(joined, "pig pg start -D "+managedDir) || strings.Contains(joined, "pg_ctl -D "+linkDir) {
+		t.Fatalf("symlink to managed dir should use managed commands against effective pg1-path, got: %+v", actions)
 	}
 }
 
@@ -555,6 +605,20 @@ func joinActionCommands(actions []output.NextAction) string {
 		parts = append(parts, action.Command)
 	}
 	return strings.Join(parts, " | ")
+}
+
+func withCurrentUserAsPgBackRestDBSU(t *testing.T) string {
+	t.Helper()
+	original := config.CurrentUser
+	current, err := user.Current()
+	if err != nil {
+		t.Fatalf("detect current user: %v", err)
+	}
+	config.CurrentUser = current.Username
+	t.Cleanup(func() {
+		config.CurrentUser = original
+	})
+	return current.Username
 }
 
 // TestBackupRolePostgresConfigDerivesFromStanza verifies the role probe

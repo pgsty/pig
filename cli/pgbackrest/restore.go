@@ -3,7 +3,6 @@ package pgbackrest
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -285,10 +284,14 @@ func patroniManagedRestoreError(cfg *Config, opts *RestoreOptions, patroniActive
 	}
 	targetDir := getDataDir(cfg, optDataDir)
 	managedDir := getDataDir(cfg, "")
-	if filepath.Clean(targetDir) != filepath.Clean(managedDir) {
+	sameDataDir, err := sameRestoreDataDir(cfg, targetDir, managedDir)
+	if err != nil {
+		return err
+	}
+	if !sameDataDir {
 		return nil
 	}
-	return fmt.Errorf("cannot run pb restore while Patroni is active for managed PGDATA %s; use pig pitr for Patroni-aware restore orchestration", targetDir)
+	return fmt.Errorf("cannot run pb restore while Patroni is active for managed PGDATA %s; use pig pitr for Patroni-aware restore orchestration", managedDir)
 }
 
 func restoreExtraArgName(arg string) string {
@@ -371,6 +374,13 @@ func normalizeTime(t string) string {
 	}
 
 	return t
+}
+
+// NormalizeRestoreTime normalizes restore target time values for replayable
+// commands. It is exported so orchestrated restore surfaces can use the same
+// deterministic time contract as pb restore plans.
+func NormalizeRestoreTime(value string) string {
+	return normalizeTime(value)
 }
 
 // buildRestoreArgs builds pgbackrest restore command arguments.
@@ -516,42 +526,56 @@ func printRestorePlan(cfg *Config, opts *RestoreOptions, normalizedTime string) 
 // printPostRestoreHints displays post-restore instructions to stderr.
 func printPostRestoreHints(cfg *Config, opts *RestoreOptions) {
 	fmt.Fprintf(os.Stderr, "\n%s=== Next Steps ===%s\n", utils.ColorGreen, utils.ColorReset)
+	if opts == nil {
+		opts = &RestoreOptions{}
+	}
 
 	// Check if using custom data directory
 	dataDir := getDataDir(cfg, opts.DataDir)
-	isCustomDataDir := opts.DataDir != "" && opts.DataDir != "/pg/data"
+	managedDir := getDataDir(cfg, "")
+	sameDataDir, sameErr := sameRestoreDataDir(cfg, dataDir, managedDir)
+	isCustomDataDir := sameErr != nil || !sameDataDir
 	action, _ := restoreTargetAction(opts)
 	needsManualPromote := action != "promote" && !opts.Default
 
 	if isCustomDataDir {
 		// Simplified hints for custom data directory
 		fmt.Fprintln(os.Stderr, "1. Start PostgreSQL with custom data directory:")
-		fmt.Fprintf(os.Stderr, "   pg_ctl -D %s start\n", dataDir)
+		fmt.Fprintf(os.Stderr, "   pg_ctl -D %s -o \"-p 5433\" start\n", QuoteShellArg(dataDir))
 		fmt.Fprintln(os.Stderr)
 
-		if needsManualPromote {
-			fmt.Fprintln(os.Stderr, "2. If satisfied, promote to primary:")
-			fmt.Fprintf(os.Stderr, "   pg_ctl -D %s promote\n", dataDir)
-			fmt.Fprintln(os.Stderr)
-		}
-	} else {
-		// Detailed hints for default data directory
-		fmt.Fprintln(os.Stderr, "1. Start PostgreSQL:")
-		fmt.Fprintln(os.Stderr, "   pig pg start")
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "2. Verify data integrity:")
-		fmt.Fprintln(os.Stderr, "   pig pg ps")
+		fmt.Fprintln(os.Stderr, "2. Verify side restore status:")
+		fmt.Fprintf(os.Stderr, "   pg_ctl -D %s status\n", QuoteShellArg(dataDir))
 		fmt.Fprintln(os.Stderr)
 
 		nextStep := 3
 		if needsManualPromote {
 			fmt.Fprintf(os.Stderr, "%d. If satisfied, promote to primary:\n", nextStep)
-			fmt.Fprintln(os.Stderr, "   pig pg promote")
+			fmt.Fprintf(os.Stderr, "   pg_ctl -D %s promote\n", QuoteShellArg(dataDir))
 			fmt.Fprintln(os.Stderr)
 			nextStep++
 		}
 
 		fmt.Fprintf(os.Stderr, "%d. Re-create stanza if needed:\n", nextStep)
-		fmt.Fprintln(os.Stderr, "   pig pb create")
+		fmt.Fprintf(os.Stderr, "   %s\n", restoreSideStanzaCreateCommand(cfg, dataDir))
+	} else {
+		// Detailed hints for default data directory
+		fmt.Fprintln(os.Stderr, "1. Start PostgreSQL:")
+		fmt.Fprintf(os.Stderr, "   %s\n", restorePigPgCommand("start", managedDir))
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "2. Verify data integrity:")
+		fmt.Fprintf(os.Stderr, "   %s\n", restorePigPgCommand("status", managedDir))
+		fmt.Fprintln(os.Stderr)
+
+		nextStep := 3
+		if needsManualPromote {
+			fmt.Fprintf(os.Stderr, "%d. If satisfied, promote to primary:\n", nextStep)
+			fmt.Fprintf(os.Stderr, "   %s\n", restorePigPgCommand("promote", managedDir))
+			fmt.Fprintln(os.Stderr)
+			nextStep++
+		}
+
+		fmt.Fprintf(os.Stderr, "%d. Re-create stanza if needed:\n", nextStep)
+		fmt.Fprintf(os.Stderr, "   %s\n", restorePigPBCreateCommand(cfg))
 	}
 }

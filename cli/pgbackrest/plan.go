@@ -417,6 +417,12 @@ func quoteArg(arg string) string {
 	return "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
 }
 
+// QuoteShellArg renders one shell-safe argument using the same POSIX quoting
+// contract as replayable pgBackRest plans.
+func QuoteShellArg(value string) string {
+	return quoteArg(value)
+}
+
 func restoreRepoName(cfg *Config) string {
 	if cfg != nil && cfg.Repo != "" {
 		return "repo" + cfg.Repo

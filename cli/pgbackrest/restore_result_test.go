@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -299,8 +300,71 @@ func TestPatroniManagedRestoreErrorAllowsInactiveOrCustomDataDir(t *testing.T) {
 	if err := patroniManagedRestoreError(DefaultConfig(), &RestoreOptions{Default: true}, false); err != nil {
 		t.Fatalf("inactive Patroni should not block managed restore: %v", err)
 	}
-	if err := patroniManagedRestoreError(DefaultConfig(), &RestoreOptions{Default: true, DataDir: "/tmp/pig-restore"}, true); err != nil {
+	dbsu := withCurrentUserAsPgBackRestDBSU(t)
+	managedDir := filepath.Join(t.TempDir(), "managed")
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatalf("mkdir managed dir: %v", err)
+	}
+	customDir := filepath.Join(t.TempDir(), "custom")
+	if err := os.MkdirAll(customDir, 0o755); err != nil {
+		t.Fatalf("mkdir custom dir: %v", err)
+	}
+	cfg := &Config{
+		ConfigPath: writeTestConfig(t, "[pg-meta]\npg1-path="+managedDir+"\n"),
+		Stanza:     "pg-meta",
+		DbSU:       dbsu,
+	}
+	if err := patroniManagedRestoreError(cfg, &RestoreOptions{Default: true, DataDir: customDir}, true); err != nil {
 		t.Fatalf("active Patroni should not block custom restore target: %v", err)
+	}
+}
+
+func TestPatroniManagedRestoreErrorRejectsSymlinkToManagedDataDir(t *testing.T) {
+	dbsu := withCurrentUserAsPgBackRestDBSU(t)
+	managedDir := filepath.Join(t.TempDir(), "managed")
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatalf("mkdir managed dir: %v", err)
+	}
+	linkDir := filepath.Join(t.TempDir(), "managed-link")
+	if err := os.Symlink(managedDir, linkDir); err != nil {
+		t.Fatalf("symlink managed dir: %v", err)
+	}
+	cfg := &Config{
+		ConfigPath: writeTestConfig(t, "[pg-meta]\npg1-path="+managedDir+"\n"),
+		Stanza:     "pg-meta",
+		DbSU:       dbsu,
+	}
+
+	err := patroniManagedRestoreError(cfg, &RestoreOptions{Default: true, DataDir: linkDir}, true)
+	if err == nil {
+		t.Fatal("active Patroni should block restore through a symlink to managed PGDATA")
+	}
+	if !strings.Contains(err.Error(), managedDir) {
+		t.Fatalf("error should mention resolved managed data dir %q, got %v", managedDir, err)
+	}
+}
+
+func TestPatroniManagedRestoreErrorFailsClosedWhenDataDirRelationCannotBeResolved(t *testing.T) {
+	dbsu := withCurrentUserAsPgBackRestDBSU(t)
+	managedDir := filepath.Join(t.TempDir(), "managed")
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatalf("mkdir managed dir: %v", err)
+	}
+	cfg := &Config{
+		ConfigPath: writeTestConfig(t, "[pg-meta]\npg1-path="+managedDir+"\n"),
+		Stanza:     "pg-meta",
+		DbSU:       dbsu,
+	}
+
+	err := patroniManagedRestoreError(cfg, &RestoreOptions{
+		Default: true,
+		DataDir: filepath.Join(t.TempDir(), "missing-link"),
+	}, true)
+	if err == nil {
+		t.Fatal("active Patroni should block restore when target/managed PGDATA relation cannot be resolved")
+	}
+	if !strings.Contains(err.Error(), "cannot determine") {
+		t.Fatalf("error should explain indeterminate data-dir relation, got %v", err)
 	}
 }
 
@@ -532,11 +596,34 @@ func TestPrintPostRestoreHintsDefaultDoesNotSuggestPromote(t *testing.T) {
 		})
 	})
 
-	if !strings.Contains(output, "pg_ctl -D /tmp/pig-pitr-restore start") {
+	if !strings.Contains(output, "pg_ctl -D /tmp/pig-pitr-restore -o \"-p 5433\" start") {
 		t.Fatalf("default restore hints should include custom pg_ctl start, got:\n%s", output)
+	}
+	if !strings.Contains(output, "pg_ctl -D /tmp/pig-pitr-restore status") ||
+		!strings.Contains(output, "pgbackrest --pg1-path=/tmp/pig-pitr-restore stanza-create") {
+		t.Fatalf("custom restore hints should include status and stanza-create, got:\n%s", output)
 	}
 	if strings.Contains(output, "promote") {
 		t.Fatalf("default restore hints should not suggest manual promote, got:\n%s", output)
+	}
+}
+
+func TestPrintPostRestoreHintsCustomDataDirPreservesStanzaCommandContext(t *testing.T) {
+	cfg := &Config{
+		ConfigPath: writeTestConfig(t, "[pg-meta]\npg1-path=/pg/data\n"),
+		Stanza:     "pg-meta",
+	}
+	output := capturePgBackRestStderr(t, func() {
+		printPostRestoreHints(cfg, &RestoreOptions{
+			Default: true,
+			DataDir: "/tmp/pig side restore",
+		})
+	})
+
+	if !strings.Contains(output, "pgbackrest --stanza=pg-meta") ||
+		!strings.Contains(output, "--config="+cfg.ConfigPath) ||
+		!strings.Contains(output, "--pg1-path='/tmp/pig side restore' stanza-create") {
+		t.Fatalf("custom restore hints should preserve stanza/config and quote pg1-path, got:\n%s", output)
 	}
 }
 
@@ -550,6 +637,22 @@ func TestPrintPostRestoreHintsDefaultDataDirRenumbersStanzaStep(t *testing.T) {
 	}
 	if strings.Contains(output, "4. Re-create stanza if needed:") {
 		t.Fatalf("default restore hints should not skip from step 2 to 4, got:\n%s", output)
+	}
+}
+
+func TestPrintPostRestoreHintsManagedNonDefaultDataDirUsesManagedCommands(t *testing.T) {
+	cfg := &Config{ConfigPath: writeTestConfig(t, "[pg-meta]\npg1-path=/var/lib/pgsql/18/data\n"), Stanza: "pg-meta"}
+	output := capturePgBackRestStderr(t, func() {
+		printPostRestoreHints(cfg, &RestoreOptions{Default: true, DataDir: "/var/lib/pgsql/18/data"})
+	})
+
+	if !strings.Contains(output, "pig pg start -D /var/lib/pgsql/18/data") ||
+		!strings.Contains(output, "pig pg status -D /var/lib/pgsql/18/data") ||
+		!strings.Contains(output, "pig pb create") {
+		t.Fatalf("managed non-/pg/data hints should use pig commands, got:\n%s", output)
+	}
+	if strings.Contains(output, "pg_ctl -D /var/lib/pgsql/18/data") {
+		t.Fatalf("managed non-/pg/data hints must not use side-restore pg_ctl, got:\n%s", output)
 	}
 }
 

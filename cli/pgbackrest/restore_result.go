@@ -7,6 +7,7 @@ package pgbackrest
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -189,32 +190,87 @@ func parseRestoredBackupSet(output string) string {
 // post-restore hints (printPostRestoreHints): start, verify, optionally
 // promote, and re-create the stanza.
 func restoreNextActions(cfg *Config, opts *RestoreOptions) []output.NextAction {
+	if opts == nil {
+		opts = &RestoreOptions{}
+	}
 	dataDir := getDataDir(cfg, opts.DataDir)
+	managedDir := getDataDir(cfg, "")
 	action := determineTargetAction(opts)
 	needsManualPromote := action != "promote" && !opts.Default
-	isCustomDataDir := opts.DataDir != "" && opts.DataDir != "/pg/data"
+	sameDataDir, sameErr := sameRestoreDataDir(cfg, dataDir, managedDir)
+	isCustomDataDir := sameErr != nil || !sameDataDir
 
 	if isCustomDataDir {
+		quotedDataDir := QuoteShellArg(dataDir)
 		actions := []output.NextAction{
-			{Command: fmt.Sprintf("pg_ctl -D %s start", dataDir), Reason: "start PostgreSQL with the restored data directory", Required: true},
+			{Command: fmt.Sprintf("pg_ctl -D %s -o \"-p 5433\" start", quotedDataDir), Reason: "start PostgreSQL with the restored data directory on an alternate port", Required: true},
+			{Command: fmt.Sprintf("pg_ctl -D %s status", quotedDataDir), Reason: "verify PostgreSQL is running on the side restore directory", Required: false},
 		}
 		if needsManualPromote {
 			actions = append(actions, output.NextAction{
-				Command: fmt.Sprintf("pg_ctl -D %s promote", dataDir), Reason: "promote to primary once the restored state is verified", Required: false})
+				Command: fmt.Sprintf("pg_ctl -D %s promote", quotedDataDir), Reason: "promote to primary once the restored state is verified", Required: false})
 		}
-		return actions
+		return append(actions, output.NextAction{
+			Command: restoreSideStanzaCreateCommand(cfg, dataDir), Reason: "re-create the pgBackRest stanza if needed", Required: false})
 	}
 
 	actions := []output.NextAction{
-		{Command: "pig pg start", Reason: "start PostgreSQL on the restored data directory", Required: true},
-		{Command: "pig pg ps", Reason: "verify PostgreSQL is running and data is intact", Required: false},
+		{Command: restorePigPgCommand("start", managedDir), Reason: "start PostgreSQL on the restored data directory", Required: true},
+		{Command: restorePigPgCommand("status", managedDir), Reason: "verify PostgreSQL is running on the restored data directory", Required: false},
 	}
 	if needsManualPromote {
 		actions = append(actions, output.NextAction{
-			Command: "pig pg promote", Reason: "promote to primary once the restored state is verified", Required: false})
+			Command: restorePigPgCommand("promote", managedDir), Reason: "promote to primary once the restored state is verified", Required: false})
 	}
 	return append(actions, output.NextAction{
-		Command: "pig pb create", Reason: "re-create the pgBackRest stanza if needed", Required: false})
+		Command: restorePigPBCreateCommand(cfg), Reason: "re-create the pgBackRest stanza if needed", Required: false})
+}
+
+func sameRestoreDataDir(cfg *Config, targetDir string, managedDir string) (bool, error) {
+	if filepath.Clean(targetDir) == filepath.Clean(managedDir) {
+		return true, nil
+	}
+	targetResolved, targetErr := resolveRestorePathAsDBSU(cfg, targetDir)
+	managedResolved, managedErr := resolveRestorePathAsDBSU(cfg, managedDir)
+	if targetErr != nil || managedErr != nil || targetResolved == "" || managedResolved == "" {
+		return false, fmt.Errorf("cannot determine whether restore target %s is managed PGDATA %s", targetDir, managedDir)
+	}
+	return filepath.Clean(targetResolved) == filepath.Clean(managedResolved), nil
+}
+
+func resolveRestorePathAsDBSU(cfg *Config, path string) (string, error) {
+	dbsu := utils.GetDBSU("")
+	if cfg != nil && cfg.DbSU != "" {
+		dbsu = cfg.DbSU
+	}
+	out, err := utils.DBSUCommandOutput(dbsu, []string{"readlink", "-f", path})
+	return strings.TrimSpace(out), err
+}
+
+func restorePigPgCommand(subcommand string, dataDir string) string {
+	parts := []string{"pig", "pg", subcommand}
+	if dataDir != "" && filepath.Clean(dataDir) != filepath.Clean(postgres.DefaultPgData) {
+		parts = append(parts, "-D", QuoteShellArg(dataDir))
+	}
+	return strings.Join(parts, " ")
+}
+
+func restorePigPBCreateCommand(cfg *Config) string {
+	return strings.Join(commandPrefix(cfg, "create"), " ")
+}
+
+func restoreSideStanzaCreateCommand(cfg *Config, dataDir string) string {
+	parts := []string{"pgbackrest"}
+	if cfg != nil {
+		if cfg.Stanza != "" {
+			parts = append(parts, "--stanza="+QuoteShellArg(cfg.Stanza))
+		}
+		if cfg.ConfigPath != "" && cfg.ConfigPath != DefaultConfigPath {
+			parts = append(parts, "--config="+QuoteShellArg(cfg.ConfigPath))
+		}
+	}
+	parts = append(parts, "--pg1-path="+QuoteShellArg(dataDir), "stanza-create")
+	return strings.Join(parts, " ")
 }
 
 func determineTargetAction(opts *RestoreOptions) string {
