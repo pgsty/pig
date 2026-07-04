@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"pig/internal/config"
 	"pig/internal/output"
+	"pig/internal/utils"
 )
 
 // TestPgStatusResultData_JSON tests JSON serialization of PgStatusResultData
@@ -34,8 +36,11 @@ func TestPgStatusResultData_JSON(t *testing.T) {
 				DataDir:       "/pg/data",
 				Port:          5432,
 				UptimeSeconds: 3600,
+				ControlData: map[string]string{
+					"Database cluster state": "in production",
+				},
 			},
-			wantKeys: []string{"running", "pid", "version", "data_dir", "port", "uptime_seconds"},
+			wantKeys: []string{"running", "pid", "version", "data_dir", "port", "uptime_seconds", "control_data"},
 		},
 		{
 			name: "not running instance minimal",
@@ -86,6 +91,221 @@ func TestPgStatusResultData_JSON(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParsePgControlData(t *testing.T) {
+	parsed := ParsePgControlData(samplePgControlData())
+
+	checks := map[string]string{
+		"Database system identifier":              "7658473303274012732",
+		"Database cluster state":                  "in production",
+		"pg_control last modified":                "Sat Jul  4 04:30:46 2026",
+		"Latest checkpoint's TimeLineID":          "2",
+		"Latest checkpoint's REDO location":       "0/F000028",
+		"Latest checkpoint's REDO WAL file":       "00000002000000000000000F",
+		"Latest checkpoint's NextXID":             "0:1363",
+		"Minimum recovery ending location":        "0/0",
+		"End-of-backup record required":           "no",
+		"Latest checkpoint's full_page_writes":    "on",
+		"Data page checksum version":              "1",
+		"wal_level setting":                       "logical",
+		"Latest checkpoint's oldestXID's DB":      "1",
+		"Latest checkpoint's oldestMulti's DB":    "1",
+		"Latest checkpoint's NextMultiXactId":     "1",
+		"Latest checkpoint's oldestMultiXid":      "1",
+		"Mock authentication nonce":               "9462146558136027301",
+		"Latest checkpoint's REDO location extra": "ignored",
+	}
+	for key, want := range checks {
+		if key == "Latest checkpoint's REDO location extra" {
+			if _, ok := parsed.Fields[key]; ok {
+				t.Fatalf("unexpected synthetic key %q in parsed fields", key)
+			}
+			continue
+		}
+		if got := parsed.Fields[key]; got != want {
+			t.Fatalf("Fields[%q] = %q, want %q", key, got, want)
+		}
+	}
+
+	if len(parsed.Rows) == 0 {
+		t.Fatal("expected ordered pg_controldata rows")
+	}
+	if parsed.Rows[0].Key != "pg_control version number" || parsed.Rows[0].Value != "1800" {
+		t.Fatalf("first row = %+v, want pg_control version number", parsed.Rows[0])
+	}
+}
+
+func TestRenderPgControlDataTable(t *testing.T) {
+	parsed := ParsePgControlData(samplePgControlData())
+
+	rendered := RenderPgControlDataTable(parsed)
+
+	for _, want := range []string{
+		"Key",
+		"Value",
+		"Database system identifier",
+		"Database cluster state",
+		"in production",
+		"Latest checkpoint's REDO location",
+		"0/F000028",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered control table missing %q:\n%s", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "map[") {
+		t.Fatalf("rendered control table should not expose Go map formatting:\n%s", rendered)
+	}
+}
+
+func TestRenderPgStatusCompactSummary(t *testing.T) {
+	parsed := ParsePgControlData(samplePgControlData())
+	status := &PgStatusResultData{
+		Version: 18,
+		DataDir: "/pg/data",
+	}
+
+	rendered := RenderPgStatusCompactSummary(status, "replica", parsed)
+	want := `[pg_controldata status]
+PostgreSQL 18  DOWN replica  data=/pg/data
+Cluster    7658473303274012732  state="in production"  timeline=2
+Checkpoint time="2026-07-04 04:30:46"  redo=0/F000028  wal=00000002000000000000000F
+TransactID xid=619 next=1363 oldest=744 db=1 active=1363  mxid=0 next=1 oldest=1 db=1
+`
+
+	if rendered != want {
+		t.Fatalf("compact summary mismatch:\nwant:\n%s\ngot:\n%s", want, rendered)
+	}
+	for _, forbidden := range []string{"Safety", "Recovery", "Key", "Value", "wal_level", "full_page_writes", "Cluster    id=", "Age"} {
+		if strings.Contains(rendered, forbidden) {
+			t.Fatalf("compact summary should not include %q:\n%s", forbidden, rendered)
+		}
+	}
+}
+
+func TestRenderPgStatusCompactSummaryColor(t *testing.T) {
+	parsed := ParsePgControlData(samplePgControlData())
+	status := &PgStatusResultData{
+		Version: 18,
+		DataDir: "/pg/data",
+	}
+
+	rendered := RenderPgStatusCompactSummaryColor(status, "replica", parsed)
+
+	for _, want := range []string{
+		utils.ColorBold + "[pg_controldata status]" + utils.ColorReset,
+		utils.ColorRed + "DOWN" + utils.ColorReset,
+		utils.ColorOrange + "replica" + utils.ColorReset,
+		`state="` + utils.ColorGreen + "in production" + utils.ColorReset + `"`,
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("colored summary missing %q:\n%q", want, rendered)
+		}
+	}
+}
+
+func TestPgControlStateColorCoversKnownStates(t *testing.T) {
+	for _, state := range pgControlDataStates {
+		if got := pgControlStateColor(state); got == "" {
+			t.Fatalf("pgControlStateColor(%q) returned empty color", state)
+		}
+	}
+	if got := pgControlStateColor("unknown future state"); got != "" {
+		t.Fatalf("unknown state color = %q, want empty", got)
+	}
+}
+
+func TestPgStatusPalette(t *testing.T) {
+	checks := map[string]string{
+		"up":      pgRunningStateColor("UP"),
+		"down":    pgRunningStateColor("DOWN"),
+		"primary": pgRoleColor("primary"),
+		"replica": pgRoleColor("replica"),
+	}
+	wants := map[string]string{
+		"up":      utils.ColorGreen,
+		"down":    utils.ColorRed,
+		"primary": utils.ColorDarkBlue,
+		"replica": utils.ColorOrange,
+	}
+	for key, got := range checks {
+		if got != wants[key] {
+			t.Fatalf("%s color = %q, want %q", key, got, wants[key])
+		}
+	}
+}
+
+func TestStatusResultIncludesControlDataWhenNotRunning(t *testing.T) {
+	config.DetectEnvironment()
+	if config.CurrentUser == "" {
+		t.Skip("current user not detected")
+	}
+
+	original := pgControlDataOutput
+	t.Cleanup(func() {
+		pgControlDataOutput = original
+	})
+	pgControlDataOutput = func(cfg *Config, dbsu, dataDir string) (string, error) {
+		return samplePgControlData(), nil
+	}
+
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "PG_VERSION"), []byte("18\n"), 0o644); err != nil {
+		t.Fatalf("write PG_VERSION: %v", err)
+	}
+
+	result := StatusResult(&Config{PgData: dataDir, DbSU: config.CurrentUser})
+	if result == nil {
+		t.Fatal("StatusResult returned nil")
+	}
+	if result.Success {
+		t.Fatal("expected not-running status to remain a failed state result")
+	}
+	data, ok := result.Data.(*PgStatusResultData)
+	if !ok {
+		t.Fatalf("result data type = %T, want *PgStatusResultData", result.Data)
+	}
+	if got := data.ControlData["Database cluster state"]; got != "in production" {
+		t.Fatalf("control_data[Database cluster state] = %q, want in production", got)
+	}
+	if got := data.ControlData["Latest checkpoint's TimeLineID"]; got != "2" {
+		t.Fatalf("control_data[Latest checkpoint's TimeLineID] = %q, want 2", got)
+	}
+}
+
+func samplePgControlData() string {
+	return `pg_control version number:            1800
+Catalog version number:               202506291
+Database system identifier:           7658473303274012732
+Database cluster state:               in production
+pg_control last modified:             Sat Jul  4 04:30:46 2026
+Latest checkpoint location:           0/F000060
+Latest checkpoint's REDO location:    0/F000028
+Latest checkpoint's REDO WAL file:    00000002000000000000000F
+Latest checkpoint's TimeLineID:       2
+Latest checkpoint's PrevTimeLineID:   2
+Time of latest checkpoint:            Sat Jul  4 04:30:46 2026
+Latest checkpoint's full_page_writes: on
+Latest checkpoint's NextXID:          0:1363
+Latest checkpoint's oldestXID:        744
+Latest checkpoint's oldestXID's DB:   1
+Latest checkpoint's oldestActiveXID:  1363
+Latest checkpoint's NextOID:          24576
+Latest checkpoint's NextMultiXactId:  1
+Latest checkpoint's NextMultiOffset:  0
+Latest checkpoint's oldestMultiXid:   1
+Latest checkpoint's oldestMulti's DB: 1
+Minimum recovery ending location:     0/0
+Min recovery ending loc's timeline:   0
+Backup start location:                0/0
+Backup end location:                  0/0
+End-of-backup record required:        no
+wal_level setting:                    logical
+wal_log_hints setting:                on
+Data page checksum version:           1
+Mock authentication nonce:            9462146558136027301
+`
 }
 
 // TestPgStatusResultData_YAML tests YAML serialization of PgStatusResultData

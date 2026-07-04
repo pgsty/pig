@@ -8,13 +8,15 @@ import (
 
 // ANSI color codes for terminal output
 const (
-	ColorReset  = "\033[0m"
-	ColorBlue   = "\033[34m"
-	ColorGreen  = "\033[32m"
-	ColorYellow = "\033[33m"
-	ColorRed    = "\033[31m"
-	ColorCyan   = "\033[36m"
-	ColorBold   = "\033[1m"
+	ColorReset    = "\033[0m"
+	ColorBlue     = "\033[34m"
+	ColorDarkBlue = "\033[38;5;25m"
+	ColorGreen    = "\033[32m"
+	ColorOrange   = "\033[38;5;208m"
+	ColorYellow   = "\033[33m"
+	ColorRed      = "\033[31m"
+	ColorCyan     = "\033[36m"
+	ColorBold     = "\033[1m"
 )
 
 // PrintHint prints a command hint to stderr in blue.

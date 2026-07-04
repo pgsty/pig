@@ -310,7 +310,7 @@ pig pg reload -D /data/pg17       # Specify data directory
 
 ### pg status
 
-Show PostgreSQL server status. Displays not only `pg_ctl status` output, but also postgres processes and Pigsty-related service status.
+Show PostgreSQL server status. Displays `pg_ctl status`, a compact `pg_controldata` summary, postgres processes, and the most relevant Pigsty runtime services.
 
 ```bash
 pig pg status                     # Check service status
@@ -320,14 +320,18 @@ pig pg status -D /data/pg17       # Specify data directory
 **Output includes:**
 
 1. `pg_ctl status` output (running status, PID, etc.)
-2. PostgreSQL process list (`ps -u postgres`)
-3. Related service status:
-   - `postgres`: PostgreSQL systemd service
+2. Compact `[pg_controldata status]` block with version, up/down state, role, data directory, system identifier, cluster state, timeline, checkpoint LSN/WAL, XID, and MultiXact counters
+3. PostgreSQL process list (`ps -u postgres`)
+4. Related service status:
+   - `postgres`: local PostgreSQL postmaster state (`postmaster.pid` / process check), not the systemd unit
    - `patroni`: Patroni HA manager
    - `pgbouncer`: Connection pooler
-   - `pgbackrest`: Backup service
    - `vip-manager`: VIP manager
    - `haproxy`: Load balancer
+
+In terminal output, PostgreSQL state is shown as `UP` / `DOWN`, related services are shown as `up` / `down`, and critical status values are colorized. The `postgres` related-service row is derived from the local postmaster status rather than `systemctl is-active postgres`, because Patroni-managed clusters normally keep the PostgreSQL systemd unit inactive. The related service list intentionally excludes `pgbackrest`, which is validated through backup/restore commands instead of this local status summary.
+
+Structured output (`-o json` / `-o yaml`) includes `data.control_data`, a raw key/value map parsed from `pg_controldata` without renaming the original keys.
 
 
 ### pg promote

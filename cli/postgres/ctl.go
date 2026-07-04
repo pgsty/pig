@@ -475,22 +475,58 @@ func Status(cfg *Config) error {
 		RunCommandQuiet(dbsu, cmdArgs)
 	}
 
-	// 2. PostgreSQL processes (ps)
+	// 2. Compact pg_controldata status summary
+	fmt.Println()
+	statusData := printCompactStatusSummary(cfg, dbsu, dataDir)
+
+	// 3. PostgreSQL processes (ps)
 	fmt.Printf("\n%s[PostgreSQL Processes]%s\n", utils.ColorBold, utils.ColorReset)
 	PrintHint([]string{"ps", "-u", dbsu, "-o", "pid,ppid,start,command"})
 	showPostgresProcesses(dbsu)
 
-	// 3. Related services (systemctl)
+	// 4. Related services (systemctl)
 	fmt.Printf("\n%s[Related Services]%s\n", utils.ColorBold, utils.ColorReset)
-	showServiceStatus("postgres") // pigsty postgres service name
-	showServiceStatus("patroni")
-	showServiceStatus("pgbouncer")
-	showServiceStatus("pgbackrest")
-	showServiceStatus("vip-manager")
-	showServiceStatus("haproxy")
+	showPostgresRuntimeStatus(statusData.Running)
+	for _, serviceName := range pgStatusRelatedServices() {
+		showServiceStatus(serviceName)
+	}
 
 	fmt.Printf("\n%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
 	return nil
+}
+
+func printCompactStatusSummary(cfg *Config, dbsu, dataDir string) *PgStatusResultData {
+	statusData := &PgStatusResultData{
+		DataDir: dataDir,
+	}
+	if ver, err := ReadPgVersionAsDBSU(dbsu, dataDir); err == nil {
+		statusData.Version = ver
+	}
+
+	if running, pid, pidContent, err := checkPostgresRunningAsDBSUWithError(dbsu, dataDir); err == nil {
+		statusData.Running = running
+		statusData.PID = pid
+		if running {
+			info := readPostmasterPidInfo(dbsu, dataDir, pidContent)
+			statusData.Port = info.Port
+		}
+	} else {
+		logrus.Debugf("cannot read compact PostgreSQL status: %v", err)
+	}
+
+	role := detectRoleString(cfg)
+	controlData, err := collectPgControlData(cfg, dbsu, dataDir)
+	if err != nil {
+		logrus.Debugf("pg_controldata failed: %v", err)
+	}
+	fmt.Println(renderPgStatusCompactHeader(true))
+	if pg, err := GetPgInstall(cfg); err == nil && pg != nil {
+		PrintHint([]string{pg.PgControldata(), "-D", dataDir})
+	} else if err != nil {
+		logrus.Debugf("cannot resolve pg_controldata command: %v", err)
+	}
+	fmt.Print(renderPgStatusCompactBody(statusData, role, controlData, true))
+	return statusData
 }
 
 // showPostgresProcesses shows postgres processes for DBSU user
@@ -541,25 +577,49 @@ func showServiceStatus(serviceName string) {
 	cmd := exec.Command("systemctl", "is-active", serviceName)
 	output, _ := cmd.Output()
 	status := strings.TrimSpace(string(output))
+	printRelatedServiceStatus(serviceName, serviceStatusDisplay(status))
+}
 
-	// Determine color based on status
-	var statusColor string
-	switch status {
-	case "active":
-		statusColor = utils.ColorGreen
-	case "inactive":
-		statusColor = utils.ColorYellow
-	case "failed":
-		statusColor = utils.ColorRed
-	default:
-		// Service doesn't exist or unknown status, skip silently
-		if status == "" || status == "unknown" {
-			return
-		}
-		statusColor = utils.ColorYellow
+func showPostgresRuntimeStatus(running bool) {
+	printRelatedServiceStatus("postgres", postgresRuntimeStatusDisplay(running))
+}
+
+func printRelatedServiceStatus(serviceName string, display serviceStatusView) {
+	if !display.Show {
+		return
 	}
 
-	fmt.Printf("  %-16s %s%s%s\n", serviceName+":", statusColor, status, utils.ColorReset)
+	fmt.Printf("  %-16s %s%s%s\n", serviceName+":", display.Color, display.Text, utils.ColorReset)
+}
+
+func pgStatusRelatedServices() []string {
+	return []string{"patroni", "pgbouncer", "vip-manager", "haproxy"}
+}
+
+type serviceStatusView struct {
+	Text  string
+	Color string
+	Show  bool
+}
+
+func postgresRuntimeStatusDisplay(running bool) serviceStatusView {
+	if running {
+		return serviceStatusView{Text: "up", Color: utils.ColorGreen, Show: true}
+	}
+	return serviceStatusView{Text: "down", Color: utils.ColorRed, Show: true}
+}
+
+func serviceStatusDisplay(status string) serviceStatusView {
+	switch strings.TrimSpace(status) {
+	case "active":
+		return serviceStatusView{Text: "up", Color: utils.ColorGreen, Show: true}
+	case "inactive", "failed":
+		return serviceStatusView{Text: "down", Color: utils.ColorRed, Show: true}
+	case "", "unknown":
+		return serviceStatusView{}
+	default:
+		return serviceStatusView{Text: status, Color: utils.ColorYellow, Show: true}
+	}
 }
 
 // PatroniActive reports whether the local Patroni systemd service is active.

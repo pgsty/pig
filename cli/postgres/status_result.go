@@ -25,12 +25,13 @@ import (
 // PgStatusResultData contains PostgreSQL instance status information.
 // This struct is used as the Data field in output.Result for structured output.
 type PgStatusResultData struct {
-	Running       bool   `json:"running" yaml:"running"`
-	PID           int    `json:"pid,omitempty" yaml:"pid,omitempty"`
-	Version       int    `json:"version,omitempty" yaml:"version,omitempty"`
-	DataDir       string `json:"data_dir" yaml:"data_dir"`
-	Port          int    `json:"port,omitempty" yaml:"port,omitempty"`
-	UptimeSeconds int64  `json:"uptime_seconds,omitempty" yaml:"uptime_seconds,omitempty"`
+	Running       bool              `json:"running" yaml:"running"`
+	PID           int               `json:"pid,omitempty" yaml:"pid,omitempty"`
+	Version       int               `json:"version,omitempty" yaml:"version,omitempty"`
+	DataDir       string            `json:"data_dir" yaml:"data_dir"`
+	Port          int               `json:"port,omitempty" yaml:"port,omitempty"`
+	UptimeSeconds int64             `json:"uptime_seconds,omitempty" yaml:"uptime_seconds,omitempty"`
+	ControlData   map[string]string `json:"control_data,omitempty" yaml:"control_data,omitempty"`
 }
 
 // StatusResult creates a structured result for pg status command.
@@ -84,6 +85,7 @@ func StatusResult(cfg *Config) *output.Result {
 	} else {
 		logrus.Debugf("failed to read PG_VERSION: %v", err)
 	}
+	attachPgControlData(statusData, cfg, dbsu, dataDir)
 
 	// If not running, return state error with partial data
 	if !running {

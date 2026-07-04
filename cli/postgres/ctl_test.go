@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"pig/internal/config"
+	"pig/internal/utils"
 )
 
 // stubCtlChecks replaces the ctl state-check seams for one test.
@@ -111,6 +112,75 @@ func TestStopTextInvalidModeStillFails(t *testing.T) {
 	err := Stop(nil, &StopOptions{Mode: "bogus"})
 	if err == nil || !strings.Contains(err.Error(), "invalid stop mode") {
 		t.Fatalf("pg stop with invalid mode should fail, got %v", err)
+	}
+}
+
+func TestPgStatusSystemdRelatedServicesExcludePostgresUnit(t *testing.T) {
+	got := pgStatusRelatedServices()
+	want := []string{"patroni", "pgbouncer", "vip-manager", "haproxy"}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pgStatusRelatedServices() = %v, want %v", got, want)
+	}
+	for _, forbidden := range []string{"postgres", "pgbackrest"} {
+		for _, service := range got {
+			if service == forbidden {
+				t.Fatalf("related services should not include %q: %v", forbidden, got)
+			}
+		}
+	}
+}
+
+func TestPostgresRuntimeStatusDisplayUsesPostmasterState(t *testing.T) {
+	tests := []struct {
+		name      string
+		running   bool
+		wantText  string
+		wantColor string
+	}{
+		{name: "running", running: true, wantText: "up", wantColor: utils.ColorGreen},
+		{name: "stopped", running: false, wantText: "down", wantColor: utils.ColorRed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := postgresRuntimeStatusDisplay(tt.running)
+			if !got.Show || got.Text != tt.wantText || got.Color != tt.wantColor {
+				t.Fatalf("postgresRuntimeStatusDisplay(%v) = %+v, want text=%q color=%q show=true",
+					tt.running, got, tt.wantText, tt.wantColor)
+			}
+		})
+	}
+}
+
+func TestServiceStatusDisplayMapsSystemdStateToOperatorState(t *testing.T) {
+	tests := []struct {
+		systemd   string
+		wantText  string
+		wantColor string
+		wantShow  bool
+	}{
+		{systemd: "active", wantText: "up", wantColor: utils.ColorGreen, wantShow: true},
+		{systemd: "inactive", wantText: "down", wantColor: utils.ColorRed, wantShow: true},
+		{systemd: "failed", wantText: "down", wantColor: utils.ColorRed, wantShow: true},
+		{systemd: "unknown", wantShow: false},
+		{systemd: "", wantShow: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.systemd, func(t *testing.T) {
+			got := serviceStatusDisplay(tt.systemd)
+			if got.Show != tt.wantShow {
+				t.Fatalf("Show = %v, want %v", got.Show, tt.wantShow)
+			}
+			if !tt.wantShow {
+				return
+			}
+			if got.Text != tt.wantText || got.Color != tt.wantColor {
+				t.Fatalf("serviceStatusDisplay(%q) = %+v, want text=%q color=%q",
+					tt.systemd, got, tt.wantText, tt.wantColor)
+			}
+		})
 	}
 }
 
