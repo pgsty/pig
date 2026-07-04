@@ -202,22 +202,28 @@ Initialize PostgreSQL data directory. Wraps `initdb`.
 pig pg init                       # Initialize with defaults
 pig pg init -v 17                 # Specify PostgreSQL 17
 pig pg init -D /data/pg17         # Specify data directory
-pig pg init -k                    # Enable data checksums
+pig pg init -K                    # Disable data checksums
 pig pg init -f                    # Force init (remove existing data)
 pig pg init -f -y                 # Skip force confirmation prompt
 pig pg init -- --waldir=/wal      # Pass extra args to initdb
 ```
 
+**Defaults:** `pg init` initializes PostgreSQL with UTF8, enables data checksums by default, and prefers `C.UTF-8` locale. PostgreSQL 17+ uses the built-in locale provider with `C.UTF-8`; older versions use OS `C.UTF-8` when available and fall back to `C` with a warning when it is not.
+
+**Checksum rendering:** PostgreSQL 18+ enables data checksums by default, so `pig pg init` omits a checksum flag unless `-K/--no-data-checksums` is set. PostgreSQL 17 and older need `--data-checksums` to enable the same policy.
+
+**Policy conflicts:** `pg init` rejects user-supplied initdb options that override Pigsty-managed encoding, locale, or checksum policy, including `--encoding/-E`, `--locale`, `--locale-provider`, `--builtin-locale`, `--icu-locale`, `--lc-*`, `--data-checksums`, and `--no-data-checksums` after the `--` separator. Use `initdb` directly for that level of customization.
+
 **Options:**
 
 | Option | Short | Default | Description |
 |:---|:---|:---|:---|
-| `--encoding` | `-E` | UTF8 | Database encoding |
-| `--locale` | | C | Locale setting |
-| `--data-checksum` | `-k` | false | Enable data checksums |
+| `--no-data-checksums` | `-K` | false | Disable data checksums |
 | `--force` | `-f` | false | Force init, remove existing data (dangerous!) |
 | `--yes` | `-y` | false | Skip confirmation when `--force` overwrites data |
 {.full-width}
+
+Advanced encoding and locale customization is intentionally not exposed by `pig pg init`; use `initdb` directly for that level of control.
 
 **Safety:** `--force` is destructive and requires confirmation in text mode; JSON/YAML mode requires `--yes`. Even with `--force --yes`, command refuses to run if PostgreSQL is running.
 

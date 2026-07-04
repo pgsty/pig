@@ -10,6 +10,7 @@ package postgres
 import (
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -145,5 +146,219 @@ func TestRestartTextStatusCheckErrorIsNotReportedAsStopped(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "use 'pig pg start'") {
 		t.Fatalf("restart should not report permission errors as stopped instance: %v", err)
+	}
+}
+
+func TestBuildInitDBArgsRendersVersionAwareDefaults(t *testing.T) {
+	tests := []struct {
+		name            string
+		pgVersion       int
+		localeAvailable bool
+		opts            *InitOptions
+		wantArgs        []string
+		wantSettings    InitDBSettings
+	}{
+		{
+			name:            "pg16 enables checksums explicitly and uses OS C.UTF-8 when available",
+			pgVersion:       16,
+			localeAvailable: true,
+			opts:            &InitOptions{},
+			wantArgs: []string{
+				"/pg/bin/initdb",
+				"-D", "/pg/data",
+				"--encoding=UTF8",
+				"--locale=C.UTF-8",
+				"--data-checksums",
+			},
+			wantSettings: InitDBSettings{
+				Encoding:      "UTF8",
+				Locale:        "C.UTF-8",
+				DataChecksums: true,
+			},
+		},
+		{
+			name:            "pg17 uses builtin C.UTF-8 and enables checksums explicitly",
+			pgVersion:       17,
+			localeAvailable: false,
+			opts:            &InitOptions{},
+			wantArgs: []string{
+				"/pg/bin/initdb",
+				"-D", "/pg/data",
+				"--encoding=UTF8",
+				"--locale-provider=builtin",
+				"--locale=C.UTF-8",
+				"--data-checksums",
+			},
+			wantSettings: InitDBSettings{
+				Encoding:       "UTF8",
+				LocaleProvider: "builtin",
+				Locale:         "C.UTF-8",
+				DataChecksums:  true,
+			},
+		},
+		{
+			name:            "pg18 uses default enabled checksums without redundant flag",
+			pgVersion:       18,
+			localeAvailable: false,
+			opts:            &InitOptions{},
+			wantArgs: []string{
+				"/pg/bin/initdb",
+				"-D", "/pg/data",
+				"--encoding=UTF8",
+				"--locale-provider=builtin",
+				"--locale=C.UTF-8",
+			},
+			wantSettings: InitDBSettings{
+				Encoding:       "UTF8",
+				LocaleProvider: "builtin",
+				Locale:         "C.UTF-8",
+				DataChecksums:  true,
+			},
+		},
+		{
+			name:            "pg18 renders no-data-checksums only when requested",
+			pgVersion:       18,
+			localeAvailable: false,
+			opts:            &InitOptions{NoDataChecksums: true},
+			wantArgs: []string{
+				"/pg/bin/initdb",
+				"-D", "/pg/data",
+				"--encoding=UTF8",
+				"--locale-provider=builtin",
+				"--locale=C.UTF-8",
+				"--no-data-checksums",
+			},
+			wantSettings: InitDBSettings{
+				Encoding:       "UTF8",
+				LocaleProvider: "builtin",
+				Locale:         "C.UTF-8",
+				DataChecksums:  false,
+			},
+		},
+		{
+			name:            "pg16 falls back to C with warning when OS C.UTF-8 is unavailable",
+			pgVersion:       16,
+			localeAvailable: false,
+			opts:            &InitOptions{},
+			wantArgs: []string{
+				"/pg/bin/initdb",
+				"-D", "/pg/data",
+				"--encoding=UTF8",
+				"--locale=C",
+				"--data-checksums",
+			},
+			wantSettings: InitDBSettings{
+				Encoding:      "UTF8",
+				Locale:        "C",
+				DataChecksums: true,
+				Warnings: []string{
+					"C.UTF-8 locale is unavailable; falling back to C locale",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotArgs, gotSettings := buildInitDBArgs("/pg/bin/initdb", "/pg/data", tt.pgVersion, tt.opts, tt.localeAvailable)
+			if !reflect.DeepEqual(gotArgs, tt.wantArgs) {
+				t.Fatalf("args mismatch\nwant: %#v\n got: %#v", tt.wantArgs, gotArgs)
+			}
+			if !reflect.DeepEqual(gotSettings, tt.wantSettings) {
+				t.Fatalf("settings mismatch\nwant: %#v\n got: %#v", tt.wantSettings, gotSettings)
+			}
+		})
+	}
+}
+
+func TestBuildInitDBArgsAppendsExtraArgsLast(t *testing.T) {
+	args, _ := buildInitDBArgs("/pg/bin/initdb", "/pg/data", 18, &InitOptions{
+		NoDataChecksums: true,
+		ExtraArgs:       []string{"--waldir=/pg/wal"},
+	}, false)
+
+	wantTail := []string{"--no-data-checksums", "--waldir=/pg/wal"}
+	gotTail := args[len(args)-len(wantTail):]
+	if !reflect.DeepEqual(gotTail, wantTail) {
+		t.Fatalf("extra args should remain last\nwant tail: %#v\n got tail: %#v\nall args: %#v", wantTail, gotTail, args)
+	}
+}
+
+func TestValidateInitOptionsRejectsPolicyOverrides(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *InitOptions
+		want string
+	}{
+		{
+			name: "encoding flag",
+			opts: &InitOptions{Encoding: "LATIN1"},
+			want: "--encoding/-E",
+		},
+		{
+			name: "locale flag",
+			opts: &InitOptions{Locale: "en_US.UTF-8"},
+			want: "--locale",
+		},
+		{
+			name: "legacy checksum flag",
+			opts: &InitOptions{Checksum: true},
+			want: "--data-checksum/-k",
+		},
+		{
+			name: "extra encoding long option",
+			opts: &InitOptions{ExtraArgs: []string{"--encoding=LATIN1"}},
+			want: "--encoding=LATIN1",
+		},
+		{
+			name: "extra encoding short option",
+			opts: &InitOptions{ExtraArgs: []string{"-E", "LATIN1"}},
+			want: "-E",
+		},
+		{
+			name: "extra locale provider option",
+			opts: &InitOptions{ExtraArgs: []string{"--locale-provider=icu"}},
+			want: "--locale-provider=icu",
+		},
+		{
+			name: "extra lc option",
+			opts: &InitOptions{ExtraArgs: []string{"--lc-collate=C"}},
+			want: "--lc-collate=C",
+		},
+		{
+			name: "extra checksum option",
+			opts: &InitOptions{ExtraArgs: []string{"--no-data-checksums"}},
+			want: "--no-data-checksums",
+		},
+		{
+			name: "extra checksum short option",
+			opts: &InitOptions{ExtraArgs: []string{"-k"}},
+			want: "-k",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateInitOptions(tt.opts)
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error %q should mention %q", err.Error(), tt.want)
+			}
+			if !strings.Contains(err.Error(), "use initdb directly") {
+				t.Fatalf("error should direct users to initdb, got %q", err.Error())
+			}
+		})
+	}
+}
+
+func TestValidateInitOptionsAllowsNonPolicyPassthrough(t *testing.T) {
+	err := ValidateInitOptions(&InitOptions{
+		NoDataChecksums: true,
+		ExtraArgs:       []string{"--waldir=/pg/wal", "--auth-local=peer"},
+	})
+	if err != nil {
+		t.Fatalf("non-policy initdb passthrough should be allowed: %v", err)
 	}
 }

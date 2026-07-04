@@ -30,6 +30,7 @@ var (
 	pgInitEncoding string
 	pgInitLocale   string
 	pgInitChecksum bool
+	pgInitNoChecks bool
 	pgInitForce    bool
 	pgInitYes      bool
 
@@ -172,16 +173,46 @@ var pgInitCmd = &cobra.Command{
 	Annotations: ancsAnn("pig postgres init", "action", "volatile", "unsafe", false, "high", "recommended", "dbsu", 30000),
 	Example: `  pig pg init                      # use default settings
   pig pg init -v 18                # use PostgreSQL 18
-  pig pg init -D /data/pg18 -k     # specify datadir with checksums
+  pig pg init -D /data/pg18        # specify datadir with default checksums
+  pig pg init -K                   # disable data checksums
   pig pg init -o json              # structured output (JSON)
   pig pg init -- --waldir=/wal     # pass extra options to initdb`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if pgInitChecksum && pgInitNoChecks {
+			return structuredParamError(
+				output.MODULE_PG,
+				"pig postgres init",
+				"invalid pg init parameters",
+				"--data-checksum and --no-data-checksums cannot be used together",
+				args,
+				map[string]interface{}{
+					"data_checksum":     pgInitChecksum,
+					"no_data_checksums": pgInitNoChecks,
+				},
+			)
+		}
 		opts := &postgres.InitOptions{
-			Encoding:  pgInitEncoding,
-			Locale:    pgInitLocale,
-			Checksum:  pgInitChecksum,
-			Force:     pgInitForce,
-			ExtraArgs: args,
+			Encoding:        pgInitEncoding,
+			Locale:          pgInitLocale,
+			Checksum:        pgInitChecksum,
+			NoDataChecksums: pgInitNoChecks,
+			Force:           pgInitForce,
+			ExtraArgs:       args,
+		}
+		if err := postgres.ValidateInitOptions(opts); err != nil {
+			return structuredParamError(
+				output.MODULE_PG,
+				"pig postgres init",
+				"invalid pg init parameters",
+				err.Error(),
+				args,
+				map[string]interface{}{
+					"encoding":          pgInitEncoding,
+					"locale":            pgInitLocale,
+					"data_checksum":     pgInitChecksum,
+					"no_data_checksums": pgInitNoChecks,
+				},
+			)
 		}
 
 		// The T2 gate fires only when --force would actually destroy something:
@@ -506,11 +537,18 @@ func pgPreRun(cmd *cobra.Command, args []string) error {
 
 func registerPgControlCommands() {
 	// init subcommand flags
-	pgInitCmd.Flags().StringVarP(&pgInitEncoding, "encoding", "E", "", "database encoding (default: UTF8)")
-	pgInitCmd.Flags().StringVar(&pgInitLocale, "locale", "", "locale setting (default: C)")
-	pgInitCmd.Flags().BoolVarP(&pgInitChecksum, "data-checksum", "k", false, "enable data checksums")
+	pgInitCmd.Flags().StringVarP(&pgInitEncoding, "encoding", "E", "", "database encoding (advanced; use initdb directly for custom encoding)")
+	pgInitCmd.Flags().StringVar(&pgInitLocale, "locale", "", "locale setting (advanced; use initdb directly for custom locale)")
+	pgInitCmd.Flags().BoolVarP(&pgInitChecksum, "data-checksum", "k", false, "deprecated: data checksums are enabled by default")
+	pgInitCmd.Flags().BoolVarP(&pgInitNoChecks, "no-data-checksums", "K", false, "disable data checksums")
 	pgInitCmd.Flags().BoolVarP(&pgInitForce, "force", "f", false, "force init, remove existing data directory (DANGEROUS)")
 	pgInitCmd.Flags().BoolVarP(&pgInitYes, "yes", "y", false, "skip confirmation when --force overwrites a data directory")
+	_ = pgInitCmd.Flags().MarkHidden("encoding")
+	_ = pgInitCmd.Flags().MarkHidden("locale")
+	_ = pgInitCmd.Flags().MarkHidden("data-checksum")
+	_ = pgInitCmd.Flags().MarkDeprecated("encoding", "advanced encoding customization is not exposed by pig pg init; use initdb directly")
+	_ = pgInitCmd.Flags().MarkDeprecated("locale", "advanced locale customization is not exposed by pig pg init; use initdb directly")
+	_ = pgInitCmd.Flags().MarkDeprecated("data-checksum", "data checksums are enabled by default; omit this flag")
 
 	// start subcommand flags
 	pgStartCmd.Flags().StringVarP(&pgStartLog, "log", "l", "", "redirect stdout/stderr to log file")

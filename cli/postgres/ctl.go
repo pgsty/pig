@@ -25,15 +25,29 @@ import (
 
 // InitOptions contains options for InitDB
 type InitOptions struct {
-	Encoding  string
-	Locale    string
-	Checksum  bool
-	Force     bool // Force init, remove existing data directory (DANGEROUS)
-	ExtraArgs []string
+	Encoding        string
+	Locale          string
+	Checksum        bool
+	NoDataChecksums bool
+	Force           bool // Force init, remove existing data directory (DANGEROUS)
+	ExtraArgs       []string
+}
+
+// InitDBSettings describes the effective initdb policy selected by pig pg init.
+type InitDBSettings struct {
+	Encoding       string
+	LocaleProvider string
+	Locale         string
+	DataChecksums  bool
+	Warnings       []string
 }
 
 // InitDB initializes a PostgreSQL data directory
 func InitDB(cfg *Config, opts *InitOptions) error {
+	if err := ValidateInitOptions(opts); err != nil {
+		return err
+	}
+
 	dataDir := GetPgData(cfg)
 	dbsu := GetDbSU(cfg)
 
@@ -71,31 +85,11 @@ func InitDB(cfg *Config, opts *InitOptions) error {
 		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
-	// Build initdb command
-	cmdArgs := []string{pg.Initdb(), "-D", dataDir}
-
-	// Encoding (default UTF8)
-	enc := DefaultEncoding
-	if opts != nil && opts.Encoding != "" {
-		enc = opts.Encoding
-	}
-	cmdArgs = append(cmdArgs, "-E", enc)
-
-	// Locale (default C)
-	loc := DefaultLocale
-	if opts != nil && opts.Locale != "" {
-		loc = opts.Locale
-	}
-	cmdArgs = append(cmdArgs, "--locale="+loc)
-
-	// Data checksums
-	if opts != nil && opts.Checksum {
-		cmdArgs = append(cmdArgs, "-k")
-	}
-
-	// Extra arguments (after --)
-	if opts != nil && len(opts.ExtraArgs) > 0 {
-		cmdArgs = append(cmdArgs, opts.ExtraArgs...)
+	cmdArgs, settings := buildInitDBArgs(pg.Initdb(), dataDir, pg.MajorVersion, opts, detectInitDBLocaleAvailable())
+	if !config.IsStructuredOutput() {
+		for _, warning := range settings.Warnings {
+			utils.PrintWarn("%s", warning)
+		}
 	}
 
 	// Create data directory if needed
@@ -111,6 +105,108 @@ func InitDB(cfg *Config, opts *InitOptions) error {
 	logrus.Infof("initializing PostgreSQL %d: %s", pg.MajorVersion, dataDir)
 	PrintHint(cmdArgs)
 	return utils.DBSUCommand(dbsu, cmdArgs)
+}
+
+// ValidateInitOptions rejects initdb options that would override pig pg init policy.
+func ValidateInitOptions(opts *InitOptions) error {
+	if opts == nil {
+		return nil
+	}
+	switch {
+	case opts.Encoding != "":
+		return newInitPolicyError("--encoding/-E")
+	case opts.Locale != "":
+		return newInitPolicyError("--locale")
+	case opts.Checksum:
+		return newInitPolicyError("--data-checksum/-k")
+	}
+	for _, arg := range opts.ExtraArgs {
+		if blocked := blockedInitDBPolicyArg(arg); blocked != "" {
+			return newInitPolicyError(blocked)
+		}
+	}
+	return nil
+}
+
+func newInitPolicyError(option string) error {
+	return fmt.Errorf("pig pg init does not accept %s; use initdb directly for custom locale, encoding, or checksum settings", option)
+}
+
+func blockedInitDBPolicyArg(arg string) string {
+	if arg == "" {
+		return ""
+	}
+	lower := strings.ToLower(arg)
+	name := lower
+	if idx := strings.Index(name, "="); idx >= 0 {
+		name = name[:idx]
+	}
+	switch {
+	case lower == "-e" || strings.HasPrefix(lower, "-e"):
+		return arg
+	case lower == "-k":
+		return arg
+	case name == "--encoding",
+		name == "--locale",
+		name == "--locale-provider",
+		name == "--builtin-locale",
+		name == "--icu-locale",
+		name == "--icu-rules",
+		name == "--data-checksum",
+		name == "--data-checksums",
+		name == "--no-data-checksums":
+		return arg
+	case strings.HasPrefix(name, "--lc-"):
+		return arg
+	}
+	return ""
+}
+
+func buildInitDBArgs(initdbPath, dataDir string, pgVersion int, opts *InitOptions, localeAvailable bool) ([]string, InitDBSettings) {
+	settings := InitDBSettings{
+		Encoding:      DefaultEncoding,
+		DataChecksums: true,
+	}
+	settings.LocaleProvider, settings.Locale, settings.Warnings = selectInitDBLocale(pgVersion, localeAvailable)
+	if opts != nil && opts.NoDataChecksums {
+		settings.DataChecksums = false
+	}
+
+	cmdArgs := []string{initdbPath, "-D", dataDir, "--encoding=" + settings.Encoding}
+	if settings.LocaleProvider != "" {
+		cmdArgs = append(cmdArgs, "--locale-provider="+settings.LocaleProvider)
+	}
+	cmdArgs = append(cmdArgs, "--locale="+settings.Locale)
+
+	switch {
+	case settings.DataChecksums && pgVersion < 18:
+		cmdArgs = append(cmdArgs, "--data-checksums")
+	case !settings.DataChecksums && pgVersion >= 18:
+		cmdArgs = append(cmdArgs, "--no-data-checksums")
+	}
+	if opts != nil && len(opts.ExtraArgs) > 0 {
+		cmdArgs = append(cmdArgs, opts.ExtraArgs...)
+	}
+	return cmdArgs, settings
+}
+
+func selectInitDBLocale(pgVersion int, localeAvailable bool) (provider string, locale string, warnings []string) {
+	if pgVersion >= 17 {
+		return "builtin", "C.UTF-8", nil
+	}
+	if localeAvailable {
+		return "", "C.UTF-8", nil
+	}
+	return "", DefaultLocale, []string{"C.UTF-8 locale is unavailable; falling back to C locale"}
+}
+
+func detectInitDBLocaleAvailable() bool {
+	out, err := utils.ShellOutput("locale", "-a")
+	if err != nil {
+		return false
+	}
+	lower := strings.ToLower(out)
+	return strings.Contains(lower, "c.utf8") || strings.Contains(lower, "c.utf-8")
 }
 
 // ============================================================================

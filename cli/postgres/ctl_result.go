@@ -40,35 +40,41 @@ const (
 // PgInitResultData contains the result data for pg init operation.
 // This struct is used as the Data field in output.Result for structured output.
 type PgInitResultData struct {
-	DataDir  string `json:"data_dir" yaml:"data_dir"`
-	Version  int    `json:"version" yaml:"version"`
-	Locale   string `json:"locale" yaml:"locale"`
-	Encoding string `json:"encoding" yaml:"encoding"`
-	Checksum bool   `json:"checksum,omitempty" yaml:"checksum,omitempty"`
-	Force    bool   `json:"force,omitempty" yaml:"force,omitempty"`
+	DataDir        string   `json:"data_dir" yaml:"data_dir"`
+	Version        int      `json:"version" yaml:"version"`
+	LocaleProvider string   `json:"locale_provider,omitempty" yaml:"locale_provider,omitempty"`
+	Locale         string   `json:"locale" yaml:"locale"`
+	Encoding       string   `json:"encoding" yaml:"encoding"`
+	Checksum       bool     `json:"checksum" yaml:"checksum"`
+	Force          bool     `json:"force,omitempty" yaml:"force,omitempty"`
+	Warnings       []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 }
 
 // InitOK creates a successful result for pg init operation.
-func InitOK(dataDir string, version int, locale, encoding string, checksum bool) *output.Result {
+func InitOK(dataDir string, version int, settings InitDBSettings) *output.Result {
 	return output.OK("PostgreSQL cluster initialized successfully", &PgInitResultData{
-		DataDir:  dataDir,
-		Version:  version,
-		Locale:   locale,
-		Encoding: encoding,
-		Checksum: checksum,
+		DataDir:        dataDir,
+		Version:        version,
+		LocaleProvider: settings.LocaleProvider,
+		Locale:         settings.Locale,
+		Encoding:       settings.Encoding,
+		Checksum:       settings.DataChecksums,
+		Warnings:       settings.Warnings,
 	})
 }
 
 // InitOKForce creates a successful result for pg init operation with --force flag.
 // When --force is used, an existing data directory was removed before initialization.
-func InitOKForce(dataDir string, version int, locale, encoding string, checksum bool) *output.Result {
+func InitOKForce(dataDir string, version int, settings InitDBSettings) *output.Result {
 	return output.OK("PostgreSQL cluster initialized (force mode)", &PgInitResultData{
-		DataDir:  dataDir,
-		Version:  version,
-		Locale:   locale,
-		Encoding: encoding,
-		Checksum: checksum,
-		Force:    true,
+		DataDir:        dataDir,
+		Version:        version,
+		LocaleProvider: settings.LocaleProvider,
+		Locale:         settings.Locale,
+		Encoding:       settings.Encoding,
+		Checksum:       settings.DataChecksums,
+		Force:          true,
+		Warnings:       settings.Warnings,
 	}).WithDetail("Previous data directory was removed")
 }
 
@@ -425,20 +431,15 @@ func InitResult(cfg *Config, opts *InitOptions) *output.Result {
 	dataDir := GetPgData(cfg)
 	dbsu := GetDbSU(cfg)
 
-	// Get encoding and locale (with defaults)
-	encoding := DefaultEncoding
-	locale := DefaultLocale
-	checksum := false
+	if err := ValidateInitOptions(opts); err != nil {
+		return output.Fail(output.GenericParamError(output.MODULE_PG), "invalid pg init parameters").
+			WithData(&PgInitResultData{DataDir: dataDir}).
+			WithDetail(err.Error())
+	}
+
 	force := false
 
 	if opts != nil {
-		if opts.Encoding != "" {
-			encoding = opts.Encoding
-		}
-		if opts.Locale != "" {
-			locale = opts.Locale
-		}
-		checksum = opts.Checksum
 		force = opts.Force
 	}
 
@@ -481,6 +482,7 @@ func InitResult(cfg *Config, opts *InitOptions) *output.Result {
 			WithDetail(err.Error())
 	}
 	version := pg.MajorVersion
+	_, settings := buildInitDBArgs(pg.Initdb(), dataDir, version, opts, detectInitDBLocaleAvailable())
 
 	// Execute the init operation
 	err = InitDB(cfg, opts)
@@ -488,20 +490,22 @@ func InitResult(cfg *Config, opts *InitOptions) *output.Result {
 		code := classifyCtlError(err, output.CodePgInitFailed)
 		return output.Fail(code, "Failed to initialize PostgreSQL cluster").
 			WithData(&PgInitResultData{
-				DataDir:  dataDir,
-				Version:  version,
-				Locale:   locale,
-				Encoding: encoding,
-				Checksum: checksum,
+				DataDir:        dataDir,
+				Version:        version,
+				LocaleProvider: settings.LocaleProvider,
+				Locale:         settings.Locale,
+				Encoding:       settings.Encoding,
+				Checksum:       settings.DataChecksums,
+				Warnings:       settings.Warnings,
 			}).
 			WithDetail(err.Error())
 	}
 
 	// Success
 	if force && exists {
-		return InitOKForce(dataDir, version, locale, encoding, checksum)
+		return InitOKForce(dataDir, version, settings)
 	}
-	return InitOK(dataDir, version, locale, encoding, checksum)
+	return InitOK(dataDir, version, settings)
 }
 
 // ============================================================================

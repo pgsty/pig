@@ -939,6 +939,150 @@ func TestPgInitForceStructuredRequiresExplicitYes(t *testing.T) {
 	assertPgStructuredConfirmationRequired(t, raw, "pg init --force requires explicit confirmation")
 }
 
+func TestPgInitNoDataChecksumsMapsToInitOptions(t *testing.T) {
+	origFormat := config.OutputFormat
+	origChecksum := pgInitChecksum
+	origNoChecks := pgInitNoChecks
+	origForce := pgInitForce
+	origYes := pgInitYes
+	origExec := pgInitCommandExec
+	origInitialized := pgInitTargetInitialized
+	defer func() {
+		config.OutputFormat = origFormat
+		pgInitChecksum = origChecksum
+		pgInitNoChecks = origNoChecks
+		pgInitForce = origForce
+		pgInitYes = origYes
+		pgInitCommandExec = origExec
+		pgInitTargetInitialized = origInitialized
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pgInitChecksum = false
+	pgInitNoChecks = true
+	pgInitForce = false
+	pgInitYes = false
+	pgInitTargetInitialized = func(*postgrescli.Config) bool { return false }
+
+	var got *postgrescli.InitOptions
+	pgInitCommandExec = func(_ *postgrescli.Config, opts *postgrescli.InitOptions) error {
+		got = opts
+		return nil
+	}
+
+	if err := pgInitCmd.RunE(pgInitCmd, nil); err != nil {
+		t.Fatalf("pg init -K should execute: %v", err)
+	}
+	if got == nil {
+		t.Fatal("pg init should pass init options")
+	}
+	if !got.NoDataChecksums {
+		t.Fatalf("NoDataChecksums = false, want true")
+	}
+}
+
+func TestPgInitChecksumFlagsConflictBeforeExecution(t *testing.T) {
+	origFormat := config.OutputFormat
+	origChecksum := pgInitChecksum
+	origNoChecks := pgInitNoChecks
+	origExec := pgInitCommandExec
+	defer func() {
+		config.OutputFormat = origFormat
+		pgInitChecksum = origChecksum
+		pgInitNoChecks = origNoChecks
+		pgInitCommandExec = origExec
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pgInitChecksum = true
+	pgInitNoChecks = true
+	executed := false
+	pgInitCommandExec = func(_ *postgrescli.Config, _ *postgrescli.InitOptions) error {
+		executed = true
+		return nil
+	}
+
+	err := pgInitCmd.RunE(pgInitCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot be used together") {
+		t.Fatalf("expected checksum flag conflict, got %v", err)
+	}
+	if executed {
+		t.Fatal("pg init should not execute with conflicting checksum flags")
+	}
+}
+
+func TestPgInitRejectsHiddenPolicyFlagBeforeExecution(t *testing.T) {
+	origFormat := config.OutputFormat
+	origEncoding := pgInitEncoding
+	origLocale := pgInitLocale
+	origChecksum := pgInitChecksum
+	origNoChecks := pgInitNoChecks
+	origExec := pgInitCommandExec
+	defer func() {
+		config.OutputFormat = origFormat
+		pgInitEncoding = origEncoding
+		pgInitLocale = origLocale
+		pgInitChecksum = origChecksum
+		pgInitNoChecks = origNoChecks
+		pgInitCommandExec = origExec
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pgInitEncoding = "LATIN1"
+	pgInitLocale = ""
+	pgInitChecksum = false
+	pgInitNoChecks = false
+	executed := false
+	pgInitCommandExec = func(_ *postgrescli.Config, _ *postgrescli.InitOptions) error {
+		executed = true
+		return nil
+	}
+
+	err := pgInitCmd.RunE(pgInitCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "use initdb directly") {
+		t.Fatalf("expected hidden policy flag rejection, got %v", err)
+	}
+	if executed {
+		t.Fatal("pg init should not execute with hidden policy flag")
+	}
+}
+
+func TestPgInitRejectsPolicyExtraArgBeforeExecution(t *testing.T) {
+	origFormat := config.OutputFormat
+	origEncoding := pgInitEncoding
+	origLocale := pgInitLocale
+	origChecksum := pgInitChecksum
+	origNoChecks := pgInitNoChecks
+	origExec := pgInitCommandExec
+	defer func() {
+		config.OutputFormat = origFormat
+		pgInitEncoding = origEncoding
+		pgInitLocale = origLocale
+		pgInitChecksum = origChecksum
+		pgInitNoChecks = origNoChecks
+		pgInitCommandExec = origExec
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pgInitEncoding = ""
+	pgInitLocale = ""
+	pgInitChecksum = false
+	pgInitNoChecks = false
+	executed := false
+	pgInitCommandExec = func(_ *postgrescli.Config, _ *postgrescli.InitOptions) error {
+		executed = true
+		return nil
+	}
+
+	err := pgInitCmd.RunE(pgInitCmd, []string{"--locale=en_US.UTF-8"})
+	if err == nil || !strings.Contains(err.Error(), "use initdb directly") {
+		t.Fatalf("expected policy extra arg rejection, got %v", err)
+	}
+	if executed {
+		t.Fatal("pg init should not execute with policy extra arg")
+	}
+}
+
 func TestPgPromoteTextRequiresConfirmationBeforeExecution(t *testing.T) {
 	origFormat := config.OutputFormat
 	origYes := pgPromoteYes

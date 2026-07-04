@@ -20,11 +20,12 @@ import (
 
 func TestPgInitResultData_JSON(t *testing.T) {
 	data := &PgInitResultData{
-		DataDir:  "/pg/data",
-		Version:  17,
-		Locale:   "C",
-		Encoding: "UTF8",
-		Checksum: true,
+		DataDir:        "/pg/data",
+		Version:        17,
+		LocaleProvider: "builtin",
+		Locale:         "C.UTF-8",
+		Encoding:       "UTF8",
+		Checksum:       true,
 	}
 
 	jsonBytes, err := json.Marshal(data)
@@ -39,7 +40,10 @@ func TestPgInitResultData_JSON(t *testing.T) {
 	if !strings.Contains(jsonStr, `"version":17`) {
 		t.Errorf("JSON should contain version: %s", jsonStr)
 	}
-	if !strings.Contains(jsonStr, `"locale":"C"`) {
+	if !strings.Contains(jsonStr, `"locale_provider":"builtin"`) {
+		t.Errorf("JSON should contain locale_provider: %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"locale":"C.UTF-8"`) {
 		t.Errorf("JSON should contain locale: %s", jsonStr)
 	}
 	if !strings.Contains(jsonStr, `"encoding":"UTF8"`) {
@@ -54,7 +58,7 @@ func TestPgInitResultData_JSON_NoChecksum(t *testing.T) {
 	data := &PgInitResultData{
 		DataDir:  "/pg/data",
 		Version:  16,
-		Locale:   "en_US.UTF-8",
+		Locale:   "C",
 		Encoding: "UTF8",
 		Checksum: false,
 	}
@@ -65,19 +69,19 @@ func TestPgInitResultData_JSON_NoChecksum(t *testing.T) {
 	}
 
 	jsonStr := string(jsonBytes)
-	// checksum should be omitted when false
-	if strings.Contains(jsonStr, `"checksum"`) {
-		t.Errorf("JSON should omit checksum when false: %s", jsonStr)
+	if !strings.Contains(jsonStr, `"checksum":false`) {
+		t.Errorf("JSON should contain checksum:false: %s", jsonStr)
 	}
 }
 
 func TestPgInitResultData_YAML(t *testing.T) {
 	data := &PgInitResultData{
-		DataDir:  "/pg/data",
-		Version:  17,
-		Locale:   "C",
-		Encoding: "UTF8",
-		Checksum: true,
+		DataDir:        "/pg/data",
+		Version:        17,
+		LocaleProvider: "builtin",
+		Locale:         "C.UTF-8",
+		Encoding:       "UTF8",
+		Checksum:       true,
 	}
 
 	yamlBytes, err := yaml.Marshal(data)
@@ -92,7 +96,10 @@ func TestPgInitResultData_YAML(t *testing.T) {
 	if !strings.Contains(yamlStr, "version: 17") {
 		t.Errorf("YAML should contain version: %s", yamlStr)
 	}
-	if !strings.Contains(yamlStr, "locale: C") {
+	if !strings.Contains(yamlStr, "locale_provider: builtin") {
+		t.Errorf("YAML should contain locale_provider: %s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "locale: C.UTF-8") {
 		t.Errorf("YAML should contain locale: %s", yamlStr)
 	}
 	if !strings.Contains(yamlStr, "encoding: UTF8") {
@@ -375,7 +382,12 @@ func TestPgReloadResultData_YAML(t *testing.T) {
 // ============================================================================
 
 func TestInitOK(t *testing.T) {
-	result := InitOK("/pg/data", 17, "C", "UTF8", true)
+	result := InitOK("/pg/data", 17, InitDBSettings{
+		Encoding:       "UTF8",
+		LocaleProvider: "builtin",
+		Locale:         "C.UTF-8",
+		DataChecksums:  true,
+	})
 	if result == nil {
 		t.Fatal("InitOK returned nil")
 	}
@@ -395,8 +407,11 @@ func TestInitOK(t *testing.T) {
 	if data.Version != 17 {
 		t.Errorf("Expected Version 17, got %d", data.Version)
 	}
-	if data.Locale != "C" {
-		t.Errorf("Expected Locale C, got %s", data.Locale)
+	if data.LocaleProvider != "builtin" {
+		t.Errorf("Expected LocaleProvider builtin, got %s", data.LocaleProvider)
+	}
+	if data.Locale != "C.UTF-8" {
+		t.Errorf("Expected Locale C.UTF-8, got %s", data.Locale)
 	}
 	if data.Encoding != "UTF8" {
 		t.Errorf("Expected Encoding UTF8, got %s", data.Encoding)
@@ -407,7 +422,11 @@ func TestInitOK(t *testing.T) {
 }
 
 func TestInitOKForce(t *testing.T) {
-	result := InitOKForce("/pg/data", 17, "C", "UTF8", false)
+	result := InitOKForce("/pg/data", 17, InitDBSettings{
+		Encoding:      "UTF8",
+		Locale:        "C",
+		DataChecksums: false,
+	})
 	if result == nil {
 		t.Fatal("InitOKForce returned nil")
 	}
@@ -1188,14 +1207,14 @@ func TestNilResultMethods(t *testing.T) {
 	})
 
 	t.Run("InitOK never returns nil", func(t *testing.T) {
-		result := InitOK("", 0, "", "", false)
+		result := InitOK("", 0, InitDBSettings{})
 		if result == nil {
 			t.Error("InitOK should never return nil")
 		}
 	})
 
 	t.Run("InitOKForce never returns nil", func(t *testing.T) {
-		result := InitOKForce("", 0, "", "", false)
+		result := InitOKForce("", 0, InitDBSettings{})
 		if result == nil {
 			t.Error("InitOKForce should never return nil")
 		}

@@ -177,6 +177,7 @@ var shorthandPermitTable = map[string]string{
 	"postgres freeze -a":     "all",
 	"postgres freeze -t":     "table",
 	"postgres init -E":       "encoding",
+	"postgres init -K":       "no-data-checksums",
 	"postgres init -f":       "force",
 	"postgres init -k":       "data-checksum",
 	"postgres init -y":       "yes",
