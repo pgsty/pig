@@ -990,7 +990,7 @@ func TestPatroniAliasesMatchContract(t *testing.T) {
 		{name: "pt restart", cmd: patroniRestartCmd, want: []string{"rs"}},
 		{name: "pt reload", cmd: patroniReloadCmd, want: []string{"rl"}},
 		{name: "pt reinit", cmd: patroniReinitCmd, want: []string{"ri"}},
-		{name: "pt switchover", cmd: patroniSwitchoverCmd, want: []string{"sw"}},
+		{name: "pt switchover", cmd: patroniSwitchoverCmd, want: []string{"so"}},
 		{name: "pt failover", cmd: patroniFailoverCmd, want: []string{"fo"}},
 		{name: "pt pause", cmd: patroniPauseCmd, want: []string{"p"}},
 		{name: "pt resume", cmd: patroniResumeCmd, want: []string{"r"}},

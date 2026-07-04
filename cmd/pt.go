@@ -31,9 +31,7 @@ var patroniCmd = &cobra.Command{
 	Aliases:     []string{"pt"},
 	GroupID:     "pigsty",
 	Annotations: ancsAnn("pig patroni", "query", "stable", "safe", true, "safe", "none", "current", 100),
-	Long: `Low-level Patroni primitives (patronictl + systemd unit patroni). Orchestrated point-in-time recovery lives in "pig pitr".
-
-Manage Patroni cluster using patronictl commands.
+	Long: `Manage Patroni cluster using patronictl commands.
 
 Cluster Operations (via patronictl):
   pig pt list [cluster]            list cluster members
@@ -466,7 +464,7 @@ from scratch using pg_basebackup from the current leader.`,
 // patroniSwitchoverCmd: pig pt switchover
 var patroniSwitchoverCmd = &cobra.Command{
 	Use:     "switchover",
-	Aliases: []string{"sw"},
+	Aliases: []string{"so"},
 	Short:   "Perform planned switchover",
 	Args:    cobra.NoArgs,
 	Long: `Perform a planned switchover to transfer leadership to another member.
@@ -954,8 +952,8 @@ var patroniStopCmd = &cobra.Command{
 // ============================================================================
 
 var patroniSvcCmd = &cobra.Command{
-	Use:         "svc",
-	Aliases:     []string{"service"},
+	Use:         "service",
+	Aliases:     []string{"svc", "sv"},
 	Short:       "Manage patroni daemon service",
 	Annotations: ancsAnn("pig patroni svc", "query", "stable", "safe", true, "safe", "none", "root", 100),
 	Long: `Manage the Patroni daemon service using systemctl.

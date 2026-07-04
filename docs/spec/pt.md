@@ -64,7 +64,7 @@ Switch preflight contract: before executing or asking for confirmation for `pt s
 | `pt restart`        | `rs`  | Restart PostgreSQL instance   | `patronictl restart`                   |
 | `pt reload`         | `rl`  | Reload PostgreSQL config      | `patronictl reload <scope> --force`    |
 | `pt reinit`         | `ri`  | Reinitialize member           | `patronictl reinit`                    |
-| `pt switchover`     | `sw`  | Planned switchover            | `patronictl switchover`                |
+| `pt switchover`     | `so`  | Planned switchover            | `patronictl switchover`                |
 | `pt failover`       | `fo`  | Manual failover               | `patronictl failover`                  |
 | `pt pause`          | `p`   | Pause auto-failover           | `patronictl pause`                     |
 | `pt resume`         | `r`   | Resume auto-failover          | `patronictl resume`                    |
@@ -233,7 +233,7 @@ pig pt reinit pg-test-1 --plan   # Preview reinit plan
 
 ### pt switchover
 
-Perform planned primary-replica switchover. (alias `sw`)
+Perform planned primary-replica switchover. (alias `so`)
 
 ```bash
 pig pt switchover                 # Planned switchover (asks confirmation)
