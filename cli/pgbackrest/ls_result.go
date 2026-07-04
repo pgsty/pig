@@ -11,7 +11,7 @@ import (
 	"pig/internal/output"
 )
 
-// PbLsResultData contains typed data for `pig pb ls` structured output.
+// PbLsResultData contains typed data for `pig pb list` structured output.
 type PbLsResultData struct {
 	Type         string               `json:"type" yaml:"type"`
 	Backups      *output.EmbeddedJSON `json:"backups,omitempty" yaml:"backups,omitempty"`
@@ -39,7 +39,7 @@ type StanzaListItem struct {
 	PGPort string `json:"pg_port" yaml:"pg_port"`
 }
 
-// LsResult returns structured output for `pig pb ls` without wrapping text tables.
+// LsResult returns structured output for `pig pb list` without wrapping text tables.
 func LsResult(cfg *Config, opts *LsOptions) *output.Result {
 	listType, err := normalizeLsType(opts)
 	if err != nil {
@@ -123,7 +123,7 @@ func normalizeLsType(opts *LsOptions) (string, error) {
 		return "backup", nil
 	case "repo":
 		return "repo", nil
-	case "stanza", "cluster", "cls":
+	case "stanza":
 		return "stanza", nil
 	default:
 		return "", fmt.Errorf("unknown list type: %s (use: backup, repo, stanza)", listType)

@@ -16,9 +16,9 @@ Usage: pig pb <command>
 
 Info Commands:
   pig pb info                      show backup info
-  pig pb ls                        list backups
-  pig pb ls repo                   list configured repos
-  pig pb ls stanza                 list all stanzas
+  pig pb list                      list backups
+  pig pb list repo                 list configured repos
+  pig pb list stanza               list all stanzas
 
 Backup Commands (Primary Only):
   pig pb backup                    create backup (auto mode)
@@ -63,40 +63,38 @@ High-risk pgBackRest actions expose a structured `state -> plan -> precheck -> e
 
 **Information Query**:
 
-| Command | Description | Implementation |
-|:---|:---|:---|
-| `pb info` | Show backup repository info | `pgbackrest info` |
-| `pb ls` | List backup sets | `pgbackrest info` |
-| `pb ls repo` | List configured repos | Parse pgbackrest.conf |
-| `pb ls stanza` | List all stanzas | Parse pgbackrest.conf |
+| Command | Alias | Description | Implementation |
+|:---|:---|:---|:---|
+| `pb info` | `i` | Show backup repository info | `pgbackrest info` |
+| `pb list` | `ls` | List backup sets, repositories, and stanzas | `pgbackrest info` / parse pgbackrest.conf |
 {.full-width}
 
 **Backup & Restore**:
 
-| Command | Description | Implementation |
-|:---|:---|:---|
-| `pb backup` | Create backup | `pgbackrest backup` |
-| `pb restore` | Restore from backup (low-level primitive) | `pgbackrest restore` |
-| `pb expire` | Clean up expired backups | `pgbackrest expire` |
+| Command | Alias | Description | Implementation |
+|:---|:---|:---|:---|
+| `pb backup` | `b` | Create backup | `pgbackrest backup` |
+| `pb restore` | `r` | Restore from backup (low-level primitive) | `pgbackrest restore` |
+| `pb expire` | `e` | Clean up expired backups | `pgbackrest expire` |
 {.full-width}
 
 **Stanza Management**:
 
-| Command | Description | Implementation |
-|:---|:---|:---|
-| `pb create` | Create stanza (first-time setup) | `pgbackrest stanza-create` |
-| `pb upgrade` | Upgrade stanza (after PG major upgrade) | `pgbackrest stanza-upgrade` |
-| `pb delete` | Delete stanza (dangerous!) | `pgbackrest stanza-delete` |
+| Command | Alias | Description | Implementation |
+|:---|:---|:---|:---|
+| `pb create` | `c` | Create stanza (first-time setup) | `pgbackrest stanza-create` |
+| `pb upgrade` | `u` | Upgrade stanza (after PG major upgrade) | `pgbackrest stanza-upgrade` |
+| `pb delete` | `d` | Delete stanza (dangerous!) | `pgbackrest stanza-delete` |
 {.full-width}
 
 **Control Commands**:
 
 | Command | Alias | Description | Implementation |
 |:--------|:------|:------------|:---------------|
-| `pb check` | | Verify backup repository integrity | `pgbackrest check` |
-| `pb start` | | Enable pgBackRest operations | `pgbackrest start` |
-| `pb stop` | | Disable pgBackRest operations | `pgbackrest stop` |
-| `pb log` | `l, lg` | View logs | `tail/cat` log files |
+| `pb check` | `ck` | Verify backup repository integrity | `pgbackrest check` |
+| `pb start` | `up` | Enable pgBackRest operations | `pgbackrest start` |
+| `pb stop` | `dw` | Disable pgBackRest operations | `pgbackrest stop` |
+| `pb log` | `l` | View logs | latest log snapshot / tail |
 {.full-width}
 
 
@@ -106,9 +104,9 @@ High-risk pgBackRest actions expose a structured `state -> plan -> precheck -> e
 # View backup info
 pig pb info                          # Show all backup info
 pig pb info -o json                  # JSON format output
-pig pb ls                            # List all backups
-pig pb ls repo                       # List configured repos
-pig pb ls stanza                     # List all stanzas
+pig pb list                          # List all backups
+pig pb list repo                     # List configured repos
+pig pb list stanza                   # List all stanzas
 
 # Create backup (must run on primary)
 pig pb backup                        # Auto mode: full if none, else incr
@@ -193,16 +191,16 @@ pig pb info --set 20250101-120000F   # Show specific backup set details
 Structured output uses the global `-o/--output` flag (json/yaml/json-pretty): the Result envelope embeds pgBackRest's native info JSON in `data`. Raw mode bypasses the Result envelope and does not support YAML; invalid raw parameters return a structured `pb` parameter error in structured mode.
 
 
-### pb ls
+### pb list
 
 List resources in backup repository.
 
 ```bash
-pig pb ls                            # List all backups (default)
-pig pb ls backup                     # List all backups (explicit)
-pig pb ls repo                       # List configured repos
-pig pb ls stanza                     # List all stanzas
-pig pb ls cluster                    # Alias for stanza
+pig pb list                          # List all backups (default)
+pig pb list backup                   # List all backups (explicit)
+pig pb list repo                     # List configured repos
+pig pb list stanza                   # List all stanzas
+pig pb ls                            # Short alias for pb list
 ```
 
 **Types:**
@@ -340,6 +338,8 @@ pig pb restore -y                    # Skip confirmation prompt
 | `--plan` | | Preview restore plan without executing |
 {.full-width}
 
+**Combination rules:** `--target-action` cannot be used with `--default`, because `--default` already recovers to the end of WAL. `--exclusive/-X` requires a precise stop-before target: `--time`, `--lsn`, or `--xid`.
+
 Raw pgBackRest restore arguments must be placed after `--`; stray positionals before the separator are rejected. Pig rejects passthrough arguments that override restore target, lifecycle, or selection flags, including `--type`, `--target`, `--target-action`, `--target-exclusive`, `--target-timeline`, `--set`, `--recovery-option`, every spelling of the data directory option (`--pg-path`, `--pgN-path`, deprecated `--db[N]-path`), the **entire** repository option family (`--repo[N]-*`: path, host, type, s3/gcs/azure/sftp, cipher, ...), and config/selection redirection (`--stanza`, `--config`, `--config-path`, `--config-include-path`, `--repo`); repository identity comes from the config file plus Pig's `-r`/`-c` flags only. Relocation escape hatches (`--tablespace-map`, `--link-map`, `--link-all`) remain allowed: they neither move the declared PGDATA nor change the backup source.
 
 **Time Formats:**
@@ -361,7 +361,7 @@ Every accepted form is canonicalized to the space-separated `YYYY-MM-DD HH:MM:SS
 1. Validate parameters and environment
 2. Refuse managed `/pg/data` restore when Patroni is active; use `pig pitr`
 3. Check PostgreSQL is stopped
-4. Display restore plan and require typed `yes` confirmation
+4. Display restore plan and require interactive `y`/`yes` confirmation
 5. Execute pgbackrest restore
 6. Provide post-restore guidance
 
@@ -497,7 +497,7 @@ During system maintenance, use this command to prevent new backup operations fro
 
 ### pb log
 
-View pgBackRest log files. Log directory is read from pgBackRest `log-path` when configured, otherwise `/pg/log/pgbackrest/`. Latest log selection follows modification-time order. Use `-o json` for JSONL log records; `yaml` and `json-pretty` are not supported for log snapshots.
+View pgBackRest log files. Log directory is read from pgBackRest `log-path` when configured, otherwise `/pg/log/pgbackrest/`. Latest log selection follows modification-time order. Use `-o json` with `pb log` or `pb log show` for JSONL log records; `yaml` and `json-pretty` are not supported for log snapshots. Structured output is not supported for follow/tail mode.
 
 ```bash
 pig pb log                           # Show latest 50 lines
@@ -514,7 +514,7 @@ pig pb log show -n 50                # Show last 50 lines
 | Subcommand | Aliases | Description |
 |:---|:---|:---|
 | list | ls | List log files |
-| tail | follow, f | Real-time follow latest log |
+| tail | t, f, follow | Real-time follow latest log |
 | show | cat, c | Show latest log content |
 {.full-width}
 
@@ -523,6 +523,7 @@ pig pb log show -n 50                # Show last 50 lines
 | Option | Short | Default | Description |
 |:---|:---|:---|:---|
 | `--lines` | `-n` | 50 | Positive number of lines to show |
+| `--follow` | `-f` | false | Root `pb log` follows; on `pb log tail` this is a no-op because tail always follows |
 {.full-width}
 
 **Permission Handling:**
@@ -567,7 +568,7 @@ For full `pgbackrest` functionality, use `pgbackrest` command directly.
 
 - `pb delete` prompts for interactive `y`/`yes` confirmation unless `--yes` is given, and refuses without explicit `--stanza` when multiple stanzas are configured
 - `pb expire --set` requires confirmation or `--yes`
-- `pb restore` requires an explicit recovery target, validates `--time`, and requires typed `yes` confirmation unless `--yes` is used; the structured result builder re-checks `--yes` independently of the cmd-layer gate
+- `pb restore` requires an explicit recovery target, validates `--time`, and requires interactive `y`/`yes` confirmation unless `--yes` is used; the structured result builder re-checks `--yes` independently of the cmd-layer gate
 - `pb backup` checks primary role by default, prevents running on replica
 - Restore passthrough (`-- args`) rejects target/lifecycle/selection overrides and stray positionals before the `--` separator
 - Log command filename parameter filters paths to prevent path traversal attacks

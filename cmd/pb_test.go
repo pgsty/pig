@@ -48,6 +48,78 @@ func TestPbLogLatestOnlySubcommandsRejectFileArgs(t *testing.T) {
 	}
 }
 
+func TestPbAliasesMatchContract(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+		want []string
+	}{
+		{name: "pb info", cmd: pbInfoCmd, want: []string{"i"}},
+		{name: "pb list", cmd: pbLsCmd, want: []string{"ls"}},
+		{name: "pb backup", cmd: pbBackupCmd, want: []string{"b"}},
+		{name: "pb restore", cmd: pbRestoreCmd, want: []string{"r"}},
+		{name: "pb expire", cmd: pbExpireCmd, want: []string{"e"}},
+		{name: "pb create", cmd: pbCreateCmd, want: []string{"c"}},
+		{name: "pb upgrade", cmd: pbUpgradeCmd, want: []string{"u"}},
+		{name: "pb delete", cmd: pbDeleteCmd, want: []string{"d"}},
+		{name: "pb check", cmd: pbCheckCmd, want: []string{"ck"}},
+		{name: "pb start", cmd: pbStartCmd, want: []string{"up"}},
+		{name: "pb stop", cmd: pbStopCmd, want: []string{"dw"}},
+		{name: "pb log", cmd: pbLogCmd, want: []string{"l"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := strings.Join(tt.cmd.Aliases, ","); got != strings.Join(tt.want, ",") {
+				t.Fatalf("%s aliases = %v, want %v", tt.name, tt.cmd.Aliases, tt.want)
+			}
+		})
+	}
+}
+
+func TestPbListUsesMeaningfulPrimaryCommand(t *testing.T) {
+	if pbLsCmd.Use != "list [type]" {
+		t.Fatalf("pb list use = %q, want %q", pbLsCmd.Use, "list [type]")
+	}
+}
+
+func TestPbSpecOverviewMatchesAliasContract(t *testing.T) {
+	raw, err := os.ReadFile("../docs/spec/pb.md")
+	if err != nil {
+		t.Fatalf("read pb spec: %v", err)
+	}
+	spec := string(raw)
+	for _, want := range []string{
+		"| `pb info` | `i` |",
+		"| `pb list` | `ls` |",
+		"| `pb backup` | `b` |",
+		"| `pb restore` | `r` |",
+		"| `pb expire` | `e` |",
+		"| `pb create` | `c` |",
+		"| `pb upgrade` | `u` |",
+		"| `pb delete` | `d` |",
+		"| `pb check` | `ck` |",
+		"| `pb start` | `up` |",
+		"| `pb stop` | `dw` |",
+		"| `pb log` | `l` |",
+	} {
+		if !strings.Contains(spec, want) {
+			t.Fatalf("pb spec missing alias contract row containing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"| `pb ls` |",
+		"`l, lg`",
+		"pb ls cluster",
+		"pb ls cls",
+		"aliases: `cluster`, `cls`",
+	} {
+		if strings.Contains(spec, forbidden) {
+			t.Fatalf("pb spec still contains deprecated contract fragment %q", forbidden)
+		}
+	}
+}
+
 func TestResolvePbInfoRawOutput(t *testing.T) {
 	origRawOutput := pbInfoRawOutput
 	origFormat := config.OutputFormat

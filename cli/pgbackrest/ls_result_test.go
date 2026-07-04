@@ -35,7 +35,7 @@ pg1-port=5432
 		t.Fatalf("result JSON failed: %v", err)
 	}
 	if strings.Contains(string(out), "captured_output") {
-		t.Fatalf("pb ls structured output should not expose captured_output: %s", out)
+		t.Fatalf("pb list structured output should not expose captured_output: %s", out)
 	}
 
 	var decoded map[string]any
@@ -151,6 +151,19 @@ pg1-path=/data/test
 	second := stanzas[1].(map[string]any)
 	if second["name"] != "pg-test" || second["pg_path"] != "/data/test" || second["pg_port"] != "5432" {
 		t.Fatalf("second stanza parsed incorrectly: %v", second)
+	}
+}
+
+func TestNormalizeLsTypeRejectsUndeclaredSynonyms(t *testing.T) {
+	for _, listType := range []string{"", "backup", "repo", "stanza"} {
+		if _, err := normalizeLsType(&LsOptions{Type: listType}); err != nil {
+			t.Fatalf("normalizeLsType(%q) should be accepted: %v", listType, err)
+		}
+	}
+	for _, listType := range []string{"cluster", "cls"} {
+		if _, err := normalizeLsType(&LsOptions{Type: listType}); err == nil {
+			t.Fatalf("normalizeLsType(%q) should reject non-contract synonym", listType)
+		}
 	}
 }
 

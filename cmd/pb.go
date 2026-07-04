@@ -25,7 +25,7 @@ var pbCmd = &cobra.Command{
 	Aliases:     []string{"pb"},
 	GroupID:     "pigsty",
 	Annotations: ancsAnn("pig pgbackrest", "query", "stable", "safe", true, "safe", "none", "current", 100),
-	Long: `Low-level pgBackRest primitives. Orchestrated point-in-time recovery lives in "pig pitr".
+	Long: `pig pb - Manage pgBackRest backup and point-in-time recovery.
 
 This command wraps pgbackrest to provide simplified backup management,
 low-level restore primitives, and stanza lifecycle management.
@@ -33,13 +33,12 @@ All commands are executed as the database superuser (postgres by default).
 
 Information:
   pig pb info                      show backup info
-  pig pb ls                        list backups
-  pig pb ls repo                   list configured repositories
-  pig pb ls stanza                 list all stanzas
+  pig pb list                      list backups
+  pig pb list repo                 list configured repositories
+  pig pb list stanza               list all stanzas
 
 Backup & Restore:
   pig pb backup                    create backup (auto: full/incr)
-  pig pb backup full               create full backup
   pig pb restore                   restore from backup (low-level primitive)
   pig pb restore -t "..."          restore to specific time
   pig pb expire                    cleanup expired backups
@@ -59,14 +58,15 @@ Control:
   # Information
   pig pb info                      # show all backup info
   pig pb info -o json              # JSON format output
-  pig pb ls                        # list all backups
-  pig pb ls repo                   # list configured repositories
-  pig pb ls stanza                 # list all stanzas
+  pig pb list                      # list all backups
+  pig pb list repo                 # list configured repositories
+  pig pb list stanza               # list all stanzas
 
   # Backup (must run on primary)
   pig pb backup                    # auto: full if none, else incr
   pig pb backup full               # full backup
   pig pb backup incr               # incremental backup
+  pig pb backup diff               # differential backup
 
   # Restore (low-level primitive; use pig pitr for orchestrated recovery)
   pig pb restore -d                # restore to latest (end of WAL)
@@ -194,7 +194,7 @@ var pbBackupForce bool
 
 var pbBackupCmd = &cobra.Command{
 	Use:       "backup [type]",
-	Aliases:   []string{"bk", "b"},
+	Aliases:   []string{"b"},
 	Short:     "Create a backup",
 	Args:      cobra.MaximumNArgs(1),
 	ValidArgs: []string{"full", "diff", "incr"},
@@ -252,7 +252,7 @@ var pbExpireCommandExec = pgbackrest.Expire
 
 var pbExpireCmd = &cobra.Command{
 	Use:         "expire",
-	Aliases:     []string{"ex", "e"},
+	Aliases:     []string{"e"},
 	Short:       "Cleanup expired backups",
 	Annotations: ancsAnn("pig pgbackrest expire", "action", "volatile", "restricted", true, "medium", "recommended", "dbsu", 30000),
 	Long: `Clean up expired backups and WAL archives according to retention policy.
@@ -474,7 +474,7 @@ var pbCheckCmd = &cobra.Command{
 
 var pbStartCmd = &cobra.Command{
 	Use:         "start",
-	Aliases:     []string{"on"},
+	Aliases:     []string{"up"},
 	Short:       "Enable pgBackRest operations",
 	Annotations: ancsAnn("pig pgbackrest start", "action", "volatile", "restricted", true, "low", "none", "dbsu", 1000),
 	Long:        `Allow pgBackRest to perform operations on the stanza.`,
@@ -489,7 +489,7 @@ var pbStopForce bool
 
 var pbStopCmd = &cobra.Command{
 	Use:         "stop",
-	Aliases:     []string{"off"},
+	Aliases:     []string{"dw"},
 	Short:       "Disable pgBackRest operations",
 	Annotations: ancsAnn("pig pgbackrest stop", "action", "volatile", "restricted", true, "medium", "recommended", "dbsu", 1000),
 	Long:        `Prevent pgBackRest from performing operations on the stanza (for maintenance).`,
@@ -515,7 +515,7 @@ var (
 
 var pbLogCmd = &cobra.Command{
 	Use:         "log",
-	Aliases:     []string{"l", "lg"},
+	Aliases:     []string{"l"},
 	Short:       "View pgBackRest logs",
 	Annotations: ancsAnn("pig pgbackrest log", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Long: `View pgBackRest log files from /pg/log/pgbackrest/.
@@ -704,13 +704,13 @@ Use -o json/yaml for structured output (Result wrapper with pgbackrest native JS
 }
 
 var pbLsCmd = &cobra.Command{
-	Use:       "ls [type]",
-	Aliases:   []string{"list"}, // B02: "l" belongs to log
+	Use:       "list [type]",
+	Aliases:   []string{"ls"},
 	Short:     "List backups, repositories, or stanzas",
 	Args:      cobra.MaximumNArgs(1),
 	ValidArgs: []string{"backup", "repo", "stanza"},
 	Annotations: mergeAnn(
-		ancsAnn("pig pgbackrest ls", "query", "volatile", "safe", true, "safe", "none", "dbsu", 5000),
+		ancsAnn("pig pgbackrest list", "query", "volatile", "safe", true, "safe", "none", "dbsu", 5000),
 		map[string]string{
 			"args.type.desc": "resource type to list",
 			"args.type.type": "enum",
@@ -721,13 +721,13 @@ var pbLsCmd = &cobra.Command{
 Types:
   backup  - List all backup sets (default)
   repo    - List configured repositories from config file
-  stanza  - List all stanzas (aliases: cluster, cls)
+  stanza  - List all stanzas
 
 Examples:
-  pig pb ls                        # list all backups
-  pig pb ls backup                 # list all backups (explicit)
-  pig pb ls repo                   # list configured repositories
-  pig pb ls stanza                 # list all stanzas`,
+  pig pb list                      # list all backups
+  pig pb list backup               # list all backups (explicit)
+  pig pb list repo                 # list configured repositories
+  pig pb list stanza               # list all stanzas`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		listType := ""
 		if len(args) > 0 {
@@ -773,7 +773,7 @@ var pbCreateForce bool
 
 var pbCreateCmd = &cobra.Command{
 	Use:         "create",
-	Aliases:     []string{"cr"},
+	Aliases:     []string{"c"},
 	Short:       "Create stanza (stanza-create)",
 	Annotations: ancsAnn("pig pgbackrest create", "action", "stable", "unsafe", true, "low", "none", "dbsu", 5000),
 	Long:        `Initialize a new stanza. Must be run before the first backup.`,
@@ -796,7 +796,7 @@ var pbUpgradeNoOnline bool
 
 var pbUpgradeCmd = &cobra.Command{
 	Use:         "upgrade",
-	Aliases:     []string{"up"},
+	Aliases:     []string{"u"},
 	Short:       "Upgrade stanza (stanza-upgrade)",
 	Annotations: ancsAnn("pig pgbackrest upgrade", "action", "stable", "unsafe", true, "low", "none", "dbsu", 5000),
 	Long:        `Update stanza after PostgreSQL major version upgrade.`,
@@ -819,7 +819,7 @@ var pbDeletePlan bool
 
 var pbDeleteCmd = &cobra.Command{
 	Use:         "delete",
-	Aliases:     []string{"del", "rm"},
+	Aliases:     []string{"d"},
 	Short:       "Delete stanza (stanza-delete)",
 	Annotations: ancsAnn("pig pgbackrest delete", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 5000),
 	Long: `Delete a stanza and all its backups.
