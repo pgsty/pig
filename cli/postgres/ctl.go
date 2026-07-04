@@ -495,6 +495,14 @@ func Status(cfg *Config) error {
 	return nil
 }
 
+// PrintCompactStatusSummary prints only the pg_controldata compact status block
+// used inside pg status, without the pg_ctl/process/service sections.
+func PrintCompactStatusSummary(cfg *Config) {
+	dataDir := GetPgData(cfg)
+	dbsu := GetDbSU(cfg)
+	printCompactStatusSummary(cfg, dbsu, dataDir)
+}
+
 func printCompactStatusSummary(cfg *Config, dbsu, dataDir string) *PgStatusResultData {
 	statusData := &PgStatusResultData{
 		DataDir: dataDir,

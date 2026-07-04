@@ -205,6 +205,41 @@ func TestRenderPgStatusCompactSummaryColor(t *testing.T) {
 	}
 }
 
+func TestPrintCompactStatusSummaryOmitsFullStatusSections(t *testing.T) {
+	config.DetectEnvironment()
+	if config.CurrentUser == "" {
+		t.Skip("current user not detected")
+	}
+
+	original := pgControlDataOutput
+	t.Cleanup(func() {
+		pgControlDataOutput = original
+	})
+	pgControlDataOutput = func(cfg *Config, dbsu, dataDir string) (string, error) {
+		return samplePgControlData(), nil
+	}
+
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "PG_VERSION"), []byte("18\n"), 0o644); err != nil {
+		t.Fatalf("write PG_VERSION: %v", err)
+	}
+
+	out := captureCtlStdout(t, func() {
+		PrintCompactStatusSummary(&Config{PgData: dataDir, DbSU: config.CurrentUser})
+	})
+
+	for _, want := range []string{"[pg_controldata status]", "PostgreSQL 18", "Cluster", "Checkpoint", "TransactID"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("compact status output missing %q:\n%s", want, out)
+		}
+	}
+	for _, forbidden := range []string{"PostgreSQL Status Summary", "[pg_ctl status]", "[PostgreSQL Processes]", "[Related Services]"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("compact status output should not include full pg status section %q:\n%s", forbidden, out)
+		}
+	}
+}
+
 func TestPgControlStateColorCoversKnownStates(t *testing.T) {
 	for _, state := range pgControlDataStates {
 		if got := pgControlStateColor(state); got == "" {

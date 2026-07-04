@@ -107,6 +107,7 @@ var (
 	pitrResolvePathAsDBSU          = resolvePathAsDBSU
 	pitrRestore                    = pgbackrest.Restore
 	pitrStartPostgres              = postgres.Start
+	pitrPostgresCompactStatus      = postgres.PrintCompactStatusSummary
 	pitrStopPostgres               = postgres.Stop
 	pitrSleep                      = time.Sleep
 )
@@ -181,15 +182,17 @@ func Execute(opts *Options) error {
 	}
 
 	// Phase 5: Start PostgreSQL (unless --no-restart)
+	postgresStarted := false
 	if !opts.NoRestart {
 		if pitrErr := startPostgres(state, opts); pitrErr != nil {
 			printPITRFailureGuidance(state, opts, patroniWasStopped, pitrFailurePhaseStart)
 			return &utils.ExitCodeError{Code: output.ExitCode(pitrErr.Code), Err: pitrErr}
 		}
+		postgresStarted = true
 	}
 
 	// Phase 6: Post-restore guidance
-	if pitrErr := postRestore(state, opts, patroniWasStopped); pitrErr != nil {
+	if pitrErr := postRestore(state, opts, patroniWasStopped, postgresStarted); pitrErr != nil {
 		return &utils.ExitCodeError{Code: output.ExitCode(pitrErr.Code), Err: pitrErr}
 	}
 
@@ -249,7 +252,7 @@ func executeResult(opts *Options) *output.Result {
 	}
 
 	// Post-restore steps
-	if pitrErr := postRestore(state, opts, patroniWasStopped); pitrErr != nil {
+	if pitrErr := postRestore(state, opts, patroniWasStopped, postgresStarted); pitrErr != nil {
 		return output.Fail(pitrErr.Code, pitrErr.Error())
 	}
 
@@ -1516,10 +1519,29 @@ func queryTimelineID(state *SystemState, pgControlData string) (string, error) {
 // postRestore performs post-restore steps and returns *PITRError on failure.
 // Currently the post-restore phase only prints guidance, but this wrapper
 // ensures CodePITRPostFailed is properly used if any step fails.
-func postRestore(state *SystemState, opts *Options, patroniWasStopped bool) *PITRError {
+func postRestore(state *SystemState, opts *Options, patroniWasStopped bool, postgresStarted bool) *PITRError {
+	if shouldPrintPostRestoreStatus(opts, postgresStarted) {
+		if err := printPostRestoreStatus(state); err != nil {
+			return &PITRError{Code: output.CodePITRPostFailed, Err: fmt.Errorf("failed to print post-restore PostgreSQL status: %w", err)}
+		}
+	}
 	if err := printPostRestoreGuidance(state, opts, patroniWasStopped); err != nil {
 		return &PITRError{Code: output.CodePITRPostFailed, Err: fmt.Errorf("failed to write post-restore guidance: %w", err)}
 	}
+	return nil
+}
+
+func shouldPrintPostRestoreStatus(opts *Options, postgresStarted bool) bool {
+	return postgresStarted && (opts == nil || !opts.Quiet)
+}
+
+func printPostRestoreStatus(state *SystemState) error {
+	cfg := &postgres.Config{}
+	if state != nil {
+		cfg.PgData = state.DataDir
+		cfg.DbSU = state.DbSU
+	}
+	pitrPostgresCompactStatus(cfg)
 	return nil
 }
 
@@ -1622,7 +1644,7 @@ func buildSideRestoreNextActions(dataDir string, pbConfig *pgbackrest.Config, op
 	return actions
 }
 
-func buildManagedRestoreNextActions(dataDir string, pbConfig *pgbackrest.Config, opts *Options, patroniWasStopped bool, shutdownTarget bool, needsManualPromote bool) []output.NextAction {
+func buildManagedRestoreNextActions(dataDir string, _ *pgbackrest.Config, opts *Options, patroniWasStopped bool, shutdownTarget bool, needsManualPromote bool) []output.NextAction {
 	actions := []output.NextAction{}
 	if shutdownTarget {
 		if opts.NoRestart {
@@ -1636,24 +1658,23 @@ func buildManagedRestoreNextActions(dataDir string, pbConfig *pgbackrest.Config,
 		if patroniWasStopped {
 			actions = append(actions, output.NextAction{Command: "systemctl status patroni", Reason: "Keep Patroni stopped until the recovered state is validated", Required: false})
 		}
-		actions = append(actions, output.NextAction{Command: pigPBCreateCommand(pbConfig), Reason: "Re-create pgBackRest stanza if needed", Required: false})
 		return actions
 	}
 
 	if opts.NoRestart {
 		actions = append(actions, output.NextAction{Command: pigPgCommand("start", dataDir), Reason: "Start PostgreSQL", Required: true})
 	}
-	actions = append(actions, output.NextAction{Command: pigPgCommand("psql", dataDir), Reason: "Verify recovered data", Required: false})
+	actions = append(actions, output.NextAction{Command: psqlCommand(dataDir), Reason: "Verify recovered data", Required: false})
 	if needsManualPromote {
 		actions = append(actions, output.NextAction{Command: pigPgCommand("promote", dataDir), Reason: "If satisfied, promote to primary", Required: false})
 	}
 	if patroniWasStopped {
 		actions = append(actions, output.NextAction{
-			Command: "systemctl start patroni",
-			Reason:  "To resume Patroni cluster management; WARNING: Ensure data is correct before starting Patroni",
+			Command: "pig pt start",
+			Reason:  "Launch Patroni to resume HA; ensure data is correct before starting Patroni",
 		})
 	}
-	actions = append(actions, output.NextAction{Command: pigPBCreateCommand(pbConfig), Reason: "Re-create pgBackRest stanza if needed", Required: false})
+	actions = append(actions, output.NextAction{Command: pigPBBackupFullCommand(), Reason: "Recreate a full backup if necessary", Required: false})
 	return actions
 }
 
@@ -1672,8 +1693,15 @@ func pigPgCommand(subcommand string, dataDir string) string {
 	return strings.Join(parts, " ")
 }
 
-func pigPBCreateCommand(cfg *pgbackrest.Config) string {
-	return pigPBCommand("create", cfg)
+func psqlCommand(dataDir string) string {
+	if isDefaultManagedDataDir(dataDir) {
+		return "psql"
+	}
+	return pigPgCommand("psql", dataDir)
+}
+
+func pigPBBackupFullCommand() string {
+	return "pig pb backup full"
 }
 
 func pigPBLogShowCommand(cfg *pgbackrest.Config) string {

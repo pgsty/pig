@@ -1681,7 +1681,7 @@ func TestQueryRecoveryStateDoesNotFallbackWhenPostmasterPidInvalid(t *testing.T)
 func TestPITRError_PostRestoreNilOnSuccess(t *testing.T) {
 	state := &SystemState{DataDir: "/pg/data", ManagedDataDir: "/pg/data"}
 	opts := &Options{Default: true}
-	pitrErr := postRestore(state, opts, false)
+	pitrErr := postRestore(state, opts, false, false)
 	if pitrErr != nil {
 		t.Errorf("postRestore should return nil on success, got %v", pitrErr)
 	}
@@ -1702,12 +1702,54 @@ func TestPITRError_PostRestoreWriteFailure(t *testing.T) {
 
 	state := &SystemState{DataDir: "/pg/data", ManagedDataDir: "/pg/data"}
 	opts := &Options{Default: true}
-	pitrErr := postRestore(state, opts, false)
+	pitrErr := postRestore(state, opts, false, false)
 	if pitrErr == nil {
 		t.Fatal("postRestore should fail when stderr is unavailable")
 	}
 	if pitrErr.Code != output.CodePITRPostFailed {
 		t.Fatalf("postRestore should return CodePITRPostFailed, got %d", pitrErr.Code)
+	}
+}
+
+func TestPostRestorePrintsCompactPgControlStatusWhenPostgresStarted(t *testing.T) {
+	oldStatus := pitrPostgresCompactStatus
+	defer func() {
+		pitrPostgresCompactStatus = oldStatus
+	}()
+
+	var gotConfig *postgres.Config
+	pitrPostgresCompactStatus = func(cfg *postgres.Config) {
+		gotConfig = cfg
+		fmt.Println("[pg_controldata status]")
+		fmt.Println("PostgreSQL 18  UP primary  pid=304784 port=5432  data=/pg/data")
+	}
+
+	stdout := capturePITRStdout(t, func() {
+		pitrErr := postRestore(&SystemState{
+			DataDir:        "/var/lib/pgsql/18/data",
+			ManagedDataDir: "/var/lib/pgsql/18/data",
+			DbSU:           "postgres",
+		}, &Options{Default: true}, true, true)
+		if pitrErr != nil {
+			t.Fatalf("postRestore failed: %v", pitrErr)
+		}
+	})
+
+	for _, want := range []string{"[pg_controldata status]", "PostgreSQL 18  UP primary"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("postRestore should print compact pg_controldata status containing %q, got stdout %q", want, stdout)
+		}
+	}
+	for _, forbidden := range []string{"PostgreSQL Status Summary", "[pg_ctl status]", "[PostgreSQL Processes]", "[Related Services]"} {
+		if strings.Contains(stdout, forbidden) {
+			t.Fatalf("postRestore status should not include full pig pg status section %q, got stdout %q", forbidden, stdout)
+		}
+	}
+	if gotConfig == nil {
+		t.Fatal("postRestore should call compact pg status with a postgres config")
+	}
+	if gotConfig.PgData != "/var/lib/pgsql/18/data" || gotConfig.DbSU != "postgres" {
+		t.Fatalf("compact pg status config = %+v, want data dir and dbsu from PITR state", gotConfig)
 	}
 }
 
@@ -1855,11 +1897,14 @@ func TestPrintPostRestoreGuidanceManagedDataDirWithTrailingSlashUsesManagedGuida
 		}
 	})
 
-	if !strings.Contains(output, "pig pg psql") {
-		t.Fatalf("managed PGDATA guidance should use pig pg psql, got:\n%s", output)
+	if !strings.Contains(output, "psql") {
+		t.Fatalf("managed PGDATA guidance should suggest psql verification, got:\n%s", output)
 	}
 	if strings.Contains(output, "pg_ctl -D /pg/data/") {
 		t.Fatalf("managed PGDATA guidance should not use custom pg_ctl path, got:\n%s", output)
+	}
+	if strings.Contains(output, "pig pb create") || strings.Contains(output, "stanza") {
+		t.Fatalf("managed PGDATA guidance should not suggest stanza recreation, got:\n%s", output)
 	}
 }
 
@@ -1917,12 +1962,15 @@ func TestPostRestoreGuidanceManagedNonDefaultDirUsesManagedActions(t *testing.T)
 		"pig pg start -D /var/lib/pgsql/18/data",
 		"pig pg psql -D /var/lib/pgsql/18/data",
 		"pig pg promote -D /var/lib/pgsql/18/data",
-		"systemctl start patroni",
-		"pig pb create",
+		"pig pt start",
+		"pig pb backup full",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("managed non-/pg/data guidance missing %q, got:\n%s", want, output)
 		}
+	}
+	if strings.Contains(output, "pig pb create") || strings.Contains(output, "stanza") {
+		t.Fatalf("managed restore guidance should not suggest stanza recreation, got:\n%s", output)
 	}
 	if strings.Contains(output, "pg_ctl -D /var/lib/pgsql/18/data -o \"-p 5433\" start") {
 		t.Fatalf("managed non-/pg/data guidance must not be rendered as side restore, got:\n%s", output)
@@ -1932,9 +1980,27 @@ func TestPostRestoreGuidanceManagedNonDefaultDirUsesManagedActions(t *testing.T)
 func TestPostRestoreNextActionsCoverManagedAndSideOutcomes(t *testing.T) {
 	managed := buildPostRestoreNextActions(&SystemState{DataDir: "/var/lib/pgsql/18/data", ManagedDataDir: "/var/lib/pgsql/18/data"}, &Options{Time: "2026-01-31 01:00:00", NoRestart: true}, true)
 	managedCmds := joinPITRActionCommands(managed)
-	for _, want := range []string{"pig pg start -D /var/lib/pgsql/18/data", "pig pg psql -D /var/lib/pgsql/18/data", "pig pg promote -D /var/lib/pgsql/18/data", "systemctl start patroni", "pig pb create"} {
+	for _, want := range []string{"pig pg start -D /var/lib/pgsql/18/data", "pig pg psql -D /var/lib/pgsql/18/data", "pig pg promote -D /var/lib/pgsql/18/data", "pig pt start", "pig pb backup full"} {
 		if !strings.Contains(managedCmds, want) {
 			t.Fatalf("managed next_actions missing %q: %+v", want, managed)
+		}
+	}
+	if strings.Contains(managedCmds, "pig pb create") || strings.Contains(managedCmds, "stanza") {
+		t.Fatalf("managed next_actions should not suggest stanza recreation: %+v", managed)
+	}
+
+	managedDefault := buildPostRestoreNextActions(&SystemState{
+		DataDir:        "/pg/data",
+		ManagedDataDir: "/pg/data",
+		PBConfig:       &pgbackrest.Config{Stanza: "pg-meta", DbSU: "postgres"},
+	}, &Options{Default: true}, true)
+	if len(managedDefault) != 3 {
+		t.Fatalf("managed default next_actions = %+v, want exactly verify, Patroni start, backup", managedDefault)
+	}
+	wantDefaultCommands := []string{"psql", "pig pt start", "pig pb backup full"}
+	for i, want := range wantDefaultCommands {
+		if managedDefault[i].Command != want {
+			t.Fatalf("managed default next action %d command = %q, want %q; actions=%+v", i+1, managedDefault[i].Command, want, managedDefault)
 		}
 	}
 
@@ -2110,6 +2176,27 @@ func capturePITRStderr(t *testing.T, fn func()) string {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatalf("failed to read stderr pipe: %v", err)
+	}
+	return string(data)
+}
+
+func capturePITRStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stdout = w
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close write pipe: %v", err)
+	}
+	os.Stdout = oldStdout
+	defer r.Close()
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("failed to read stdout pipe: %v", err)
 	}
 	return string(data)
 }
