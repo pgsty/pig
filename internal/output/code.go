@@ -189,7 +189,8 @@ const (
 	CodePtPermDenied = MODULE_PT + CAT_PERM + 1 // Permission denied accessing patronictl
 
 	// State errors (15_06_xx - State category)
-	CodePtNotRunning = MODULE_PT + CAT_STATE + 1 // Patroni is not running
+	CodePtNotRunning    = MODULE_PT + CAT_STATE + 1 // Patroni is not running
+	CodePtClusterPaused = MODULE_PT + CAT_STATE + 2 // Patroni cluster management is paused
 
 	// Configuration errors (15_07_xx - Config category)
 	CodePtConfigNotFound      = MODULE_PT + CAT_CONFIG + 1 // Patroni config file not found

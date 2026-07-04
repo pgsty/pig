@@ -47,7 +47,6 @@ func TestPatroniClusterCommandsRejectIgnoredPositionals(t *testing.T) {
 	}{
 		{name: "reload", cmd: patroniReloadCmd},
 		{name: "switchover", cmd: patroniSwitchoverCmd},
-		{name: "failover", cmd: patroniFailoverCmd},
 		{name: "pause", cmd: patroniPauseCmd},
 		{name: "resume", cmd: patroniResumeCmd},
 	}
@@ -61,6 +60,18 @@ func TestPatroniClusterCommandsRejectIgnoredPositionals(t *testing.T) {
 				t.Fatalf("%s should reject unexpected positional args", tt.name)
 			}
 		})
+	}
+}
+
+func TestPatroniFailoverAcceptsCandidatePositional(t *testing.T) {
+	if patroniFailoverCmd.Args == nil {
+		t.Fatal("failover command must validate positional argument count")
+	}
+	if err := patroniFailoverCmd.Args(patroniFailoverCmd, []string{"pg-nms-2"}); err != nil {
+		t.Fatalf("failover should accept one candidate positional: %v", err)
+	}
+	if err := patroniFailoverCmd.Args(patroniFailoverCmd, []string{"pg-nms-2", "pg-nms-3"}); err == nil {
+		t.Fatal("failover must reject multiple candidate positionals")
 	}
 }
 
@@ -546,6 +557,7 @@ func TestPatroniTextConfirmClusterOps(t *testing.T) {
 	origReinit := patroniReinitExec
 	origSwitchover := patroniSwitchoverExec
 	origFailover := patroniFailoverExec
+	origPreflight := patroniSwitchPreflight
 	defer func() {
 		config.OutputFormat = origFormat
 		patroniPlan = origPlan
@@ -553,6 +565,7 @@ func TestPatroniTextConfirmClusterOps(t *testing.T) {
 		patroniReinitExec = origReinit
 		patroniSwitchoverExec = origSwitchover
 		patroniFailoverExec = origFailover
+		patroniSwitchPreflight = origPreflight
 		_ = patroniReinitCmd.Flags().Set("yes", "false")
 		_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
 		_ = patroniFailoverCmd.Flags().Set("yes", "false")
@@ -560,6 +573,13 @@ func TestPatroniTextConfirmClusterOps(t *testing.T) {
 	}()
 	config.OutputFormat = config.OUTPUT_TEXT
 	patroniPlan = false
+	patroniSwitchPreflight = func(dbsu string) (*patroni.SwitchPreflight, *output.Result) {
+		return &patroni.SwitchPreflight{
+			Cluster:    "pg-test",
+			Leader:     "pg-test-1",
+			Candidates: []string{"pg-test-2"},
+		}, nil
+	}
 
 	var forcedToPatronictl bool
 	patroniReinitExec = func(dbsu string, opts *patroni.ReinitOptions) error {
@@ -583,7 +603,7 @@ func TestPatroniTextConfirmClusterOps(t *testing.T) {
 		warning string
 	}{
 		{name: "reinit", cmd: patroniReinitCmd, args: []string{"pg-test-2"}, warning: "WIPE and rebuild member pg-test-2"},
-		{name: "switchover", cmd: patroniSwitchoverCmd, args: nil, warning: "transfer cluster leadership"},
+		{name: "switchover", cmd: patroniSwitchoverCmd, args: nil, warning: "leadership will transfer"},
 		{name: "failover", cmd: patroniFailoverCmd, args: nil,
 			flags: map[string]string{"candidate": "pg-test-2"}, warning: "data loss possible"},
 	}
@@ -623,11 +643,180 @@ func TestPatroniTextConfirmClusterOps(t *testing.T) {
 	}
 }
 
+func TestPatroniSwitchPreflightBlocksPausedClusterBeforeConfirm(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	origConfirm := highRiskTextConfirm
+	origPreflight := patroniSwitchPreflight
+	origSwitchover := patroniSwitchoverExec
+	origFailover := patroniFailoverExec
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		highRiskTextConfirm = origConfirm
+		patroniSwitchPreflight = origPreflight
+		patroniSwitchoverExec = origSwitchover
+		patroniFailoverExec = origFailover
+		_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
+		_ = patroniFailoverCmd.Flags().Set("yes", "false")
+		_ = patroniFailoverCmd.Flags().Set("candidate", "")
+	}()
+	config.OutputFormat = config.OUTPUT_TEXT
+	patroniPlan = false
+	patroniSwitchPreflight = func(dbsu string) (*patroni.SwitchPreflight, *output.Result) {
+		return &patroni.SwitchPreflight{
+			Cluster:    "pg-test",
+			Leader:     "pg-test-1",
+			Candidates: []string{"pg-test-2"},
+			Paused:     true,
+		}, nil
+	}
+	highRiskTextConfirm = func(warning, action string) error {
+		t.Fatal("paused cluster must fail before asking for confirmation")
+		return nil
+	}
+	patroniSwitchoverExec = func(dbsu string, opts *patroni.SwitchoverOptions) error {
+		t.Fatal("paused cluster must not run switchover")
+		return nil
+	}
+	patroniFailoverExec = func(dbsu string, opts *patroni.FailoverOptions) error {
+		t.Fatal("paused cluster must not run failover")
+		return nil
+	}
+
+	if err := patroniSwitchoverCmd.RunE(patroniSwitchoverCmd, nil); err == nil || !strings.Contains(err.Error(), "pig pt resume") {
+		t.Fatalf("paused switchover should mention pig pt resume, got %v", err)
+	}
+	_ = patroniFailoverCmd.Flags().Set("candidate", "pg-test-2")
+	if err := patroniFailoverCmd.RunE(patroniFailoverCmd, nil); err == nil || !strings.Contains(err.Error(), "pig pt resume") {
+		t.Fatalf("paused failover should mention pig pt resume, got %v", err)
+	}
+}
+
+func TestPatroniSwitchConfirmationUsesClusterTopology(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	origConfirm := highRiskTextConfirm
+	origPreflight := patroniSwitchPreflight
+	origSwitchover := patroniSwitchoverExec
+	origFailover := patroniFailoverExec
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		highRiskTextConfirm = origConfirm
+		patroniSwitchPreflight = origPreflight
+		patroniSwitchoverExec = origSwitchover
+		patroniFailoverExec = origFailover
+		_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
+		_ = patroniSwitchoverCmd.Flags().Set("candidate", "")
+		_ = patroniFailoverCmd.Flags().Set("yes", "false")
+		_ = patroniFailoverCmd.Flags().Set("candidate", "")
+	}()
+	config.OutputFormat = config.OUTPUT_TEXT
+	patroniPlan = false
+	patroniSwitchPreflight = func(dbsu string) (*patroni.SwitchPreflight, *output.Result) {
+		return &patroni.SwitchPreflight{
+			Cluster:    "pg-test",
+			Leader:     "pg-test-1",
+			Candidates: []string{"pg-test-2", "pg-test-3"},
+		}, nil
+	}
+	patroniSwitchoverExec = func(dbsu string, opts *patroni.SwitchoverOptions) error {
+		t.Fatal("confirmation rejection must prevent switchover execution")
+		return nil
+	}
+	patroniFailoverExec = func(dbsu string, opts *patroni.FailoverOptions) error {
+		t.Fatal("confirmation rejection must prevent failover execution")
+		return nil
+	}
+
+	var swWarning string
+	highRiskTextConfirm = func(warning, action string) error {
+		swWarning = warning
+		return errors.New("cancelled")
+	}
+	if err := patroniSwitchoverCmd.RunE(patroniSwitchoverCmd, nil); err == nil {
+		t.Fatal("switchover should stop after rejected confirmation")
+	}
+	for _, want := range []string{"pg-test", "pg-test-1", "pg-test-2, pg-test-3", "pig pt switchover -c <instance>"} {
+		if !strings.Contains(swWarning, want) {
+			t.Fatalf("switchover warning %q should contain %q", swWarning, want)
+		}
+	}
+
+	var foWarning string
+	highRiskTextConfirm = func(warning, action string) error {
+		foWarning = warning
+		return errors.New("cancelled")
+	}
+	_ = patroniFailoverCmd.Flags().Set("candidate", "pg-test-2")
+	if err := patroniFailoverCmd.RunE(patroniFailoverCmd, nil); err == nil {
+		t.Fatal("failover should stop after rejected confirmation")
+	}
+	for _, want := range []string{"pg-test", "pg-test-1", "pg-test-2", "data loss possible"} {
+		if !strings.Contains(foWarning, want) {
+			t.Fatalf("failover warning %q should contain %q", foWarning, want)
+		}
+	}
+}
+
+func TestPatroniSwitchPausedStructuredResultCarriesResumeAction(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	origPreflight := patroniSwitchPreflight
+	origSwitchover := patroniSwitchoverExec
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		patroniSwitchPreflight = origPreflight
+		patroniSwitchoverExec = origSwitchover
+		_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
+	}()
+	config.OutputFormat = config.OUTPUT_JSON
+	patroniPlan = false
+	patroniSwitchPreflight = func(dbsu string) (*patroni.SwitchPreflight, *output.Result) {
+		return &patroni.SwitchPreflight{
+			Cluster:    "pg-test",
+			Leader:     "pg-test-1",
+			Candidates: []string{"pg-test-2"},
+			Paused:     true,
+		}, nil
+	}
+	patroniSwitchoverExec = func(dbsu string, opts *patroni.SwitchoverOptions) error {
+		t.Fatal("paused structured switchover must not execute")
+		return nil
+	}
+
+	var runErr error
+	raw := capturePtStdout(t, func() {
+		runErr = patroniSwitchoverCmd.RunE(patroniSwitchoverCmd, nil)
+	})
+	if runErr == nil {
+		t.Fatal("paused structured switchover should fail")
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(ptBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if code, _ := payload["code"].(float64); int(code) != output.CodePtClusterPaused {
+		t.Fatalf("code = %v, want %d", payload["code"], output.CodePtClusterPaused)
+	}
+	actions, _ := payload["next_actions"].([]interface{})
+	if len(actions) == 0 {
+		t.Fatalf("paused result should include resume next action, got %v", payload)
+	}
+	first, _ := actions[0].(map[string]interface{})
+	if cmd := ptAsString(first["command"]); cmd != "pig pt resume" {
+		t.Fatalf("first next action = %q, want pig pt resume", cmd)
+	}
+}
+
 func TestPatroniSwitchoverSilentExitSilencesCobraOutput(t *testing.T) {
 	origFormat := config.OutputFormat
 	origPlan := patroniPlan
 	origConfirm := highRiskTextConfirm
 	origSwitchover := patroniSwitchoverExec
+	origPreflight := patroniSwitchPreflight
 	origSilenceErrors := patroniSwitchoverCmd.SilenceErrors
 	origSilenceUsage := patroniSwitchoverCmd.SilenceUsage
 	defer func() {
@@ -635,6 +824,7 @@ func TestPatroniSwitchoverSilentExitSilencesCobraOutput(t *testing.T) {
 		patroniPlan = origPlan
 		highRiskTextConfirm = origConfirm
 		patroniSwitchoverExec = origSwitchover
+		patroniSwitchPreflight = origPreflight
 		patroniSwitchoverCmd.SilenceErrors = origSilenceErrors
 		patroniSwitchoverCmd.SilenceUsage = origSilenceUsage
 		_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
@@ -646,6 +836,9 @@ func TestPatroniSwitchoverSilentExitSilencesCobraOutput(t *testing.T) {
 	patroniSwitchoverCmd.SilenceUsage = false
 	_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
 	highRiskTextConfirm = func(warning, action string) error { return nil }
+	patroniSwitchPreflight = func(dbsu string) (*patroni.SwitchPreflight, *output.Result) {
+		return &patroni.SwitchPreflight{Cluster: "pg-test", Leader: "pg-test-1", Candidates: []string{"pg-test-2"}}, nil
+	}
 	patroniSwitchoverExec = func(dbsu string, opts *patroni.SwitchoverOptions) error {
 		return &utils.ExitCodeError{
 			Code:   1,
@@ -675,6 +868,7 @@ func TestPatroniFailoverSilentExitSilencesCobraOutput(t *testing.T) {
 	origPlan := patroniPlan
 	origConfirm := highRiskTextConfirm
 	origFailover := patroniFailoverExec
+	origPreflight := patroniSwitchPreflight
 	origSilenceErrors := patroniFailoverCmd.SilenceErrors
 	origSilenceUsage := patroniFailoverCmd.SilenceUsage
 	defer func() {
@@ -682,6 +876,7 @@ func TestPatroniFailoverSilentExitSilencesCobraOutput(t *testing.T) {
 		patroniPlan = origPlan
 		highRiskTextConfirm = origConfirm
 		patroniFailoverExec = origFailover
+		patroniSwitchPreflight = origPreflight
 		patroniFailoverCmd.SilenceErrors = origSilenceErrors
 		patroniFailoverCmd.SilenceUsage = origSilenceUsage
 		_ = patroniFailoverCmd.Flags().Set("yes", "false")
@@ -695,6 +890,9 @@ func TestPatroniFailoverSilentExitSilencesCobraOutput(t *testing.T) {
 	_ = patroniFailoverCmd.Flags().Set("yes", "false")
 	_ = patroniFailoverCmd.Flags().Set("candidate", "pg-test-2")
 	highRiskTextConfirm = func(warning, action string) error { return nil }
+	patroniSwitchPreflight = func(dbsu string) (*patroni.SwitchPreflight, *output.Result) {
+		return &patroni.SwitchPreflight{Cluster: "pg-test", Leader: "pg-test-1", Candidates: []string{"pg-test-2"}}, nil
+	}
 	patroniFailoverExec = func(dbsu string, opts *patroni.FailoverOptions) error {
 		return &utils.ExitCodeError{
 			Code:   1,

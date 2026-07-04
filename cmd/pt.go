@@ -43,7 +43,7 @@ Cluster Operations (via patronictl):
   pig pt pause                     pause automatic failover
   pig pt resume                    resume automatic failover
   pig pt switchover                perform planned switchover
-  pig pt failover                  perform manual failover
+  pig pt failover [candidate]      perform manual failover
   pig pt config <action>           manage cluster config (edit|show|set|pg)
 
 Service Management (via systemctl):
@@ -308,13 +308,85 @@ func requirePtClusterConfirmation(yes bool, action, risk, warning, executeCmd, p
 	return requireTextHighRiskConfirmation(yes, warning, action)
 }
 
+func requirePtSwitchPreflight(action string, state *patroni.SwitchPreflight) error {
+	if state == nil || !state.Paused {
+		return nil
+	}
+	cluster := valueOrUnknown(state.Cluster)
+	detail := fmt.Sprintf("cluster %s is paused; run 'pig pt resume' before %s", cluster, action)
+	if !config.IsStructuredOutput() {
+		return fmt.Errorf("%s", detail)
+	}
+	return handleAuxResult(
+		output.Fail(output.CodePtClusterPaused, "Patroni cluster is paused").
+			WithDetail(detail).
+			WithData(state).
+			WithNextActions(
+				output.NextAction{Command: "pig pt resume", Reason: "resume Patroni cluster management before leader transfer", Required: true},
+				output.NextAction{Command: "pig pt list", Reason: "verify cluster pause and role state", Required: false},
+			),
+	)
+}
+
+func buildSwitchoverWarning(state *patroni.SwitchPreflight, opts *patroni.SwitchoverOptions) string {
+	cluster := switchClusterName(state)
+	leader := switchLeaderName(state, opts.Leader)
+	candidates := switchCandidateSummary(state)
+	if opts.Candidate != "" {
+		return fmt.Sprintf("Cluster %s leadership will transfer from %s to %s (planned switchover).\nObserved candidates: %s",
+			cluster, leader, opts.Candidate, candidates)
+	}
+	return fmt.Sprintf("Cluster %s leadership will transfer from %s to the most eligible replica selected by Patroni (planned switchover).\nObserved candidates: %s\nTo choose explicitly, rerun with: pig pt switchover -c <instance>",
+		cluster, leader, candidates)
+}
+
+func buildFailoverWarning(state *patroni.SwitchPreflight, opts *patroni.FailoverOptions) string {
+	cluster := switchClusterName(state)
+	leader := switchLeaderName(state, "")
+	candidates := switchCandidateSummary(state)
+	return fmt.Sprintf("Cluster %s leadership will be forced from current leader %s to %s (failover, data loss possible).\nObserved candidates: %s",
+		cluster, leader, opts.Candidate, candidates)
+}
+
+func switchClusterName(state *patroni.SwitchPreflight) string {
+	if state == nil {
+		return "<unknown>"
+	}
+	return valueOrUnknown(state.Cluster)
+}
+
+func switchLeaderName(state *patroni.SwitchPreflight, explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if state == nil {
+		return "<unknown>"
+	}
+	return valueOrUnknown(state.Leader)
+}
+
+func switchCandidateSummary(state *patroni.SwitchPreflight) string {
+	if state == nil || len(state.Candidates) == 0 {
+		return "<none>"
+	}
+	return strings.Join(state.Candidates, ", ")
+}
+
+func valueOrUnknown(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "<unknown>"
+	}
+	return value
+}
+
 // Execution seams for cluster operations, stubbed in tests so RunE-level
 // gating can be verified without invoking patronictl/sudo.
 var (
-	patroniRestartExec    = patroni.Restart
-	patroniReinitExec     = patroni.Reinit
-	patroniSwitchoverExec = patroni.Switchover
-	patroniFailoverExec   = patroni.Failover
+	patroniRestartExec     = patroni.Restart
+	patroniReinitExec      = patroni.Reinit
+	patroniSwitchoverExec  = patroni.Switchover
+	patroniFailoverExec    = patroni.Failover
+	patroniSwitchPreflight = patroni.LoadSwitchPreflight
 )
 
 // splitConfigKVPairs partitions config args into key=value pairs (non-empty
@@ -427,8 +499,17 @@ The old leader becomes a replica after switchover.`,
 			return handlePlanOutput(patroni.BuildSwitchoverPlan(opts))
 		}
 
+		dbsu := utils.GetDBSU(patroniDBSU)
+		state, preflightResult := patroniSwitchPreflight(dbsu)
+		if preflightResult != nil {
+			return handleAuxResult(preflightResult)
+		}
+		if err := requirePtSwitchPreflight("switchover", state); err != nil {
+			return err
+		}
+
 		if err := requirePtClusterConfirmation(yes, "switchover", "high",
-			"This will transfer cluster leadership (planned switchover)",
+			buildSwitchoverWarning(state, opts),
 			patroni.SwitchoverCommand(opts, false, true),
 			patroni.SwitchoverCommand(opts, true, false),
 		); err != nil {
@@ -436,30 +517,32 @@ The old leader becomes a replica after switchover.`,
 		}
 
 		if config.IsStructuredOutput() {
-			return handleAuxResult(patroni.SwitchoverResult(utils.GetDBSU(patroniDBSU), opts))
+			return handleAuxResult(patroni.SwitchoverResult(dbsu, opts))
 		}
-		return patroniSwitchoverExec(utils.GetDBSU(patroniDBSU), opts)
+		return patroniSwitchoverExec(dbsu, opts)
 	},
 }
 
 // patroniFailoverCmd: pig pt failover
 var patroniFailoverCmd = &cobra.Command{
-	Use:     "failover",
+	Use:     "failover [candidate]",
 	Aliases: []string{"fo"},
 	Short:   "Perform manual failover",
-	Args:    cobra.NoArgs,
+	Args:    cobra.MaximumNArgs(1),
 	Long: `Perform a manual failover when the leader is unavailable.
 
 Unlike switchover, failover is used when the current leader is unhealthy
 or unavailable. This may result in data loss if there are unreplicated
 transactions. Patroni performs failover only to an explicit candidate,
-so --candidate is required.
+so a candidate is required. Use --candidate/-c <member> or the positional
+form: pig pt failover <member>.
 
 WARNING: Use switchover for planned maintenance. Only use failover when
 the leader is truly unavailable.`,
 	Example: `
   pig pt failover --candidate pg-test-2         # failover to member (asks confirmation)
   pig pt failover -c pg-test-2                  # failover to member (short form)
+  pig pt failover pg-test-2                     # failover to member (positional candidate)
   pig pt failover --candidate pg-test-2 -y      # failover without confirmation
   pig pt failover --candidate pg-test-2 -o json # structured JSON output
   pig pt failover --candidate pg-test-2 --plan  # show execution plan`,
@@ -467,13 +550,22 @@ the leader is truly unavailable.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		candidate, _ := cmd.Flags().GetString("candidate")
 		yes, _ := cmd.Flags().GetBool("yes")
+		if len(args) > 0 {
+			if candidate != "" && candidate != args[0] {
+				return structuredParamError(output.MODULE_PT, "pig patroni failover",
+					"conflicting failover candidates",
+					fmt.Sprintf("positional candidate %q conflicts with --candidate %q", args[0], candidate),
+					args, map[string]interface{}{"candidate": candidate, "positional_candidate": args[0]})
+			}
+			candidate = args[0]
+		}
 
 		// Patroni's REST API only performs failover to an explicit candidate;
 		// fail fast instead of leaving the rejection to patronictl.
 		if candidate == "" {
 			return structuredParamError(output.MODULE_PT, "pig patroni failover",
 				"failover requires --candidate",
-				"specify the member to promote with --candidate <member>, or use 'pig pt switchover' for planned leader transfer",
+				"specify the member to promote with --candidate <member> or 'pig pt failover <member>', or use 'pig pt switchover' for planned leader transfer",
 				args, nil)
 		}
 
@@ -484,8 +576,17 @@ the leader is truly unavailable.`,
 			return handlePlanOutput(patroni.BuildFailoverPlan(opts))
 		}
 
+		dbsu := utils.GetDBSU(patroniDBSU)
+		state, preflightResult := patroniSwitchPreflight(dbsu)
+		if preflightResult != nil {
+			return handleAuxResult(preflightResult)
+		}
+		if err := requirePtSwitchPreflight("failover", state); err != nil {
+			return err
+		}
+
 		if err := requirePtClusterConfirmation(yes, "failover", "critical",
-			"This will force leadership transfer (failover, data loss possible)",
+			buildFailoverWarning(state, opts),
 			patroni.FailoverCommand(opts, false, true),
 			patroni.FailoverCommand(opts, true, false),
 		); err != nil {
@@ -493,9 +594,9 @@ the leader is truly unavailable.`,
 		}
 
 		if config.IsStructuredOutput() {
-			return handleAuxResult(patroni.FailoverResult(utils.GetDBSU(patroniDBSU), opts))
+			return handleAuxResult(patroni.FailoverResult(dbsu, opts))
 		}
-		return patroniFailoverExec(utils.GetDBSU(patroniDBSU), opts)
+		return patroniFailoverExec(dbsu, opts)
 	},
 }
 
