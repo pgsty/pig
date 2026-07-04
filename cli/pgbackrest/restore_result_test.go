@@ -358,7 +358,7 @@ func TestPatroniManagedRestoreErrorFailsClosedWhenDataDirRelationCannotBeResolve
 
 	err := patroniManagedRestoreError(cfg, &RestoreOptions{
 		Default: true,
-		DataDir: filepath.Join(t.TempDir(), "missing-link"),
+		DataDir: filepath.Join(t.TempDir(), "missing-parent", "target"),
 	}, true)
 	if err == nil {
 		t.Fatal("active Patroni should block restore when target/managed PGDATA relation cannot be resolved")

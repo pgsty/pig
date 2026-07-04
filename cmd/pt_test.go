@@ -1362,8 +1362,6 @@ func resultHasRequiredNextAction(result output.Result, needle string) bool {
 	return false
 }
 
-var ptTestCommand = patroniCmd
-
 func capturePtStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	origStdout := os.Stdout

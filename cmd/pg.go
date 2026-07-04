@@ -6,7 +6,6 @@ import (
 	"os"
 	"pig/cli/ext"
 	"pig/cli/postgres"
-	postgrescli "pig/cli/postgres"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
@@ -726,8 +725,8 @@ func addPgCloneFlags(cmd *cobra.Command, opts *cloneCLIOptions) {
 	cmd.Flags().IntVar(&opts.connLimit, "conn-limit", 0, "connection limit for cloned database (-1 = no limit, 0 = disallow)")
 }
 
-func buildCloneOptions(cli *cloneCLIOptions, sourceDB, destDB string, connLimitSet bool) *postgrescli.CloneOptions {
-	return &postgrescli.CloneOptions{
+func buildCloneOptions(cli *cloneCLIOptions, sourceDB, destDB string, connLimitSet bool) *postgres.CloneOptions {
+	return &postgres.CloneOptions{
 		DbSU:         pgConfig.DbSU,
 		Plan:         cli.plan,
 		Yes:          cli.yes,
@@ -741,9 +740,9 @@ func buildCloneOptions(cli *cloneCLIOptions, sourceDB, destDB string, connLimitS
 	}
 }
 
-func runClone(cmd *cobra.Command, opts *postgrescli.CloneOptions) error {
+func runClone(cmd *cobra.Command, opts *postgres.CloneOptions) error {
 	if opts.Plan {
-		plan, err := postgrescli.PlanClone(opts)
+		plan, err := postgres.PlanClone(opts)
 		if err != nil {
 			if config.IsStructuredOutput() {
 				return handleAuxResult(cloneErrorResult(err))
@@ -765,10 +764,10 @@ func runClone(cmd *cobra.Command, opts *postgrescli.CloneOptions) error {
 				buildCloneConfirmationCommand(opts, false, true),
 			)
 		}
-		return handleAuxResult(postgrescli.ExecuteCloneResult(opts))
+		return handleAuxResult(postgres.ExecuteCloneResult(opts))
 	}
 
-	if err := postgrescli.ExecuteClone(opts); err != nil {
+	if err := postgres.ExecuteClone(opts); err != nil {
 		return handleCloneError(err)
 	}
 	return nil
@@ -778,14 +777,14 @@ func cloneErrorResult(err error) *output.Result {
 	if err == nil {
 		return output.OK("database clone completed", nil)
 	}
-	var cloneErr *postgrescli.CloneError
+	var cloneErr *postgres.CloneError
 	if errors.As(err, &cloneErr) {
 		return output.Fail(cloneErr.Code, cloneErr.Error())
 	}
 	return output.Fail(output.CodeForkPrecheckFailed, err.Error())
 }
 
-func buildCloneConfirmationCommand(opts *postgrescli.CloneOptions, includeYes bool, includePlan bool) string {
+func buildCloneConfirmationCommand(opts *postgres.CloneOptions, includeYes bool, includePlan bool) string {
 	if opts == nil {
 		args := []string{"pig", "pg", "clone"}
 		if includeYes {
@@ -799,7 +798,7 @@ func buildCloneConfirmationCommand(opts *postgrescli.CloneOptions, includeYes bo
 	n := *opts
 	n.Yes = false
 	n.Plan = includePlan
-	command := postgrescli.BuildCloneCommand(&n)
+	command := postgres.BuildCloneCommand(&n)
 	if includeYes {
 		command += " --yes"
 	}
@@ -826,7 +825,7 @@ func handleCloneError(err error) error {
 	if errors.As(err, &exitErr) {
 		return err
 	}
-	var cloneErr *postgrescli.CloneError
+	var cloneErr *postgres.CloneError
 	if errors.As(err, &cloneErr) {
 		return &utils.ExitCodeError{Code: output.ExitCode(cloneErr.Code), Err: cloneErr}
 	}
@@ -1105,8 +1104,8 @@ func newPgForkStartCommand(opts *forkCLIOptions) *cobra.Command {
 			if opts.plan {
 				return runForkTargetPlan("start", opts, firstArg(args), "Start PostgreSQL fork")
 			}
-			return runForkAction("fork start", func() (postgrescli.ResultData, error) {
-				return postgrescli.StartFork(buildForkTargetOptions(opts, firstArg(args)))
+			return runForkAction("fork start", func() (postgres.ResultData, error) {
+				return postgres.StartFork(buildForkTargetOptions(opts, firstArg(args)))
 			})
 		},
 	}
@@ -1131,8 +1130,8 @@ func newPgForkStopCommand(opts *forkCLIOptions) *cobra.Command {
 			if opts.plan {
 				return runForkTargetPlan("stop", opts, firstArg(args), "Stop PostgreSQL fork")
 			}
-			return runForkAction("fork stop", func() (postgrescli.ResultData, error) {
-				return postgrescli.StopFork(buildForkTargetOptions(opts, firstArg(args)))
+			return runForkAction("fork stop", func() (postgres.ResultData, error) {
+				return postgres.StopFork(buildForkTargetOptions(opts, firstArg(args)))
 			})
 		},
 	}
@@ -1161,8 +1160,8 @@ func newPgForkRemoveCommand(opts *forkCLIOptions) *cobra.Command {
 			if err := requireForkRemoveStructuredConfirmation(opts, firstArg(args)); err != nil {
 				return err
 			}
-			return runForkAction("fork remove", func() (postgrescli.ResultData, error) {
-				return postgrescli.RemoveFork(buildForkTargetOptions(opts, firstArg(args)))
+			return runForkAction("fork remove", func() (postgres.ResultData, error) {
+				return postgres.RemoveFork(buildForkTargetOptions(opts, firstArg(args)))
 			})
 		},
 	}
@@ -1187,19 +1186,19 @@ func setPgForkUseLine(cmd *cobra.Command, useLine string) {
 	cmd.SetUsageTemplate(tmpl)
 }
 
-func buildInstanceOptions(cli *forkCLIOptions, name string) *postgrescli.Options {
+func buildInstanceOptions(cli *forkCLIOptions, name string) *postgres.Options {
 	sourceData := cli.sourceData
 	if sourceData == "" {
 		sourceData = pgConfig.PgData
 	}
-	return &postgrescli.Options{
-		Kind:    postgrescli.KindInstance,
+	return &postgres.Options{
+		Kind:    postgres.KindInstance,
 		DbSU:    pgConfig.DbSU,
 		Plan:    cli.plan,
 		Yes:     cli.yes || cli.force,
 		Start:   cli.start,
 		Replace: cli.force,
-		Instance: postgrescli.InstanceOptions{
+		Instance: postgres.InstanceOptions{
 			Name:       name,
 			SourceData: sourceData,
 			SourcePort: cli.sourcePort,
@@ -1210,8 +1209,8 @@ func buildInstanceOptions(cli *forkCLIOptions, name string) *postgrescli.Options
 	}
 }
 
-func buildForkTargetOptions(cli *forkCLIOptions, name string) postgrescli.ForkTargetOptions {
-	return postgrescli.ForkTargetOptions{
+func buildForkTargetOptions(cli *forkCLIOptions, name string) postgres.ForkTargetOptions {
+	return postgres.ForkTargetOptions{
 		DbSU:       pgConfig.DbSU,
 		Name:       name,
 		DestData:   cli.destData,
@@ -1250,9 +1249,9 @@ func forkTargetArgs(opts *forkCLIOptions) cobra.PositionalArgs {
 }
 
 func runForkList(cmd *cobra.Command) error {
-	forks, err := postgrescli.ScanForksAs(pgConfig.DbSU, "/pg")
+	forks, err := postgres.ScanForksAs(pgConfig.DbSU, "/pg")
 	if err != nil {
-		return handleForkError(&postgrescli.ForkError{Code: output.CodeForkPrecheckFailed, Err: err})
+		return handleForkError(&postgres.ForkError{Code: output.CodeForkPrecheckFailed, Err: err})
 	}
 	refreshForkRuntimeStates(forks)
 	if config.IsStructuredOutput() {
@@ -1277,13 +1276,13 @@ func runForkList(cmd *cobra.Command) error {
 	return tw.Flush()
 }
 
-func refreshForkRuntimeStates(forks []postgrescli.ForkInfo) {
+func refreshForkRuntimeStates(forks []postgres.ForkInfo) {
 	dbsu := utils.GetDBSU(pgConfig.DbSU)
 	for i := range forks {
 		if forks[i].Orphan || forks[i].Target.Data == "" {
 			continue
 		}
-		running, pid := postgrescli.CheckPostgresRunningAsDBSU(dbsu, forks[i].Target.Data)
+		running, pid := postgres.CheckPostgresRunningAsDBSU(dbsu, forks[i].Target.Data)
 		forks[i].Target.Started = running
 		if running {
 			forks[i].Target.PID = pid
@@ -1293,7 +1292,7 @@ func refreshForkRuntimeStates(forks []postgrescli.ForkInfo) {
 	}
 }
 
-func forkListStatus(fork postgrescli.ForkInfo) string {
+func forkListStatus(fork postgres.ForkInfo) string {
 	if fork.Orphan {
 		return "orphan"
 	}
@@ -1338,7 +1337,7 @@ func formatForkListAge(createdAt string, now time.Time) string {
 	}
 }
 
-func formatForkListRow(fork postgrescli.ForkInfo, now time.Time) forkListRow {
+func formatForkListRow(fork postgres.ForkInfo, now time.Time) forkListRow {
 	row := forkListRow{
 		name:   fork.Name,
 		port:   "-",
@@ -1363,7 +1362,7 @@ func formatForkListRow(fork postgrescli.ForkInfo, now time.Time) forkListRow {
 	case fork.Source.Port > 0:
 		row.source = fmt.Sprintf(":%d", fork.Source.Port)
 	}
-	if fork.Copy.Actual != "" && fork.Copy.Actual != string(postgrescli.CloneModeUnknown) {
+	if fork.Copy.Actual != "" && fork.Copy.Actual != string(postgres.CloneModeUnknown) {
 		row.copy = fork.Copy.Actual
 	}
 	return row
@@ -1376,12 +1375,12 @@ func firstArg(args []string) string {
 	return args[0]
 }
 
-func runFork(cmd *cobra.Command, opts *postgrescli.Options) error {
+func runFork(cmd *cobra.Command, opts *postgres.Options) error {
 	if opts.Instance.DestData != "" && !config.IsStructuredOutput() {
 		utils.PrintWarn("--dst-data creates an unmanaged fork; it will not appear in `pig pg fork list`")
 	}
 	if opts.Plan {
-		plan, err := postgrescli.Plan(opts)
+		plan, err := postgres.Plan(opts)
 		if err != nil {
 			if config.IsStructuredOutput() {
 				return handleAuxResult(forkErrorResult(err))
@@ -1403,16 +1402,16 @@ func runFork(cmd *cobra.Command, opts *postgrescli.Options) error {
 				buildForkConfirmationCommand(opts, false, true),
 			)
 		}
-		return handleAuxResult(postgrescli.ExecuteResult(opts))
+		return handleAuxResult(postgres.ExecuteResult(opts))
 	}
 
-	if err := postgrescli.Execute(opts); err != nil {
+	if err := postgres.Execute(opts); err != nil {
 		return handleForkError(err)
 	}
 	return nil
 }
 
-func buildForkConfirmationCommand(opts *postgrescli.Options, includeYes bool, includePlan bool) string {
+func buildForkConfirmationCommand(opts *postgres.Options, includeYes bool, includePlan bool) string {
 	if opts == nil {
 		args := []string{"pig", "pg", "fork", "init"}
 		if includeYes {
@@ -1426,14 +1425,14 @@ func buildForkConfirmationCommand(opts *postgrescli.Options, includeYes bool, in
 	n := *opts
 	n.Yes = false
 	n.Plan = includePlan
-	command := postgrescli.BuildCommand(&n)
+	command := postgres.BuildCommand(&n)
 	if includeYes {
 		command += " --yes"
 	}
 	return command
 }
 
-func runForkAction(message string, action func() (postgrescli.ResultData, error)) error {
+func runForkAction(message string, action func() (postgres.ResultData, error)) error {
 	result, err := action()
 	if config.IsStructuredOutput() {
 		if err != nil {
@@ -1444,7 +1443,7 @@ func runForkAction(message string, action func() (postgrescli.ResultData, error)
 	if err != nil {
 		return handleForkError(err)
 	}
-	fmt.Fprint(os.Stderr, postgrescli.ForkActionHint(message, result))
+	fmt.Fprint(os.Stderr, postgres.ForkActionHint(message, result))
 	return nil
 }
 
@@ -1529,7 +1528,7 @@ func forkErrorResult(err error) *output.Result {
 	if err == nil {
 		return output.OK("fork completed", nil)
 	}
-	var forkErr *postgrescli.ForkError
+	var forkErr *postgres.ForkError
 	if errors.As(err, &forkErr) {
 		return output.Fail(forkErr.Code, forkErr.Error())
 	}
@@ -1544,7 +1543,7 @@ func handleForkError(err error) error {
 	if errors.As(err, &exitErr) {
 		return err
 	}
-	var forkErr *postgrescli.ForkError
+	var forkErr *postgres.ForkError
 	if errors.As(err, &forkErr) {
 		return &utils.ExitCodeError{Code: output.ExitCode(forkErr.Code), Err: forkErr}
 	}

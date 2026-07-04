@@ -1563,11 +1563,6 @@ func verifyInstance(dbsu string, port int) error {
 	return err
 }
 
-func canConnect(dbsu string, port int) bool {
-	_, err := forkProbeSourceDataDir(dbsu, port)
-	return err == nil
-}
-
 func sourcePortMatchesDataDir(dbsu string, port int, sourceData string) (bool, error) {
 	probedDataDir, err := forkProbeSourceDataDir(dbsu, port)
 	if err != nil {
