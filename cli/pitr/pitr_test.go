@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"pig/cli/ext"
 	"pig/cli/pgbackrest"
+	"pig/cli/postgres"
+	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
 )
@@ -58,6 +62,21 @@ func TestBuildPlanBasic(t *testing.T) {
 	}
 	if len(plan.Risks) == 0 {
 		t.Error("Plan.Risks should not be empty")
+	}
+	if plan.Boundary != "pitr:managed-recovery" {
+		t.Fatalf("managed PITR boundary = %q, want pitr:managed-recovery", plan.Boundary)
+	}
+	if plan.Confirmation != "required" {
+		t.Fatalf("PITR confirmation = %q, want required", plan.Confirmation)
+	}
+	if !containsCheck(plan.Preconditions, "pgbackrest stanza") {
+		t.Fatalf("PITR plan should include pgbackrest stanza precondition: %+v", plan.Preconditions)
+	}
+	if !containsCheck(plan.Verifications, "post restore state") {
+		t.Fatalf("PITR plan should include post restore state verification: %+v", plan.Verifications)
+	}
+	if !containsNextAction(plan.NextActions, "--yes") {
+		t.Fatalf("PITR plan should include --yes execute next action: %+v", plan.NextActions)
 	}
 }
 
@@ -112,6 +131,234 @@ func TestBuildPlanCustomDataDirSideRestoreDoesNotManagePatroni(t *testing.T) {
 		if res.Type == "service" && (res.Name == "patroni" || res.Name == "postgresql") {
 			t.Fatalf("side restore plan should not affect live services, got %+v", res)
 		}
+	}
+	if plan.Boundary != "pitr:side-restore" {
+		t.Fatalf("side restore boundary = %q, want pitr:side-restore", plan.Boundary)
+	}
+}
+
+func TestPreCheckPreservesRequestedDataDirAndRecordsManagedDir(t *testing.T) {
+	oldCheckDataDir := pitrCheckDataDirAsDBSU
+	oldCheckRunning := pitrCheckPostgresRunningAsDBSU
+	oldLoadInfo := pitrLoadPgBackRestInfo
+	oldResolve := pitrResolvePathAsDBSU
+	defer func() {
+		pitrCheckDataDirAsDBSU = oldCheckDataDir
+		pitrCheckPostgresRunningAsDBSU = oldCheckRunning
+		pitrLoadPgBackRestInfo = oldLoadInfo
+		pitrResolvePathAsDBSU = oldResolve
+	}()
+
+	var checkedDataDir string
+	pitrCheckDataDirAsDBSU = func(_ string, dataDir string) (bool, bool) {
+		checkedDataDir = dataDir
+		return true, true
+	}
+	pitrCheckPostgresRunningAsDBSU = func(string, string) (bool, int) {
+		return false, 0
+	}
+	pitrLoadPgBackRestInfo = func(*pgbackrest.Config, string) ([]pgbackrest.PgBackRestInfo, error) {
+		return []pgbackrest.PgBackRestInfo{{
+			Name:   "pg-meta",
+			Status: pgbackrest.StatusInfo{Code: 0},
+			Backup: []pgbackrest.BackupInfo{{Label: "20260701-010101F"}},
+		}}, nil
+	}
+	pitrResolvePathAsDBSU = func(_ string, path string) (string, error) {
+		return filepath.Clean(path), nil
+	}
+
+	managedDir := "/var/lib/pgsql/18/data"
+	opts := &Options{
+		Default:    true,
+		DbSU:       config.CurrentUser,
+		ConfigPath: writePITRTestConfig(t, "[pg-meta]\npg1-path="+managedDir+"\n"),
+	}
+
+	state, err := preCheck(opts)
+	if err != nil {
+		t.Fatalf("preCheck returned error: %v", err)
+	}
+	if opts.DataDir != "" {
+		t.Fatalf("preCheck must preserve requested opts.DataDir, got %q", opts.DataDir)
+	}
+	if state.DataDir != managedDir {
+		t.Fatalf("state.DataDir = %q, want effective managed dir %q", state.DataDir, managedDir)
+	}
+	if state.ManagedDataDir != managedDir {
+		t.Fatalf("state.ManagedDataDir = %q, want %q", state.ManagedDataDir, managedDir)
+	}
+	if state.SideRestore {
+		t.Fatalf("managed dir %q must not be classified as side restore", managedDir)
+	}
+	if checkedDataDir != managedDir {
+		t.Fatalf("preCheck checked data dir %q, want %q", checkedDataDir, managedDir)
+	}
+}
+
+func TestPreCheckAllowsExplicitSideRestoreWhenManagedRelationCannotBeResolved(t *testing.T) {
+	oldCheckDataDir := pitrCheckDataDirAsDBSU
+	oldCheckRunning := pitrCheckPostgresRunningAsDBSU
+	oldLoadInfo := pitrLoadPgBackRestInfo
+	oldResolve := pitrResolvePathAsDBSU
+	oldOwner := pitrDataDirOwnerAsDBSU
+	defer func() {
+		pitrCheckDataDirAsDBSU = oldCheckDataDir
+		pitrCheckPostgresRunningAsDBSU = oldCheckRunning
+		pitrLoadPgBackRestInfo = oldLoadInfo
+		pitrResolvePathAsDBSU = oldResolve
+		pitrDataDirOwnerAsDBSU = oldOwner
+	}()
+
+	var checkedDataDir string
+	pitrCheckDataDirAsDBSU = func(string, string) (bool, bool) {
+		checkedDataDir = "/var/lib/pgsql/data-link"
+		return true, false
+	}
+	pitrCheckPostgresRunningAsDBSU = func(string, string) (bool, int) {
+		return false, 0
+	}
+	pitrLoadPgBackRestInfo = func(*pgbackrest.Config, string) ([]pgbackrest.PgBackRestInfo, error) {
+		return []pgbackrest.PgBackRestInfo{{
+			Name:   "pg-meta",
+			Status: pgbackrest.StatusInfo{Code: 0},
+			Backup: []pgbackrest.BackupInfo{{Label: "20260701-010101F"}},
+		}}, nil
+	}
+	pitrResolvePathAsDBSU = func(_ string, path string) (string, error) {
+		if path == "/var/lib/pgsql/data-link" {
+			return path, nil
+		}
+		return "", errors.New("managed pgdata missing")
+	}
+	pitrDataDirOwnerAsDBSU = func(dbsu string, _ string) (string, error) {
+		return dbsu, nil
+	}
+
+	opts := &Options{
+		Default:   true,
+		NoRestart: true,
+		DataDir:   "/var/lib/pgsql/data-link",
+		DbSU:      config.CurrentUser,
+		ConfigPath: writePITRTestConfig(t,
+			"[pg-meta]\npg1-path=/var/lib/pgsql/18/data\n"),
+	}
+
+	state, err := preCheck(opts)
+	if err != nil {
+		t.Fatalf("explicit side restore should proceed when only managed PGDATA cannot be resolved: %v", err)
+	}
+	if state == nil || !state.SideRestore {
+		t.Fatalf("unresolved managed PGDATA should classify explicit -D as side restore, got %+v", state)
+	}
+	if checkedDataDir != "/var/lib/pgsql/data-link" {
+		t.Fatalf("preCheck checked data dir %q, want requested side dir", checkedDataDir)
+	}
+}
+
+func TestPreCheckAllowsEmptyOwnedManagedDataDir(t *testing.T) {
+	oldCheckDataDir := pitrCheckDataDirAsDBSU
+	oldCheckRunning := pitrCheckPostgresRunningAsDBSU
+	oldLoadInfo := pitrLoadPgBackRestInfo
+	oldResolve := pitrResolvePathAsDBSU
+	oldOwner := pitrDataDirOwnerAsDBSU
+	oldEmpty := pitrDataDirEmptyAsDBSU
+	defer func() {
+		pitrCheckDataDirAsDBSU = oldCheckDataDir
+		pitrCheckPostgresRunningAsDBSU = oldCheckRunning
+		pitrLoadPgBackRestInfo = oldLoadInfo
+		pitrResolvePathAsDBSU = oldResolve
+		pitrDataDirOwnerAsDBSU = oldOwner
+		pitrDataDirEmptyAsDBSU = oldEmpty
+	}()
+
+	managedDir := "/var/lib/pgsql/18/data"
+	pitrCheckDataDirAsDBSU = func(_ string, dataDir string) (bool, bool) {
+		if dataDir != managedDir {
+			t.Fatalf("checked data dir = %q, want %q", dataDir, managedDir)
+		}
+		return true, false
+	}
+	pitrDataDirEmptyAsDBSU = func(_ string, dataDir string) (bool, error) {
+		if dataDir != managedDir {
+			t.Fatalf("checked empty dir = %q, want %q", dataDir, managedDir)
+		}
+		return true, nil
+	}
+	pitrDataDirOwnerAsDBSU = func(dbsu string, _ string) (string, error) {
+		return dbsu, nil
+	}
+	pitrCheckPostgresRunningAsDBSU = func(string, string) (bool, int) {
+		return false, 0
+	}
+	pitrLoadPgBackRestInfo = func(*pgbackrest.Config, string) ([]pgbackrest.PgBackRestInfo, error) {
+		return []pgbackrest.PgBackRestInfo{{
+			Name:   "pg-meta",
+			Status: pgbackrest.StatusInfo{Code: 0},
+			Backup: []pgbackrest.BackupInfo{{Label: "20260701-010101F"}},
+		}}, nil
+	}
+	pitrResolvePathAsDBSU = func(_ string, path string) (string, error) {
+		return filepath.Clean(path), nil
+	}
+
+	state, err := preCheck(&Options{
+		Default:    true,
+		DbSU:       config.CurrentUser,
+		ConfigPath: writePITRTestConfig(t, "[pg-meta]\npg1-path="+managedDir+"\n"),
+	})
+	if err != nil {
+		t.Fatalf("empty owned managed PGDATA should be accepted for restore: %v", err)
+	}
+	if state == nil || state.SideRestore || state.DataDir != managedDir {
+		t.Fatalf("expected managed restore into empty target, got %+v", state)
+	}
+}
+
+func TestPreCheckNonexistentSideDirReportsDoesNotExist(t *testing.T) {
+	oldCheckDataDir := pitrCheckDataDirAsDBSU
+	oldLoadInfo := pitrLoadPgBackRestInfo
+	oldResolve := pitrResolvePathAsDBSU
+	defer func() {
+		pitrCheckDataDirAsDBSU = oldCheckDataDir
+		pitrLoadPgBackRestInfo = oldLoadInfo
+		pitrResolvePathAsDBSU = oldResolve
+	}()
+
+	requestedDir := "/mnt/missing/restore"
+	pitrCheckDataDirAsDBSU = func(_ string, dataDir string) (bool, bool) {
+		if dataDir != requestedDir {
+			t.Fatalf("checked data dir = %q, want requested side dir", dataDir)
+		}
+		return false, false
+	}
+	pitrLoadPgBackRestInfo = func(*pgbackrest.Config, string) ([]pgbackrest.PgBackRestInfo, error) {
+		t.Fatal("pgBackRest preflight should not run after data directory precheck fails")
+		return nil, nil
+	}
+	pitrResolvePathAsDBSU = func(_ string, path string) (string, error) {
+		if path == requestedDir {
+			return "", errors.New("readlink: no such file")
+		}
+		return filepath.Clean(path), nil
+	}
+
+	_, err := preCheck(&Options{
+		Default:   true,
+		NoRestart: true,
+		DataDir:   requestedDir,
+		DbSU:      config.CurrentUser,
+		ConfigPath: writePITRTestConfig(t,
+			"[pg-meta]\npg1-path=/var/lib/pgsql/18/data\n"),
+	})
+	if err == nil {
+		t.Fatal("preCheck should fail for nonexistent side restore dir")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("nonexistent side dir should report existence error, got %q", err.Error())
+	}
+	if strings.Contains(err.Error(), "cannot determine requested data directory") {
+		t.Fatalf("nonexistent side dir should not be hidden behind resolver error, got %q", err.Error())
 	}
 }
 
@@ -243,7 +490,7 @@ func TestBuildCommand(t *testing.T) {
 				Repo:       "2",
 				DbSU:       "postgres",
 			},
-			contains: []string{"-t", `"2026-01-31 01:00:00"`, "-D", "/data/pg", "-s", "pg-prod", "-c", "/etc/pgbackrest/custom.conf", "-r", "2", "-U", "postgres"},
+			contains: []string{"-t", pgbackrest.QuoteShellArg(pgbackrest.NormalizeRestoreTime("2026-01-31 01:00:00")), "-D", "/data/pg", "-s", "pg-prod", "-c", "/etc/pgbackrest/custom.conf", "-r", "2", "-U", "postgres"},
 			excludes: []string{},
 		},
 		{
@@ -286,6 +533,41 @@ func TestBuildCommand(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildCommandUsesSharedQuotingAndNormalizedTime(t *testing.T) {
+	timeValue := "2025-01-01"
+	normalizedTime := pgbackrest.NormalizeRestoreTime(timeValue)
+	wantTime := pgbackrest.QuoteShellArg(normalizedTime)
+	cmd := buildCommand(&Options{
+		Time:    timeValue,
+		DataDir: "/data/pitr restore",
+		Name:    "ignored",
+		Plan:    true,
+	})
+
+	if !strings.Contains(cmd, "-t "+wantTime) {
+		t.Fatalf("command should use normalized, shell-safe time %q: %q", wantTime, cmd)
+	}
+	if !strings.Contains(cmd, "-D "+pgbackrest.QuoteShellArg("/data/pitr restore")) {
+		t.Fatalf("command should shell-quote requested data dir: %q", cmd)
+	}
+	if !strings.Contains(cmd, "--plan") {
+		t.Fatalf("plan command should keep --plan: %q", cmd)
+	}
+}
+
+func TestBuildPlanCommandDoesNotPinEffectiveDataDir(t *testing.T) {
+	plan := BuildPlan(
+		&SystemState{
+			DataDir:        "/var/lib/pgsql/18/data",
+			ManagedDataDir: "/var/lib/pgsql/18/data",
+		},
+		&Options{Default: true, Plan: true},
+	)
+	if strings.Contains(plan.Command, "-D") || strings.Contains(plan.Command, "/var/lib/pgsql/18/data") {
+		t.Fatalf("plan command must not pin effective data dir when user did not request -D: %q", plan.Command)
 	}
 }
 
@@ -445,28 +727,27 @@ func TestBuildRisks(t *testing.T) {
 	}
 }
 
-func TestQuoteIfNeeded(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"simple", "simple"},
-		{"with space", `"with space"`},
-		{"with\ttab", `"with\ttab"`},
-		{"no-special", "no-special"},
-	}
-
-	for _, tt := range tests {
-		got := quoteIfNeeded(tt.input)
-		if got != tt.expected {
-			t.Errorf("quoteIfNeeded(%q) = %q, want %q", tt.input, got, tt.expected)
-		}
-	}
-}
-
 func containsAction(actions []output.Action, needle string) bool {
 	for _, action := range actions {
 		if strings.Contains(action.Description, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsCheck(checks []output.Check, needle string) bool {
+	for _, check := range checks {
+		if strings.Contains(check.Name, needle) || strings.Contains(check.Detail, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsNextAction(actions []output.NextAction, needle string) bool {
+	for _, action := range actions {
+		if strings.Contains(action.Command, needle) || strings.Contains(action.Reason, needle) {
 			return true
 		}
 	}
@@ -480,6 +761,32 @@ func containsResource(resources []output.Resource, resType string) bool {
 		}
 	}
 	return false
+}
+
+func stringSliceContains(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func joinPITRActionCommands(actions []output.NextAction) string {
+	parts := make([]string, 0, len(actions))
+	for _, action := range actions {
+		parts = append(parts, action.Command)
+	}
+	return strings.Join(parts, " | ")
+}
+
+func writePITRTestConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "pgbackrest.conf")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write pgbackrest config: %v", err)
+	}
+	return path
 }
 
 // ============================================================================
@@ -939,19 +1246,45 @@ func TestClassifyPITRDataDirTreatsEquivalentManagedPathAsManaged(t *testing.T) {
 		}
 	}
 
-	sideRestore := classifyPITRSideRestore("/pg/data/", "/pg/data", resolver)
+	sideRestore, err := classifyPITRSideRestore("/pg/data/", "/pg/data", resolver)
+	if err != nil {
+		t.Fatalf("classifyPITRSideRestore returned error: %v", err)
+	}
 	if sideRestore {
 		t.Fatal("trailing-slash managed PGDATA should not be treated as side restore")
 	}
 
-	sideRestore = classifyPITRSideRestore("/pg/../pg/data", "/pg/data", resolver)
+	sideRestore, err = classifyPITRSideRestore("/pg/../pg/data", "/pg/data", resolver)
+	if err != nil {
+		t.Fatalf("classifyPITRSideRestore returned error: %v", err)
+	}
 	if sideRestore {
 		t.Fatal("canonically equivalent managed PGDATA should not be treated as side restore")
 	}
 
-	sideRestore = classifyPITRSideRestore("/tmp/pitr-restore", "/pg/data", resolver)
+	sideRestore, err = classifyPITRSideRestore("/tmp/pitr-restore", "/pg/data", resolver)
+	if err != nil {
+		t.Fatalf("classifyPITRSideRestore returned error: %v", err)
+	}
 	if !sideRestore {
 		t.Fatal("distinct custom data dir should be treated as side restore")
+	}
+}
+
+func TestClassifyPITRSideRestoreRequestedUnresolvableTreatedAsSide(t *testing.T) {
+	resolver := func(path string) (string, error) {
+		if path == "/mnt/missing/restore" {
+			return "", errors.New("readlink: no such file")
+		}
+		return filepath.Clean(path), nil
+	}
+
+	sideRestore, err := classifyPITRSideRestore("/mnt/missing/restore", "/pg/data", resolver)
+	if err != nil {
+		t.Fatalf("unresolvable requested side dir should not fail classification: %v", err)
+	}
+	if !sideRestore {
+		t.Fatal("unresolvable requested dir should be treated as side restore until precheck reports the concrete existence/owner error")
 	}
 }
 
@@ -1032,6 +1365,41 @@ func TestShouldEscalateStopRequiresForceStop(t *testing.T) {
 	}
 }
 
+func TestEnsurePostgresStoppedRunningWithoutPidFails(t *testing.T) {
+	oldCheck := pitrCheckPostgresRunningAsDBSU
+	oldStop := pitrStopPostgres
+	oldSleep := pitrSleep
+	defer func() {
+		pitrCheckPostgresRunningAsDBSU = oldCheck
+		pitrStopPostgres = oldStop
+		pitrSleep = oldSleep
+	}()
+
+	checks := 0
+	pitrCheckPostgresRunningAsDBSU = func(string, string) (bool, int) {
+		checks++
+		return true, 0
+	}
+	pitrStopPostgres = func(*postgres.Config, *postgres.StopOptions) error {
+		return errors.New("stop failed")
+	}
+	pitrSleep = func(time.Duration) {}
+
+	err := ensurePostgresStopped(&SystemState{DataDir: "/pg/data", DbSU: "postgres"}, &Options{ForceStop: true}, false)
+	if err == nil {
+		t.Fatal("running PostgreSQL with unknown pid should not be treated as stopped")
+	}
+	if err.Code != output.CodePITRStopFailed {
+		t.Fatalf("error code = %d, want %d", err.Code, output.CodePITRStopFailed)
+	}
+	if !strings.Contains(err.Error(), "cannot determine PID") {
+		t.Fatalf("error should explain unknown pid, got %q", err.Error())
+	}
+	if checks == 0 {
+		t.Fatal("test did not exercise PostgreSQL running checks")
+	}
+}
+
 func TestBuildRisksManagedPatroniSaysNotRejoined(t *testing.T) {
 	risks := buildRisks(&SystemState{PatroniActive: true, DataDir: "/pg/data"}, &Options{Default: true})
 	joined := strings.Join(risks, "\n")
@@ -1059,6 +1427,66 @@ func TestRestoreOptionsFromPITRPassesTimelineAndTargetAction(t *testing.T) {
 	}
 	if got := getStringField(t, restoreOpts, "TargetAction"); got != "shutdown" {
 		t.Fatalf("restore target action = %q, want shutdown", got)
+	}
+}
+
+func TestExecuteRestoreForwardsEffectiveDataDir(t *testing.T) {
+	oldRestore := pitrRestore
+	defer func() {
+		pitrRestore = oldRestore
+	}()
+
+	tests := []struct {
+		name        string
+		state       *SystemState
+		opts        *Options
+		wantDataDir string
+	}{
+		{
+			name: "managed effective data dir",
+			state: &SystemState{
+				DataDir:        "/var/lib/pgsql/18/data",
+				ManagedDataDir: "/var/lib/pgsql/18/data",
+				DbSU:           "postgres",
+				PBConfig:       &pgbackrest.Config{Stanza: "pg-prod"},
+			},
+			opts:        &Options{Default: true},
+			wantDataDir: "/var/lib/pgsql/18/data",
+		},
+		{
+			name: "side restore data dir",
+			state: &SystemState{
+				DataDir:        "/data/side restore",
+				ManagedDataDir: "/pg/data",
+				SideRestore:    true,
+				DbSU:           "postgres",
+				PBConfig:       &pgbackrest.Config{Stanza: "pg-prod"},
+			},
+			opts:        &Options{Default: true, DataDir: "/data/side restore", NoRestart: true},
+			wantDataDir: "/data/side restore",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotDataDir string
+			var gotYes bool
+			pitrRestore = func(_ *pgbackrest.Config, opts *pgbackrest.RestoreOptions) error {
+				gotDataDir = opts.DataDir
+				gotYes = opts.Yes
+				return nil
+			}
+
+			if err := executeRestore(tt.state, tt.opts); err != nil {
+				t.Fatalf("executeRestore returned error: %v", err)
+			}
+			if gotDataDir != tt.wantDataDir {
+				t.Fatalf("restore DataDir = %q, want effective state data dir %q", gotDataDir, tt.wantDataDir)
+			}
+			if !gotYes {
+				t.Fatal("nested pgBackRest restore should be auto-confirmed after PITR confirmation")
+			}
+		})
 	}
 }
 
@@ -1173,10 +1601,87 @@ func TestWaitForRecoveryCompleteStopsWhenPrimary(t *testing.T) {
 	}
 }
 
+func TestQueryRecoveryStateBindsPsqlToPostmasterPid(t *testing.T) {
+	oldGetPgInstall := pitrGetPgInstall
+	oldDBSUOutput := pitrDBSUCommandOutput
+	oldCurrentUser := config.CurrentUser
+	defer func() {
+		pitrGetPgInstall = oldGetPgInstall
+		pitrDBSUCommandOutput = oldDBSUOutput
+		config.CurrentUser = oldCurrentUser
+	}()
+
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "postmaster.pid"), []byte("12345\n"+dataDir+"\n1738656000\n6543\n/tmp/pgsocket\n127.0.0.1\n12345\n"), 0o644); err != nil {
+		t.Fatalf("write postmaster.pid: %v", err)
+	}
+	pitrGetPgInstall = func(*postgres.Config) (*ext.PostgresInstall, error) {
+		return &ext.PostgresInstall{BinPath: "/usr/lib/postgresql/18/bin"}, nil
+	}
+
+	var gotArgs []string
+	pitrDBSUCommandOutput = func(_ string, args []string) (string, error) {
+		gotArgs = append([]string(nil), args...)
+		return "f\n", nil
+	}
+
+	dbsu := os.Getenv("USER")
+	if dbsu == "" {
+		dbsu = oldCurrentUser
+	}
+	config.CurrentUser = dbsu
+	inRecovery, err := queryRecoveryState(&SystemState{DataDir: dataDir, DbSU: dbsu})
+	if err != nil {
+		t.Fatalf("queryRecoveryState returned error: %v", err)
+	}
+	if inRecovery {
+		t.Fatal("expected primary state")
+	}
+	for _, want := range []string{"-X", "-qAt", "-w", "-v", "ON_ERROR_STOP=1", "-p", "6543", "-h", "/tmp/pgsocket", "-d", "postgres"} {
+		if !stringSliceContains(gotArgs, want) {
+			t.Fatalf("psql args missing %q: %v", want, gotArgs)
+		}
+	}
+}
+
+func TestQueryRecoveryStateDoesNotFallbackWhenPostmasterPidInvalid(t *testing.T) {
+	oldGetPgInstall := pitrGetPgInstall
+	oldDBSUOutput := pitrDBSUCommandOutput
+	oldCurrentUser := config.CurrentUser
+	defer func() {
+		pitrGetPgInstall = oldGetPgInstall
+		pitrDBSUCommandOutput = oldDBSUOutput
+		config.CurrentUser = oldCurrentUser
+	}()
+
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "postmaster.pid"), []byte("12345\n"), 0o644); err != nil {
+		t.Fatalf("write postmaster.pid: %v", err)
+	}
+	pitrGetPgInstall = func(*postgres.Config) (*ext.PostgresInstall, error) {
+		t.Fatal("postgres install should not be resolved when postmaster.pid is invalid")
+		return nil, nil
+	}
+	pitrDBSUCommandOutput = func(string, []string) (string, error) {
+		t.Fatal("psql should not run when postmaster.pid cannot identify the instance")
+		return "", nil
+	}
+
+	dbsu := os.Getenv("USER")
+	if dbsu == "" {
+		dbsu = oldCurrentUser
+	}
+	config.CurrentUser = dbsu
+	if _, err := queryRecoveryState(&SystemState{DataDir: dataDir, DbSU: dbsu}); err == nil {
+		t.Fatal("queryRecoveryState should fail instead of querying the default instance")
+	}
+}
+
 // TestPITRError_PostRestoreNilOnSuccess verifies postRestore returns nil on success
 func TestPITRError_PostRestoreNilOnSuccess(t *testing.T) {
+	state := &SystemState{DataDir: "/pg/data", ManagedDataDir: "/pg/data"}
 	opts := &Options{Default: true}
-	pitrErr := postRestore(opts, false)
+	pitrErr := postRestore(state, opts, false)
 	if pitrErr != nil {
 		t.Errorf("postRestore should return nil on success, got %v", pitrErr)
 	}
@@ -1195,8 +1700,9 @@ func TestPITRError_PostRestoreWriteFailure(t *testing.T) {
 	os.Stderr = w
 	defer func() { os.Stderr = oldStderr }()
 
+	state := &SystemState{DataDir: "/pg/data", ManagedDataDir: "/pg/data"}
 	opts := &Options{Default: true}
-	pitrErr := postRestore(opts, false)
+	pitrErr := postRestore(state, opts, false)
 	if pitrErr == nil {
 		t.Fatal("postRestore should fail when stderr is unavailable")
 	}
@@ -1207,7 +1713,11 @@ func TestPITRError_PostRestoreWriteFailure(t *testing.T) {
 
 func TestPrintPostRestoreGuidanceUsesCustomDataDir(t *testing.T) {
 	output := capturePITRStderr(t, func() {
-		err := printPostRestoreGuidance(&Options{
+		err := printPostRestoreGuidance(&SystemState{
+			DataDir:        "/tmp/pig-pitr-restore",
+			ManagedDataDir: "/pg/data",
+			SideRestore:    true,
+		}, &Options{
 			Default:   true,
 			DataDir:   "/tmp/pig-pitr-restore",
 			NoRestart: true,
@@ -1275,6 +1785,12 @@ func TestCollectPostRestoreStateSkipsQueryWhenPostgresNotStarted(t *testing.T) {
 	if post == nil || !post.Queried {
 		t.Fatalf("post state should be present, got %+v", post)
 	}
+	if post.SQLQueried {
+		t.Fatalf("post state should not claim SQL was queried when PostgreSQL was not started: %+v", post)
+	}
+	if post.QuerySkippedReason == "" {
+		t.Fatalf("post state should explain why SQL probe was skipped: %+v", post)
+	}
 	if post.Running {
 		t.Fatalf("post state should not claim running when PostgreSQL was not started: %+v", post)
 	}
@@ -1298,6 +1814,7 @@ func TestCollectPostRestoreStateUsesQueryWhenPostgresStarted(t *testing.T) {
 	pitrQueryPostRestoreState = func(*SystemState) (*PostRestoreState, error) {
 		return &PostRestoreState{
 			Queried:    true,
+			SQLQueried: true,
 			Running:    true,
 			InRecovery: &inRecovery,
 			CurrentLSN: "0/50001A0",
@@ -1319,7 +1836,7 @@ func TestCollectPostRestoreStateUsesQueryWhenPostgresStarted(t *testing.T) {
 
 func TestPrintPostRestoreGuidanceDefaultDoesNotSuggestManualPromote(t *testing.T) {
 	output := capturePITRStderr(t, func() {
-		err := printPostRestoreGuidance(&Options{Default: true}, false)
+		err := printPostRestoreGuidance(&SystemState{DataDir: "/pg/data", ManagedDataDir: "/pg/data"}, &Options{Default: true}, false)
 		if err != nil {
 			t.Fatalf("printPostRestoreGuidance failed: %v", err)
 		}
@@ -1332,7 +1849,7 @@ func TestPrintPostRestoreGuidanceDefaultDoesNotSuggestManualPromote(t *testing.T
 
 func TestPrintPostRestoreGuidanceManagedDataDirWithTrailingSlashUsesManagedGuidance(t *testing.T) {
 	output := capturePITRStderr(t, func() {
-		err := printPostRestoreGuidance(&Options{Default: true, DataDir: "/pg/data/"}, false)
+		err := printPostRestoreGuidance(&SystemState{DataDir: "/pg/data", ManagedDataDir: "/pg/data"}, &Options{Default: true, DataDir: "/pg/data/"}, false)
 		if err != nil {
 			t.Fatalf("printPostRestoreGuidance failed: %v", err)
 		}
@@ -1348,7 +1865,7 @@ func TestPrintPostRestoreGuidanceManagedDataDirWithTrailingSlashUsesManagedGuida
 
 func TestPrintPostRestoreGuidanceTargetActionPromoteDoesNotSuggestManualPromote(t *testing.T) {
 	output := capturePITRStderr(t, func() {
-		err := printPostRestoreGuidance(&Options{
+		err := printPostRestoreGuidance(&SystemState{DataDir: "/pg/data", ManagedDataDir: "/pg/data"}, &Options{
 			Time:         "2026-01-31 01:00:00",
 			TargetAction: "promote",
 		}, false)
@@ -1364,7 +1881,7 @@ func TestPrintPostRestoreGuidanceTargetActionPromoteDoesNotSuggestManualPromote(
 
 func TestPrintPostRestoreGuidanceTargetActionShutdownUsesRecoveryShutdownGuidance(t *testing.T) {
 	output := capturePITRStderr(t, func() {
-		err := printPostRestoreGuidance(&Options{
+		err := printPostRestoreGuidance(&SystemState{DataDir: "/pg/data", ManagedDataDir: "/pg/data"}, &Options{
 			Time:         "2026-01-31 01:00:00",
 			TargetAction: "shutdown",
 			NoRestart:    true,
@@ -1383,6 +1900,195 @@ func TestPrintPostRestoreGuidanceTargetActionShutdownUsesRecoveryShutdownGuidanc
 	for _, want := range []string{"reaches the recovery target and exits", "pig pg start", "pig pg log show"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("shutdown target guidance should mention %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestPostRestoreGuidanceManagedNonDefaultDirUsesManagedActions(t *testing.T) {
+	state := &SystemState{DataDir: "/var/lib/pgsql/18/data", ManagedDataDir: "/var/lib/pgsql/18/data"}
+	output := capturePITRStderr(t, func() {
+		err := printPostRestoreGuidance(state, &Options{Time: "2026-01-31 01:00:00", NoRestart: true}, true)
+		if err != nil {
+			t.Fatalf("printPostRestoreGuidance failed: %v", err)
+		}
+	})
+
+	for _, want := range []string{
+		"pig pg start -D /var/lib/pgsql/18/data",
+		"pig pg psql -D /var/lib/pgsql/18/data",
+		"pig pg promote -D /var/lib/pgsql/18/data",
+		"systemctl start patroni",
+		"pig pb create",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("managed non-/pg/data guidance missing %q, got:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "pg_ctl -D /var/lib/pgsql/18/data -o \"-p 5433\" start") {
+		t.Fatalf("managed non-/pg/data guidance must not be rendered as side restore, got:\n%s", output)
+	}
+}
+
+func TestPostRestoreNextActionsCoverManagedAndSideOutcomes(t *testing.T) {
+	managed := buildPostRestoreNextActions(&SystemState{DataDir: "/var/lib/pgsql/18/data", ManagedDataDir: "/var/lib/pgsql/18/data"}, &Options{Time: "2026-01-31 01:00:00", NoRestart: true}, true)
+	managedCmds := joinPITRActionCommands(managed)
+	for _, want := range []string{"pig pg start -D /var/lib/pgsql/18/data", "pig pg psql -D /var/lib/pgsql/18/data", "pig pg promote -D /var/lib/pgsql/18/data", "systemctl start patroni", "pig pb create"} {
+		if !strings.Contains(managedCmds, want) {
+			t.Fatalf("managed next_actions missing %q: %+v", want, managed)
+		}
+	}
+
+	side := buildPostRestoreNextActions(&SystemState{DataDir: "/data/side", ManagedDataDir: "/pg/data", SideRestore: true}, &Options{Default: true, NoRestart: true}, false)
+	sideCmds := joinPITRActionCommands(side)
+	if !strings.Contains(sideCmds, "pg_ctl -D /data/side -o \"-p 5433\" start") ||
+		!strings.Contains(sideCmds, "pgbackrest --pg1-path=/data/side stanza-create") {
+		t.Fatalf("side restore next_actions should use side restore commands: %+v", side)
+	}
+	if strings.Contains(sideCmds, "pig pg start") || strings.Contains(sideCmds, "systemctl start patroni") {
+		t.Fatalf("side restore next_actions should not manage default services: %+v", side)
+	}
+}
+
+func TestPostRestoreNextActionsPreserveSideRestorePgBackRestContext(t *testing.T) {
+	state := &SystemState{
+		DataDir:        "/data/side restore",
+		ManagedDataDir: "/pg/data",
+		SideRestore:    true,
+		PBConfig: &pgbackrest.Config{
+			Stanza:     "pg-prod",
+			ConfigPath: "/etc/pg backrest/custom.conf",
+		},
+	}
+	actions := buildPostRestoreNextActions(state, &Options{Default: true, NoRestart: true}, false)
+	cmds := joinPITRActionCommands(actions)
+	for _, want := range []string{
+		"pgbackrest",
+		"--stanza=pg-prod",
+		"--config='/etc/pg backrest/custom.conf'",
+		"--pg1-path='/data/side restore'",
+		"stanza-create",
+	} {
+		if !strings.Contains(cmds, want) {
+			t.Fatalf("side restore stanza-create next action missing %q: %+v", want, actions)
+		}
+	}
+}
+
+func TestSideRestoreShutdownGuidanceLogsPointToSideDir(t *testing.T) {
+	state := &SystemState{
+		DataDir:        "/data/side restore",
+		ManagedDataDir: "/pg/data",
+		SideRestore:    true,
+	}
+	actions := buildPostRestoreNextActions(state, &Options{
+		Time:         "2026-01-31 01:00:00",
+		TargetAction: "shutdown",
+		NoRestart:    true,
+	}, false)
+	cmds := joinPITRActionCommands(actions)
+	if strings.Contains(cmds, "pig pg log show") {
+		t.Fatalf("side restore shutdown log guidance should not inspect the managed log directory: %+v", actions)
+	}
+	if !strings.Contains(cmds, "'/data/side restore/log'") {
+		t.Fatalf("side restore shutdown log guidance should point at side dir logs, got %+v", actions)
+	}
+}
+
+func TestBuildPlanNextActionsDoNotIncludePostRestoreRunbook(t *testing.T) {
+	state := &SystemState{
+		PatroniActive:  true,
+		DataDir:        "/var/lib/pgsql/18/data",
+		ManagedDataDir: "/var/lib/pgsql/18/data",
+		PBConfig: &pgbackrest.Config{
+			Stanza:     "pg-prod",
+			ConfigPath: "/etc/pg backrest/custom.conf",
+			Repo:       "2",
+			DbSU:       "postgres",
+		},
+	}
+	actions := buildPlanNextActions(state, &Options{
+		Time:      "2026-01-31 01:00:00",
+		NoRestart: true,
+		DataDir:   "/var/lib/pgsql/18/data",
+	})
+	cmds := joinPITRActionCommands(actions)
+	wantExec := "pig pitr -t " + pgbackrest.QuoteShellArg(pgbackrest.NormalizeRestoreTime("2026-01-31 01:00:00")) +
+		" --no-restart -D /var/lib/pgsql/18/data --yes"
+	for _, want := range []string{
+		wantExec,
+		"pig pb info -s pg-prod -c '/etc/pg backrest/custom.conf' -r 2 -U postgres",
+	} {
+		if !strings.Contains(cmds, want) {
+			t.Fatalf("plan next_actions missing %q: %+v", want, actions)
+		}
+	}
+	for _, forbidden := range []string{"pig pg start", "pig pg promote", "systemctl", "pg_ctl -D"} {
+		if strings.Contains(cmds, forbidden) {
+			t.Fatalf("plan next_actions must not include post-restore runbook command %q: %+v", forbidden, actions)
+		}
+	}
+}
+
+func TestExecuteResultAttachesPostRestoreNextActionsToEnvelope(t *testing.T) {
+	start := time.Now()
+	result := newPITRSuccessResult(
+		&SystemState{DataDir: "/pg/data", ManagedDataDir: "/pg/data"},
+		&Options{Default: true},
+		true,
+		true,
+		start,
+		start.Add(time.Second),
+		nil,
+	)
+
+	if result.Data == nil {
+		t.Fatal("result data should be present")
+	}
+	if len(result.NextActions) == 0 {
+		t.Fatalf("structured PITR success should carry envelope next_actions: %+v", result)
+	}
+}
+
+func TestPITRFailureResultRestoreFailureSurfacesPatroniStoppedGuidance(t *testing.T) {
+	result := pitrFailureResult(
+		&PITRError{Code: output.CodePITRRestoreFailed, Err: errors.New("restore failed")},
+		&SystemState{DataDir: "/pg/data", ManagedDataDir: "/pg/data", PBConfig: &pgbackrest.Config{Stanza: "pg-prod"}},
+		&Options{Default: true},
+		true,
+		pitrFailurePhaseRestore,
+	)
+
+	if result == nil || result.Success {
+		t.Fatalf("failure result should be unsuccessful, got %+v", result)
+	}
+	if !strings.Contains(result.Detail, "Patroni remains stopped") || !strings.Contains(result.Detail, "partially restored") {
+		t.Fatalf("restore failure detail should explain stopped Patroni and dirty PGDATA, got %q", result.Detail)
+	}
+	for _, want := range []string{"systemctl status patroni", "pig pb log show", "pig pitr -d --yes"} {
+		if !containsNextAction(result.NextActions, want) {
+			t.Fatalf("restore failure next_actions missing %q: %+v", want, result.NextActions)
+		}
+	}
+}
+
+func TestPITRFailureResultStartFailureAttachesLogAction(t *testing.T) {
+	result := pitrFailureResult(
+		&PITRError{Code: output.CodePITRStartFailed, Err: errors.New("start failed")},
+		&SystemState{DataDir: "/pg/data", ManagedDataDir: "/pg/data", PBConfig: &pgbackrest.Config{Stanza: "pg-prod"}},
+		&Options{Default: true},
+		true,
+		pitrFailurePhaseStart,
+	)
+
+	if result == nil || result.Success {
+		t.Fatalf("failure result should be unsuccessful, got %+v", result)
+	}
+	if !strings.Contains(result.Detail, "PostgreSQL failed to start") || !strings.Contains(result.Detail, "Patroni remains stopped") {
+		t.Fatalf("start failure detail should explain stopped Patroni and start failure, got %q", result.Detail)
+	}
+	for _, want := range []string{"systemctl status patroni", "pig pg log show", "pig pitr -d --yes"} {
+		if !containsNextAction(result.NextActions, want) {
+			t.Fatalf("start failure next_actions missing %q: %+v", want, result.NextActions)
 		}
 	}
 }

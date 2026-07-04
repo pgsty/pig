@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -203,6 +204,52 @@ func TestPITRStructuredExecutionRequiresExplicitYes(t *testing.T) {
 	}
 }
 
+func TestPITRStructuredConfirmationUsesNeutralBoundaryAndReplayableCommands(t *testing.T) {
+	origFormat := config.OutputFormat
+	origOpts := *pitrOpts
+	defer func() {
+		config.OutputFormat = origFormat
+		*pitrOpts = origOpts
+	}()
+
+	config.OutputFormat = config.OUTPUT_JSON
+	*pitrOpts = pitr.Options{
+		Default:    true,
+		NoRestart:  true,
+		DataDir:    "/data/side restore",
+		Stanza:     "pg-prod",
+		ConfigPath: "/etc/pg backrest/custom.conf",
+		Yes:        false,
+	}
+
+	var runErr error
+	raw := captureStdout(t, func() {
+		runErr = pitrCmd.RunE(pitrCmd, nil)
+	})
+	if runErr == nil {
+		t.Fatal("structured pitr execution should require explicit --yes")
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(bytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	data, _ := payload["data"].(map[string]interface{})
+	operation, _ := data["operation"].(map[string]interface{})
+	if got := asString(operation["boundary"]); got != "pitr:restore" {
+		t.Fatalf("confirmation boundary = %q, want pitr:restore payload=%v", got, payload)
+	}
+	if !resultDataHasNextAction(payload, "pig pitr -d --no-restart -s pg-prod -c '/etc/pg backrest/custom.conf' -D '/data/side restore' --yes") {
+		t.Fatalf("confirmation next actions should include replayable --yes command, got %v", payload)
+	}
+	if !resultDataHasNextAction(payload, "--plan") {
+		t.Fatalf("confirmation next actions should include replayable --plan command, got %v", payload)
+	}
+	if !resultDataHasNextAction(payload, "pig pb restore --stanza pg-prod --config '/etc/pg backrest/custom.conf' --dbsu postgres --default --data '/data/side restore' --plan") {
+		t.Fatalf("confirmation next actions should include replayable primitive restore plan, got %v", payload)
+	}
+}
+
 func TestPITRStructuredRejectsExtraArgsBeforeDash(t *testing.T) {
 	origFormat := config.OutputFormat
 	origOpts := *pitrOpts
@@ -231,6 +278,88 @@ func TestPITRStructuredRejectsExtraArgsBeforeDash(t *testing.T) {
 	}
 	if !strings.Contains(asString(payload["detail"]), "after --") {
 		t.Fatalf("detail should mention -- separator, got %v", payload)
+	}
+}
+
+func TestPITRPlanPrecheckStructuredUsesTypedCode(t *testing.T) {
+	origFormat := config.OutputFormat
+	origOpts := *pitrOpts
+	origSilenceUsage := pitrCmd.SilenceUsage
+	defer func() {
+		config.OutputFormat = origFormat
+		*pitrOpts = origOpts
+		pitrCmd.SilenceUsage = origSilenceUsage
+	}()
+
+	config.OutputFormat = config.OUTPUT_JSON
+	*pitrOpts = pitr.Options{
+		Default:    true,
+		Plan:       true,
+		ConfigPath: filepath.Join(t.TempDir(), "missing-pgbackrest.conf"),
+	}
+
+	var runErr error
+	raw := captureStdout(t, func() {
+		runErr = pitrCmd.RunE(pitrCmd, nil)
+	})
+	if runErr == nil {
+		t.Fatal("expected structured plan precheck error")
+	}
+	var exitErr *utils.ExitCodeError
+	if !errors.As(runErr, &exitErr) {
+		t.Fatalf("expected ExitCodeError, got %T: %v", runErr, runErr)
+	}
+	if exitErr.Code != output.ExitCode(output.CodePITRPrecheckFailed) {
+		t.Fatalf("exit code = %d, want %d", exitErr.Code, output.ExitCode(output.CodePITRPrecheckFailed))
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(bytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if got := int(payload["code"].(float64)); got != output.CodePITRPrecheckFailed {
+		t.Fatalf("structured code = %d, want %d payload=%v", got, output.CodePITRPrecheckFailed, payload)
+	}
+}
+
+func TestPITRTextRuntimeErrorSilencesUsageAfterValidation(t *testing.T) {
+	origFormat := config.OutputFormat
+	origOpts := *pitrOpts
+	origSilenceUsage := pitrCmd.SilenceUsage
+	origOut := pitrCmd.OutOrStdout()
+	origErr := pitrCmd.ErrOrStderr()
+	defer func() {
+		config.OutputFormat = origFormat
+		*pitrOpts = origOpts
+		pitrCmd.SilenceUsage = origSilenceUsage
+		pitrCmd.SetOut(origOut)
+		pitrCmd.SetErr(origErr)
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pitrCmd.SetOut(io.Discard)
+	pitrCmd.SetErr(io.Discard)
+
+	pitrCmd.SilenceUsage = false
+	*pitrOpts = pitr.Options{
+		Default:    true,
+		Plan:       true,
+		ConfigPath: filepath.Join(t.TempDir(), "missing-pgbackrest.conf"),
+	}
+	if err := pitrCmd.RunE(pitrCmd, nil); err == nil {
+		t.Fatal("expected runtime/precheck error")
+	}
+	if !pitrCmd.SilenceUsage {
+		t.Fatal("runtime/precheck errors after valid args should silence Cobra usage")
+	}
+
+	pitrCmd.SilenceUsage = false
+	*pitrOpts = pitr.Options{}
+	if err := pitrCmd.RunE(pitrCmd, nil); err == nil {
+		t.Fatal("expected missing-target error")
+	}
+	if pitrCmd.SilenceUsage {
+		t.Fatal("missing target should keep help/usage behavior")
 	}
 }
 

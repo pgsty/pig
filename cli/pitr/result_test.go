@@ -12,12 +12,24 @@ func TestPITRResultData(t *testing.T) {
 	start := time.Date(2026, 1, 31, 1, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Second)
 
-	state := &SystemState{DataDir: "/pg/data"}
-	opts := &Options{Time: "2026-01-31 01:00:00", Set: "20240101-010101F", TargetAction: "promote"}
+	state := &SystemState{DataDir: "/var/lib/pgsql/18/data", ManagedDataDir: "/var/lib/pgsql/18/data"}
+	opts := &Options{Time: "2026-01-31 01:00:00", Set: "20240101-010101F", TargetAction: "promote", DataDir: "/var/lib/pgsql/18/data"}
 
 	data := newPITRResultData(state, opts, true, true, start, end, nil)
 	if data.Target == "" || data.DataDir == "" {
 		t.Fatalf("unexpected empty fields: %+v", data)
+	}
+	if data.TargetType != "time" || data.TargetValue == "" {
+		t.Fatalf("target_type/target_value not populated: %+v", data)
+	}
+	if data.EffectiveDataDir != "/var/lib/pgsql/18/data" || data.ManagedDataDir != "/var/lib/pgsql/18/data" {
+		t.Fatalf("effective/managed data dir fields not populated: %+v", data)
+	}
+	if data.RequestedDataDir != "/var/lib/pgsql/18/data" {
+		t.Fatalf("requested data dir = %q, want /var/lib/pgsql/18/data", data.RequestedDataDir)
+	}
+	if data.SideRestore {
+		t.Fatalf("managed restore should not be marked side restore: %+v", data)
 	}
 	if data.BackupSet != "20240101-010101F" {
 		t.Errorf("backup_set = %q, want %q", data.BackupSet, "20240101-010101F")
@@ -49,6 +61,7 @@ func TestPITRResultDataIncludesPostRestoreState(t *testing.T) {
 	inRecovery := false
 	post := &PostRestoreState{
 		Queried:       true,
+		SQLQueried:    true,
 		Running:       true,
 		InRecovery:    &inRecovery,
 		CurrentLSN:    "0/50001A0",
@@ -154,6 +167,12 @@ func TestPITRResultDataJSONTags(t *testing.T) {
 	// Verify snake_case field names
 	expectedFields := []string{
 		"data_dir",
+		"requested_data_dir",
+		"target_type",
+		"target_value",
+		"effective_data_dir",
+		"managed_data_dir",
+		"side_restore",
 		"backup_set",
 		"patroni_stopped",
 		"postgres_restarted",
@@ -185,6 +204,11 @@ func TestPITRResultDataYAMLTags(t *testing.T) {
 	// Verify snake_case field names
 	expectedFields := []string{
 		"data_dir:",
+		"requested_data_dir:",
+		"target_type:",
+		"effective_data_dir:",
+		"managed_data_dir:",
+		"side_restore:",
 		"backup_set:",
 		"patroni_stopped:",
 		"postgres_restarted:",

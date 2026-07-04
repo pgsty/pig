@@ -5,6 +5,7 @@ Copyright 2018-2026 Ruohang Feng <rh@vonng.com>
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
 	"pig/cli/pitr"
@@ -149,14 +150,15 @@ The command uses the same execution privilege strategy as other pig commands:
 		if err := pitr.ValidateOptions(pitrOpts); err != nil {
 			return restoreInvalidParamsError(output.CodePITRInvalidArgs, err)
 		}
+		cmd.SilenceUsage = true
 
 		// Plan mode: show plan and exit
 		if pitrOpts.Plan {
 			plan, err := pitr.Plan(pitrOpts)
 			if err != nil {
-				return err
+				return handlePITRPlanError(err)
 			}
-			return output.RenderPlan(plan)
+			return handlePlanOutput(plan)
 		}
 
 		// Structured output: return Result
@@ -166,20 +168,8 @@ The command uses the same execution privilege strategy as other pig commands:
 					output.CodePITRConfirmationRequired,
 					"pitr requires explicit confirmation",
 					"structured output mode does not prompt interactively; rerun with --yes to execute or --plan to preview",
-					output.OperationMeta{
-						Module:       "pitr",
-						Command:      "pitr",
-						Boundary:     "pitr:managed-recovery",
-						Risk:         "critical",
-						Confirmation: "required",
-						Executed:     false,
-						DryRun:       false,
-					},
-					[]output.NextAction{
-						{Command: "pig pitr ... --yes", Reason: "execute managed PITR after explicit confirmation", Required: true},
-						{Command: "pig pitr ... --plan", Reason: "preview managed PITR prechecks and lifecycle steps", Required: false},
-						{Command: "pig pb restore ... --plan", Reason: "preview the low-level pgBackRest restore primitive", Required: false},
-					},
+					pitr.ConfirmationOperation(),
+					pitr.ConfirmationNextActions(pitrOpts),
 				)
 			}
 			preparePITRStructuredOptions(pitrOpts)
@@ -196,6 +186,21 @@ func preparePITRStructuredOptions(opts *pitr.Options) {
 	if opts != nil {
 		opts.Quiet = true
 	}
+}
+
+func handlePITRPlanError(err error) error {
+	if err == nil {
+		return nil
+	}
+	code := output.CodePITRPrecheckFailed
+	var pitrErr *pitr.PITRError
+	if errors.As(err, &pitrErr) {
+		code = pitrErr.Code
+	}
+	if config.IsStructuredOutput() {
+		return handleAuxResult(output.Fail(code, err.Error()))
+	}
+	return &utils.ExitCodeError{Code: output.ExitCode(code), Err: err}
 }
 
 func init() {
