@@ -518,14 +518,14 @@ func TestEnsureConsoleInfoLog(t *testing.T) {
 // TestRestoreNextActionsMirrorTextHints verifies the structured next actions
 // follow the same branching as printPostRestoreHints.
 func TestRestoreNextActionsMirrorTextHints(t *testing.T) {
-	// Default target on managed dir: start + verify + recreate, no promote.
+	// Default target on managed dir: start + verify + promote, no stanza-create.
 	actions := restoreNextActions(&Config{}, &RestoreOptions{Default: true})
 	joined := joinActionCommands(actions)
-	if !strings.Contains(joined, "pig pg start") || !strings.Contains(joined, "pig pb create") {
-		t.Errorf("default-dir actions missing start/create: %q", joined)
+	if !strings.Contains(joined, "pig pg start") || !strings.Contains(joined, "pig pg promote") {
+		t.Errorf("default-dir actions missing start/promote: %q", joined)
 	}
-	if strings.Contains(joined, "promote") {
-		t.Errorf("--default restore must not suggest promote: %q", joined)
+	if strings.Contains(joined, "pig pb create") {
+		t.Errorf("managed restore should not suggest stanza recreation: %q", joined)
 	}
 	if !actions[0].Required {
 		t.Errorf("starting PostgreSQL should be the required next action: %+v", actions[0])
@@ -571,6 +571,7 @@ func TestRestoreNextActionsMirrorTextHints(t *testing.T) {
 	joined = joinActionCommands(actions)
 	if !strings.Contains(joined, "pig pg start -D /var/lib/pgsql/18/data") ||
 		!strings.Contains(joined, "pig pg status -D /var/lib/pgsql/18/data") ||
+		!strings.Contains(joined, "pig pg promote -D /var/lib/pgsql/18/data") ||
 		strings.Contains(joined, "pg_ctl -D /var/lib/pgsql/18/data") {
 		t.Errorf("managed non-/pg/data actions should use pig pg commands: %+v", actions)
 	}

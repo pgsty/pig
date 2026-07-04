@@ -536,7 +536,8 @@ func printPostRestoreHints(cfg *Config, opts *RestoreOptions) {
 	sameDataDir, sameErr := sameRestoreDataDir(cfg, dataDir, managedDir)
 	isCustomDataDir := sameErr != nil || !sameDataDir
 	action, _ := restoreTargetAction(opts)
-	needsManualPromote := action != "promote" && !opts.Default
+	needsSideManualPromote := action != "promote" && !opts.Default
+	needsManagedPromote := action != "promote"
 
 	if isCustomDataDir {
 		// Simplified hints for custom data directory
@@ -549,7 +550,7 @@ func printPostRestoreHints(cfg *Config, opts *RestoreOptions) {
 		fmt.Fprintln(os.Stderr)
 
 		nextStep := 3
-		if needsManualPromote {
+		if needsSideManualPromote {
 			fmt.Fprintf(os.Stderr, "%d. If satisfied, promote to primary:\n", nextStep)
 			fmt.Fprintf(os.Stderr, "   pg_ctl -D %s promote\n", QuoteShellArg(dataDir))
 			fmt.Fprintln(os.Stderr)
@@ -568,14 +569,10 @@ func printPostRestoreHints(cfg *Config, opts *RestoreOptions) {
 		fmt.Fprintln(os.Stderr)
 
 		nextStep := 3
-		if needsManualPromote {
-			fmt.Fprintf(os.Stderr, "%d. If satisfied, promote to primary:\n", nextStep)
+		if needsManagedPromote {
+			fmt.Fprintf(os.Stderr, "%d. Promote if accept:\n", nextStep)
 			fmt.Fprintf(os.Stderr, "   %s\n", restorePigPgCommand("promote", managedDir))
 			fmt.Fprintln(os.Stderr)
-			nextStep++
 		}
-
-		fmt.Fprintf(os.Stderr, "%d. Re-create stanza if needed:\n", nextStep)
-		fmt.Fprintf(os.Stderr, "   %s\n", restorePigPBCreateCommand(cfg))
 	}
 }

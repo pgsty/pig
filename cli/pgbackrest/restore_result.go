@@ -187,8 +187,8 @@ func parseRestoredBackupSet(output string) string {
 }
 
 // restoreNextActions returns the structured counterpart of the text-mode
-// post-restore hints (printPostRestoreHints): start, verify, optionally
-// promote, and re-create the stanza.
+// post-restore hints (printPostRestoreHints): start, verify, promote for
+// managed restores, and re-create the stanza for side restores.
 func restoreNextActions(cfg *Config, opts *RestoreOptions) []output.NextAction {
 	if opts == nil {
 		opts = &RestoreOptions{}
@@ -196,7 +196,8 @@ func restoreNextActions(cfg *Config, opts *RestoreOptions) []output.NextAction {
 	dataDir := getDataDir(cfg, opts.DataDir)
 	managedDir := getDataDir(cfg, "")
 	action := determineTargetAction(opts)
-	needsManualPromote := action != "promote" && !opts.Default
+	needsSideManualPromote := action != "promote" && !opts.Default
+	needsManagedPromote := action != "promote"
 	sameDataDir, sameErr := sameRestoreDataDir(cfg, dataDir, managedDir)
 	isCustomDataDir := sameErr != nil || !sameDataDir
 
@@ -206,7 +207,7 @@ func restoreNextActions(cfg *Config, opts *RestoreOptions) []output.NextAction {
 			{Command: fmt.Sprintf("pg_ctl -D %s -o \"-p 5433\" start", quotedDataDir), Reason: "start PostgreSQL with the restored data directory on an alternate port", Required: true},
 			{Command: fmt.Sprintf("pg_ctl -D %s status", quotedDataDir), Reason: "verify PostgreSQL is running on the side restore directory", Required: false},
 		}
-		if needsManualPromote {
+		if needsSideManualPromote {
 			actions = append(actions, output.NextAction{
 				Command: fmt.Sprintf("pg_ctl -D %s promote", quotedDataDir), Reason: "promote to primary once the restored state is verified", Required: false})
 		}
@@ -218,12 +219,11 @@ func restoreNextActions(cfg *Config, opts *RestoreOptions) []output.NextAction {
 		{Command: restorePigPgCommand("start", managedDir), Reason: "start PostgreSQL on the restored data directory", Required: true},
 		{Command: restorePigPgCommand("status", managedDir), Reason: "verify PostgreSQL is running on the restored data directory", Required: false},
 	}
-	if needsManualPromote {
+	if needsManagedPromote {
 		actions = append(actions, output.NextAction{
-			Command: restorePigPgCommand("promote", managedDir), Reason: "promote to primary once the restored state is verified", Required: false})
+			Command: restorePigPgCommand("promote", managedDir), Reason: "promote to primary after accepting the restored state", Required: false})
 	}
-	return append(actions, output.NextAction{
-		Command: restorePigPBCreateCommand(cfg), Reason: "re-create the pgBackRest stanza if needed", Required: false})
+	return actions
 }
 
 func sameRestoreDataDir(cfg *Config, targetDir string, managedDir string) (bool, error) {
@@ -253,10 +253,6 @@ func restorePigPgCommand(subcommand string, dataDir string) string {
 		parts = append(parts, "-D", QuoteShellArg(dataDir))
 	}
 	return strings.Join(parts, " ")
-}
-
-func restorePigPBCreateCommand(cfg *Config) string {
-	return strings.Join(commandPrefix(cfg, "create"), " ")
 }
 
 func restoreSideStanzaCreateCommand(cfg *Config, dataDir string) string {

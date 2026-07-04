@@ -627,16 +627,18 @@ func TestPrintPostRestoreHintsCustomDataDirPreservesStanzaCommandContext(t *test
 	}
 }
 
-func TestPrintPostRestoreHintsDefaultDataDirRenumbersStanzaStep(t *testing.T) {
+func TestPrintPostRestoreHintsDefaultDataDirSuggestsPromote(t *testing.T) {
 	output := capturePgBackRestStderr(t, func() {
 		printPostRestoreHints(DefaultConfig(), &RestoreOptions{Default: true})
 	})
 
-	if !strings.Contains(output, "3. Re-create stanza if needed:") {
-		t.Fatalf("default restore hints should renumber stanza step to 3, got:\n%s", output)
+	if !strings.Contains(output, "3. Promote if accept:") ||
+		!strings.Contains(output, "pig pg promote") {
+		t.Fatalf("default restore hints should suggest promotion as step 3, got:\n%s", output)
 	}
-	if strings.Contains(output, "4. Re-create stanza if needed:") {
-		t.Fatalf("default restore hints should not skip from step 2 to 4, got:\n%s", output)
+	if strings.Contains(output, "Re-create stanza") ||
+		strings.Contains(output, "pig pb create") {
+		t.Fatalf("managed restore hints should not suggest stanza recreation, got:\n%s", output)
 	}
 }
 
@@ -648,8 +650,11 @@ func TestPrintPostRestoreHintsManagedNonDefaultDataDirUsesManagedCommands(t *tes
 
 	if !strings.Contains(output, "pig pg start -D /var/lib/pgsql/18/data") ||
 		!strings.Contains(output, "pig pg status -D /var/lib/pgsql/18/data") ||
-		!strings.Contains(output, "pig pb create") {
+		!strings.Contains(output, "pig pg promote -D /var/lib/pgsql/18/data") {
 		t.Fatalf("managed non-/pg/data hints should use pig commands, got:\n%s", output)
+	}
+	if strings.Contains(output, "pig pb create") {
+		t.Fatalf("managed restore hints should not suggest stanza recreation, got:\n%s", output)
 	}
 	if strings.Contains(output, "pg_ctl -D /var/lib/pgsql/18/data") {
 		t.Fatalf("managed non-/pg/data hints must not use side-restore pg_ctl, got:\n%s", output)
