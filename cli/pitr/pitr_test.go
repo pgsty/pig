@@ -1201,6 +1201,16 @@ func TestValidatePITRDataDirAllowsExplicitUninitializedDirectory(t *testing.T) {
 	}
 }
 
+func TestValidatePITRRestoreTargetSuggestsSideDirPreparation(t *testing.T) {
+	err := validatePITRRestoreTarget("postgres", "/tmp/pitr-restore", true, false, false)
+	if err == nil {
+		t.Fatal("missing side restore directory should fail")
+	}
+	if !strings.Contains(err.Error(), "install -d -m 700 -o postgres -g postgres /tmp/pitr-restore") {
+		t.Fatalf("missing side dir error should suggest preparation command, got %q", err.Error())
+	}
+}
+
 func TestValidatePITRDataDirOwnerRequiresDBSUForSideRestore(t *testing.T) {
 	err := validatePITRDataDirOwner("/tmp/pitr-restore", "postgres", "vagrant")
 	if err == nil {
@@ -1211,6 +1221,9 @@ func TestValidatePITRDataDirOwnerRequiresDBSUForSideRestore(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "chown postgres") {
 		t.Fatalf("error should suggest chown to dbsu, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "chmod 700 /tmp/pitr-restore") {
+		t.Fatalf("error should suggest restrictive side-restore permissions, got %q", err.Error())
 	}
 
 	if err := validatePITRDataDirOwner("/tmp/pitr-restore", "postgres", "postgres"); err != nil {

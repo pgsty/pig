@@ -418,6 +418,13 @@ func Restart(cfg *Config, opts *RestartOptions) error {
 	// Build pg_ctl restart command
 	cmdArgs := []string{pg.PgCtl(), "restart", "-D", dataDir, "-m", mode}
 
+	// Redirect the restarted postmaster's stdout/stderr to a log file (-l).
+	// Without this, the new postmaster inherits pig's stdout/stderr pipe and
+	// keeps its write end open, so the output-copy goroutine never sees EOF
+	// and the command hangs indefinitely even after the restart succeeds.
+	// This mirrors the behavior of Start (see buildStartArgs).
+	cmdArgs = append(cmdArgs, "-l", DefaultStartLogFile)
+
 	// Wait options
 	if opts != nil && opts.NoWait {
 		cmdArgs = append(cmdArgs, "-W")

@@ -784,6 +784,55 @@ func TestPatroniTextConfirmClusterOps(t *testing.T) {
 	}
 }
 
+func TestPatroniSwitchoverTextCancelIsSilent(t *testing.T) {
+	origFormat := config.OutputFormat
+	origPlan := patroniPlan
+	origConfirm := highRiskTextConfirm
+	origSwitchover := patroniSwitchoverExec
+	origPreflight := patroniSwitchPreflight
+	origSilenceErrors := patroniSwitchoverCmd.SilenceErrors
+	origSilenceUsage := patroniSwitchoverCmd.SilenceUsage
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniPlan = origPlan
+		highRiskTextConfirm = origConfirm
+		patroniSwitchoverExec = origSwitchover
+		patroniSwitchPreflight = origPreflight
+		patroniSwitchoverCmd.SilenceErrors = origSilenceErrors
+		patroniSwitchoverCmd.SilenceUsage = origSilenceUsage
+		_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	patroniPlan = false
+	patroniSwitchoverCmd.SilenceErrors = false
+	patroniSwitchoverCmd.SilenceUsage = false
+	_ = patroniSwitchoverCmd.Flags().Set("yes", "false")
+	highRiskTextConfirm = func(warning, action string) error {
+		return errors.New("switchover cancelled by user")
+	}
+	patroniSwitchPreflight = func(dbsu string) (*patroni.SwitchPreflight, *output.Result) {
+		return &patroni.SwitchPreflight{Cluster: "pg-test", Leader: "pg-test-1", Candidates: []string{"pg-test-2"}}, nil
+	}
+	patroniSwitchoverExec = func(dbsu string, opts *patroni.SwitchoverOptions) error {
+		t.Fatal("switchover must not execute after cancelled confirmation")
+		return nil
+	}
+
+	err := patroniSwitchoverCmd.RunE(patroniSwitchoverCmd, nil)
+	var exitErr *utils.ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("switchover cancellation = %T, want ExitCodeError: %v", err, err)
+	}
+	if !exitErr.Silent {
+		t.Fatalf("switchover cancellation should be silent, got %v", err)
+	}
+	if !patroniSwitchoverCmd.SilenceErrors || !patroniSwitchoverCmd.SilenceUsage {
+		t.Fatalf("switchover cancellation should silence Cobra output, got errors=%v usage=%v",
+			patroniSwitchoverCmd.SilenceErrors, patroniSwitchoverCmd.SilenceUsage)
+	}
+}
+
 func TestPatroniSwitchPreflightBlocksPausedClusterBeforeConfirm(t *testing.T) {
 	origFormat := config.OutputFormat
 	origPlan := patroniPlan

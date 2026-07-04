@@ -520,7 +520,12 @@ func validatePITRDataDir(dataDir string, explicitCustom bool, exists bool, initi
 func validatePITRRestoreTarget(dbsu string, dataDir string, sideRestore bool, exists bool, initialized bool) error {
 	if err := validatePITRDataDir(dataDir, sideRestore, exists, initialized); err == nil {
 		return nil
-	} else if sideRestore || !exists {
+	} else if sideRestore {
+		if !exists {
+			return fmt.Errorf("%w\nHint: Pig does not create side-restore directories automatically; run: %s", err, sideRestorePrepareCommand(dbsu, dataDir))
+		}
+		return err
+	} else if !exists {
 		return err
 	}
 
@@ -563,9 +568,15 @@ func validatePITRDataDirOwner(dataDir string, dbsu string, owner string) error {
 
 func validatePITRDataDirOwnerFor(dataDir string, dbsu string, owner string, kind string) error {
 	if owner != dbsu {
-		return fmt.Errorf("%s data directory %s is owned by %s; run: chown %s %s", kind, dataDir, owner, dbsu, dataDir)
+		quotedDataDir := pgbackrest.QuoteShellArg(dataDir)
+		return fmt.Errorf("%s data directory %s is owned by %s; run: chown %s %s && chmod 700 %s", kind, dataDir, owner, dbsu, quotedDataDir, quotedDataDir)
 	}
 	return nil
+}
+
+func sideRestorePrepareCommand(dbsu string, dataDir string) string {
+	quotedDataDir := pgbackrest.QuoteShellArg(dataDir)
+	return fmt.Sprintf("install -d -m 700 -o %s -g %s %s", dbsu, dbsu, quotedDataDir)
 }
 
 func validateSideRestorePolicy(sideRestore bool, noRestart bool) error {

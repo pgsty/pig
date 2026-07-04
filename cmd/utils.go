@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -142,6 +143,24 @@ func silenceCobraOnSilentExit(cmd *cobra.Command, err error) error {
 		cmd.SilenceUsage = true
 	}
 	return err
+}
+
+func silentRuntimeError(cmd *cobra.Command, err error) error {
+	if err == nil {
+		return nil
+	}
+	if cmd != nil {
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+	}
+	if utils.IsSilentExit(err) {
+		return err
+	}
+	var exitErr *utils.ExitCodeError
+	if errors.As(err, &exitErr) {
+		return &utils.ExitCodeError{Code: exitErr.Code, Err: exitErr.Err, Silent: true}
+	}
+	return &utils.ExitCodeError{Code: utils.ExitCode(err), Err: err, Silent: true}
 }
 
 // wrapSilentExitSilence wraps every RunE in the command tree so a silent

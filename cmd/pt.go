@@ -453,15 +453,15 @@ from scratch using pg_basebackup from the current leader.`,
 			patroni.ReinitCommand(opts, false, true),
 			patroni.ReinitCommand(opts, true, false),
 		); err != nil {
-			return err
+			return silentRuntimeError(cmd, err)
 		}
-		return runLegacyStructured(legacyModulePt, "pig patroni reinit", args, map[string]interface{}{
+		return silentRuntimeError(cmd, runLegacyStructured(legacyModulePt, "pig patroni reinit", args, map[string]interface{}{
 			"member": args[0],
 			"yes":    yes,
 			"wait":   wait,
 		}, func() error {
 			return patroniReinitExec(utils.GetDBSU(patroniDBSU), opts)
-		})
+		}))
 	},
 }
 
@@ -515,13 +515,13 @@ The old leader becomes a replica after switchover.`,
 			patroni.SwitchoverCommand(opts, false, true),
 			patroni.SwitchoverCommand(opts, true, false),
 		); err != nil {
-			return err
+			return silentRuntimeError(cmd, err)
 		}
 
 		if config.IsStructuredOutput() {
 			return handleAuxResult(patroni.SwitchoverResult(dbsu, opts))
 		}
-		return patroniSwitchoverExec(dbsu, opts)
+		return silentRuntimeError(cmd, patroniSwitchoverExec(dbsu, opts))
 	},
 }
 
@@ -592,13 +592,13 @@ the leader is truly unavailable.`,
 			patroni.FailoverCommand(opts, false, true),
 			patroni.FailoverCommand(opts, true, false),
 		); err != nil {
-			return err
+			return silentRuntimeError(cmd, err)
 		}
 
 		if config.IsStructuredOutput() {
 			return handleAuxResult(patroni.FailoverResult(dbsu, opts))
 		}
-		return patroniFailoverExec(dbsu, opts)
+		return silentRuntimeError(cmd, patroniFailoverExec(dbsu, opts))
 	},
 }
 

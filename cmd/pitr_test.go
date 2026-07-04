@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -53,6 +54,35 @@ func TestPITRHelpSaysCustomDataDirRequiresNoRestart(t *testing.T) {
 	}
 	if !strings.Contains(pitrCmd.Example, "pig pitr -d -D /tmp/pg-restore --no-restart") {
 		t.Fatalf("custom -D example should keep --no-restart:\n%s", pitrCmd.Example)
+	}
+}
+
+func TestPITRHelpAndSpecDocumentSideRestoreDirectoryPermissions(t *testing.T) {
+	help := pitrCmd.Long + "\n" + pitrCmd.Example
+	for _, want := range []string{
+		"Pig does not create this directory automatically",
+		"mkdir -p /tmp/pg-restore",
+		"chown postgres /tmp/pg-restore",
+		"chmod 700 /tmp/pg-restore",
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("pitr help should document side-restore directory requirement %q:\n%s", want, help)
+		}
+	}
+
+	raw, err := os.ReadFile("../docs/spec/pitr.md")
+	if err != nil {
+		t.Fatalf("read pitr spec: %v", err)
+	}
+	spec := string(raw)
+	for _, want := range []string{
+		"Pig does not create side-restore directories automatically",
+		"install -d -m 700 -o postgres -g postgres /tmp/pg-restore",
+		"side-restore directory must be empty enough for pgBackRest restore",
+	} {
+		if !strings.Contains(spec, want) {
+			t.Fatalf("pitr spec should document side-restore directory requirement %q", want)
+		}
 	}
 }
 

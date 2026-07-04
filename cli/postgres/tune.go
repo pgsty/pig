@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -275,30 +274,7 @@ func detectMemoryMB() int {
 	return 0
 }
 
-// detectDiskGB runs df on the given path and returns total disk size in GB.
-// Returns 0 on failure.
-func detectDiskGB(path string) int {
-	out, err := exec.Command("df", "-k", path).Output()
-	if err != nil {
-		logrus.Debugf("df failed for %s: %v", path, err)
-		return 0
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) < 2 {
-		return 0
-	}
-	fields := strings.Fields(lines[len(lines)-1])
-	if len(fields) < 2 {
-		return 0
-	}
-	kb, err := strconv.Atoi(fields[1])
-	if err != nil {
-		return 0
-	}
-	return kb / (1024 * 1024) // KB -> GB
-}
-
-// ============================================================================	
+// ============================================================================
 // PG Version Resolution
 // ============================================================================
 
@@ -353,6 +329,6 @@ func minInt(a, b int) int {
 	return b
 }
 
-func itoa(n int) string          { return strconv.Itoa(n) }
-func mb(n int) string            { return fmt.Sprintf("%dMB", n) }
-func gb(n int) string            { return fmt.Sprintf("%dGB", n) }
+func itoa(n int) string { return strconv.Itoa(n) }
+func mb(n int) string   { return fmt.Sprintf("%dMB", n) }
+func gb(n int) string   { return fmt.Sprintf("%dGB", n) }

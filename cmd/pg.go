@@ -768,7 +768,7 @@ func runClone(cmd *cobra.Command, opts *postgres.CloneOptions) error {
 	}
 
 	if err := postgres.ExecuteClone(opts); err != nil {
-		return handleCloneError(err)
+		return silentRuntimeError(cmd, handleCloneError(err))
 	}
 	return nil
 }

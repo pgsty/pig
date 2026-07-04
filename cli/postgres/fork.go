@@ -1845,34 +1845,6 @@ func existingParentAs(dbsu, path string) string {
 	return "/"
 }
 
-func dfMountAndFS(path string) (string, string) {
-	out, err := exec.Command("df", "-T", path).Output()
-	if err != nil {
-		return "", ""
-	}
-	return parseDFMountAndFS(string(out))
-}
-
-func dfMountAndFSAs(dbsu, path string) (string, string) {
-	out, err := forkDBSUCommandOutput(dbsu, []string{"df", "-T", path})
-	if err != nil {
-		return "", ""
-	}
-	return parseDFMountAndFS(out)
-}
-
-func parseDFMountAndFS(out string) (string, string) {
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) < 2 {
-		return "", ""
-	}
-	fields := strings.Fields(lines[len(lines)-1])
-	if len(fields) < 7 {
-		return "", ""
-	}
-	return fields[6], fields[1]
-}
-
 func instanceResult(opts *Options, state *State, elapsed time.Duration) ResultData {
 	inst := opts.Instance
 	return ResultData{

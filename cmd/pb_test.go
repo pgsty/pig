@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"io"
 	"os"
+	"path/filepath"
 	"pig/cli/pgbackrest"
 	"pig/internal/config"
 	"pig/internal/output"
@@ -590,6 +591,76 @@ func TestPbRestoreMissingTargetTextReturnsInvalidArgs(t *testing.T) {
 	}
 	if !pbRestoreCmd.SilenceUsage || !pbRestoreCmd.SilenceErrors {
 		t.Fatalf("missing-target help path should silence Cobra duplicate output, got usage=%v errors=%v",
+			pbRestoreCmd.SilenceUsage, pbRestoreCmd.SilenceErrors)
+	}
+}
+
+func TestPbRestoreTextRuntimeErrorAfterValidationIsSilent(t *testing.T) {
+	origFormat := config.OutputFormat
+	origDefault := pbRestoreDefault
+	origImmediate := pbRestoreImmediate
+	origTime := pbRestoreTime
+	origName := pbRestoreName
+	origLSN := pbRestoreLSN
+	origXID := pbRestoreXID
+	origSet := pbRestoreSet
+	origDataDir := pbRestoreDataDir
+	origExclusive := pbRestoreExclusive
+	origTargetAction := pbRestoreTargetAction
+	origTargetTimeline := pbRestoreTargetTimeline
+	origPlan := pbRestorePlan
+	origYes := pbRestoreYes
+	origConfigPath := pbConfig.ConfigPath
+	origSilenceUsage := pbRestoreCmd.SilenceUsage
+	origSilenceErrors := pbRestoreCmd.SilenceErrors
+	defer func() {
+		config.OutputFormat = origFormat
+		pbRestoreDefault = origDefault
+		pbRestoreImmediate = origImmediate
+		pbRestoreTime = origTime
+		pbRestoreName = origName
+		pbRestoreLSN = origLSN
+		pbRestoreXID = origXID
+		pbRestoreSet = origSet
+		pbRestoreDataDir = origDataDir
+		pbRestoreExclusive = origExclusive
+		pbRestoreTargetAction = origTargetAction
+		pbRestoreTargetTimeline = origTargetTimeline
+		pbRestorePlan = origPlan
+		pbRestoreYes = origYes
+		pbConfig.ConfigPath = origConfigPath
+		pbRestoreCmd.SilenceUsage = origSilenceUsage
+		pbRestoreCmd.SilenceErrors = origSilenceErrors
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	pbRestoreDefault = true
+	pbRestoreImmediate = false
+	pbRestoreTime = ""
+	pbRestoreName = ""
+	pbRestoreLSN = ""
+	pbRestoreXID = ""
+	pbRestoreSet = ""
+	pbRestoreDataDir = ""
+	pbRestoreExclusive = false
+	pbRestoreTargetAction = ""
+	pbRestoreTargetTimeline = ""
+	pbRestorePlan = false
+	pbRestoreYes = true
+	pbConfig.ConfigPath = filepath.Join(t.TempDir(), "missing.conf")
+	pbRestoreCmd.SilenceUsage = false
+	pbRestoreCmd.SilenceErrors = false
+
+	err := pbRestoreCmd.RunE(pbRestoreCmd, nil)
+	var exitErr *utils.ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("pb restore runtime error = %T, want ExitCodeError: %v", err, err)
+	}
+	if !exitErr.Silent {
+		t.Fatalf("pb restore runtime error should be silent, got %v", err)
+	}
+	if !pbRestoreCmd.SilenceUsage || !pbRestoreCmd.SilenceErrors {
+		t.Fatalf("pb restore runtime error should silence Cobra output, got usage=%v errors=%v",
 			pbRestoreCmd.SilenceUsage, pbRestoreCmd.SilenceErrors)
 	}
 }

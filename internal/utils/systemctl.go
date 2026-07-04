@@ -32,7 +32,12 @@ func RunSystemctl(action, service string) error {
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return &ExitCodeError{Code: exitErr.ExitCode(), Err: err}
+			// The status action is a read-only query: systemctl reports the
+			// unit state via the exit code (3 = inactive/dead, 4 = not found),
+			// which is not a command failure. Preserve the exit code for
+			// scripting but mark it silent so we don't dump cobra usage or an
+			// alarming "command execution failed" log for a stopped service.
+			return &ExitCodeError{Code: exitErr.ExitCode(), Err: err, Silent: action == "status"}
 		}
 		return fmt.Errorf("systemctl %s failed: %w", action, err)
 	}

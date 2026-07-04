@@ -43,6 +43,12 @@ cluster membership after restore.
 Custom -D side restores require --no-restart. Restored PostgreSQL
 configuration keeps the original port, so start the side restore manually
 with pg_ctl -D <dir> -o "-p <free-port>" start.
+The custom directory must already exist, be owned by the configured DBSU
+(postgres by default), and be writable by that user.
+Pig does not create this directory automatically. Example preparation:
+  mkdir -p /tmp/pg-restore
+  chown postgres /tmp/pg-restore
+  chmod 700 /tmp/pg-restore
 
 Recovery Targets (at least one required):
   --default, -d      Recover to end of WAL stream (latest)
@@ -178,8 +184,9 @@ The command uses the same execution privilege strategy as other pig commands:
 			return handleAuxResult(result)
 		}
 
-		// Text output: keep existing behavior
-		return pitr.Execute(pitrOpts)
+		// Text output: execute after validation without Cobra usage/error noise
+		// for runtime, precheck, and confirmation-cancel failures.
+		return silentRuntimeError(cmd, pitr.Execute(pitrOpts))
 	},
 }
 
@@ -201,7 +208,7 @@ func handlePITRPlanError(err error) error {
 	if config.IsStructuredOutput() {
 		return handleAuxResult(output.Fail(code, err.Error()))
 	}
-	return &utils.ExitCodeError{Code: output.ExitCode(code), Err: err}
+	return &utils.ExitCodeError{Code: output.ExitCode(code), Err: err, Silent: true}
 }
 
 func init() {
