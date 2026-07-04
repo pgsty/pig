@@ -457,6 +457,48 @@ func TestPatroniConfigInvalidActionStructuredError(t *testing.T) {
 	}
 }
 
+func TestPatroniConfigInvalidActionTextHelpIsSilentError(t *testing.T) {
+	origFormat := config.OutputFormat
+	origOut := patroniConfigCmd.OutOrStdout()
+	origErr := patroniConfigCmd.ErrOrStderr()
+	origSilenceUsage := patroniConfigCmd.SilenceUsage
+	origSilenceErrors := patroniConfigCmd.SilenceErrors
+	defer func() {
+		config.OutputFormat = origFormat
+		patroniConfigCmd.SetOut(origOut)
+		patroniConfigCmd.SetErr(origErr)
+		patroniConfigCmd.SilenceUsage = origSilenceUsage
+		patroniConfigCmd.SilenceErrors = origSilenceErrors
+	}()
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	patroniConfigCmd.SetOut(io.Discard)
+	patroniConfigCmd.SetErr(io.Discard)
+	patroniConfigCmd.SilenceUsage = false
+	patroniConfigCmd.SilenceErrors = false
+
+	err := patroniConfigCmd.RunE(patroniConfigCmd, []string{"invalid"})
+	if err == nil {
+		t.Fatal("expected text error for invalid config action")
+	}
+
+	var exitErr *utils.ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitCodeError, got %T: %v", err, err)
+	}
+	if exitErr.Code != output.ExitCode(output.CodePtInvalidConfigAction) {
+		t.Fatalf("unexpected exit code: got %d, want %d",
+			exitErr.Code, output.ExitCode(output.CodePtInvalidConfigAction))
+	}
+	if !exitErr.Silent {
+		t.Fatal("invalid-action help path should return a silent exit after printing help")
+	}
+	if !patroniConfigCmd.SilenceUsage || !patroniConfigCmd.SilenceErrors {
+		t.Fatalf("invalid-action help path should silence Cobra duplicate output, got usage=%v errors=%v",
+			patroniConfigCmd.SilenceUsage, patroniConfigCmd.SilenceErrors)
+	}
+}
+
 func TestPatroniStructuredNeedYesGate(t *testing.T) {
 	origFormat := config.OutputFormat
 	defer func() {

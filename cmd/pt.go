@@ -768,7 +768,16 @@ restart-required. After changing those parameters, inspect the cluster with
 						WithDetail("unknown action: " + action + " (valid: show, edit, set, pg)"),
 				)
 			}
-			return cmd.Help()
+			if err := cmd.Help(); err != nil {
+				return err
+			}
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			return &utils.ExitCodeError{
+				Code:   output.ExitCode(output.CodePtInvalidConfigAction),
+				Err:    fmt.Errorf("invalid config action: %s", action),
+				Silent: true,
+			}
 		}
 	},
 }
