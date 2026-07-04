@@ -764,7 +764,7 @@ func TestPatroniStartStopShortcutHelpMentionsSvcTarget(t *testing.T) {
 		alias  string
 	}{
 		{name: "start", cmd: patroniStartCmd, target: "pig pt svc start", alias: "pig pt up"},
-		{name: "stop", cmd: patroniStopCmd, target: "pig pt svc stop", alias: "pig pt down"},
+		{name: "stop", cmd: patroniStopCmd, target: "pig pt svc stop", alias: "pig pt dn"},
 	}
 
 	for _, tt := range tests {
@@ -782,20 +782,31 @@ func TestPatroniStartStopShortcutHelpMentionsSvcTarget(t *testing.T) {
 	}
 }
 
-func TestPatroniServiceAliasesStayMinimal(t *testing.T) {
+func TestPatroniAliasesMatchContract(t *testing.T) {
 	tests := []struct {
 		name string
 		cmd  *cobra.Command
 		want []string
 	}{
-		{name: "pt start", cmd: patroniStartCmd, want: []string{"up"}},
-		{name: "pt stop", cmd: patroniStopCmd, want: []string{"down"}},
-		{name: "pt restart", cmd: patroniRestartCmd, want: []string{"rst"}},
+		{name: "pt list", cmd: patroniListCmd, want: []string{"ls"}},
+		{name: "pt restart", cmd: patroniRestartCmd, want: []string{"rs"}},
 		{name: "pt reload", cmd: patroniReloadCmd, want: []string{"rl"}},
+		{name: "pt reinit", cmd: patroniReinitCmd, want: []string{"ri"}},
+		{name: "pt switchover", cmd: patroniSwitchoverCmd, want: []string{"sw"}},
+		{name: "pt failover", cmd: patroniFailoverCmd, want: []string{"fo"}},
+		{name: "pt pause", cmd: patroniPauseCmd, want: []string{"p"}},
+		{name: "pt resume", cmd: patroniResumeCmd, want: []string{"r"}},
+		{name: "pt config", cmd: patroniConfigCmd, want: []string{"c"}},
+		{name: "pt start", cmd: patroniStartCmd, want: []string{"up"}},
+		{name: "pt stop", cmd: patroniStopCmd, want: []string{"dn"}},
 		{name: "pt status", cmd: patroniStatusCmd, want: []string{"st"}},
+		{name: "pt log", cmd: patroniLogCmd, want: []string{"l"}},
+		{name: "pt log show", cmd: patroniLogCatCmd, want: []string{"s"}},
+		{name: "pt log tail", cmd: patroniLogTailCmd, want: []string{"t"}},
+		{name: "pt svc", cmd: patroniSvcCmd, want: []string{"service"}},
 		{name: "pt svc start", cmd: patroniSvcStartCmd, want: []string{"up"}},
-		{name: "pt svc stop", cmd: patroniSvcStopCmd, want: []string{"down"}},
-		{name: "pt svc restart", cmd: patroniSvcRestartCmd, want: []string{"rst"}},
+		{name: "pt svc stop", cmd: patroniSvcStopCmd, want: []string{"dn"}},
+		{name: "pt svc restart", cmd: patroniSvcRestartCmd, want: []string{"rs"}},
 		{name: "pt svc reload", cmd: patroniSvcReloadCmd, want: []string{"rl"}},
 		{name: "pt svc status", cmd: patroniSvcStatusCmd, want: []string{"st"}},
 	}
@@ -809,9 +820,32 @@ func TestPatroniServiceAliasesStayMinimal(t *testing.T) {
 	}
 }
 
-// TestPatroniRemovedShorthands guards B04/B12/B17: -f/-l/-c/-s/-w are gone from
-// the pt cluster-op surface while --yes/-y is present on all four T2 commands.
-func TestPatroniRemovedShorthands(t *testing.T) {
+func TestPatroniWaitFlagsUseWWhenAvailable(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+	}{
+		{name: "pt reinit", cmd: patroniReinitCmd},
+		{name: "pt pause", cmd: patroniPauseCmd},
+		{name: "pt resume", cmd: patroniResumeCmd},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flag := tt.cmd.Flags().Lookup("wait")
+			if flag == nil {
+				t.Fatalf("%s must expose --wait", tt.name)
+			}
+			if flag.Shorthand != "w" {
+				t.Fatalf("%s --wait shorthand = %q, want %q", tt.name, flag.Shorthand, "w")
+			}
+		})
+	}
+}
+
+// TestPatroniClusterOpShorthands guards B04/B12/B17: -f remains removed,
+// and approved pt shortcuts stay exposed.
+func TestPatroniClusterOpShorthands(t *testing.T) {
 	removed := map[*cobra.Command][]string{
 		patroniRestartCmd:    {"force"},
 		patroniReinitCmd:     {"force"},
@@ -829,22 +863,34 @@ func TestPatroniRemovedShorthands(t *testing.T) {
 			t.Errorf("pt %s: --yes/-y gate flag missing (B04)", cmd.Name())
 		}
 	}
-	longOnly := map[*cobra.Command][]string{
-		patroniReinitCmd:     {"wait"},
-		patroniPauseCmd:      {"wait"},
-		patroniResumeCmd:     {"wait"},
-		patroniSwitchoverCmd: {"leader", "candidate", "scheduled"},
-		patroniFailoverCmd:   {"candidate"},
+	shortcuts := map[*cobra.Command]map[string]string{
+		patroniReinitCmd: {
+			"wait": "w",
+		},
+		patroniSwitchoverCmd: {
+			"leader":    "l",
+			"candidate": "c",
+			"scheduled": "s",
+		},
+		patroniFailoverCmd: {
+			"candidate": "c",
+		},
+		patroniPauseCmd: {
+			"wait": "w",
+		},
+		patroniResumeCmd: {
+			"wait": "w",
+		},
 	}
-	for cmd, flags := range longOnly {
-		for _, name := range flags {
+	for cmd, flags := range shortcuts {
+		for name, shorthand := range flags {
 			f := cmd.Flags().Lookup(name)
 			if f == nil {
 				t.Errorf("pt %s: flag --%s missing", cmd.Name(), name)
 				continue
 			}
-			if f.Shorthand != "" {
-				t.Errorf("pt %s: --%s must be long-only (B12/B17), has -%s", cmd.Name(), name, f.Shorthand)
+			if f.Shorthand != shorthand {
+				t.Errorf("pt %s: --%s shorthand = %q, want %q", cmd.Name(), name, f.Shorthand, shorthand)
 			}
 		}
 	}

@@ -55,9 +55,9 @@ Service Management (via systemctl):
   pig pt svc status                show patroni service status
 
 Logs:
-  pig pt log [-f] [-n 100]         view patroni logs
-  pig pt log tail [-n 100]         follow patroni logs
-  pig pt log show [-n 100]         show patroni log snapshot
+  pig pt log [-f] [-n 50]          view patroni logs
+  pig pt log tail [-n 50]          follow patroni logs
+  pig pt log show [-n 50]          show patroni log snapshot
 	`,
 }
 
@@ -88,26 +88,26 @@ func registerPatroniFlags() {
 	patroniRestartCmd.Flags().StringP("role", "r", "", "Filter by role: leader, replica, any")
 	patroniRestartCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
-	// reinit subcommand flags (B12: --wait is long-only)
+	// reinit subcommand flags (B12: --wait keeps Patroni's -w shortcut)
 	patroniReinitCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
-	patroniReinitCmd.Flags().Bool("wait", false, "Wait for reinit to complete")
+	patroniReinitCmd.Flags().BoolP("wait", "w", false, "Wait for reinit to complete")
 	patroniReinitCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
-	// switchover subcommand flags (B17: target flags are long-only)
-	patroniSwitchoverCmd.Flags().String("leader", "", "Current leader name")
-	patroniSwitchoverCmd.Flags().String("candidate", "", "Candidate to promote")
+	// switchover subcommand flags (B17: target flags have explicit shortcuts)
+	patroniSwitchoverCmd.Flags().StringP("leader", "l", "", "Current leader name")
+	patroniSwitchoverCmd.Flags().StringP("candidate", "c", "", "Candidate to promote")
 	patroniSwitchoverCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
-	patroniSwitchoverCmd.Flags().String("scheduled", "", "Scheduled time for switchover")
+	patroniSwitchoverCmd.Flags().StringP("scheduled", "s", "", "Scheduled time for switchover")
 	patroniSwitchoverCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
-	// failover subcommand flags (B17: --candidate is long-only)
-	patroniFailoverCmd.Flags().String("candidate", "", "Candidate to promote (required)")
+	// failover subcommand flags (B17: --candidate has explicit shortcut)
+	patroniFailoverCmd.Flags().StringP("candidate", "c", "", "Candidate to promote (required)")
 	patroniFailoverCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
 	patroniFailoverCmd.Flags().BoolVar(&patroniPlan, "plan", false, "show execution plan without running")
 
-	// pause/resume subcommand flags (B12: --wait is long-only)
-	patroniPauseCmd.Flags().Bool("wait", false, "Wait for all members to confirm")
-	patroniResumeCmd.Flags().Bool("wait", false, "Wait for all members to confirm")
+	// pause/resume subcommand flags (B12: --wait keeps Patroni's -w shortcut)
+	patroniPauseCmd.Flags().BoolP("wait", "w", false, "Wait for all members to confirm")
+	patroniResumeCmd.Flags().BoolP("wait", "w", false, "Wait for all members to confirm")
 
 	// config subcommand flags
 	patroniConfigCmd.Flags().BoolVar(&patroniConfigPlan, "plan", false, "preview config changes without executing")
@@ -209,7 +209,7 @@ var patroniListCmd = &cobra.Command{
 // patroniRestartCmd: pig pt restart [member] - restart PostgreSQL via patronictl
 var patroniRestartCmd = &cobra.Command{
 	Use:     "restart [member]",
-	Aliases: []string{"rst"},
+	Aliases: []string{"rs"},
 	Short:   "Restart PostgreSQL instance(s) via Patroni",
 	Args:    cobra.MaximumNArgs(1),
 	Annotations: mergeAnn(
@@ -362,7 +362,7 @@ from scratch using pg_basebackup from the current leader.`,
 	Example: `
   pig pt reinit pg-test-2          # reinit member pg-test-2 (asks confirmation)
   pig pt reinit pg-test-2 -y       # reinit without confirmation
-  pig pt reinit pg-test-2 --wait   # wait for completion`,
+  pig pt reinit pg-test-2 -w       # wait for completion`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		yes, _ := cmd.Flags().GetBool("yes")
@@ -405,8 +405,9 @@ The old leader becomes a replica after switchover.`,
 	Example: `
   pig pt switchover                          # planned switchover (asks confirmation)
   pig pt switchover --candidate pg-test-2    # switchover to specific member
+  pig pt switchover -l pg-test-1 -c pg-test-2 # short target flags
   pig pt switchover -y                       # switchover without confirmation
-  pig pt switchover --scheduled "2024-01-01T12:00:00"  # scheduled switchover`,
+  pig pt switchover -s "2024-01-01T12:00:00" # scheduled switchover`,
 	Annotations: ancsAnn("pig patroni switchover", "action", "volatile", "unsafe", false, "high", "required", "dbsu", 300000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		leader, _ := cmd.Flags().GetString("leader")
@@ -458,6 +459,7 @@ WARNING: Use switchover for planned maintenance. Only use failover when
 the leader is truly unavailable.`,
 	Example: `
   pig pt failover --candidate pg-test-2         # failover to member (asks confirmation)
+  pig pt failover -c pg-test-2                  # failover to member (short form)
   pig pt failover --candidate pg-test-2 -y      # failover without confirmation
   pig pt failover --candidate pg-test-2 -o json # structured JSON output
   pig pt failover --candidate pg-test-2 --plan  # show execution plan`,
@@ -507,7 +509,7 @@ var patroniPauseCmd = &cobra.Command{
 	Long:        `Pause automatic failover for the Patroni cluster.`,
 	Example: `
   pig pt pause              # Pause automatic failover
-  pig pt pause --wait       # Wait for all members to confirm`,
+  pig pt pause -w           # Wait for all members to confirm`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wait, _ := cmd.Flags().GetBool("wait")
 		return runLegacyStructured(legacyModulePt, "pig patroni pause", args, map[string]interface{}{
@@ -528,7 +530,7 @@ var patroniResumeCmd = &cobra.Command{
 	Long:        `Resume automatic failover for the Patroni cluster.`,
 	Example: `
   pig pt resume              # Resume automatic failover
-  pig pt resume --wait       # Wait for all members to confirm`,
+  pig pt resume -w           # Wait for all members to confirm`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wait, _ := cmd.Flags().GetBool("wait")
 		return runLegacyStructured(legacyModulePt, "pig patroni resume", args, map[string]interface{}{
@@ -542,7 +544,7 @@ var patroniResumeCmd = &cobra.Command{
 // patroniConfigCmd: pig pt config <action> [key=value ...]
 var patroniConfigCmd = &cobra.Command{
 	Use:     "config <action> [key=value ...]",
-	Aliases: []string{"cfg", "c"},
+	Aliases: []string{"c"},
 	Short:   "Show or edit cluster config",
 	Long: `Manage Patroni cluster configuration.
 
@@ -695,7 +697,7 @@ func printPatroniConfigPGHints(kvPairs []string) {
 // patroniLogCmd: pig pt log
 var patroniLogCmd = &cobra.Command{
 	Use:         "log",
-	Aliases:     []string{"l", "lg"},
+	Aliases:     []string{"l"},
 	Short:       "View patroni logs",
 	Annotations: ancsAnn("pig patroni log", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Long:        `View patroni service logs using journalctl.`,
@@ -737,7 +739,7 @@ var patroniLogCmd = &cobra.Command{
 
 var patroniLogCatCmd = &cobra.Command{
 	Use:         "show",
-	Aliases:     []string{"cat", "c"},
+	Aliases:     []string{"s"},
 	Short:       "Output recent patroni logs",
 	Annotations: ancsAnn("pig patroni log show", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Args:        cobra.NoArgs,
@@ -761,7 +763,7 @@ var patroniLogCatCmd = &cobra.Command{
 
 var patroniLogTailCmd = &cobra.Command{
 	Use:         "tail",
-	Aliases:     []string{"t", "f", "follow"},
+	Aliases:     []string{"t"},
 	Short:       "Tail patroni logs",
 	Annotations: ancsAnn("pig patroni log tail", "query", "volatile", "safe", true, "safe", "none", "dbsu", 0),
 	Args:        cobra.NoArgs,
@@ -833,7 +835,7 @@ var patroniStartCmd = &cobra.Command{
 // patroniStopCmd: hidden shortcut for 'pig pt svc stop'.
 var patroniStopCmd = &cobra.Command{
 	Use:          "stop",
-	Aliases:      []string{"down"},
+	Aliases:      []string{"dn"},
 	Hidden:       true,
 	SilenceUsage: true,
 	Short:        "Stop patroni service",
@@ -851,10 +853,10 @@ var patroniStopCmd = &cobra.Command{
 // ============================================================================
 
 var patroniSvcCmd = &cobra.Command{
-	Use:         "service",
-	Aliases:     []string{"svc", "s"},
+	Use:         "svc",
+	Aliases:     []string{"service"},
 	Short:       "Manage patroni daemon service",
-	Annotations: ancsAnn("pig patroni service", "query", "stable", "safe", true, "safe", "none", "root", 100),
+	Annotations: ancsAnn("pig patroni svc", "query", "stable", "safe", true, "safe", "none", "root", 100),
 	Long: `Manage the Patroni daemon service using systemctl.
 
 These commands control the Patroni process itself, not the PostgreSQL
@@ -867,7 +869,7 @@ var patroniSvcStartCmd = &cobra.Command{
 	Use:         "start",
 	Aliases:     []string{"up"},
 	Short:       "Start patroni service",
-	Annotations: ancsAnn("pig patroni service start", "action", "volatile", "unsafe", true, "medium", "none", "root", 10000),
+	Annotations: ancsAnn("pig patroni svc start", "action", "volatile", "unsafe", true, "medium", "none", "root", 10000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("start", args)
 	},
@@ -875,9 +877,9 @@ var patroniSvcStartCmd = &cobra.Command{
 
 var patroniSvcStopCmd = &cobra.Command{
 	Use:         "stop",
-	Aliases:     []string{"down"},
+	Aliases:     []string{"dn"},
 	Short:       "Stop patroni service",
-	Annotations: ancsAnn("pig patroni service stop", "action", "volatile", "unsafe", true, "high", "recommended", "root", 10000),
+	Annotations: ancsAnn("pig patroni svc stop", "action", "volatile", "unsafe", true, "high", "recommended", "root", 10000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("stop", args)
 	},
@@ -885,9 +887,9 @@ var patroniSvcStopCmd = &cobra.Command{
 
 var patroniSvcRestartCmd = &cobra.Command{
 	Use:         "restart",
-	Aliases:     []string{"rst"},
+	Aliases:     []string{"rs"},
 	Short:       "Restart patroni service",
-	Annotations: ancsAnn("pig patroni service restart", "action", "volatile", "unsafe", false, "high", "recommended", "root", 30000),
+	Annotations: ancsAnn("pig patroni svc restart", "action", "volatile", "unsafe", false, "high", "recommended", "root", 30000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("restart", args)
 	},
@@ -897,7 +899,7 @@ var patroniSvcReloadCmd = &cobra.Command{
 	Use:         "reload",
 	Aliases:     []string{"rl"},
 	Short:       "Reload patroni service",
-	Annotations: ancsAnn("pig patroni service reload", "action", "volatile", "restricted", true, "low", "none", "root", 1000),
+	Annotations: ancsAnn("pig patroni svc reload", "action", "volatile", "restricted", true, "low", "none", "root", 1000),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("reload", args)
 	},
@@ -907,14 +909,14 @@ var patroniSvcStatusCmd = &cobra.Command{
 	Use:         "status",
 	Aliases:     []string{"st"},
 	Short:       "Show patroni service status",
-	Annotations: ancsAnn("pig patroni service status", "query", "volatile", "safe", true, "safe", "none", "root", 500),
+	Annotations: ancsAnn("pig patroni svc status", "query", "volatile", "safe", true, "safe", "none", "root", 500),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("status", args)
 	},
 }
 
 func runPatroniSvcAction(action string, args []string) error {
-	return runLegacyStructured(legacyModulePt, "pig patroni service "+action, args, nil, func() error {
+	return runLegacyStructured(legacyModulePt, "pig patroni svc "+action, args, nil, func() error {
 		return patroni.Systemctl(action)
 	})
 }
