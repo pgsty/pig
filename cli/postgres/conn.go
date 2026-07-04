@@ -216,27 +216,41 @@ func Psql(cfg *Config, dbname string, opts *PsqlOptions) error {
 		return fmt.Errorf("postgresql not found: %w", err)
 	}
 
-	// Validate database name
-	if !ValidateIdentifier(dbname) {
-		return fmt.Errorf("invalid database name: %s", dbname)
+	cmdArgs, err := buildPsqlArgs(pg.Psql(), cfg, dbname, opts)
+	if err != nil {
+		return err
 	}
 
-	// Default to postgres database
+	PrintHint(cmdArgs)
+	return utils.DBSUCommand(dbsu, cmdArgs)
+}
+
+func buildPsqlArgs(psqlPath string, cfg *Config, dbname string, opts *PsqlOptions) ([]string, error) {
 	if dbname == "" {
 		dbname = "postgres"
 	}
+	if !ValidateIdentifier(dbname) {
+		return nil, fmt.Errorf("invalid database name: %s", dbname)
+	}
 
-	// Build psql command
-	cmdArgs := []string{pg.Psql(), "-d", dbname}
+	cmdArgs := []string{psqlPath}
+	if cfg != nil && cfg.PgData != "" {
+		info, err := ReadPostmasterPidInfoAsDBSU(GetDbSU(cfg), cfg.PgData)
+		if err != nil {
+			return nil, fmt.Errorf("read postmaster info for %s: %w", cfg.PgData, err)
+		}
+		cmdArgs = append(cmdArgs, "-p", fmt.Sprintf("%d", info.Port))
+		if info.SocketDir != "" {
+			cmdArgs = append(cmdArgs, "-h", info.SocketDir)
+		}
+	}
+	cmdArgs = append(cmdArgs, "-d", dbname)
 
-	// Add options
 	if opts != nil && opts.Command != "" {
 		cmdArgs = append(cmdArgs, "-c", opts.Command)
 	}
 	if opts != nil && opts.File != "" {
 		cmdArgs = append(cmdArgs, "-f", opts.File)
 	}
-
-	PrintHint(cmdArgs)
-	return utils.DBSUCommand(dbsu, cmdArgs)
+	return cmdArgs, nil
 }

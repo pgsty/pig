@@ -7,6 +7,8 @@ package postgres
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -245,59 +247,104 @@ func TestStatusResult_ErrorCodes(t *testing.T) {
 	}
 }
 
-// TestParsePostmasterPidInfo tests parsing of postmaster.pid content
 func TestParsePostmasterPidInfo(t *testing.T) {
 	tests := []struct {
-		name        string
-		content     string
-		wantPort    int
-		wantUnix    int64
-		expectZero  bool
+		name          string
+		content       string
+		wantPort      int
+		wantSocketDir string
+		wantUnix      int64
+		wantErr       bool
 	}{
 		{
-			name: "epoch timestamp",
-			content: "12345\n/pg/data\n1738656000\n5432\n/var/run/postgresql\n127.0.0.1\n12345\n",
-			wantPort: 5432,
+			name:          "epoch timestamp",
+			content:       testPostmasterPid("/pg/data", "1738656000", "5432", "/var/run/postgresql"),
+			wantPort:      5432,
+			wantSocketDir: "/var/run/postgresql",
+			wantUnix:      1738656000,
+		},
+		{
+			name:          "timestamp string",
+			content:       testPostmasterPid("/pg/data", "2025-02-04 00:00:00 UTC", "5433", "/var/run/postgresql"),
+			wantPort:      5433,
+			wantSocketDir: "/var/run/postgresql",
+			wantUnix:      time.Date(2025, 2, 4, 0, 0, 0, 0, time.UTC).Unix(),
+		},
+		{
+			name:     "empty socket dir",
+			content:  testPostmasterPid("/pg/data", "1738656000", "6543", ""),
+			wantPort: 6543,
 			wantUnix: 1738656000,
 		},
 		{
-			name: "timestamp string",
-			content: "12345\n/pg/data\n2025-02-04 00:00:00 UTC\n5433\n/var/run/postgresql\n127.0.0.1\n12345\n",
-			wantPort: 5433,
-			wantUnix: time.Date(2025, 2, 4, 0, 0, 0, 0, time.UTC).Unix(),
+			name:          "invalid start time keeps port binding",
+			content:       testPostmasterPid("/pg/data", "not-a-start-time", "6543", "/tmp/pgsocket"),
+			wantPort:      6543,
+			wantSocketDir: "/tmp/pgsocket",
 		},
 		{
-			name:       "insufficient lines",
-			content:    "12345\n/pg/data\n",
-			expectZero: true,
+			name:    "insufficient lines",
+			content: "12345\n/pg/data\n1738656000\n",
+			wantErr: true,
 		},
 		{
-			name:       "invalid port and time",
-			content:    "12345\n/pg/data\nnot-a-time\nnot-a-port\n",
-			expectZero: true,
+			name:    "invalid port",
+			content: "12345\n/pg/data\nnot-a-time\nnot-a-port\n",
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			port, startTime := parsePostmasterPidInfo(tt.content)
-			if tt.expectZero {
-				if port != 0 {
-					t.Errorf("port = %d, want 0", port)
-				}
-				if !startTime.IsZero() {
-					t.Errorf("startTime should be zero, got %v", startTime)
+			info, err := ParsePostmasterPidInfo(tt.content)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("ParsePostmasterPidInfo should return an error")
 				}
 				return
 			}
-			if port != tt.wantPort {
-				t.Errorf("port = %d, want %d", port, tt.wantPort)
+			if err != nil {
+				t.Fatalf("ParsePostmasterPidInfo returned error: %v", err)
 			}
-			if startTime.Unix() != tt.wantUnix {
-				t.Errorf("startTime unix = %d, want %d", startTime.Unix(), tt.wantUnix)
+			if info.Port != tt.wantPort {
+				t.Errorf("Port = %d, want %d", info.Port, tt.wantPort)
+			}
+			if info.SocketDir != tt.wantSocketDir {
+				t.Errorf("SocketDir = %q, want %q", info.SocketDir, tt.wantSocketDir)
+			}
+			if tt.wantUnix > 0 && info.StartTime.Unix() != tt.wantUnix {
+				t.Errorf("StartTime unix = %d, want %d", info.StartTime.Unix(), tt.wantUnix)
+			}
+			if tt.wantUnix == 0 && !info.StartTime.IsZero() {
+				t.Errorf("StartTime = %v, want zero time", info.StartTime)
 			}
 		})
 	}
+}
+
+func TestReadPostmasterPidInfoAsDBSU(t *testing.T) {
+	dataDir := t.TempDir()
+	writeTestPostmasterPid(t, dataDir, "1738656000", "6543", "/tmp/pgsocket")
+
+	info, err := ReadPostmasterPidInfoAsDBSU(config.CurrentUser, dataDir)
+	if err != nil {
+		t.Fatalf("ReadPostmasterPidInfoAsDBSU returned error: %v", err)
+	}
+	if info.Port != 6543 || info.SocketDir != "/tmp/pgsocket" {
+		t.Fatalf("unexpected postmaster info: %+v", info)
+	}
+}
+
+func writeTestPostmasterPid(t *testing.T, dataDir, startTime, port, socketDir string) {
+	t.Helper()
+	content := testPostmasterPid(dataDir, startTime, port, socketDir)
+	if err := os.WriteFile(filepath.Join(dataDir, "postmaster.pid"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write postmaster.pid: %v", err)
+	}
+}
+
+func testPostmasterPid(dataDir, startTime, port, socketDir string) string {
+	return "12345\n" + dataDir + "\n" + startTime + "\n" + port + "\n" + socketDir + "\n127.0.0.1\n12345\n"
 }
 
 // TestPgStatusResultData_RoundTrip tests JSON round-trip

@@ -93,10 +93,10 @@ func StatusResult(cfg *Config) *output.Result {
 	}
 
 	// PostgreSQL is running - read port and uptime from postmaster.pid
-	port, startTime := readPostmasterPidInfo(dbsu, dataDir, pidContent)
-	statusData.Port = port
-	if !startTime.IsZero() {
-		statusData.UptimeSeconds = int64(time.Since(startTime).Seconds())
+	info := readPostmasterPidInfo(dbsu, dataDir, pidContent)
+	statusData.Port = info.Port
+	if !info.StartTime.IsZero() {
+		statusData.UptimeSeconds = int64(time.Since(info.StartTime).Seconds())
 	}
 
 	return output.OK("PostgreSQL is running", statusData)
@@ -113,8 +113,8 @@ func StatusResult(cfg *Config) *output.Result {
 //	6: Listen addresses
 //	7: Shared memory key
 //
-// Returns port (0 if cannot read) and start time (zero time if cannot parse).
-func readPostmasterPidInfo(dbsu, dataDir, pidContent string) (port int, startTime time.Time) {
+// Returns zero values if postmaster.pid cannot be read or parsed.
+func readPostmasterPidInfo(dbsu, dataDir, pidContent string) PostmasterPidInfo {
 	content := pidContent
 	if strings.TrimSpace(content) == "" {
 		pidFile := filepath.Join(dataDir, "postmaster.pid")
@@ -122,38 +122,74 @@ func readPostmasterPidInfo(dbsu, dataDir, pidContent string) (port int, startTim
 		fileContent, err := utils.ReadFileAsDBSU(pidFile, dbsu)
 		if err != nil {
 			logrus.Debugf("cannot read postmaster.pid: %v", err)
-			return 0, time.Time{}
+			return PostmasterPidInfo{}
 		}
 		content = fileContent
 	}
-	return parsePostmasterPidInfo(content)
+	info, err := ParsePostmasterPidInfo(content)
+	if err != nil {
+		logrus.Debugf("cannot parse postmaster.pid: %v", err)
+		return PostmasterPidInfo{}
+	}
+	return info
 }
 
-// parsePostmasterPidInfo parses port and start time from postmaster.pid content.
-// Returns port (0 if cannot parse) and start time (zero time if cannot parse).
-func parsePostmasterPidInfo(content string) (port int, startTime time.Time) {
+// PostmasterPidInfo captures the postmaster.pid fields used for local
+// instance binding.
+type PostmasterPidInfo struct {
+	Port      int
+	StartTime time.Time
+	SocketDir string
+}
+
+// ReadPostmasterPidInfoAsDBSU reads postmaster.pid from a data directory using
+// DBSU privileges.
+func ReadPostmasterPidInfoAsDBSU(dbsu, dataDir string) (PostmasterPidInfo, error) {
+	pidFile := filepath.Join(dataDir, "postmaster.pid")
+	content, err := utils.ReadFileAsDBSU(pidFile, dbsu)
+	if err != nil {
+		return PostmasterPidInfo{}, fmt.Errorf("read postmaster.pid: %w", err)
+	}
+	return ParsePostmasterPidInfo(content)
+}
+
+// ParsePostmasterPidInfo parses postmaster.pid connection fields. Port is
+// required; socket directory and start time are optional evidence.
+func ParsePostmasterPidInfo(content string) (PostmasterPidInfo, error) {
 	lines := strings.Split(content, "\n")
 	if len(lines) < 4 {
-		logrus.Debugf("postmaster.pid has fewer than 4 lines")
-		return 0, time.Time{}
+		return PostmasterPidInfo{}, fmt.Errorf("postmaster.pid has fewer than 4 lines")
+	}
+	socketDir := ""
+	if len(lines) >= 5 {
+		socketDir = strings.TrimSpace(lines[4])
 	}
 
-	// Parse port (line 4, 0-indexed as 3)
 	portStr := strings.TrimSpace(lines[3])
 	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		logrus.Debugf("cannot parse port from postmaster.pid: %v", err)
-		port = 0
+	if err != nil || port <= 0 {
+		if err == nil {
+			err = fmt.Errorf("invalid port %d", port)
+		}
+		return PostmasterPidInfo{}, fmt.Errorf("parse postmaster.pid port: %w", err)
 	}
 
-	// Parse start time (line 3, 0-indexed as 2)
-	// Can be Unix epoch (seconds) or timestamp string
-	startTimeStr := strings.TrimSpace(lines[2])
+	startTime, err := parsePostmasterStartTime(strings.TrimSpace(lines[2]))
+	if err != nil {
+		startTime = time.Time{}
+	}
 
+	return PostmasterPidInfo{
+		Port:      port,
+		StartTime: startTime,
+		SocketDir: socketDir,
+	}, nil
+}
+
+func parsePostmasterStartTime(startTimeStr string) (time.Time, error) {
 	// Try parsing as Unix epoch first
 	if epoch, err := strconv.ParseInt(startTimeStr, 10, 64); err == nil {
-		startTime = time.Unix(epoch, 0)
-		return port, startTime
+		return time.Unix(epoch, 0), nil
 	}
 
 	// Try parsing as timestamp string (various formats PostgreSQL might use)
@@ -166,13 +202,11 @@ func parsePostmasterPidInfo(content string) (port int, startTime time.Time) {
 	}
 	for _, format := range timeFormats {
 		if t, err := time.Parse(format, startTimeStr); err == nil {
-			startTime = t
-			return port, startTime
+			return t, nil
 		}
 	}
 
-	logrus.Debugf("cannot parse start time from postmaster.pid: %s", startTimeStr)
-	return port, time.Time{}
+	return time.Time{}, fmt.Errorf("parse postmaster.pid start time: %s", startTimeStr)
 }
 
 // checkDataDirStateAsDBSU checks data directory existence and initialization with permission awareness.

@@ -455,7 +455,10 @@ pig pg psql                       # Connect to postgres database
 pig pg psql mydb                  # Connect to specific database
 pig pg psql mydb -c "SELECT 1"    # Execute single command
 pig pg psql -f script.sql         # Execute SQL script file
+pig pg psql -D /pg/data-dev       # Connect using postmaster.pid port/socket
 ```
+
+When `--data/-D` is set, `pg psql` reads `postmaster.pid` from that data directory and passes its port and socket directory to `psql`.
 
 **Options:**
 
