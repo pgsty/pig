@@ -41,7 +41,7 @@ var SpecialSourceMapping = map[string][]string{
 	"agentsgraph": {"agensgraph-2.16.0.tar.gz"},
 	"pgedge":      {"postgresql-18.3.tar.gz", "spock-5.0.6.tar.gz"},
 	"hunspell":    {"hunspell-1.0.tar.gz"},
-	"libfq":       {"libfq-0.6.1.tar.gz"},
+	"libfq":       {"libfq-0.6.2.tar.gz"},
 	"pdu":         {"pdu-3.0.25.12.tar.gz"},
 	"pgdog":       {"pgdog-0.1.32.tar.gz"},
 	"inchi":       {"inchi-1.07.3.tar.gz"},
