@@ -24,6 +24,7 @@ func TestRepoContentGeneration(t *testing.T) {
 		osVersion      string
 		osCode         string
 		repoName       string
+		minor          bool
 		expectReplace  bool
 		expectedString string
 	}{
@@ -76,6 +77,67 @@ func TestRepoContentGeneration(t *testing.T) {
 			expectedString: "$releasever",
 		},
 		{
+			name:           "EL10 epel should use z stream",
+			osMajor:        10,
+			osArch:         "aarch64",
+			osType:         config.DistroEL,
+			osVersionFull:  "10.2",
+			osVersion:      "10",
+			osCode:         "el10",
+			repoName:       "epel",
+			expectReplace:  true,
+			expectedString: "10z",
+		},
+		{
+			name:           "EL10 pgdg should use full minor",
+			osMajor:        10,
+			osArch:         "aarch64",
+			osType:         config.DistroEL,
+			osVersionFull:  "10.2",
+			osVersion:      "10",
+			osCode:         "el10",
+			repoName:       "pgdg17",
+			expectReplace:  true,
+			expectedString: "10.2",
+		},
+		{
+			name:           "EL9 pgdg 9.8 patch release should use major minor",
+			osMajor:        9,
+			osArch:         "aarch64",
+			osType:         config.DistroEL,
+			osVersionFull:  "9.8.1",
+			osVersion:      "9",
+			osCode:         "el9",
+			repoName:       "pgdg17",
+			expectReplace:  true,
+			expectedString: "9.8",
+		},
+		{
+			name:           "EL9 pgdg before 9.6 should not replace",
+			osMajor:        9,
+			osArch:         "aarch64",
+			osType:         config.DistroEL,
+			osVersionFull:  "9.5",
+			osVersion:      "9",
+			osCode:         "el9",
+			repoName:       "pgdg17",
+			expectReplace:  false,
+			expectedString: "$releasever",
+		},
+		{
+			name:           "explicit minor should override epel z stream",
+			osMajor:        10,
+			osArch:         "aarch64",
+			osType:         config.DistroEL,
+			osVersionFull:  "10.2",
+			osVersion:      "10",
+			osCode:         "el10",
+			repoName:       "epel",
+			minor:          true,
+			expectReplace:  true,
+			expectedString: "10.2",
+		},
+		{
 			name:           "EL10 aarch64 pigsty should not replace",
 			osMajor:        10,
 			osArch:         "aarch64",
@@ -107,6 +169,7 @@ func TestRepoContentGeneration(t *testing.T) {
 				Arch:     []string{"x86_64", "aarch64"},
 				BaseURL:  map[string]string{"default": "https://repo.example.com/el/$releasever/$basearch"},
 				Meta:     map[string]string{"enabled": "1", "gpgcheck": "0"},
+				Minor:    tt.minor,
 			}
 
 			// Generate content
@@ -123,9 +186,6 @@ func TestRepoContentGeneration(t *testing.T) {
 			} else {
 				if !strings.Contains(content, "$releasever") {
 					t.Errorf("Expected $releasever to remain for %s, but it was replaced. Content: %s", tt.name, content)
-				}
-				if strings.Contains(content, "10.0") && tt.osArch != "aarch64" {
-					t.Errorf("Unexpected replacement of $releasever for %s. Content: %s", tt.name, content)
 				}
 			}
 		})

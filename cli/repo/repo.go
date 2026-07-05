@@ -119,32 +119,58 @@ func (r *Repository) Available(code string, arch string) bool {
 	return true
 }
 
-// useMinorVersion checks if this repo should use full minor version (e.g. 9.6) instead of major (e.g. 9) in $releasever
+// releaseverTarget returns the value that should replace $releasever for RPM repos.
 // This is required for:
-// 1. Repos with Minor=true explicitly set
-// 2. EPEL repos on EL10+ where EPEL started building for specific minor versions
-// 3. PGDG repos on specific EL versions (9.6, 9.7, 10.0, 10.1) where PGDG builds for minor versions
-func (r *Repository) useMinorVersion() bool {
+// 1. EPEL repos on EL10+, where EPEL uses the 10z stream
+// 2. PGDG repos on EL10+ or EL9.6+, where PGDG builds for minor versions
+// 3. Repos with Minor=true explicitly set, which use the full OS version
+func (r *Repository) releaseverTarget() (string, bool) {
 	// Only applies to EL (RPM) systems
 	if config.OSType != config.DistroEL {
-		return false
+		return "", false
 	}
-	// Explicit minor flag takes precedence
-	if r.Minor {
-		return true
+
+	repoName := strings.ToLower(r.Name)
+	target := ""
+	if config.OSMajor >= 10 && strings.HasPrefix(repoName, "epel") {
+		target = config.OSVersion
+		if target == "" {
+			target = strconv.Itoa(config.OSMajor)
+		}
+		target += "z"
 	}
-	// Auto-enable for EPEL on EL10+
-	if config.OSMajor >= 10 && strings.HasPrefix(strings.ToLower(r.Name), "epel") {
-		return true
-	}
-	// Auto-enable for PGDG repos on specific EL versions that require minor version
-	if strings.HasPrefix(strings.ToLower(r.Name), "pgdg") {
-		switch config.OSVersionFull {
-		case "9.6", "9.7", "10.0", "10.1":
-			return true
+
+	if strings.HasPrefix(repoName, "pgdg") {
+		if config.OSMajor >= 10 {
+			target = config.OSVersionFull
+		} else if config.OSMajor == 9 {
+			if majorMinor, ok := el9PGDGReleasever(config.OSVersionFull); ok {
+				target = majorMinor
+			}
 		}
 	}
-	return false
+
+	// Explicit minor flag takes precedence over repo-specific defaults.
+	if r.Minor {
+		target = config.OSVersionFull
+	}
+	return target, target != ""
+}
+
+func el9PGDGReleasever(version string) (string, bool) {
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 {
+		return "", false
+	}
+	major, err := strconv.Atoi(parts[0])
+	if err != nil || major != 9 {
+		return "", false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil || minor < 6 {
+		return "", false
+	}
+	return fmt.Sprintf("%d.%d", major, minor), true
 }
 
 // Content returns the repo file content for a given region
@@ -173,11 +199,9 @@ func (r *Repository) Content(region ...string) string {
 		}
 
 		baseURL := r.GetBaseURL(regionStr)
-		// Substitute $releasever with full version (e.g. 9.6, 10.0) if minor version is required
-		// This is needed for EPEL on EL10+ and repos with Minor=true
-		if r.useMinorVersion() {
-			logrus.Debugf("substituting $releasever with %s for repo %s", config.OSVersionFull, r.Name)
-			baseURL = strings.ReplaceAll(baseURL, "$releasever", config.OSVersionFull)
+		if target, ok := r.releaseverTarget(); ok {
+			logrus.Debugf("substituting $releasever with %s for repo %s", target, r.Name)
+			baseURL = strings.ReplaceAll(baseURL, "$releasever", target)
 		}
 
 		return fmt.Sprintf("[%s]\nname=%s\nbaseurl=%s\n%s", r.Name, r.Name, baseURL, rpmMeta)
