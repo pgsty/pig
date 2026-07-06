@@ -233,6 +233,7 @@ var buildPkgCmd = &cobra.Command{
 
 func init() {
 	// Parse build flags
+	buildRepoCmd.Flags().BoolVarP(&repoMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
 	buildPgrxCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", build.DefaultPgrxVersion, "pgrx version to install")
 	buildRustCmd.PersistentFlags().BoolVarP(&buildRustYes, "yes", "y", false, "enforce rust re-installation")
 

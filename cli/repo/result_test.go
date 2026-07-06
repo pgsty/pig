@@ -522,6 +522,7 @@ func TestRepoAddDataSerialization(t *testing.T) {
 			Major: 9,
 		},
 		Region:           "default",
+		Mirror:           true,
 		RequestedModules: []string{"all"},
 		ExpandedModules:  []string{"infra", "node", "pgsql"},
 		AddedRepos: []*AddedRepoItem{
@@ -561,6 +562,16 @@ func TestRepoAddDataSerialization(t *testing.T) {
 
 	if jsonAddData.Region != "default" {
 		t.Errorf("Expected region 'default', got '%s'", jsonAddData.Region)
+	}
+	if !jsonAddData.Mirror {
+		t.Error("Expected mirror to be true")
+	}
+	jsonStr := string(jsonData)
+	if !strings.Contains(jsonStr, `"mirror":true`) {
+		t.Errorf("JSON should contain mirror field, got %s", jsonStr)
+	}
+	if strings.Contains(jsonStr, "pgdg_proxy") {
+		t.Errorf("JSON should not contain old pgdg_proxy field, got %s", jsonStr)
 	}
 	if len(jsonAddData.ExpandedModules) != 3 {
 		t.Errorf("Expected 3 expanded modules, got %d", len(jsonAddData.ExpandedModules))

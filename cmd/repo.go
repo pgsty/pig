@@ -13,6 +13,7 @@ var (
 	repoRegion string
 	repoUpdate bool
 	repoRemove bool
+	repoMirror bool
 
 	repoCacheDir string
 	repoCachePkg string
@@ -119,7 +120,12 @@ var repoAddCmd = &cobra.Command{
 			args = []string{"all"}
 		}
 		modules := repo.ExpandModuleArgs(args)
-		result := repo.AddRepos(modules, repoRegion, repoRemove, repoUpdate)
+		result := repo.AddReposWithOptions(modules, repo.AddOptions{
+			Region: repoRegion,
+			Remove: repoRemove,
+			Update: repoUpdate,
+			Mirror: repoMirror,
+		})
 		return handleAuxResult(result)
 	},
 }
@@ -149,7 +155,12 @@ var repoSetCmd = &cobra.Command{
 			args = []string{"all"}
 		}
 		modules := repo.ExpandModuleArgs(args)
-		result := repo.AddRepos(modules, repoRegion, true, true)
+		result := repo.AddReposWithOptions(modules, repo.AddOptions{
+			Region: repoRegion,
+			Remove: true,
+			Update: true,
+			Mirror: repoMirror,
+		})
 		return handleAuxResult(result)
 	},
 }
@@ -289,7 +300,9 @@ func init() {
 	repoAddCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
 	repoAddCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 	repoAddCmd.Flags().BoolVarP(&repoRemove, "remove", "r", false, "remove existing repo")
+	repoAddCmd.Flags().BoolVarP(&repoMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
 	repoSetCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
+	repoSetCmd.Flags().BoolVarP(&repoMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
 	repoRmCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
 
 	// boot command flags

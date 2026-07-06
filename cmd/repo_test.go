@@ -6,6 +6,8 @@ import (
 
 	"pig/internal/config"
 	"pig/internal/utils"
+
+	"github.com/spf13/cobra"
 )
 
 func TestRepoSetDoesNotMutateGlobalFlags(t *testing.T) {
@@ -41,5 +43,23 @@ func TestRepoSetDoesNotMutateGlobalFlags(t *testing.T) {
 	}
 	if repoUpdate {
 		t.Fatal("repo set should not mutate repoUpdate")
+	}
+}
+
+func TestMirrorFlagVisibleOnRepoAndBuildRepo(t *testing.T) {
+	for _, cmd := range []*cobra.Command{repoAddCmd, repoSetCmd, buildRepoCmd} {
+		flag := cmd.Flags().Lookup("mirror")
+		if flag == nil {
+			t.Fatalf("%s missing --mirror flag", cmd.CommandPath())
+		}
+		if flag.Shorthand != "m" {
+			t.Fatalf("%s --mirror shorthand = %q, want m", cmd.CommandPath(), flag.Shorthand)
+		}
+		if flag.Hidden {
+			t.Fatalf("%s --mirror should be visible", cmd.CommandPath())
+		}
+		if oldFlag := cmd.Flags().Lookup("pgdg-proxy"); oldFlag != nil {
+			t.Fatalf("%s should not keep old --pgdg-proxy flag", cmd.CommandPath())
+		}
 	}
 }

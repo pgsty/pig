@@ -578,6 +578,7 @@ func isNumericPriority(s string) bool {
 type RepoAddData struct {
 	OSEnv            *OSEnvironment     `json:"os_env" yaml:"os_env"`
 	Region           string             `json:"region" yaml:"region"`
+	Mirror           bool               `json:"mirror,omitempty" yaml:"mirror,omitempty"`
 	RequestedModules []string           `json:"requested_modules" yaml:"requested_modules"`
 	ExpandedModules  []string           `json:"expanded_modules" yaml:"expanded_modules"`
 	AddedRepos       []*AddedRepoItem   `json:"added_repos" yaml:"added_repos"`

@@ -139,6 +139,21 @@ func ExpandModuleArgs(args []string) []string {
 // AddRepos adds repositories and returns a structured Result
 // This function is used for YAML/JSON output modes
 func AddRepos(modules []string, region string, doRemove, doUpdate bool) *output.Result {
+	return AddReposWithOptions(modules, AddOptions{
+		Region: region,
+		Remove: doRemove,
+		Update: doUpdate,
+	})
+}
+
+type AddOptions struct {
+	Region string
+	Remove bool
+	Update bool
+	Mirror bool
+}
+
+func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 	startTime := time.Now()
 
 	// Check OS support
@@ -167,7 +182,8 @@ func AddRepos(modules []string, region string, doRemove, doUpdate bool) *output.
 	// Prepare data structure
 	data := &RepoAddData{
 		OSEnv:            osEnv,
-		Region:           region,
+		Region:           opts.Region,
+		Mirror:           opts.Mirror,
 		RequestedModules: modules,
 		ExpandedModules:  expandedModules,
 		AddedRepos:       []*AddedRepoItem{},
@@ -193,7 +209,7 @@ func AddRepos(modules []string, region string, doRemove, doUpdate bool) *output.
 	}
 
 	// Handle backup if doRemove is true
-	if doRemove {
+	if opts.Remove {
 		backupInfo, err := backupReposStructured(manager)
 		if err != nil {
 			data.DurationMs = time.Since(startTime).Milliseconds()
@@ -203,8 +219,12 @@ func AddRepos(modules []string, region string, doRemove, doUpdate bool) *output.
 		data.BackupInfo = backupInfo
 	}
 
-	// Detect region
-	manager.DetectRegion(region)
+	// PGDG proxy is a route override; skip auto-detection when enabled.
+	if opts.Mirror {
+		applyPGDGProxyRoute(manager)
+	} else {
+		manager.DetectRegion(opts.Region)
+	}
 	data.Region = manager.Region
 
 	// Add each module
@@ -241,7 +261,7 @@ func AddRepos(modules []string, region string, doRemove, doUpdate bool) *output.
 	}
 
 	// Handle cache update if doUpdate is true
-	if doUpdate {
+	if opts.Update {
 		updateCmd := strings.Join(manager.UpdateCmd, " ")
 		err := utils.SudoCommand(manager.UpdateCmd)
 		if err != nil {
