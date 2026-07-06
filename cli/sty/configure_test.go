@@ -1,6 +1,7 @@
 package sty
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"pig/cli/ext"
@@ -271,6 +272,45 @@ func TestMutateTemplatePG19SkipsPinnedKernelModes(t *testing.T) {
 	}
 }
 
+func TestMutateTemplatePGMajorTemplateSkipsVersionRewrite(t *testing.T) {
+	for _, tt := range []struct {
+		mode   string
+		locked int
+	}{
+		{mode: "pg19", locked: 19},
+		{mode: "pg20", locked: 20},
+		{mode: "pg21", locked: 21},
+	} {
+		t.Run(tt.mode, func(t *testing.T) {
+			content := fmt.Sprintf(`all:
+  vars:
+    node_repo_modules: node,infra,pgsql,beta
+    pg_version: %d
+    pg_packages: [ pg%d-main ]
+`, tt.locked, tt.locked)
+			got, _, warnings, err := mutateTemplate(content, mutationOptions{
+				Mode:      tt.mode,
+				PGVersion: 18,
+			})
+			if err != nil {
+				t.Fatalf("mutateTemplate error: %v", err)
+			}
+			if !strings.Contains(got, fmt.Sprintf("pg_version: %d", tt.locked)) {
+				t.Fatalf("expected %s to keep pg_version %d, got:\n%s", tt.mode, tt.locked, got)
+			}
+			if strings.Contains(got, "pg_version: 18") || strings.Contains(got, "pg18-main") {
+				t.Fatalf("expected %s to ignore requested PG18, got:\n%s", tt.mode, got)
+			}
+			if !strings.Contains(got, fmt.Sprintf("pg%d-main", tt.locked)) {
+				t.Fatalf("expected %s to keep locked package aliases, got:\n%s", tt.mode, got)
+			}
+			if len(warnings) != 0 {
+				t.Fatalf("unexpected warnings for %s: %v", tt.mode, warnings)
+			}
+		})
+	}
+}
+
 func TestMutateTemplateBetaSkippedOnceMajorIsStable(t *testing.T) {
 	// GA tripwire: once 19 enters the stable active window, -v 19 must no
 	// longer inject the beta repo module.
@@ -491,6 +531,60 @@ func TestConfigureNativePG19SuggestsDedicatedTemplate(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "node_repo_modules: 'node,infra,pgsql,beta'") {
 		t.Fatalf("expected beta repo module in output, got:\n%s", out)
+	}
+}
+
+func TestConfigureNativePGMajorTemplateSkipsVersionRewrite(t *testing.T) {
+	tmp := t.TempDir()
+	confDir := filepath.Join(tmp, "conf")
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatalf("mkdir conf: %v", err)
+	}
+	template := `all:
+  vars:
+    region: default
+    node_repo_modules: node,infra,pgsql,beta
+    pg_version: 19
+    pg_packages: [ pg19-main ]
+`
+	if err := os.WriteFile(filepath.Join(confDir, "pg19.yml"), []byte(template), 0644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	outPath := filepath.Join(tmp, "out.yml")
+	locale := false
+	result := ConfigureNative(ConfigureOptions{
+		PigstyHome:       tmp,
+		Mode:             "pg19",
+		PrimaryIP:        "192.168.0.10",
+		PGVersion:        "16",
+		OutputFile:       outPath,
+		NonInteractive:   true,
+		CPUCount:         8,
+		LocaleAvailable:  &locale,
+		DisablePreflight: true,
+	})
+	if result == nil || !result.Success {
+		t.Fatalf("expected success result, got: %+v", result)
+	}
+	data, ok := result.Data.(*ConfigureData)
+	if !ok {
+		t.Fatalf("unexpected result data type: %T", result.Data)
+	}
+	if data.PGVersion != "16" {
+		t.Fatalf("expected reported pg_version to preserve requested flag, got %q", data.PGVersion)
+	}
+	if len(data.Warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", data.Warnings)
+	}
+
+	out, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	got := string(out)
+	if !strings.Contains(got, "pg_version: 19") || strings.Contains(got, "pg_version: 16") {
+		t.Fatalf("expected pg19 template to keep pg_version 19, got:\n%s", got)
 	}
 }
 

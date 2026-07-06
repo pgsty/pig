@@ -830,23 +830,25 @@ func mutateTemplate(content string, opts mutationOptions) (string, []string, []s
 		content = insertProxyBlock(content, opts.Proxy)
 	}
 
-	if opts.PGVersion > 0 && opts.Mode != "mssql" && opts.Mode != "polar" {
+	pinnedKernelMode := opts.Mode == "mssql" || opts.Mode == "polar"
+	pgMajorTemplate := pgMajorTemplateMode.MatchString(opts.Mode)
+	if opts.PGVersion > 0 && !pinnedKernelMode && !pgMajorTemplate {
 		content = upsertPGVersion(content, opts.PGVersion)
 		content = strings.ReplaceAll(content, "pg18-", fmt.Sprintf("pg%d-", opts.PGVersion))
-
-		// Beta majors beyond the stable window ship from the PGDG testing repos,
-		// which require the 'beta' repo module on top of the standard modules.
-		if opts.PGVersion > ext.PostgresLatestMajorVersion() {
-			var enabled bool
-			content, enabled = enableBetaRepoModule(content)
-			if !enabled {
-				warnings = append(warnings, fmt.Sprintf(
-					"beta repo module not enabled: no repo module list with 'pgsql' in template, add 'beta' to repo modules manually for PG%d packages", opts.PGVersion))
-			}
-		}
-	} else if opts.PGVersion > 0 {
+	} else if opts.PGVersion > 0 && pinnedKernelMode {
 		warnings = append(warnings, fmt.Sprintf(
 			"pg_version %d ignored: %s template pins its own kernel version", opts.PGVersion, opts.Mode))
+	}
+
+	// Beta majors beyond the stable window ship from the PGDG testing repos,
+	// which require the 'beta' repo module on top of the standard modules.
+	if opts.PGVersion > ext.PostgresLatestMajorVersion() && !pinnedKernelMode {
+		var enabled bool
+		content, enabled = enableBetaRepoModule(content)
+		if !enabled {
+			warnings = append(warnings, fmt.Sprintf(
+				"beta repo module not enabled: no repo module list with 'pgsql' in template, add 'beta' to repo modules manually for PG%d packages", opts.PGVersion))
+		}
 	}
 
 	if shouldSetLocale(opts.PGVersion, opts.Mode, opts.LocaleAvailable) {
@@ -864,6 +866,8 @@ func mutateTemplate(content string, opts mutationOptions) (string, []string, []s
 
 	return content, generated, warnings, nil
 }
+
+var pgMajorTemplateMode = regexp.MustCompile(`^pg[0-9]+$`)
 
 // betaRepoModulesLine matches an uncommented (node_)repo_modules line and
 // captures: key+separator, opening quote, comma-separated module list,
