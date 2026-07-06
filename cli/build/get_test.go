@@ -19,6 +19,11 @@ func TestGetSourceFilesSpecialSourceMapping(t *testing.T) {
 			expected: []string{"agensgraph-2.16.0.tar.gz"},
 		},
 		{
+			name:     "polardb kernel",
+			pkg:      "polardb",
+			expected: []string{"polardb-for-postgresql-17.10.1.0.tar.gz"},
+		},
+		{
 			name:     "agentsgraph alias",
 			pkg:      "agentsgraph",
 			expected: []string{"agensgraph-2.16.0.tar.gz"},
