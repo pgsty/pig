@@ -40,7 +40,7 @@ func TestLoadAliasMapRequestedAliasesEL9(t *testing.T) {
 		"agensgraph":     "agensgraph_$v",
 		"agens":          "agensgraph_$v",
 		"pgedge":         "pgedge_$v spock_$v lolor_$v snowflake_$v",
-		"orioledb":       "orioledb_$v oriolepg_$v",
+		"orioledb":       "orioledb-$v",
 		"vtraces":        "victoria-traces",
 		"hunspell":       "hunspell_cs_cz_$v hunspell_de_de_$v hunspell_en_us_$v hunspell_fr_$v hunspell_ne_np_$v hunspell_nl_nl_$v hunspell_nn_no_$v hunspell_ru_ru_$v hunspell_ru_ru_aot_$v",
 		"ansible":        ansibleComboEL9,
@@ -107,6 +107,33 @@ func TestLoadAliasMapIncludesPG19BetaStaticAliases(t *testing.T) {
 	}
 }
 
+func TestLoadAliasMapIncludesPolarDBCanonicalAlias(t *testing.T) {
+	tests := []struct {
+		name   string
+		osType string
+		osCode string
+	}{
+		{name: "el", osType: config.DistroEL, osCode: "el9"},
+		{name: "deb", osType: config.DistroDEB, osCode: "u24"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup := withAliasMapTestEnv(t, tt.osType, tt.osCode, "amd64")
+			defer cleanup()
+
+			ec := &ExtensionCatalog{}
+			ec.LoadAliasMap(config.OSType)
+
+			for _, key := range []string{"polardb", "polar"} {
+				if got := ec.AliasMap[key]; got != "polardb-17" {
+					t.Fatalf("unexpected alias for %s: want %q, got %q", key, "polardb-17", got)
+				}
+			}
+		})
+	}
+}
+
 func TestLoadAliasMapRequestedAliasesU22(t *testing.T) {
 	cleanup := withAliasMapTestEnv(t, config.DistroDEB, "u22", "amd64")
 	defer cleanup()
@@ -123,7 +150,7 @@ func TestLoadAliasMapRequestedAliasesU22(t *testing.T) {
 		"agensgraph":     "agensgraph-$v",
 		"agens":          "agensgraph-$v",
 		"pgedge":         "pgedge-$v pgedge-$v-spock pgedge-$v-lolor pgedge-$v-snowflake",
-		"orioledb":       "oriolepg-$v-orioledb oriolepg-$v",
+		"orioledb":       "orioledb-$v",
 		"vtraces":        "victoria-traces",
 		"hunspell":       "postgresql-$v-hunspell-cs-cz,postgresql-$v-hunspell-de-de,postgresql-$v-hunspell-en-us,postgresql-$v-hunspell-fr,postgresql-$v-hunspell-ne-np,postgresql-$v-hunspell-nl-nl,postgresql-$v-hunspell-nn-no,postgresql-$v-hunspell-ru-ru,postgresql-$v-hunspell-ru-ru-aot",
 		"ansible":        ansibleComboDEB,
@@ -156,7 +183,7 @@ func TestLoadAliasMapRequestedAliasesU26(t *testing.T) {
 		"agensgraph":     "agensgraph-$v",
 		"agens":          "agensgraph-$v",
 		"pgedge":         "pgedge-$v pgedge-$v-spock pgedge-$v-lolor pgedge-$v-snowflake",
-		"orioledb":       "oriolepg-$v-orioledb oriolepg-$v",
+		"orioledb":       "orioledb-$v",
 		"vtraces":        "victoria-traces",
 		"hunspell":       "postgresql-$v-hunspell-cs-cz,postgresql-$v-hunspell-de-de,postgresql-$v-hunspell-en-us,postgresql-$v-hunspell-fr,postgresql-$v-hunspell-ne-np,postgresql-$v-hunspell-nl-nl,postgresql-$v-hunspell-nn-no,postgresql-$v-hunspell-ru-ru,postgresql-$v-hunspell-ru-ru-aot",
 		"ansible":        ansibleComboDEB,

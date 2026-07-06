@@ -10,6 +10,7 @@ import (
 	"pig/internal/utils"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -24,6 +25,7 @@ const (
 var (
 	unlinkKeywords = map[string]bool{"null": true, "none": true, "nil": true, "nop": true, "no": true}
 	systemPaths    = map[string]bool{"/": true, "/usr": true, "/usr/local": true}
+	pgHomeAliases  = map[string]string{"polar": "/usr/polar-17", "polardb": "/usr/polar-17", "polardb-17": "/usr/polar-17"}
 )
 
 // LinkError represents an error with an associated semantic code for link operations.
@@ -88,6 +90,10 @@ func RemoveSymlink(path string) error {
 
 // resolvePGHome determines the PostgreSQL home directory based on version or path
 func resolvePGHome(arg string) (string, error) {
+	if pgHome, ok := pgHomeAliases[strings.ToLower(strings.TrimSpace(arg))]; ok {
+		return pgHome, nil
+	}
+
 	// Check if it's a version number
 	if ver, err := strconv.Atoi(arg); err == nil {
 		if ver < minPGVersion || ver > maxPGVersion {
