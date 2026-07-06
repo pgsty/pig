@@ -43,6 +43,8 @@ var SpecialSourceMapping = map[string][]string{
 	"orioledb-18":  orioledbSources("postgres-patches18_1.tar.gz"),
 	"agensgraph":   {"agensgraph-2.17.0.tar.gz"},
 	"polardb":      {"polardb-for-postgresql-17.10.1.0.tar.gz"},
+	"polarstore":   {"polarstore-1.2.42-d0c5dc6.tar.gz"},
+	"zlog":         {"zlog-1.2.18.tar.gz"},
 	"pgedge":       pgedgeSources("postgresql-18.4.tar.gz"),
 	"pgedge-15":    pgedgeSources("postgresql-15.18.tar.gz"),
 	"pgedge-16":    pgedgeSources("postgresql-16.14.tar.gz"),

@@ -144,6 +144,7 @@ func TestResolveRPMBuildSpecAndPG(t *testing.T) {
 		{pkg: "babelfish-18", wantSpec: "babelfish", wantPG: "18"},
 		{pkg: "pgedge-17", wantSpec: "pgedge", wantPG: "17"},
 		{pkg: "orioledb-16", wantSpec: "orioledb", wantPG: "16"},
+		{pkg: "polarstore", wantSpec: "polarstore", wantPG: ""},
 		{pkg: "pg_duckdb", wantSpec: "pg_duckdb", wantPG: "18"},
 	}
 
@@ -168,6 +169,7 @@ func TestResolveDebBuildRecipe(t *testing.T) {
 		{pkg: "babelfish", wantRecipe: "babelfish"},
 		{pkg: "babelfish-17", wantRecipe: "babelfish"},
 		{pkg: "babelfish-18", wantRecipe: "babelfish"},
+		{pkg: "polarstore", wantRecipe: "polarstore"},
 		{pkg: "pg_duckdb", wantRecipe: "pg_duckdb"},
 	}
 

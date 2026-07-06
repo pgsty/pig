@@ -28,6 +28,16 @@ func TestGetSourceFilesSpecialSourceMapping(t *testing.T) {
 			expected: []string{"polardb-for-postgresql-17.10.1.0.tar.gz"},
 		},
 		{
+			name:     "polarstore dependency",
+			pkg:      "polarstore",
+			expected: []string{"polarstore-1.2.42-d0c5dc6.tar.gz"},
+		},
+		{
+			name:     "zlog dependency",
+			pkg:      "zlog",
+			expected: []string{"zlog-1.2.18.tar.gz"},
+		},
+		{
 			name:     "ivorysql kernel",
 			pkg:      "ivorysql",
 			expected: []string{"ivorysql-5.4.tar.gz"},
