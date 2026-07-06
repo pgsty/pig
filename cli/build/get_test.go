@@ -3,7 +3,6 @@ package build
 import (
 	"pig/cli/ext"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -16,7 +15,12 @@ func TestGetSourceFilesSpecialSourceMapping(t *testing.T) {
 		{
 			name:     "agensgraph",
 			pkg:      "agensgraph",
-			expected: []string{"agensgraph-2.16.0.tar.gz"},
+			expected: []string{"agensgraph-2.17.0.tar.gz"},
+		},
+		{
+			name:     "openhalo kernel alias",
+			pkg:      "openhalo",
+			expected: []string{"openhalodb-1.0.tar.gz"},
 		},
 		{
 			name:     "polardb kernel",
@@ -24,9 +28,9 @@ func TestGetSourceFilesSpecialSourceMapping(t *testing.T) {
 			expected: []string{"polardb-for-postgresql-17.10.1.0.tar.gz"},
 		},
 		{
-			name:     "agentsgraph alias",
-			pkg:      "agentsgraph",
-			expected: []string{"agensgraph-2.16.0.tar.gz"},
+			name:     "ivorysql kernel",
+			pkg:      "ivorysql",
+			expected: []string{"ivorysql-5.4.tar.gz"},
 		},
 		{
 			name:     "pdu alias",
@@ -58,9 +62,12 @@ func TestGetSourceFilesSpecialSourceMapping(t *testing.T) {
 			expected: []string{"rdkit_202503.6.orig.tar.xz", "better-enums-0.11.3-enum.h", "rapidjson-1.1.0.tar.gz", "inchi-1.07.3.tar.gz"},
 		},
 		{
-			name:     "orioledb overrides stale catalog source",
-			pkg:      "orioledb",
-			expected: []string{"orioledb-beta15.tar.gz"},
+			name: "orioledb defaults to PG18 patchset and extension source",
+			pkg:  "orioledb",
+			expected: []string{
+				"postgres-patches18_1.tar.gz",
+				"orioledb-beta16.tar.gz",
+			},
 		},
 		{
 			name:     "onesparse alias bundle",
@@ -79,26 +86,159 @@ func TestGetSourceFilesSpecialSourceMapping(t *testing.T) {
 	}
 }
 
+func TestGetSourceFilesSpecialSourceMappingOrioledbMajorAliases(t *testing.T) {
+	tests := []struct {
+		pkg      string
+		expected []string
+	}{
+		{
+			pkg: "orioledb-16",
+			expected: []string{
+				"postgres-patches16_47.tar.gz",
+				"orioledb-beta16.tar.gz",
+			},
+		},
+		{
+			pkg: "orioledb-17",
+			expected: []string{
+				"postgres-patches17_20.tar.gz",
+				"orioledb-beta16.tar.gz",
+			},
+		},
+		{
+			pkg: "orioledb-18",
+			expected: []string{
+				"postgres-patches18_1.tar.gz",
+				"orioledb-beta16.tar.gz",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pkg, func(t *testing.T) {
+			got := getSourceFiles(tt.pkg)
+			if !reflect.DeepEqual(got, tt.expected) {
+				t.Fatalf("getSourceFiles(%q) = %v, expected %v", tt.pkg, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestGetSourceFilesSpecialSourceMappingPgedge(t *testing.T) {
 	got := getSourceFiles("pgedge")
-	want := []string{"postgresql-18.3.tar.gz", "spock-5.0.6.tar.gz"}
+	want := []string{
+		"postgresql-18.4.tar.gz",
+		"spock-5.0.10.tar.gz",
+		"lolor-1.2.2.tar.gz",
+		"snowflake-2.5.0.tar.gz",
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("getSourceFiles(%q) = %v, expected %v", "pgedge", got, want)
 	}
 
 	hasPostgresSource := false
 	hasSpockSource := false
+	hasLolorSource := false
+	hasSnowflakeSource := false
 	for _, src := range got {
-		if strings.HasPrefix(src, "postgresql-18.") && strings.HasSuffix(src, ".tar.gz") {
+		if src == "postgresql-18.4.tar.gz" {
 			hasPostgresSource = true
 		}
-		if strings.HasPrefix(src, "spock-5.0.6") && strings.HasSuffix(src, ".tar.gz") {
+		if src == "spock-5.0.10.tar.gz" {
 			hasSpockSource = true
+		}
+		if src == "lolor-1.2.2.tar.gz" {
+			hasLolorSource = true
+		}
+		if src == "snowflake-2.5.0.tar.gz" {
+			hasSnowflakeSource = true
 		}
 	}
 
-	if !hasPostgresSource || !hasSpockSource {
-		t.Fatalf("pgedge sources should include both postgres-18 and spock tarballs, got %v", got)
+	if !hasPostgresSource || !hasSpockSource || !hasLolorSource || !hasSnowflakeSource {
+		t.Fatalf("pgedge sources should include postgres-18, spock, lolor, and snowflake tarballs, got %v", got)
+	}
+}
+
+func TestGetSourceFilesSpecialSourceMappingPgedgeMajorAliases(t *testing.T) {
+	tests := []struct {
+		pkg      string
+		expected []string
+	}{
+		{
+			pkg: "pgedge-15",
+			expected: []string{
+				"postgresql-15.18.tar.gz",
+				"spock-5.0.10.tar.gz",
+				"lolor-1.2.2.tar.gz",
+				"snowflake-2.5.0.tar.gz",
+			},
+		},
+		{
+			pkg: "pgedge-16",
+			expected: []string{
+				"postgresql-16.14.tar.gz",
+				"spock-5.0.10.tar.gz",
+				"lolor-1.2.2.tar.gz",
+				"snowflake-2.5.0.tar.gz",
+			},
+		},
+		{
+			pkg: "pgedge-17",
+			expected: []string{
+				"postgresql-17.10.tar.gz",
+				"spock-5.0.10.tar.gz",
+				"lolor-1.2.2.tar.gz",
+				"snowflake-2.5.0.tar.gz",
+			},
+		},
+		{
+			pkg: "pgedge-18",
+			expected: []string{
+				"postgresql-18.4.tar.gz",
+				"spock-5.0.10.tar.gz",
+				"lolor-1.2.2.tar.gz",
+				"snowflake-2.5.0.tar.gz",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pkg, func(t *testing.T) {
+			got := getSourceFiles(tt.pkg)
+			if !reflect.DeepEqual(got, tt.expected) {
+				t.Fatalf("getSourceFiles(%q) = %v, expected %v", tt.pkg, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetSourceFilesSpecialSourceMappingBabelfishMajorAliases(t *testing.T) {
+	tests := []struct {
+		pkg      string
+		expected []string
+	}{
+		{
+			pkg:      "babelfish",
+			expected: []string{"babelfish-17-17.7-5.4.0.tar.gz"},
+		},
+		{
+			pkg:      "babelfish-17",
+			expected: []string{"babelfish-17-17.7-5.4.0.tar.gz"},
+		},
+		{
+			pkg:      "babelfish-18",
+			expected: []string{"babelfish-18-18.3-6.0.0.tar.gz"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pkg, func(t *testing.T) {
+			got := getSourceFiles(tt.pkg)
+			if !reflect.DeepEqual(got, tt.expected) {
+				t.Fatalf("getSourceFiles(%q) = %v, expected %v", tt.pkg, got, tt.expected)
+			}
+		})
 	}
 }
 

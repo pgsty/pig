@@ -2,7 +2,7 @@
 
 [![Website: pigsty.io/ext](https://img.shields.io/badge/Website-pigsty.io%2Fext-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/ext/)
 [![Doc: pig](https://img.shields.io/badge/Docs-pig-slategray?style=flat)](https://pigsty.io/docs/pig)
-[![Version: v1.5.0](https://img.shields.io/badge/version-v1.5.0-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.5.0)
+[![Version: v1.5.1](https://img.shields.io/badge/version-v1.5.1-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.5.1)
 [![Pigsty: v4.4.0](https://img.shields.io/badge/Pigsty-v4.4.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 531](https://img.shields.io/badge/extensions-531-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
@@ -287,12 +287,13 @@ Take el for examples:
 "pgloader":            "pgloader",
 "pg_timetable":        "pg_timetable",
 "timescaledb-utils":   "timescaledb-tools timescaledb-event-streamer",
-"ivorysql":            "ivorysql5",
+"ivorysql":            "ivorysql-18",
 "agensgraph":          "agensgraph_$v",
 "agens":               "agensgraph_$v",
 "pgedge":              "pgedge_$v spock_$v lolor_$v snowflake_$v",
-"polardb":             "PolarDB",
-"orioledb":            "orioledb_$v oriolepg_$v",
+"polardb":             "polardb-17",
+"polar":               "polardb-17",
+"orioledb":            "orioledb-$v",
 "openhalodb":          "openhalodb_14",
 "percona-core":        "percona-postgresql18,percona-postgresql18-server,percona-postgresql18-contrib,percona-postgresql18-plperl,percona-postgresql18-plpython3,percona-postgresql18-pltcl,percona-pg_tde18",
 "percona-main":        "percona-postgresql18,percona-postgresql18-server,percona-postgresql18-contrib,percona-postgresql18-plperl,percona-postgresql18-plpython3,percona-postgresql18-pltcl,percona-pg_tde18,percona-postgis35_18,percona-postgis35_18-client,percona-postgis35_18-utils,percona-pgvector_18,percona-wal2json18,percona-pg_repack18,percona-pgaudit18,percona-pgaudit18_set_user,percona-pg_stat_monitor18,percona-pg_gather",

@@ -236,10 +236,19 @@ func installDebDep(pkg string, pgVersion string) error {
 }
 
 func resolveDebBuildRecipe(pkg string) string {
+	if recipe, ok := specialDebBuildRecipeMapping[normalizeBuildName(pkg)]; ok {
+		return recipe
+	}
 	if ext, err := ResolvePackage(pkg); err == nil {
 		return resolveMakeBuildTarget(pkg, ext)
 	}
 	return pkg
+}
+
+var specialDebBuildRecipeMapping = map[string]string{
+	"babelfish":    "babelfish",
+	"babelfish-17": "babelfish",
+	"babelfish-18": "babelfish",
 }
 
 func parseDebBuildDepends(controlContent string, pgVersion string) []string {

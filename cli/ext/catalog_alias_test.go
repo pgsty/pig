@@ -134,6 +134,31 @@ func TestLoadAliasMapIncludesPolarDBCanonicalAlias(t *testing.T) {
 	}
 }
 
+func TestLoadAliasMapIvorySQLUsesPG18Package(t *testing.T) {
+	tests := []struct {
+		name   string
+		osType string
+		osCode string
+	}{
+		{name: "el", osType: config.DistroEL, osCode: "el9"},
+		{name: "deb", osType: config.DistroDEB, osCode: "u24"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup := withAliasMapTestEnv(t, tt.osType, tt.osCode, "amd64")
+			defer cleanup()
+
+			ec := &ExtensionCatalog{}
+			ec.LoadAliasMap(config.OSType)
+
+			if got := ec.AliasMap["ivorysqldb"]; got != "ivorysql-18" {
+				t.Fatalf("unexpected ivorysqldb alias: want %q, got %q", "ivorysql-18", got)
+			}
+		})
+	}
+}
+
 func TestLoadAliasMapRequestedAliasesU22(t *testing.T) {
 	cleanup := withAliasMapTestEnv(t, config.DistroDEB, "u22", "amd64")
 	defer cleanup()

@@ -164,6 +164,10 @@ func TestResolveDebBuildRecipe(t *testing.T) {
 	}{
 		{pkg: "openhalo", wantRecipe: "openhalodb"},
 		{pkg: "openhalodb", wantRecipe: "openhalodb"},
+		{pkg: "ivorysql", wantRecipe: "ivorysql"},
+		{pkg: "babelfish", wantRecipe: "babelfish"},
+		{pkg: "babelfish-17", wantRecipe: "babelfish"},
+		{pkg: "babelfish-18", wantRecipe: "babelfish"},
 		{pkg: "pg_duckdb", wantRecipe: "pg_duckdb"},
 	}
 

@@ -33,6 +33,16 @@ func TestShouldUseMakeForKernelPackageShortcut(t *testing.T) {
 			want: true,
 		},
 		{
+			name:  "ivorysql kernel package",
+			input: "ivorysql",
+			ext: &ext.Extension{
+				Name:  "ivorysql_ora",
+				Pkg:   "ivorysql",
+				Extra: map[string]interface{}{"kernel": "ivorysql"},
+			},
+			want: true,
+		},
+		{
 			name:  "kernel-bound component stays regular extension",
 			input: "spock",
 			ext: &ext.Extension{
@@ -80,5 +90,19 @@ func TestResolveMakeBuildTargetForKernelPackageAlias(t *testing.T) {
 	want := "openhalodb"
 	if got != want {
 		t.Fatalf("resolveMakeBuildTarget(openhalo) = %q, want %q", got, want)
+	}
+}
+
+func TestResolveMakeBuildTargetForIvorySQL(t *testing.T) {
+	extension := &ext.Extension{
+		Name:  "ivorysql_ora",
+		Pkg:   "ivorysql",
+		Extra: map[string]interface{}{"kernel": "ivorysql"},
+	}
+
+	got := resolveMakeBuildTarget("ivorysql", extension)
+	want := "ivorysql"
+	if got != want {
+		t.Fatalf("resolveMakeBuildTarget(ivorysql) = %q, want %q", got, want)
 	}
 }

@@ -259,7 +259,7 @@ func TestResolveOrioleDBAliasUsesTargetPGVersion(t *testing.T) {
 			osVersion: "9",
 			osCode:    "el9",
 			pgVer:     16,
-			want:      []string{"orioledb_16", "oriolepg_16"},
+			want:      []string{"orioledb-16"},
 		},
 		{
 			name:      "el_pg18",
@@ -267,7 +267,7 @@ func TestResolveOrioleDBAliasUsesTargetPGVersion(t *testing.T) {
 			osVersion: "9",
 			osCode:    "el9",
 			pgVer:     18,
-			want:      []string{"orioledb_18", "oriolepg_18"},
+			want:      []string{"orioledb-18"},
 		},
 		{
 			name:      "deb_pg16",
@@ -275,7 +275,7 @@ func TestResolveOrioleDBAliasUsesTargetPGVersion(t *testing.T) {
 			osVersion: "24",
 			osCode:    "u24",
 			pgVer:     16,
-			want:      []string{"oriolepg-16-orioledb", "oriolepg-16"},
+			want:      []string{"orioledb-16"},
 		},
 		{
 			name:      "deb_pg18",
@@ -283,7 +283,7 @@ func TestResolveOrioleDBAliasUsesTargetPGVersion(t *testing.T) {
 			osVersion: "24",
 			osCode:    "u24",
 			pgVer:     18,
-			want:      []string{"oriolepg-18-orioledb", "oriolepg-18"},
+			want:      []string{"orioledb-18"},
 		},
 	}
 
