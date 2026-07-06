@@ -4,6 +4,7 @@ package build
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/utils"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 )
+
+var debDependencyAvailable = debPackageAvailable
 
 // InstallDeps installs build dependencies for a single package
 func InstallDeps(pkg string, pgVersion string) error {
@@ -98,21 +101,7 @@ func installRpmDep(pkg string, pgVersion string) error {
 	reqPgVer := strings.TrimSpace(pgVersion)
 	var extPkg bool
 
-	// Try as extension first
-	if ext, err := ResolvePackage(pkg); err == nil {
-		pkgName = ext.Pkg
-		extPkg = true
-		// Use requested PG version first.
-		if reqPgVer != "" {
-			pgVer = reqPgVer
-		} else if len(ext.RpmPg) > 0 {
-			// Use extension's highest/first declared RPM PG version.
-			pgVer = ext.RpmPg[0]
-		}
-	} else {
-		// Treat as normal package
-		pkgName = pkg
-	}
+	pkgName, pgVer, extPkg = resolveRPMBuildSpecAndPG(pkg, reqPgVer)
 
 	specFile := filepath.Join(specsDir, pkgName+".spec")
 	if _, err := os.Stat(specFile); os.IsNotExist(err) {
@@ -147,6 +136,35 @@ func installRpmDep(pkg string, pgVersion string) error {
 	return nil
 }
 
+func resolveRPMBuildSpecAndPG(pkg string, reqPgVer string) (string, string, bool) {
+	reqPgVer = strings.TrimSpace(reqPgVer)
+
+	if ext, err := ResolvePackage(pkg); err == nil {
+		pkgName := ext.Pkg
+		if shouldUseMakeForKernelPackage(pkg, ext) {
+			if kernel := strings.TrimSpace(ext.GetExtraString("kernel")); kernel != "" {
+				pkgName = kernel
+			}
+		}
+
+		pgVer := reqPgVer
+		if pgVer == "" && len(ext.RpmPg) > 0 {
+			// Use extension's highest/first declared RPM PG version.
+			pgVer = ext.RpmPg[0]
+		}
+		return pkgName, pgVer, true
+	}
+
+	if basePkg, pgMajor, ok := splitPGMajorSuffix(pkg); ok {
+		if reqPgVer != "" {
+			pgMajor = reqPgVer
+		}
+		return basePkg, pgMajor, false
+	}
+
+	return pkg, reqPgVer, false
+}
+
 func inferRPMPGMajorFromSpec(specFile string) string {
 	content, err := os.ReadFile(specFile)
 	if err != nil {
@@ -176,12 +194,14 @@ func installDebDep(pkg string, pgVersion string) error {
 		return fmt.Errorf("debbuild directory not found: run 'pig build spec' first")
 	}
 
+	recipe := resolveDebBuildRecipe(pkg)
+
 	// Convert package name
-	controlFile := filepath.Join(debDir, pkg, "debian", "control.in")
+	controlFile := filepath.Join(debDir, recipe, "debian", "control.in")
 	if _, err := os.Stat(controlFile); os.IsNotExist(err) {
-		controlFile = filepath.Join(debDir, pkg, "debian", "control")
+		controlFile = filepath.Join(debDir, recipe, "debian", "control")
 		if _, err := os.Stat(controlFile); os.IsNotExist(err) {
-			return fmt.Errorf("control file not found for %s: %s", pkg, controlFile)
+			return fmt.Errorf("control file not found for %s: %s", recipe, controlFile)
 		}
 	}
 
@@ -213,6 +233,13 @@ func installDebDep(pkg string, pgVersion string) error {
 
 	logrus.Infof("[DONE] %s build dep complete", pkg)
 	return nil
+}
+
+func resolveDebBuildRecipe(pkg string) string {
+	if ext, err := ResolvePackage(pkg); err == nil {
+		return resolveMakeBuildTarget(pkg, ext)
+	}
+	return pkg
 }
 
 func parseDebBuildDepends(controlContent string, pgVersion string) []string {
@@ -413,30 +440,67 @@ func normalizeDebDependencyEntry(entry string, pgVersion string) string {
 	dep = stripDelimitedSegments(dep, '[', ']')
 	dep = stripDelimitedSegments(dep, '<', '>')
 
-	// For alternatives like "foo | bar", try the first candidate.
-	if idx := strings.Index(dep, "|"); idx >= 0 {
-		dep = dep[:idx]
-	}
-
-	dep = strings.TrimSpace(strings.Join(strings.Fields(dep), " "))
-	if dep == "" {
+	candidates := normalizeDebDependencyCandidates(dep, pgVersion)
+	if len(candidates) == 0 {
 		return ""
 	}
-
-	// Keep package atom only.
-	if idx := strings.Index(dep, " "); idx >= 0 {
-		dep = dep[:idx]
+	if len(candidates) > 1 {
+		for _, candidate := range candidates {
+			if debDependencyAvailable(candidate) {
+				return candidate
+			}
+		}
 	}
+	return candidates[0]
+}
 
-	if strings.HasPrefix(dep, "${") {
-		return ""
+func normalizeDebDependencyCandidates(entry string, pgVersion string) []string {
+	rawCandidates := strings.Split(entry, "|")
+	candidates := make([]string, 0, len(rawCandidates))
+	for _, dep := range rawCandidates {
+		dep = strings.TrimSpace(strings.Join(strings.Fields(dep), " "))
+		if dep == "" {
+			continue
+		}
+
+		// Keep package atom only.
+		if idx := strings.Index(dep, " "); idx >= 0 {
+			dep = dep[:idx]
+		}
+
+		if strings.HasPrefix(dep, "${") {
+			continue
+		}
+
+		if pgVersion != "" {
+			dep = strings.ReplaceAll(dep, "PGVERSION", pgVersion)
+		}
+		candidates = append(candidates, dep)
 	}
+	return candidates
+}
 
-	if pgVersion != "" {
-		dep = strings.ReplaceAll(dep, "PGVERSION", pgVersion)
+func debPackageAvailable(pkg string) bool {
+	if pkg == "" || strings.Contains(pkg, "PGVERSION") {
+		return false
 	}
-
-	return dep
+	aptCache, err := exec.LookPath("apt-cache")
+	if err != nil {
+		return false
+	}
+	output, err := exec.Command(aptCache, "policy", pkg).Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Candidate:") {
+			continue
+		}
+		candidate := strings.TrimSpace(strings.TrimPrefix(line, "Candidate:"))
+		return candidate != "" && candidate != "(none)"
+	}
+	return false
 }
 
 func leadingDigits(s string) string {

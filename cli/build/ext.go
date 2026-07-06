@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"pig/cli/ext"
 	"pig/internal/config"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,8 +35,12 @@ func BuildExtensions(packages []string, pgVersions string, debugPkg bool) error 
 
 // BuildExtension is the main entry point for building a single package
 func BuildExtension(pkg string, pgVersions string, debugPkg bool) error {
-	if _, err := resolveExtension(pkg); err != nil {
+	extension, err := resolveExtension(pkg)
+	if err != nil {
 		return BuildMake(pkg, pgVersions, debugPkg)
+	}
+	if shouldUseMakeForKernelPackage(pkg, extension) {
+		return BuildMake(resolveMakeBuildTarget(pkg, extension), pgVersions, debugPkg)
 	}
 
 	// run extension builder for postgres extension
@@ -50,12 +55,56 @@ func BuildExtension(pkg string, pgVersions string, debugPkg bool) error {
 	return builder.Build()
 }
 
+func shouldUseMakeForKernelPackage(pkg string, extension *ext.Extension) bool {
+	if extension == nil {
+		return false
+	}
+	kernel := normalizeBuildName(extension.GetExtraString("kernel"))
+	if kernel == "" {
+		return false
+	}
+	key := normalizeBuildName(pkg)
+	if key == kernel {
+		return true
+	}
+	return key == normalizeBuildName(extension.Pkg) && key != normalizeBuildName(extension.Name)
+}
+
+func resolveMakeBuildTarget(pkg string, extension *ext.Extension) string {
+	if shouldUseMakeForKernelPackage(pkg, extension) {
+		if kernel := strings.TrimSpace(extension.GetExtraString("kernel")); kernel != "" {
+			return kernel
+		}
+	}
+	return pkg
+}
+
+func normalizeBuildName(pkg string) string {
+	return strings.ToLower(strings.TrimSpace(pkg))
+}
+
+func splitPGMajorSuffix(pkg string) (string, string, bool) {
+	key := strings.TrimSpace(pkg)
+	idx := strings.LastIndex(key, "-")
+	if idx <= 0 || idx == len(key)-1 {
+		return "", "", false
+	}
+	major := key[idx+1:]
+	majorNum, err := strconv.Atoi(major)
+	if err != nil || !ext.IsInstallablePGMajor(majorNum) {
+		return "", "", false
+	}
+	return key[:idx], major, true
+}
+
 // BuildMake builds packages using Makefile
 func BuildMake(pkg string, pgVersions string, debugPkg bool) error {
+	target := strings.TrimSpace(pkg)
+
 	// Print header
 	headerWidth := 58
 	logrus.Info(strings.Repeat("=", headerWidth))
-	logrus.Infof("[BUILD MAKE] %s", pkg)
+	logrus.Infof("[BUILD MAKE] make %s", target)
 	logrus.Info(strings.Repeat("=", headerWidth))
 
 	// Determine build directory based on OS type
@@ -76,7 +125,7 @@ func BuildMake(pkg string, pgVersions string, debugPkg bool) error {
 	}
 
 	logrus.Infof("path   : %s", makeFile)
-	logrus.Infof("target : %s", pkg)
+	logrus.Infof("target : %s", target)
 	logrus.Info(strings.Repeat("-", headerWidth))
 
 	// Setup logging
@@ -98,7 +147,7 @@ func BuildMake(pkg string, pgVersions string, debugPkg bool) error {
 		fmt.Sprintf("BUILD: %s", pkg),
 		fmt.Sprintf("TIME : %s", startTime.Format("2006-01-02 15:04:05 -07")),
 		fmt.Sprintf("DIR  : %s", makeDir),
-		fmt.Sprintf("CMD  : make %s", pkg),
+		fmt.Sprintf("CMD  : make %s", target),
 		strings.Repeat("=", headerWidth),
 	}
 	for _, line := range metadata {
@@ -106,7 +155,7 @@ func BuildMake(pkg string, pgVersions string, debugPkg bool) error {
 	}
 
 	// Execute make command
-	cmd := exec.Command("make", pkg)
+	cmd := exec.Command("make", target)
 	cmd.Dir = makeDir
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile

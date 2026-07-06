@@ -80,6 +80,22 @@ Standards-Version: 4.6.2
 	}
 }
 
+func TestNormalizeDebDependencyEntrySelectsAvailableAlternative(t *testing.T) {
+	original := debDependencyAvailable
+	debDependencyAvailable = func(pkg string) bool {
+		return pkg == "libselinux-dev"
+	}
+	defer func() {
+		debDependencyAvailable = original
+	}()
+
+	got := normalizeDebDependencyEntry("libselinux1-dev [linux-any] | libselinux-dev [linux-any]", "")
+	want := "libselinux-dev"
+	if got != want {
+		t.Fatalf("normalizeDebDependencyEntry(alternative) = %q, want %q", got, want)
+	}
+}
+
 func TestExpandDebPGVersionDeps(t *testing.T) {
 	deps := []string{
 		"postgresql-server-dev-PGVERSION",
@@ -114,6 +130,50 @@ Name: %{sname}_%{pgmajorversion}
 	got := inferRPMPGMajorFromSpec(specFile)
 	if got != "18" {
 		t.Fatalf("inferRPMPGMajorFromSpec = %q, want %q", got, "18")
+	}
+}
+
+func TestResolveRPMBuildSpecAndPG(t *testing.T) {
+	tests := []struct {
+		pkg      string
+		wantSpec string
+		wantPG   string
+	}{
+		{pkg: "openhalo", wantSpec: "openhalodb", wantPG: "14"},
+		{pkg: "ivorysql", wantSpec: "ivorysql", wantPG: "18"},
+		{pkg: "babelfish-18", wantSpec: "babelfish", wantPG: "18"},
+		{pkg: "pgedge-17", wantSpec: "pgedge", wantPG: "17"},
+		{pkg: "orioledb-16", wantSpec: "orioledb", wantPG: "16"},
+		{pkg: "pg_duckdb", wantSpec: "pg_duckdb", wantPG: "18"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pkg, func(t *testing.T) {
+			gotSpec, gotPG, _ := resolveRPMBuildSpecAndPG(tt.pkg, "")
+			if gotSpec != tt.wantSpec || gotPG != tt.wantPG {
+				t.Fatalf("resolveRPMBuildSpecAndPG(%q) = (%q, %q), want (%q, %q)", tt.pkg, gotSpec, gotPG, tt.wantSpec, tt.wantPG)
+			}
+		})
+	}
+}
+
+func TestResolveDebBuildRecipe(t *testing.T) {
+	tests := []struct {
+		pkg        string
+		wantRecipe string
+	}{
+		{pkg: "openhalo", wantRecipe: "openhalodb"},
+		{pkg: "openhalodb", wantRecipe: "openhalodb"},
+		{pkg: "pg_duckdb", wantRecipe: "pg_duckdb"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pkg, func(t *testing.T) {
+			got := resolveDebBuildRecipe(tt.pkg)
+			if got != tt.wantRecipe {
+				t.Fatalf("resolveDebBuildRecipe(%q) = %q, want %q", tt.pkg, got, tt.wantRecipe)
+			}
+		})
 	}
 }
 
