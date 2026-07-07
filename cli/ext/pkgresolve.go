@@ -169,6 +169,9 @@ func applyPackageVersion(pkg, version string) string {
 	case config.DistroEL:
 		return fmt.Sprintf("%s-%s", pkg, version)
 	case config.DistroDEB:
+		// APT package version pins are prefix matches so explicit user requests like
+		// "postgis=3.5" can match Debian revisions such as "3.5-1.pgdg...".
+		// This is only for user-provided version pins, not build tool package lists.
 		return fmt.Sprintf("%s=%s*", pkg, version)
 	default:
 		return pkg

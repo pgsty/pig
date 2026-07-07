@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"fmt"
 	"testing"
 
 	"pig/internal/config"
@@ -57,7 +58,8 @@ func TestLoadAliasMapRequestedAliasesEL9(t *testing.T) {
 	}
 }
 
-func TestLoadAliasMapIncludesPG19BetaStaticAliases(t *testing.T) {
+func TestLoadAliasMapIncludesBetaStaticAliases(t *testing.T) {
+	beta := PostgresBetaMajorVersion
 	tests := []struct {
 		name   string
 		osType string
@@ -69,11 +71,11 @@ func TestLoadAliasMapIncludesPG19BetaStaticAliases(t *testing.T) {
 			osType: config.DistroEL,
 			osCode: "el9",
 			want: map[string]string{
-				"pg19":        "postgresql19 postgresql19-server postgresql19-libs postgresql19-contrib postgresql19-plperl postgresql19-plpython3 postgresql19-pltcl",
-				"pg19-mini":   "postgresql19 postgresql19-server postgresql19-libs postgresql19-contrib",
-				"pg19-devel":  "postgresql19-devel",
-				"pg19-basic":  "pg_repack_19 wal2json_19 pgvector_19",
-				"pgsql-devel": "postgresql$v-devel",
+				fmt.Sprintf("pg%d", beta):       fmt.Sprintf("postgresql%d postgresql%d-server postgresql%d-libs postgresql%d-contrib postgresql%d-plperl postgresql%d-plpython3 postgresql%d-pltcl", beta, beta, beta, beta, beta, beta, beta),
+				fmt.Sprintf("pg%d-mini", beta):  fmt.Sprintf("postgresql%d postgresql%d-server postgresql%d-libs postgresql%d-contrib", beta, beta, beta, beta),
+				fmt.Sprintf("pg%d-devel", beta): fmt.Sprintf("postgresql%d-devel", beta),
+				fmt.Sprintf("pg%d-basic", beta): fmt.Sprintf("pg_repack_%d wal2json_%d pgvector_%d", beta, beta, beta),
+				"pgsql-devel":                   "postgresql$v-devel",
 			},
 		},
 		{
@@ -81,11 +83,11 @@ func TestLoadAliasMapIncludesPG19BetaStaticAliases(t *testing.T) {
 			osType: config.DistroDEB,
 			osCode: "u24",
 			want: map[string]string{
-				"pg19":        "postgresql-19 postgresql-client-19 postgresql-plpython3-19 postgresql-plperl-19 postgresql-pltcl-19",
-				"pg19-mini":   "postgresql-19 postgresql-client-19",
-				"pg19-devel":  "postgresql-server-dev-19",
-				"pg19-basic":  "postgresql-19-repack postgresql-19-wal2json postgresql-19-pgvector",
-				"pgsql-devel": "postgresql-server-dev-$v",
+				fmt.Sprintf("pg%d", beta):       fmt.Sprintf("postgresql-%d postgresql-client-%d postgresql-plpython3-%d postgresql-plperl-%d postgresql-pltcl-%d", beta, beta, beta, beta, beta),
+				fmt.Sprintf("pg%d-mini", beta):  fmt.Sprintf("postgresql-%d postgresql-client-%d", beta, beta),
+				fmt.Sprintf("pg%d-devel", beta): fmt.Sprintf("postgresql-server-dev-%d", beta),
+				fmt.Sprintf("pg%d-basic", beta): fmt.Sprintf("postgresql-%d-repack postgresql-%d-wal2json postgresql-%d-pgvector", beta, beta, beta),
+				"pgsql-devel":                   "postgresql-server-dev-$v",
 			},
 		},
 	}

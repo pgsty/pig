@@ -461,11 +461,6 @@ var DistroBadCase = map[string]map[string][]int{
 	"d13.arm64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}}, // TBD
 }
 
-// RpmRenameMap is a map of RPM package rename rules
-var RpmRenameMap = map[string]map[int]string{
-	"pgaudit": {15: "pgaudit17_15*", 14: "pgaudit17_14*"},
-}
-
 // Available check if the extension is available for the given pg version
 func (e *Extension) Available(pgVer int) bool {
 	verStr := strconv.Itoa(pgVer)

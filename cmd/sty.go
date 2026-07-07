@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"pig/cli/ext"
 	stycli "pig/cli/sty"
 	"pig/internal/config"
 	"strings"
@@ -60,12 +61,12 @@ var styCmd = &cobra.Command{
   pig sty deploy               # run the deploy.yml playbook`,
 }
 
-const styConfigureLong = `Configure pigsty with native workflow (default) or raw shell workflow
+var styConfigureLong = fmt.Sprintf(`Configure pigsty with native workflow (default) or raw shell workflow
 
 pig sty conf (aliases: c, configure)
   [-c|--conf <name>]      # config template: [meta|rich|slim|full|supabase|...]
   [--ip <ip>]             # primary IP address (skip with -s)
-  [-v|--version <pgver>]  # postgres major version: [18|17|16|15|14] (19 beta)
+  [-v|--version <pgver>]  # postgres major version: [%s] (beta: %d)
   [-r|--region <region>]  # upstream repo region: [default|china|europe]
   [-m|--mirror]           # same as --region china
   [-O|--output-file <file>]    # output config file path (default: pigsty.yml)
@@ -78,7 +79,7 @@ pig sty conf (aliases: c, configure)
   [--raw]                 # use raw legacy shell configure workflow
 
 Check https://pigsty.io/docs/setup/install/#configure for details
-`
+`, strings.Join(ext.PostgresActiveVersionStrings(), "|"), ext.PostgresBetaMajorVersion)
 
 const styConfigureExample = `
   pig sty conf                       # native Go configure path (default)

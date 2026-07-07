@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -115,7 +116,7 @@ func TestResolveExtensionPackagesWithVersionSpec(t *testing.T) {
 	}
 }
 
-func TestResolveExtensionPackagesPG19DirectExtension(t *testing.T) {
+func TestResolveExtensionPackagesBetaPGDirectExtension(t *testing.T) {
 	ext := &Extension{
 		Name:   "test_ext",
 		Pkg:    "test_pkg",
@@ -125,14 +126,14 @@ func TestResolveExtensionPackagesPG19DirectExtension(t *testing.T) {
 	cleanup := withResolveTestEnv(t, config.DistroEL, "9", newTestCatalog(ext))
 	defer cleanup()
 
-	res := ResolveExtensionPackages(19, []string{"test_ext"}, false)
+	res := ResolveExtensionPackages(PostgresBetaMajorVersion, []string{"test_ext"}, false)
 	if len(res.NotFound) != 0 || len(res.NoPackage) != 0 {
 		t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
 	}
 	if len(res.Packages) != 1 {
 		t.Fatalf("expected 1 package, got %d (%v)", len(res.Packages), res.Packages)
 	}
-	if res.Packages[0] != "test_ext_19" {
+	if want := fmt.Sprintf("test_ext_%d", PostgresBetaMajorVersion); res.Packages[0] != want {
 		t.Fatalf("unexpected package: %s", res.Packages[0])
 	}
 }
@@ -201,6 +202,18 @@ func TestResolveInstallPackagesNoTranslation(t *testing.T) {
 	}
 	if res.PackageOwner[res.Packages[0]] != "nginx" {
 		t.Fatalf("unexpected owner: %s", res.PackageOwner[res.Packages[0]])
+	}
+}
+
+func TestApplyPackageVersionDebWildcardOnlyForExplicitPin(t *testing.T) {
+	cleanup := withResolveTestEnv(t, config.DistroDEB, "12", newEmptyTestCatalog())
+	defer cleanup()
+
+	if got := applyPackageVersion("postgresql-17-test-ext", "2.0.0"); got != "postgresql-17-test-ext=2.0.0*" {
+		t.Fatalf("applyPackageVersion with explicit DEB pin = %q", got)
+	}
+	if got := applyPackageVersion("postgresql-17-test-ext", ""); got != "postgresql-17-test-ext" {
+		t.Fatalf("applyPackageVersion without version should not add wildcard, got %q", got)
 	}
 }
 

@@ -40,11 +40,14 @@ var (
 	Inited   = false                     // Whether the PostgreSQL installation has been initialized
 )
 
+// PostgresBetaMajorVersion is the current beta major accepted by opt-in build/install flows.
+const PostgresBetaMajorVersion = 19
+
 var (
 	// PostgresActiveMajorVersions is the stable support window used for defaults and catalog display.
 	PostgresActiveMajorVersions = []int{18, 17, 16, 15, 14}
 	// PostgresInstallableMajorVersions includes beta majors accepted by install/build/config commands.
-	PostgresInstallableMajorVersions = []int{19, 18, 17, 16, 15, 14}
+	PostgresInstallableMajorVersions = append([]int{PostgresBetaMajorVersion}, PostgresActiveMajorVersions...)
 	PostgresElSearchPath             = []string{"/usr/pgsql-%s/bin/pg_config"}
 	PostgresDEBSearchPath            = []string{"/usr/lib/postgresql/%s/bin/pg_config"}
 	PostgresMACSearchPath            = []string{"/opt/homebrew/opt/postgresql@%s/bin/pg_config"}
@@ -53,6 +56,11 @@ var (
 // IsActivePGMajor checks whether the PostgreSQL major version is in active support window.
 func IsActivePGMajor(ver int) bool {
 	return slices.Contains(PostgresActiveMajorVersions, ver)
+}
+
+// IsBetaPGMajor checks whether the major version is the current beta placeholder.
+func IsBetaPGMajor(ver int) bool {
+	return ver == PostgresBetaMajorVersion && !IsActivePGMajor(ver)
 }
 
 // IsInstallablePGMajor checks whether the PostgreSQL major version can be requested explicitly.
@@ -452,8 +460,8 @@ func FindPostgres(pgVersion int) (*PostgresInstall, error) {
 
 // latestInstall picks the default installation from a detected install map:
 // the highest major within the stable active window wins, so an explicitly
-// installed beta major (e.g. PG19) never becomes the implicit default unless
-// it is the only installation on the host.
+// installed beta major never becomes the implicit default unless it is the only
+// installation on the host.
 func latestInstall(installs map[int]*PostgresInstall) *PostgresInstall {
 	var latest, latestActive *PostgresInstall
 	for _, pi := range installs {

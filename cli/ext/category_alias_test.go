@@ -100,7 +100,7 @@ func TestResolveCategoryAliasVisibleOnly(t *testing.T) {
 	}
 }
 
-func TestResolvePG19CategoryAliasUsesPG18PGDGTemplate(t *testing.T) {
+func TestResolveBetaCategoryAliasUsesLatestStablePGDGTemplate(t *testing.T) {
 	extPGDG := newTestCategoryExt(100, "pg_cron", "pg_cron", "TIME", []string{"el9i:18:A:f:1:G:1.0"})
 	extPGDG.RpmPkg, extPGDG.RpmRepo, extPGDG.RpmPg = "pg_cron_$v", "PGDG", []string{"18"}
 
@@ -120,17 +120,43 @@ func TestResolvePG19CategoryAliasUsesPG18PGDGTemplate(t *testing.T) {
 	})
 	defer cleanup()
 
-	res := ResolveExtensionPackages(19, []string{"pg19-time"}, false)
+	alias := fmt.Sprintf("pg%d-time", PostgresBetaMajorVersion)
+	res := ResolveExtensionPackages(PostgresBetaMajorVersion, []string{alias}, false)
 	if len(res.NotFound) > 0 || len(res.NoPackage) > 0 {
 		t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
 	}
-	want := []string{"pg_cron_19", "dbt2-pg19-extensions"}
+	want := []string{
+		fmt.Sprintf("pg_cron_%d", PostgresBetaMajorVersion),
+		fmt.Sprintf("dbt2-pg%d-extensions", PostgresBetaMajorVersion),
+	}
 	if !reflect.DeepEqual(res.Packages, want) {
 		t.Fatalf("resolved packages mismatch\nwant: %v\ngot:  %v", want, res.Packages)
 	}
 }
 
-func TestResolvePG19PgsqlCategoryAliasUsesPG18DEBTemplate(t *testing.T) {
+func TestResolveFutureInstallableCategoryAliasDoesNotUseBetaFallback(t *testing.T) {
+	futureMajor := PostgresBetaMajorVersion + 1
+	oldInstallable := PostgresInstallableMajorVersions
+	PostgresInstallableMajorVersions = append([]int{futureMajor}, oldInstallable...)
+	defer func() { PostgresInstallableMajorVersions = oldInstallable }()
+
+	extPGDG := newTestCategoryExt(100, "pg_cron", "pg_cron", "TIME", []string{"el9i:18:A:f:1:G:1.0"})
+	extPGDG.RpmPkg, extPGDG.RpmRepo, extPGDG.RpmPg = "pg_cron_$v", "PGDG", []string{"18"}
+
+	cleanup := withCategoryAliasTestEnv(t, config.DistroEL, "el9", "amd64", []*Extension{extPGDG})
+	defer cleanup()
+
+	alias := fmt.Sprintf("pg%d-time", futureMajor)
+	res := ResolveExtensionPackages(futureMajor, []string{alias}, false)
+	if len(res.Packages) != 0 {
+		t.Fatalf("expected future non-beta alias not to borrow beta fallback, got packages: %v", res.Packages)
+	}
+	if len(res.NoPackage) != 1 || res.NoPackage[0] != alias {
+		t.Fatalf("expected no_package for %s, got not_found=%v no_package=%v", alias, res.NotFound, res.NoPackage)
+	}
+}
+
+func TestResolveBetaPgsqlCategoryAliasUsesLatestStableDEBTemplate(t *testing.T) {
 	extPGDG := newTestCategoryExt(100, "pg_cron", "pg_cron", "TIME", []string{"u24i:18:A:f:1:G:1.0"})
 	extPGDG.DebPkg, extPGDG.DebRepo, extPGDG.DebPg = "postgresql-$v-cron", "PGDG", []string{"18"}
 
@@ -142,11 +168,11 @@ func TestResolvePG19PgsqlCategoryAliasUsesPG18DEBTemplate(t *testing.T) {
 	})
 	defer cleanup()
 
-	res := ResolveExtensionPackages(19, []string{"pgsql-time"}, false)
+	res := ResolveExtensionPackages(PostgresBetaMajorVersion, []string{"pgsql-time"}, false)
 	if len(res.NotFound) > 0 || len(res.NoPackage) > 0 {
 		t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
 	}
-	want := []string{"postgresql-19-cron"}
+	want := []string{fmt.Sprintf("postgresql-%d-cron", PostgresBetaMajorVersion)}
 	if !reflect.DeepEqual(res.Packages, want) {
 		t.Fatalf("resolved packages mismatch\nwant: %v\ngot:  %v", want, res.Packages)
 	}

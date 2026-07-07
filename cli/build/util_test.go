@@ -1,6 +1,8 @@
 package build
 
 import (
+	"pig/cli/ext"
+	"strconv"
 	"testing"
 )
 
@@ -16,7 +18,7 @@ func TestParsePGVersions(t *testing.T) {
 		{"Multiple versions", "14,15,16", []int{14, 15, 16}, false},
 		{"With spaces", "14, 15, 16", []int{14, 15, 16}, false},
 		{"Duplicates removed", "16,16,15", []int{16, 15}, false},
-		{"PG19 beta", "19", []int{19}, false},
+		{"PG beta", strconv.Itoa(ext.PostgresBetaMajorVersion), []int{ext.PostgresBetaMajorVersion}, false},
 		{"Empty string", "", nil, false},
 
 		// Invalid inputs

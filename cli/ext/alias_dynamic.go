@@ -171,9 +171,9 @@ func buildCategoryPackageList(spec categoryAliasSpec, matrixOS, matrixArch strin
 	pkgs := make([]string, 0, 16)
 	seen := make(map[string]struct{})
 
-	// betaTarget: the requested major is beyond the stable window (e.g. PG19
-	// beta) and has no catalog matrix data of its own yet.
-	betaTarget := spec.targetPG > PostgresLatestMajorVersion()
+	// betaTarget: the requested major is the current beta placeholder and has
+	// no catalog matrix data of its own yet.
+	betaTarget := IsBetaPGMajor(spec.targetPG)
 	// Visibility is evaluated against the stable window: pgsql-* aliases follow
 	// the latest stable template, and beta targets borrow it, restricted to
 	// PGDG-origin entries (PGDG rebuilds its repo for beta majors, Pigsty does not).

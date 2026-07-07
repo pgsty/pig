@@ -3,6 +3,7 @@ package cmd
 import (
 	"pig/cli/build"
 	"pig/cli/ext"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -21,6 +22,8 @@ var (
 	buildRustYes    bool
 	buildRustMirror bool
 	buildMirror     bool
+	buildRepoBeta   bool
+	buildToolBeta   bool
 )
 
 // buildCmd represents the top-level `build` command
@@ -35,6 +38,7 @@ var buildCmd = &cobra.Command{
 Environment Setup:
   pig build spec                   # init build spec and directory (~ext)
   pig build repo                   # init build repo (=repo set -ru)
+  pig build repo --beta            # init build repo with PostgreSQL beta repo
   pig build tool  [mini|full|...]  # init build toolset
   pig build rust  [-y] [-m]        # install Rust toolchain
   pig build pgrx  [-v <ver>]       # install & init pgrx (` + build.DefaultPgrxVersion + `)
@@ -68,7 +72,7 @@ var buildRepoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repoRemove = true
 		repoUpdate = true
-		return repoSetCmd.RunE(cmd, args)
+		return repoSetCmd.RunE(cmd, buildRepoModules(args, buildRepoBeta))
 	},
 }
 
@@ -85,9 +89,34 @@ var buildToolCmd = &cobra.Command{
 				mode = args[0]
 			}
 			logrus.Infof("Init pg ext build env in %s mode", mode)
-			return build.InstallBuildTools(mode)
+			return build.InstallBuildToolsWithBeta(mode, buildToolBeta)
 		})
 	},
+}
+
+func buildRepoModules(args []string, includeBeta bool) []string {
+	if !includeBeta {
+		return args
+	}
+	modules := append([]string(nil), args...)
+	if len(modules) == 0 {
+		modules = []string{"all"}
+	}
+	if !moduleArgsContain(modules, "beta") {
+		modules = append(modules, "beta")
+	}
+	return modules
+}
+
+func moduleArgsContain(args []string, target string) bool {
+	for _, arg := range args {
+		for _, part := range strings.Split(arg, ",") {
+			if strings.TrimSpace(part) == target {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // buildProxyCmd represents the `build proxy` command
@@ -236,6 +265,8 @@ var buildPkgCmd = &cobra.Command{
 func init() {
 	// Parse build flags
 	buildRepoCmd.Flags().BoolVarP(&repoMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
+	buildRepoCmd.Flags().BoolVar(&buildRepoBeta, "beta", false, "include PostgreSQL beta repository")
+	buildToolCmd.Flags().BoolVar(&buildToolBeta, "beta", false, "include PostgreSQL beta build packages")
 	buildPgrxCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", build.DefaultPgrxVersion, "pgrx version to install")
 	buildRustCmd.PersistentFlags().BoolVarP(&buildRustYes, "yes", "y", false, "enforce rust re-installation")
 	buildRustCmd.Flags().BoolVarP(&buildRustMirror, "mirror", "m", false, "use China mirrors for rustup and Cargo")

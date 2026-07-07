@@ -218,7 +218,7 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 	warnings = append(warnings, preflightWarnings...)
 
 	// Beta majors get a heads-up: the generic templates are not tuned for them.
-	if pgVer > ext.PostgresLatestMajorVersion() {
+	if ext.IsBetaPGMajor(pgVer) {
 		betaMode := fmt.Sprintf("pg%d", pgVer)
 		if mode != betaMode {
 			warn := fmt.Sprintf("PG%d is a beta major, template conf/%s.yml is not tuned for it", pgVer, mode)
@@ -842,7 +842,7 @@ func mutateTemplate(content string, opts mutationOptions) (string, []string, []s
 
 	// Beta majors beyond the stable window ship from the PGDG testing repos,
 	// which require the 'beta' repo module on top of the standard modules.
-	if opts.PGVersion > ext.PostgresLatestMajorVersion() && !pinnedKernelMode {
+	if ext.IsBetaPGMajor(opts.PGVersion) && !pinnedKernelMode {
 		var enabled bool
 		content, enabled = enableBetaRepoModule(content)
 		if !enabled {
@@ -877,7 +877,7 @@ var betaRepoModulesLine = regexp.MustCompile(`^([ \t]*(?:node_)?repo_modules[ \t
 // enableBetaRepoModule inserts the beta module (PGDG testing repos) into every
 // repo module list that contains the pgsql module, right after it, regardless
 // of module order. Lines already listing beta are left untouched, so the
-// rewrite is idempotent (e.g. for conf/pg19.yml); commented lines are ignored.
+// rewrite is idempotent (e.g. for dedicated beta templates); commented lines are ignored.
 // It reports whether the resulting content enables the beta module.
 func enableBetaRepoModule(content string) (string, bool) {
 	lines := strings.Split(content, "\n")
