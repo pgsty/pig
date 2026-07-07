@@ -207,3 +207,46 @@ func TestInstallDepsListReturnsNilOnDependencyFailures(t *testing.T) {
 		t.Fatalf("InstallDepsList() should keep warning-only behavior, got error: %v", err)
 	}
 }
+
+func TestInstallDebDepRefreshesAptCacheBeforeInstall(t *testing.T) {
+	home := t.TempDir()
+	controlDir := filepath.Join(home, "debbuild", "cloudberry", "debian")
+	if err := os.MkdirAll(controlDir, 0755); err != nil {
+		t.Fatalf("create control dir failed: %v", err)
+	}
+	control := `Source: cloudberry
+Build-Depends: bison, flex
+`
+	if err := os.WriteFile(filepath.Join(controlDir, "control"), []byte(control), 0644); err != nil {
+		t.Fatalf("write control failed: %v", err)
+	}
+
+	oldHomeDir := config.HomeDir
+	oldSudoCommand := buildSudoCommand
+	oldAptCacheUpdated := debBuildAptCacheUpdated
+	config.HomeDir = home
+	debBuildAptCacheUpdated = false
+	t.Cleanup(func() {
+		config.HomeDir = oldHomeDir
+		buildSudoCommand = oldSudoCommand
+		debBuildAptCacheUpdated = oldAptCacheUpdated
+	})
+
+	var calls [][]string
+	buildSudoCommand = func(args []string) error {
+		calls = append(calls, append([]string(nil), args...))
+		return nil
+	}
+
+	if err := installDebDep("cloudberry", ""); err != nil {
+		t.Fatalf("installDebDep returned error: %v", err)
+	}
+
+	want := [][]string{
+		{"apt-get", "update"},
+		{"apt-get", "install", "-y", "bison", "flex"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("sudo calls = %v, want %v", calls, want)
+	}
+}
