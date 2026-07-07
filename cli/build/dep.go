@@ -14,8 +14,6 @@ import (
 )
 
 var debDependencyAvailable = debPackageAvailable
-var buildSudoCommand = utils.SudoCommand
-var debBuildAptCacheUpdated bool
 
 // InstallDeps installs build dependencies for a single package
 func InstallDeps(pkg string, pgVersion string) error {
@@ -213,10 +211,6 @@ func installDebDep(pkg string, pgVersion string) error {
 		return fmt.Errorf("failed to read control file: %v", err)
 	}
 
-	if err := ensureDebBuildAptCacheUpdated(); err != nil {
-		return fmt.Errorf("[FAIL] %s build dep missing: %v", pkg, err)
-	}
-
 	deps := parseDebBuildDepends(string(content), pgVersion)
 	pgVers, err := resolveDebPGVersionsForDeps(pkg, pgVersion, deps)
 	if err != nil {
@@ -231,26 +225,13 @@ func installDebDep(pkg string, pgVersion string) error {
 	}
 
 	logrus.Infof("install deps for %s dependencies", pkg)
-	cmd := append([]string{"apt-get", "install", "-y"}, deps...)
+	cmd := append([]string{"apt", "install", "-y"}, deps...)
 
-	if err := buildSudoCommand(cmd); err != nil {
+	if err := utils.SudoCommand(cmd); err != nil {
 		return fmt.Errorf("[FAIL] %s build dep missing: %v", pkg, err)
 	}
 
 	logrus.Infof("[DONE] %s build dep complete", pkg)
-	return nil
-}
-
-func ensureDebBuildAptCacheUpdated() error {
-	if debBuildAptCacheUpdated {
-		return nil
-	}
-
-	logrus.Infof("refresh apt package index")
-	if err := buildSudoCommand([]string{"apt-get", "update"}); err != nil {
-		return fmt.Errorf("apt-get update failed: %w", err)
-	}
-	debBuildAptCacheUpdated = true
 	return nil
 }
 
