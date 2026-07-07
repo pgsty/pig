@@ -17,7 +17,7 @@ import (
 
 const DefaultPgrxVersion = "0.19.1"
 
-func SetupPgrx(pgrxVersion string, pgVersions string) error {
+func SetupPgrx(pgrxVersion string, pgVersions string, includeBeta bool) error {
 	if pgrxVersion == "" {
 		pgrxVersion = DefaultPgrxVersion
 	}
@@ -63,24 +63,17 @@ func SetupPgrx(pgrxVersion string, pgVersions string) error {
 		return nil
 	}
 
-	// Parse pgVersions if specified
-	var versions []string
-	if pgVersions != "" {
-		versions = strings.Split(pgVersions, ",")
-		for i, v := range versions {
-			versions[i] = strings.TrimSpace(v)
-		}
-	}
+	versions := splitPgrxVersionStrings(pgVersions)
 
 	// Build pgrx init arguments based on OS type
 	var initArgs []string
 	switch config.OSType {
 	case config.DistroEL:
-		initArgs = buildELPgrxArgs(cargoBin, versions)
+		initArgs = buildELPgrxArgs(cargoBin, versions, includeBeta)
 	case config.DistroDEB:
-		initArgs = buildDEBPgrxArgs(cargoBin, versions)
+		initArgs = buildDEBPgrxArgs(cargoBin, versions, includeBeta)
 	case config.DistroMAC:
-		initArgs = buildMacPgrxArgs(cargoBin, versions)
+		initArgs = buildMacPgrxArgs(cargoBin, versions, includeBeta)
 	default:
 		return fmt.Errorf("unsupported operating system: %s", config.OSType)
 	}
@@ -103,7 +96,38 @@ func installPgrx(cargoBin string, pgrxVersion string) error {
 	return nil
 }
 
-func buildELPgrxArgs(cargoBin string, versions []string) []string {
+func pgrxAutoDetectVersionStrings(includeBeta bool) []string {
+	versions := ext.PostgresActiveVersionStrings()
+	if includeBeta && ext.IsBetaPGMajor(ext.PostgresBetaMajorVersion) {
+		betaVersion := strconv.Itoa(ext.PostgresBetaMajorVersion)
+		if !pgrxVersionStringsContain(versions, betaVersion) {
+			versions = append([]string{betaVersion}, versions...)
+		}
+	}
+	return versions
+}
+
+func splitPgrxVersionStrings(pgVersions string) []string {
+	var versions []string
+	for _, version := range strings.Split(pgVersions, ",") {
+		version = strings.TrimSpace(version)
+		if version != "" {
+			versions = append(versions, version)
+		}
+	}
+	return versions
+}
+
+func pgrxVersionStringsContain(versions []string, target string) bool {
+	for _, version := range versions {
+		if version == target {
+			return true
+		}
+	}
+	return false
+}
+
+func buildELPgrxArgs(cargoBin string, versions []string, includeBeta bool) []string {
 	args := []string{cargoBin, "pgrx", "init"}
 
 	// If versions are specified, use them
@@ -115,7 +139,7 @@ func buildELPgrxArgs(cargoBin string, versions []string) []string {
 	} else {
 		// Auto-detect installed versions
 		logrus.Info("Auto-detecting PostgreSQL installations for EL-based system")
-		for _, ver := range ext.PostgresActiveVersionStrings() {
+		for _, ver := range pgrxAutoDetectVersionStrings(includeBeta) {
 			pgConfig := fmt.Sprintf("/usr/pgsql-%s/bin/pg_config", ver)
 			if _, err := os.Stat(pgConfig); err == nil {
 				args = append(args, fmt.Sprintf("--pg%s=%s", ver, pgConfig))
@@ -127,7 +151,7 @@ func buildELPgrxArgs(cargoBin string, versions []string) []string {
 	return args
 }
 
-func buildDEBPgrxArgs(cargoBin string, versions []string) []string {
+func buildDEBPgrxArgs(cargoBin string, versions []string, includeBeta bool) []string {
 	args := []string{cargoBin, "pgrx", "init"}
 
 	// If versions are specified, use them
@@ -139,7 +163,7 @@ func buildDEBPgrxArgs(cargoBin string, versions []string) []string {
 	} else {
 		// Auto-detect installed versions
 		logrus.Info("Auto-detecting PostgreSQL installations for DEB-based system")
-		for _, ver := range ext.PostgresActiveVersionStrings() {
+		for _, ver := range pgrxAutoDetectVersionStrings(includeBeta) {
 			pgConfig := fmt.Sprintf("/usr/lib/postgresql/%s/bin/pg_config", ver)
 			if _, err := os.Stat(pgConfig); err == nil {
 				args = append(args, fmt.Sprintf("--pg%s=%s", ver, pgConfig))
@@ -151,7 +175,7 @@ func buildDEBPgrxArgs(cargoBin string, versions []string) []string {
 	return args
 }
 
-func buildMacPgrxArgs(cargoBin string, versions []string) []string {
+func buildMacPgrxArgs(cargoBin string, versions []string, includeBeta bool) []string {
 	args := []string{cargoBin, "pgrx", "init"}
 
 	// If versions are specified, use them but need to find actual paths
@@ -169,7 +193,7 @@ func buildMacPgrxArgs(cargoBin string, versions []string) []string {
 	} else {
 		// Auto-detect installed versions
 		logrus.Info("Auto-detecting PostgreSQL installations for macOS")
-		for _, ver := range ext.PostgresActiveVersionStrings() {
+		for _, ver := range pgrxAutoDetectVersionStrings(includeBeta) {
 			pgConfig := findMacPGConfig(ver)
 			if pgConfig != "" {
 				args = append(args, fmt.Sprintf("--pg%s=%s", ver, pgConfig))

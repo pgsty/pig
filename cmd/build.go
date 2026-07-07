@@ -12,6 +12,7 @@ import (
 var (
 	buildPgrxVer    string
 	buildPgrxPg     string
+	buildPgrxBeta   bool
 	buildDepPg      string
 	buildPkgPg      string
 	buildPkgSymbol  bool
@@ -41,7 +42,7 @@ Environment Setup:
   pig build repo --beta            # init build repo with PostgreSQL beta repo
   pig build tool  [mini|full|...]  # init build toolset
   pig build rust  [-y] [-m]        # install Rust toolchain
-  pig build pgrx  [-v <ver>]       # install & init pgrx (` + build.DefaultPgrxVersion + `)
+  pig build pgrx  [-v <ver>] [-b]  # install & init pgrx (` + build.DefaultPgrxVersion + `)
   pig build proxy [id@host:port ]  # init build proxy (optional)
 
 Package Building:
@@ -169,8 +170,9 @@ var buildPgrxCmd = &cobra.Command{
 		return runLegacyStructured(legacyModuleBuild, "pig build pgrx", args, map[string]interface{}{
 			"pgrx": buildPgrxVer,
 			"pg":   buildPgrxPg,
+			"beta": buildPgrxBeta,
 		}, func() error {
-			return build.SetupPgrx(buildPgrxVer, buildPgrxPg)
+			return build.SetupPgrx(buildPgrxVer, buildPgrxPg, buildPgrxBeta)
 		})
 	},
 }
@@ -265,9 +267,10 @@ var buildPkgCmd = &cobra.Command{
 func init() {
 	// Parse build flags
 	buildRepoCmd.Flags().BoolVarP(&repoMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
-	buildRepoCmd.Flags().BoolVar(&buildRepoBeta, "beta", false, "include PostgreSQL beta repository")
-	buildToolCmd.Flags().BoolVar(&buildToolBeta, "beta", false, "include PostgreSQL beta build packages")
+	buildRepoCmd.Flags().BoolVarP(&buildRepoBeta, "beta", "b", false, "include PostgreSQL beta repository")
+	buildToolCmd.Flags().BoolVarP(&buildToolBeta, "beta", "b", false, "include PostgreSQL beta build packages")
 	buildPgrxCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", build.DefaultPgrxVersion, "pgrx version to install")
+	buildPgrxCmd.Flags().BoolVarP(&buildPgrxBeta, "beta", "b", false, "include PostgreSQL beta pg_config link")
 	buildRustCmd.PersistentFlags().BoolVarP(&buildRustYes, "yes", "y", false, "enforce rust re-installation")
 	buildRustCmd.Flags().BoolVarP(&buildRustMirror, "mirror", "m", false, "use China mirrors for rustup and Cargo")
 

@@ -22,11 +22,13 @@ func TestBuildRustMirrorFlagVisible(t *testing.T) {
 
 func TestBuildBetaFlagsVisible(t *testing.T) {
 	for _, tt := range []struct {
-		name string
-		cmd  *cobra.Command
+		name      string
+		cmd       *cobra.Command
+		shorthand string
 	}{
-		{name: "pig build repo", cmd: buildRepoCmd},
-		{name: "pig build tool", cmd: buildToolCmd},
+		{name: "pig build repo", cmd: buildRepoCmd, shorthand: "b"},
+		{name: "pig build tool", cmd: buildToolCmd, shorthand: "b"},
+		{name: "pig build pgrx", cmd: buildPgrxCmd, shorthand: "b"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			flag := tt.cmd.Flags().Lookup("beta")
@@ -36,8 +38,8 @@ func TestBuildBetaFlagsVisible(t *testing.T) {
 			if flag.Hidden {
 				t.Fatalf("%s --beta should be visible", tt.name)
 			}
-			if flag.Shorthand != "" {
-				t.Fatalf("%s --beta shorthand = %q, want none", tt.name, flag.Shorthand)
+			if flag.Shorthand != tt.shorthand {
+				t.Fatalf("%s --beta shorthand = %q, want %q", tt.name, flag.Shorthand, tt.shorthand)
 			}
 		})
 	}
