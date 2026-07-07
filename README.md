@@ -150,7 +150,7 @@ pig repo reload                  # reload repo catalog to latest version
 pig build repo                   # init build repo (=repo set -ru)
 pig build tool  [mini|full|...]  # init build toolset
 pig build proxy [id@host:port ]  # init build proxy (optional)
-pig build rust                   # init rustc cargo
+pig build rust  [-m]             # init rustc cargo
 pig build pgrx  [-v 0.19.1]      # init pgrx
 pig build spec                   # init build spec repo
 pig build get   [all|std|..]     # get ext code tarball with prefixes
@@ -618,7 +618,7 @@ CMD ["/bin/bash"]
 
 RUN apt update && apt install -y ca-certificates vim ncdu wget curl rsync unzip && \
     curl https://repo.pigsty.io/pig | bash -s && pig repo add --remove && apt clean
-RUN pig repo set && pig build tool && pig build spec && pig build rust && pig build pgrx -v 0.19.1
+RUN pig repo set && pig build tool && pig build spec && pig build rust -m && pig build pgrx -v 0.19.1
 ```
 
 ```bash

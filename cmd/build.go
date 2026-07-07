@@ -9,17 +9,18 @@ import (
 )
 
 var (
-	buildPgrxVer   string
-	buildPgrxPg    string
-	buildDepPg     string
-	buildPkgPg     string
-	buildPkgSymbol bool
-	buildAllPg     string
-	buildAllSymbol bool
-	buildGetForce  bool
-	buildSpecForce bool
-	buildRustYes   bool
-	buildMirror    bool
+	buildPgrxVer    string
+	buildPgrxPg     string
+	buildDepPg      string
+	buildPkgPg      string
+	buildPkgSymbol  bool
+	buildAllPg      string
+	buildAllSymbol  bool
+	buildGetForce   bool
+	buildSpecForce  bool
+	buildRustYes    bool
+	buildRustMirror bool
+	buildMirror     bool
 )
 
 // buildCmd represents the top-level `build` command
@@ -35,7 +36,7 @@ Environment Setup:
   pig build spec                   # init build spec and directory (~ext)
   pig build repo                   # init build repo (=repo set -ru)
   pig build tool  [mini|full|...]  # init build toolset
-  pig build rust  [-y]             # install Rust toolchain
+  pig build rust  [-y] [-m]        # install Rust toolchain
   pig build pgrx  [-v <ver>]       # install & init pgrx (` + build.DefaultPgrxVersion + `)
   pig build proxy [id@host:port ]  # init build proxy (optional)
 
@@ -121,9 +122,10 @@ var buildRustCmd = &cobra.Command{
 	Aliases:     []string{"rs"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleBuild, "pig build rust", args, map[string]interface{}{
-			"yes": buildRustYes,
+			"yes":    buildRustYes,
+			"mirror": buildRustMirror,
 		}, func() error {
-			return build.SetupRust(buildRustYes)
+			return build.SetupRust(buildRustYes, buildRustMirror)
 		})
 	},
 }
@@ -236,6 +238,7 @@ func init() {
 	buildRepoCmd.Flags().BoolVarP(&repoMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
 	buildPgrxCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", build.DefaultPgrxVersion, "pgrx version to install")
 	buildRustCmd.PersistentFlags().BoolVarP(&buildRustYes, "yes", "y", false, "enforce rust re-installation")
+	buildRustCmd.Flags().BoolVarP(&buildRustMirror, "mirror", "m", false, "use China mirrors for rustup and Cargo")
 
 	// Add pgrx specific flags
 	buildPgrxCmd.Flags().StringVar(&buildPgrxPg, "pg", "", "comma-separated PG versions to init (e.g. '18,17,16'), 'init' for no args, or auto-detect if empty")

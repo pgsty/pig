@@ -49,6 +49,21 @@ func Command(args []string) error {
 	return nil
 }
 
+// CommandWithEnv runs a command with additional environment variables.
+func CommandWithEnv(args []string, env []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no command specified")
+	}
+	logrus.Debugf("executing command: %v", args)
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = append(os.Environ(), env...)
+	configureCmdIO(cmd)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("command failed: %w", err)
+	}
+	return nil
+}
+
 // ShellCommand runs a command without sudo
 func ShellCommand(args []string) error {
 	if len(args) == 0 {
