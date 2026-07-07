@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	stycli "pig/cli/sty"
 	"pig/internal/config"
 	"strings"
 	"testing"
@@ -63,6 +64,135 @@ func TestStyConfOutputFileFlagKeepsGlobalOutputFlag(t *testing.T) {
 	}
 	if inherited := pigstyConfCmd.InheritedFlags().Lookup("output"); inherited == nil {
 		t.Fatal("expected inherited global --output flag on pig sty conf")
+	}
+}
+
+func TestStyInitMirrorFlagPassesMirrorOption(t *testing.T) {
+	flag := pigstyInitCmd.Flags().Lookup("mirror")
+	if flag == nil {
+		t.Fatal("expected --mirror flag on pig sty init")
+	}
+	if flag.Shorthand != "m" {
+		t.Fatalf("expected shorthand -m for mirror, got -%s", flag.Shorthand)
+	}
+	if flag.Hidden {
+		t.Fatal("pig sty init --mirror should be visible")
+	}
+
+	origInitExec := pigstyInitExec
+	origMirror := flag.Value.String()
+	origPath := pigstyInitPath
+	origForce := pigstyInitForce
+	origVersion := pigstyVersion
+	origDir := pigstyDownloadDir
+	defer func() {
+		pigstyInitExec = origInitExec
+		pigstyInitPath = origPath
+		pigstyInitForce = origForce
+		pigstyVersion = origVersion
+		pigstyDownloadDir = origDir
+		_ = flag.Value.Set(origMirror)
+	}()
+
+	var got stycli.InitOptions
+	pigstyInitExec = func(opts stycli.InitOptions) error {
+		got = opts
+		return nil
+	}
+
+	pigstyInitPath = "/tmp/pigsty"
+	pigstyInitForce = true
+	pigstyVersion = "v1.2.3"
+	pigstyDownloadDir = "/tmp"
+	if err := flag.Value.Set("true"); err != nil {
+		t.Fatalf("set --mirror: %v", err)
+	}
+
+	if err := pigstyInitCmd.RunE(pigstyInitCmd, nil); err != nil {
+		t.Fatalf("pig sty init --mirror failed: %v", err)
+	}
+	if !got.Mirror {
+		t.Fatal("expected InitOptions.Mirror to be true")
+	}
+}
+
+func TestStyGetMirrorFlagPassesMirrorOption(t *testing.T) {
+	flag := pigstyGetcmd.Flags().Lookup("mirror")
+	if flag == nil {
+		t.Fatal("expected --mirror flag on pig sty get")
+	}
+	if flag.Shorthand != "m" {
+		t.Fatalf("expected shorthand -m for mirror, got -%s", flag.Shorthand)
+	}
+	if flag.Hidden {
+		t.Fatal("pig sty get --mirror should be visible")
+	}
+
+	origGetExec := pigstyGetExec
+	origMirror := flag.Value.String()
+	origVersion := pigstyVersion
+	origDir := pigstyDownloadDir
+	defer func() {
+		pigstyGetExec = origGetExec
+		pigstyVersion = origVersion
+		pigstyDownloadDir = origDir
+		_ = flag.Value.Set(origMirror)
+	}()
+
+	var got stycli.DownloadOptions
+	pigstyGetExec = func(opts stycli.DownloadOptions) error {
+		got = opts
+		return nil
+	}
+
+	pigstyVersion = "v1.2.3"
+	pigstyDownloadDir = "/tmp"
+	if err := flag.Value.Set("true"); err != nil {
+		t.Fatalf("set --mirror: %v", err)
+	}
+
+	if err := pigstyGetcmd.RunE(pigstyGetcmd, []string{"v1.2.3"}); err != nil {
+		t.Fatalf("pig sty get --mirror failed: %v", err)
+	}
+	if !got.Mirror {
+		t.Fatal("expected DownloadOptions.Mirror to be true")
+	}
+}
+
+func TestStyListMirrorFlagPassesMirrorOption(t *testing.T) {
+	flag := pigstyListcmd.Flags().Lookup("mirror")
+	if flag == nil {
+		t.Fatal("expected --mirror flag on pig sty list")
+	}
+	if flag.Shorthand != "m" {
+		t.Fatalf("expected shorthand -m for mirror, got -%s", flag.Shorthand)
+	}
+	if flag.Hidden {
+		t.Fatal("pig sty list --mirror should be visible")
+	}
+
+	origListExec := pigstyListExec
+	origMirror := flag.Value.String()
+	defer func() {
+		pigstyListExec = origListExec
+		_ = flag.Value.Set(origMirror)
+	}()
+
+	var got stycli.ListOptions
+	pigstyListExec = func(opts stycli.ListOptions) error {
+		got = opts
+		return nil
+	}
+
+	if err := flag.Value.Set("true"); err != nil {
+		t.Fatalf("set --mirror: %v", err)
+	}
+
+	if err := pigstyListcmd.RunE(pigstyListcmd, []string{"v3"}); err != nil {
+		t.Fatalf("pig sty list --mirror failed: %v", err)
+	}
+	if !got.Mirror {
+		t.Fatal("expected ListOptions.Mirror to be true")
 	}
 }
 

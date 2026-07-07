@@ -14,13 +14,10 @@ import (
 )
 
 // ReloadCatalogResult returns a structured Result for the ext reload command
-func ReloadCatalogResult() *output.Result {
+func ReloadCatalogResult(mirror ...bool) *output.Result {
 	startTime := time.Now()
-
-	urls := []string{
-		config.RepoPigstyIO + "/ext/data/extension.csv",
-		config.RepoPigstyCC + "/ext/data/extension.csv",
-	}
+	useMirror := len(mirror) > 0 && mirror[0]
+	urls := extensionCatalogURLs(useMirror)
 
 	// Success criteria: downloaded content must be a valid extension catalog.
 	var extNum int
@@ -41,7 +38,7 @@ func ReloadCatalogResult() *output.Result {
 			msg = "download timed out"
 		}
 		result := output.Fail(output.CodeExtensionReloadFailed, msg)
-		result.Detail = fmt.Sprintf("attempted:\n- %s\n- %s\nerrors:\n%s", urls[0], urls[1], strings.TrimSpace(err.Error()))
+		result.Detail = reloadAttemptDetail(urls, err)
 		result.Data = &ReloadResultData{
 			DurationMs:   time.Since(startTime).Milliseconds(),
 			DownloadedAt: time.Now().Format(time.RFC3339),
@@ -71,4 +68,26 @@ func ReloadCatalogResult() *output.Result {
 
 	message := fmt.Sprintf("Reloaded extension catalog: %d extensions from %s", extNum, sourceURL)
 	return output.OK(message, data)
+}
+
+func extensionCatalogURLs(mirror bool) []string {
+	if mirror {
+		return []string{config.RepoPigstyCC + "/ext/data/extension.csv"}
+	}
+	return []string{
+		config.RepoPigstyIO + "/ext/data/extension.csv",
+		config.RepoPigstyCC + "/ext/data/extension.csv",
+	}
+}
+
+func reloadAttemptDetail(urls []string, err error) string {
+	attempted := strings.Join(urls, "\n- ")
+	if attempted != "" {
+		attempted = "- " + attempted
+	}
+	errText := ""
+	if err != nil {
+		errText = strings.TrimSpace(err.Error())
+	}
+	return fmt.Sprintf("attempted:\n%s\nerrors:\n%s", attempted, errText)
 }

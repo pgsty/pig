@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	pigstyInitPath  string
-	pigstyInitForce bool
+	pigstyInitPath   string
+	pigstyInitForce  bool
+	pigstyInitMirror bool
 
 	pigstyBootRegion  string
 	pigstyBootPackage string
@@ -33,6 +34,8 @@ var (
 
 	pigstyDownloadDir string
 	pigstyVersion     string
+	pigstyGetMirror   bool
+	pigstyListMirror  bool
 )
 
 var styCmd = &cobra.Command{
@@ -43,7 +46,7 @@ var styCmd = &cobra.Command{
 	GroupID:     "pigsty",
 	Long: `pig sty -Init (Download), Bootstrap, Configure, and Deploy Pigsty
 
-  pig sty init    [-pfvd]         # install pigsty (~/pigsty by default)
+  pig sty init    [-mpfvd]        # install pigsty (~/pigsty by default)
   pig sty boot    [-rmpk]         # install ansible and prepare offline pkg
   pig sty conf    [-cvmrsoxnpg --raw] # configure pigsty and generate config
   pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
@@ -102,6 +105,7 @@ var pigstyInitCmd = &cobra.Command{
 pig sty init
   -p | --path    : where to install, ~/pigsty by default
   -f | --force   : force overwrite existing pigsty dir
+  -m | --mirror  : prefer mirror (pigsty.cc) as primary source
   -v | --version : pigsty version, latest by default
   -d | --dir     : download directory, /tmp by default
 
@@ -109,6 +113,7 @@ pig sty init
 	Example: `
   pig sty init                   # install to ~/pigsty with the latest version
   pig sty init -f                # install and OVERWRITE existing pigsty dir
+  pig sty init -m                # install from mirror source
   pig sty init -p /tmp/pigsty    # install to another location /tmp/pigsty
   pig sty init -v 3.4            # get & install specific version v3.4.1
   pig sty init 3                 # get & install specific version v3 latest
@@ -117,12 +122,14 @@ pig sty init
 		return runLegacyStructured(legacyModuleSty, "pig sty init", args, map[string]interface{}{
 			"path":    pigstyInitPath,
 			"force":   pigstyInitForce,
+			"mirror":  pigstyInitMirror,
 			"version": pigstyVersion,
 			"dir":     pigstyDownloadDir,
 		}, func() error {
-			return stycli.Init(stycli.InitOptions{
+			return pigstyInitExec(stycli.InitOptions{
 				TargetPath:  pigstyInitPath,
 				Force:       pigstyInitForce,
+				Mirror:      pigstyInitMirror,
 				Version:     pigstyVersion,
 				DownloadDir: pigstyDownloadDir,
 				Args:        args,
@@ -130,6 +137,8 @@ pig sty init
 		})
 	},
 }
+
+var pigstyInitExec = stycli.Init
 
 var pigstyBootCmd = &cobra.Command{
 	Use:         "boot",
@@ -287,8 +296,13 @@ var pigstyListcmd = &cobra.Command{
   pig sty list all       # list all available versions
 	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModuleSty, "pig sty list", args, nil, func() error {
-			return stycli.ListVersions(args)
+		return runLegacyStructured(legacyModuleSty, "pig sty list", args, map[string]interface{}{
+			"mirror": pigstyListMirror,
+		}, func() error {
+			return pigstyListExec(stycli.ListOptions{
+				Mirror: pigstyListMirror,
+				Args:   args,
+			})
 		})
 	},
 }
@@ -302,15 +316,22 @@ var pigstyGetcmd = &cobra.Command{
 		return runLegacyStructured(legacyModuleSty, "pig sty get", args, map[string]interface{}{
 			"version": pigstyVersion,
 			"dir":     pigstyDownloadDir,
+			"mirror":  pigstyGetMirror,
 		}, func() error {
-			return stycli.Download(stycli.DownloadOptions{
+			return pigstyGetExec(stycli.DownloadOptions{
 				Version:     pigstyVersion,
 				DownloadDir: pigstyDownloadDir,
+				Mirror:      pigstyGetMirror,
 				Args:        args,
 			})
 		})
 	},
 }
+
+var (
+	pigstyGetExec  = stycli.Download
+	pigstyListExec = stycli.ListVersionsWithOptions
+)
 
 var pigstyDeployCmd = &cobra.Command{
 	Use:         "deploy",
@@ -345,6 +366,7 @@ WARNING: This operation makes changes to your system. Use with caution!
 func init() {
 	pigstyInitCmd.Flags().StringVarP(&pigstyInitPath, "path", "p", "~/pigsty", "target directory")
 	pigstyInitCmd.Flags().BoolVarP(&pigstyInitForce, "force", "f", false, "overwrite existing pigsty (false by default)")
+	pigstyInitCmd.Flags().BoolVarP(&pigstyInitMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 	pigstyInitCmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyInitCmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
 
@@ -358,6 +380,8 @@ func init() {
 
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
+	pigstyGetcmd.Flags().BoolVarP(&pigstyGetMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
+	pigstyListcmd.Flags().BoolVarP(&pigstyListMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
 	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyDeployCmd, pigstyListcmd, pigstyGetcmd)
 }

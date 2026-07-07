@@ -12,6 +12,7 @@ import (
 
 var updateVersion string
 var updateRegion string
+var updateMirror bool
 
 // updateCmd represents the installation command
 var updateCmd = &cobra.Command{
@@ -27,20 +28,28 @@ var updateCmd = &cobra.Command{
   pig update -v 1.5.1 		    # update pig to version 1.5.1
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		effectiveRegion := updateRegion
+		if updateMirror {
+			effectiveRegion = "china"
+		}
 		return runLegacyStructured(legacyModuleSty, "pig update", args, map[string]interface{}{
 			"version": updateVersion,
-			"region":  updateRegion,
+			"region":  effectiveRegion,
+			"mirror":  updateMirror,
 		}, func() error {
 			pigVersion := updateVersion
 			if strings.HasPrefix(updateVersion, "v") {
 				pigVersion = strings.TrimLeft(updateVersion, "v")
 			} // remove the vx.y.z 'v' prefix
-			return get.UpdatePig(pigVersion, updateRegion)
+			return updateExec(pigVersion, effectiveRegion)
 		})
 	},
 }
 
+var updateExec = get.UpdatePig
+
 func init() {
 	updateCmd.Flags().StringVarP(&updateVersion, "version", "v", "", "pigsty version to update to")
 	updateCmd.Flags().StringVarP(&updateRegion, "region", "r", "", "pigsty region (default,china,...)")
+	updateCmd.Flags().BoolVarP(&updateMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 }

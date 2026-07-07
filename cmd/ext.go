@@ -14,13 +14,14 @@ import (
 )
 
 var (
-	extPgVer       int
-	extPgConfig    string
-	extShowContrib bool
-	extYes         bool
-	extRepoDir     string
-	extAddPlan     bool
-	extRmPlan      bool
+	extPgVer        int
+	extPgConfig     string
+	extShowContrib  bool
+	extYes          bool
+	extRepoDir      string
+	extAddPlan      bool
+	extRmPlan       bool
+	extUpdateMirror bool
 )
 
 // extCmd represents the installation command
@@ -213,18 +214,35 @@ Description:
 		// Safety: no arguments means no-op (avoid "update everything" surprises).
 		// Do not force PG probe in this case.
 		if len(args) == 0 {
-			result := ext.UpgradeExtensions(extPgVer, args, extYes)
+			result := extUpdateExec(extPgVer, args, extYes)
 			return handleAuxResult(result)
 		}
 
-		pgVer, err := extProbeVersion()
+		if extUpdateMirror {
+			result := extUpdateReloadCatalogResultExec(true)
+			if result == nil || !result.Success {
+				return handleAuxResult(result)
+			}
+			if err := extUpdateLoadCatalogExec(); err != nil {
+				return handleAuxResult(output.Fail(output.CodeExtensionCatalogError, err.Error()))
+			}
+		}
+
+		pgVer, err := extUpdateProbeVersionExec()
 		if err != nil {
 			return handleExtProbeError(err)
 		}
-		result := ext.UpgradeExtensions(pgVer, args, extYes)
+		result := extUpdateExec(pgVer, args, extYes)
 		return handleAuxResult(result)
 	},
 }
+
+var (
+	extUpdateProbeVersionExec        = extProbeVersion
+	extUpdateReloadCatalogResultExec = func(mirror bool) *output.Result { return ext.ReloadCatalogResult(mirror) }
+	extUpdateLoadCatalogExec         = ext.ReloadCatalog
+	extUpdateExec                    = ext.UpgradeExtensions
+)
 
 var extImportCmd = &cobra.Command{
 	Use:          "import [ext...]",
@@ -411,6 +429,7 @@ func init() {
 	extRmCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm removal")
 	extRmCmd.Flags().BoolVar(&extRmPlan, "plan", false, "preview remove plan without executing")
 	extUpdateCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm update")
+	extUpdateCmd.Flags().BoolVarP(&extUpdateMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 	extImportCmd.Flags().StringVarP(&extRepoDir, "repo", "d", "/www/pigsty", "specify repo dir")
 
 	extCmd.AddCommand(extAddCmd)

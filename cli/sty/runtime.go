@@ -16,6 +16,7 @@ import (
 type InitOptions struct {
 	TargetPath  string
 	Force       bool
+	Mirror      bool
 	Version     string
 	DownloadDir string
 	Args        []string
@@ -34,6 +35,9 @@ func Init(opts InitOptions) error {
 	}
 
 	get.NetworkCondition()
+	if opts.Mirror {
+		usePigstyMirrorSource()
+	}
 	var ver *get.VersionInfo
 	if get.AllVersions == nil {
 		logrus.Warnf("Fail to get pigsty version list, use the built-in version %s", config.PigstyVersion)
@@ -43,9 +47,13 @@ func Init(opts InitOptions) error {
 		if len(version) > 0 && version[0] >= '0' && version[0] <= '9' {
 			version = "v" + version
 		}
+		baseURL := config.RepoPigstyIO
+		if opts.Mirror {
+			baseURL = config.RepoPigstyCC
+		}
 		ver = &get.VersionInfo{
 			Version:     version,
-			DownloadURL: fmt.Sprintf("%s/src/pigsty-%s.tgz", config.RepoPigstyIO, version),
+			DownloadURL: fmt.Sprintf("%s/src/pigsty-%s.tgz", baseURL, version),
 		}
 	} else {
 		version = get.CompleteVersion(version)
@@ -74,6 +82,15 @@ func Init(opts InitOptions) error {
 	}
 	logrus.Infof("proceed with pig boot & pig conf")
 	return nil
+}
+
+func usePigstyMirrorSource() {
+	get.Source = get.ViaCC
+	get.Region = "china"
+	for i := range get.AllVersions {
+		filename := fmt.Sprintf("pigsty-%s.tgz", get.AllVersions[i].Version)
+		get.AllVersions[i].DownloadURL = fmt.Sprintf("%s/src/%s", config.RepoPigstyCC, filename)
+	}
 }
 
 type BootstrapOptions struct {
@@ -187,12 +204,16 @@ func ConfigureRaw(opts RawConfigureOptions) error {
 type DownloadOptions struct {
 	Version     string
 	DownloadDir string
+	Mirror      bool
 	Args        []string
 }
 
 func Download(opts DownloadOptions) error {
 	logrus.Info("fetching pigsty version info...")
 	get.NetworkCondition()
+	if opts.Mirror {
+		usePigstyMirrorSource()
+	}
 	if get.AllVersions == nil {
 		logrus.Errorf("Fail to get pigsty version list")
 		return fmt.Errorf("failed to get pigsty version list")
@@ -226,15 +247,28 @@ func Download(opts DownloadOptions) error {
 	return nil
 }
 
+type ListOptions struct {
+	Mirror bool
+	Args   []string
+}
+
 func ListVersions(args []string) error {
+	return ListVersionsWithOptions(ListOptions{Args: args})
+}
+
+func ListVersionsWithOptions(opts ListOptions) error {
 	logrus.Info("fetching pigsty version info...")
 	get.NetworkCondition()
+	if opts.Mirror {
+		usePigstyMirrorSource()
+	}
 	if get.AllVersions == nil {
 		logrus.Errorf("Fail to list pigsty versions")
 		return fmt.Errorf("failed to list pigsty versions")
 	}
 
 	var since string
+	args := opts.Args
 	if len(args) > 0 {
 		if len(args) > 1 {
 			logrus.Warnf("expect at most one version string, unexpected args: %s", strings.Join(args, " "))
