@@ -16,6 +16,7 @@ var (
 	pigstyBootRegion  string
 	pigstyBootPackage string
 	pigstyBootKeep    bool
+	pigstyBootMirror  bool
 
 	pigstyConfName           string
 	pigstyConfIP             string
@@ -28,6 +29,7 @@ var (
 	pigstyConfPort           string
 	pigstyConfGenerate       bool
 	pigstyConfRaw            bool
+	pigstyConfMirror         bool
 
 	pigstyDownloadDir string
 	pigstyVersion     string
@@ -42,8 +44,8 @@ var styCmd = &cobra.Command{
 	Long: `pig sty -Init (Download), Bootstrap, Configure, and Deploy Pigsty
 
   pig sty init    [-pfvd]         # install pigsty (~/pigsty by default)
-  pig sty boot    [-rpk]          # install ansible and prepare offline pkg
-  pig sty conf    [-cvrsoxnpg --raw] # configure pigsty and generate config
+  pig sty boot    [-rmpk]         # install ansible and prepare offline pkg
+  pig sty conf    [-cvmrsoxnpg --raw] # configure pigsty and generate config
   pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
   pig sty get                     # download pigsty source tarball
   pig sty list                    # list available pigsty versions
@@ -62,6 +64,7 @@ pig sty conf (aliases: c, configure)
   [--ip <ip>]             # primary IP address (skip with -s)
   [-v|--version <pgver>]  # postgres major version: [18|17|16|15|14] (19 beta)
   [-r|--region <region>]  # upstream repo region: [default|china|europe]
+  [-m|--mirror]           # same as --region china
   [-O|--output-file <file>]    # output config file path (default: pigsty.yml)
   [-s|--skip]             # skip IP address probing
   [-p|--port <port>]      # specify SSH port (for ssh accessibility check)
@@ -85,6 +88,7 @@ const styConfigureExample = `
   pig sty conf -c supabase           # use conf/supabase.yml template (self-hosting)
   pig sty conf -v 17 -c rich         # use conf/rich.yml template with PostgreSQL 17
   pig sty conf -r china -s           # use china region mirrors, skip IP probe
+  pig sty conf -m -s                 # use mirror mode, skip IP probe
   pig sty conf -x                    # write proxy env from environment to config
   pig sty conf -c full -g -O ha.yml  # full HA template with random passwords to ha.yml
 `
@@ -136,14 +140,20 @@ var pigstyBootCmd = &cobra.Command{
 
 pig sty boot
   [-r|--region <region]   [default,china,europe]
+  [-m|--mirror]           same as --region china
   [-p|--path <path>]      specify another offline pkg path
   [-k|--keep]             keep existing upstream repo during bootstrap
 
 Check https://pigsty.io/docs/setup/offline/#bootstrap for details
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		bootRegion := pigstyBootRegion
+		if pigstyBootMirror {
+			bootRegion = "china"
+		}
 		return runLegacyStructured(legacyModuleSty, "pig sty boot", args, map[string]interface{}{
-			"region":   pigstyBootRegion,
+			"region":   bootRegion,
+			"mirror":   pigstyBootMirror,
 			"path":     pigstyBootPackage,
 			"keep":     pigstyBootKeep,
 			"pig_home": config.PigstyHome,
@@ -153,7 +163,7 @@ Check https://pigsty.io/docs/setup/offline/#bootstrap for details
 			}
 			return stycli.Bootstrap(stycli.BootstrapOptions{
 				PigstyHome:  config.PigstyHome,
-				Region:      pigstyBootRegion,
+				Region:      bootRegion,
 				PackagePath: pigstyBootPackage,
 				Keep:        pigstyBootKeep,
 			})
@@ -175,14 +185,18 @@ var pigstyConfCmd = &cobra.Command{
 				command = "pig sty " + called
 			}
 		}
+		confRegion := pigstyConfRegion
+		if pigstyConfMirror {
+			confRegion = "china"
+		}
 		if pigstyConfRaw {
-			return runLegacyStructured(legacyModuleSty, command, args, styConfigureParams(), func() error {
+			return runLegacyStructured(legacyModuleSty, command, args, styConfigureParams(confRegion), func() error {
 				return stycli.ConfigureRaw(stycli.RawConfigureOptions{
 					PigstyHome:     config.PigstyHome,
 					Mode:           pigstyConfName,
 					PrimaryIP:      pigstyConfIP,
 					PGVersion:      pigstyConfVer,
-					Region:         pigstyConfRegion,
+					Region:         confRegion,
 					SSHPort:        pigstyConfPort,
 					OutputFile:     pigstyConfOutput,
 					Skip:           pigstyConfSkip,
@@ -193,16 +207,17 @@ var pigstyConfCmd = &cobra.Command{
 				})
 			})
 		}
-		return runPigstyConfigureNative(command, args)
+		return runPigstyConfigureNative(command, args, confRegion)
 	},
 }
 
-func styConfigureParams() map[string]interface{} {
+func styConfigureParams(region string) map[string]interface{} {
 	return map[string]interface{}{
 		"conf":            pigstyConfName,
 		"ip":              pigstyConfIP,
 		"version":         pigstyConfVer,
-		"region":          pigstyConfRegion,
+		"region":          region,
+		"mirror":          pigstyConfMirror,
 		"output_file":     pigstyConfOutput,
 		"skip":            pigstyConfSkip,
 		"proxy":           pigstyConfProxy,
@@ -213,12 +228,12 @@ func styConfigureParams() map[string]interface{} {
 	}
 }
 
-func runPigstyConfigureNative(command string, args []string) error {
+func runPigstyConfigureNative(command string, args []string, region string) error {
 	if len(args) > 0 {
 		return structuredParamError(
 			legacyModuleSty, command, "invalid arguments",
 			fmt.Sprintf("unexpected arguments: %s", strings.Join(args, " ")),
-			args, styConfigureParams(),
+			args, styConfigureParams(region),
 		)
 	}
 	opts := stycli.ConfigureOptions{
@@ -226,7 +241,7 @@ func runPigstyConfigureNative(command string, args []string) error {
 		Mode:           pigstyConfName,
 		PrimaryIP:      pigstyConfIP,
 		PGVersion:      pigstyConfVer,
-		Region:         pigstyConfRegion,
+		Region:         region,
 		SSHPort:        pigstyConfPort,
 		OutputFile:     pigstyConfOutput,
 		Skip:           pigstyConfSkip,
@@ -245,6 +260,7 @@ func addStyConfigureFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&pigstyConfIP, "ip", "", "primary ip address")
 	cmd.Flags().StringVarP(&pigstyConfVer, "version", "v", "", "postgres major version")
 	cmd.Flags().StringVarP(&pigstyConfRegion, "region", "r", "", "upstream repo region")
+	cmd.Flags().BoolVarP(&pigstyConfMirror, "mirror", "m", false, "same as --region china")
 	cmd.Flags().StringVarP(&pigstyConfOutput, "output-file", "O", "", "output config file path")
 	cmd.Flags().BoolVarP(&pigstyConfSkip, "skip", "s", false, "skip ip probe")
 	cmd.Flags().BoolVarP(&pigstyConfProxy, "proxy", "x", false, "write proxy env from environment")
@@ -333,6 +349,7 @@ func init() {
 	pigstyInitCmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
 
 	pigstyBootCmd.Flags().StringVarP(&pigstyBootRegion, "region", "r", "", "default,china,europe,...")
+	pigstyBootCmd.Flags().BoolVarP(&pigstyBootMirror, "mirror", "m", false, "same as --region china")
 	pigstyBootCmd.Flags().StringVarP(&pigstyBootPackage, "path", "p", "", "offline package path")
 	pigstyBootCmd.Flags().BoolVarP(&pigstyBootKeep, "keep", "k", false, "keep existing repo")
 
