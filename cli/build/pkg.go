@@ -3,13 +3,24 @@ package build
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"pig/internal/config"
+	"pig/internal/utils"
+	"sort"
 	"strings"
 
 	"github.com/sirupsen/logrus"
 )
 
+var cloudberryBuildComponents = []string{"cloudberry", "cloudberry-backup", "cloudberry-pxf"}
+
 // BuildPackage runs complete build pipeline for a single package
 func BuildPackage(pkg string, pgVersions string, withSymbol bool, mirror bool) error {
+	if normalizeBuildName(pkg) == "cloudberry" {
+		return BuildCloudberryPackage(pgVersions, withSymbol, mirror)
+	}
+
 	fmt.Printf("\n")
 	logrus.Info(strings.Repeat("#", 58))
 	logrus.Infof("[BUILD PKG] %s", pkg)
@@ -34,6 +45,108 @@ func BuildPackage(pkg string, pgVersions string, withSymbol bool, mirror bool) e
 
 	logrus.Info(strings.Repeat("#", 58))
 	return nil
+}
+
+// BuildCloudberryPackage builds the Cloudberry suite in dependency order.
+func BuildCloudberryPackage(pgVersions string, withSymbol bool, mirror bool) error {
+	fmt.Printf("\n")
+	logrus.Info(strings.Repeat("#", 58))
+	logrus.Info("[BUILD PKG] cloudberry suite")
+	logrus.Info(strings.Repeat("#", 58))
+
+	if err := DownloadSource("cloudberry", false, mirror); err != nil {
+		return fmt.Errorf("source download failed for cloudberry suite: %w", err)
+	}
+
+	for _, component := range cloudberryBuildComponents {
+		if err := InstallDeps(component, pgVersions); err != nil {
+			logrus.Warnf("Dependency install error for %s: %v", component, err)
+		}
+		if err := BuildExtension(component, pgVersions, withSymbol); err != nil {
+			return fmt.Errorf("build failed for %s: %w", component, err)
+		}
+		if component == "cloudberry" {
+			if err := installBuiltPackage("cloudberry"); err != nil {
+				return err
+			}
+		}
+	}
+
+	logrus.Info(strings.Repeat("#", 58))
+	return nil
+}
+
+func installBuiltPackage(pkg string) error {
+	artifact, err := findBuiltPackageArtifact(pkg)
+	if err != nil {
+		return err
+	}
+
+	logrus.Infof("installing local build artifact: %s", artifact)
+	switch config.OSType {
+	case config.DistroEL:
+		return utils.SudoCommand([]string{"dnf", "install", "-y", artifact})
+	case config.DistroDEB:
+		return utils.SudoCommand([]string{"apt-get", "install", "-y", artifact})
+	default:
+		return fmt.Errorf("unsupported OS type for package install: %s", config.OSType)
+	}
+}
+
+type packageArtifact struct {
+	path    string
+	modTime int64
+}
+
+func findBuiltPackageArtifact(pkg string) (string, error) {
+	var patterns []string
+	switch config.OSType {
+	case config.DistroEL:
+		patterns = []string{
+			filepath.Join(config.HomeDir, "ext", "pkg", "*", pkg+"-[0-9]*.rpm"),
+			filepath.Join(config.HomeDir, "ext", "pkg", pkg+"-[0-9]*.rpm"),
+			filepath.Join(config.HomeDir, "rpmbuild", "RPMS", "*", pkg+"-[0-9]*.rpm"),
+		}
+	case config.DistroDEB:
+		patterns = []string{
+			filepath.Join(config.HomeDir, "ext", "pkg", pkg+"_[0-9]*.deb"),
+			filepath.Join(config.HomeDir, "debbuild", pkg+"_[0-9]*.deb"),
+		}
+	default:
+		return "", fmt.Errorf("unsupported OS type for artifact lookup: %s", config.OSType)
+	}
+
+	seen := make(map[string]struct{})
+	var artifacts []packageArtifact
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			logrus.Debugf("glob pattern error for %s: %v", pattern, err)
+			continue
+		}
+		for _, match := range matches {
+			if _, ok := seen[match]; ok {
+				continue
+			}
+			seen[match] = struct{}{}
+			info, err := os.Stat(match)
+			if err != nil || info.IsDir() {
+				continue
+			}
+			artifacts = append(artifacts, packageArtifact{path: match, modTime: info.ModTime().UnixNano()})
+		}
+	}
+	if len(artifacts) == 0 {
+		return "", fmt.Errorf("built package artifact not found for %s", pkg)
+	}
+
+	sort.Slice(artifacts, func(i, j int) bool {
+		if artifacts[i].modTime == artifacts[j].modTime {
+			return artifacts[i].path > artifacts[j].path
+		}
+		return artifacts[i].modTime > artifacts[j].modTime
+	})
+	return artifacts[0].path, nil
 }
 
 // BuildPackages processes multiple packages sequentially
