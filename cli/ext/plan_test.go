@@ -1,6 +1,8 @@
 package ext
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -188,34 +190,6 @@ func TestBuildAddPlan_VersionPinAndYesFlag(t *testing.T) {
 	}
 }
 
-func TestBuildAddPlan_AlreadyInstalled(t *testing.T) {
-	cleanup := setupTestCatalog()
-	defer cleanup()
-
-	// Set up Postgres with postgis already installed
-	Postgres = &PostgresInstall{
-		MajorVersion: 17,
-		ExtensionMap: map[string]*ExtensionInstall{
-			"postgis": {Extension: &Extension{Name: "postgis"}},
-		},
-	}
-
-	plan := BuildAddPlan(17, []string{"postgis"}, false)
-	if plan == nil {
-		t.Fatal("BuildAddPlan returned nil")
-	}
-
-	// Actions should be empty
-	if len(plan.Actions) != 0 {
-		t.Errorf("Expected 0 actions for already installed, got %d", len(plan.Actions))
-	}
-
-	// Expected should indicate already installed
-	if !strings.Contains(plan.Expected, "already installed") {
-		t.Errorf("Expected should mention 'already installed', got %q", plan.Expected)
-	}
-}
-
 func TestBuildAddPlan_NeedLoad(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
@@ -273,6 +247,98 @@ func TestBuildAddPlan_MultipleExtensions(t *testing.T) {
 	}
 	if pkgCount < 2 {
 		t.Errorf("Expected at least 2 package resources, got %d", pkgCount)
+	}
+}
+
+func TestPlanPackagesMatchPreparedOperation(t *testing.T) {
+	cleanup := setupPlanParityCatalog()
+	defer cleanup()
+
+	tests := []struct {
+		name           string
+		names          []string
+		op             pkgOp
+		parseVersion   bool
+		installed      bool
+		wantPackages   []string
+		wantOwner      string
+		wantFailedCode int
+		wantFailedErr  string
+	}{
+		{name: "add duplicate request", names: []string{"alpha", "alpha"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{"alpha_17"}},
+		{name: "add aliases share package", names: []string{"agensgraph", "agens"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{"agensgraph_17"}, wantOwner: "agensgraph"},
+		{name: "add version pin", names: []string{"alpha=1.2.3"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{"alpha_17-1.2.3"}},
+		{name: "add not found", names: []string{"missing"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{}, wantFailedCode: output.CodeExtensionNotFound, wantFailedErr: "extension not found in catalog"},
+		{name: "add no package", names: []string{"no_pkg"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{}, wantFailedCode: output.CodeExtensionNoPackage, wantFailedErr: "no package available for extension on PG 17"},
+		{name: "add multiple", names: []string{"beta", "alpha"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{"beta_17", "beta_tools_17", "alpha_17"}},
+		{name: "add already installed", names: []string{"alpha"}, op: pkgOpInstall, parseVersion: true, installed: true, wantPackages: []string{"alpha_17"}},
+		{name: "rm duplicate request", names: []string{"alpha", "alpha"}, op: pkgOpRemove, wantPackages: []string{"alpha_17"}},
+		{name: "rm aliases share package", names: []string{"agensgraph", "agens"}, op: pkgOpRemove, wantPackages: []string{"agensgraph_17"}, wantOwner: "agensgraph"},
+		{name: "rm multiple", names: []string{"beta", "alpha"}, op: pkgOpRemove, wantPackages: []string{"beta_17", "beta_tools_17", "alpha_17"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			Postgres = nil
+			defer func() { Postgres = nil }()
+			if tt.installed {
+				Postgres = &PostgresInstall{
+					MajorVersion: 17,
+					ExtensionMap: map[string]*ExtensionInstall{
+						"alpha": {Extension: &Extension{Name: "alpha"}},
+					},
+				}
+			}
+
+			var plan *output.Plan
+			if tt.op == pkgOpInstall {
+				plan = BuildAddPlan(17, tt.names, false)
+			} else {
+				plan = BuildRmPlan(17, tt.names, false)
+			}
+			prep, result := prepareExtensionPkgOp(preparePkgOpOptions{
+				PgVersion:             17,
+				Requested:             tt.names,
+				ParseVersionSpec:      tt.parseVersion,
+				MacUnsupportedMessage: "macOS unsupported",
+			})
+			if result != nil {
+				t.Fatalf("prepareExtensionPkgOp() failed: %#v", result)
+			}
+			if !reflect.DeepEqual(prep.Packages, tt.wantPackages) {
+				t.Fatalf("runtime packages = %v, want %v", prep.Packages, tt.wantPackages)
+			}
+
+			planPackages := packageResources(plan)
+			if !reflect.DeepEqual(planPackages, tt.wantPackages) {
+				t.Fatalf("plan packages = %v, want %v", planPackages, tt.wantPackages)
+			}
+
+			execute := executeAction(plan)
+			if len(tt.wantPackages) == 0 {
+				if execute != "" {
+					t.Fatalf("plan has unexpected execute action %q", execute)
+				}
+			} else {
+				verb := "install"
+				if tt.op == pkgOpRemove {
+					verb = "remove"
+				}
+				want := fmt.Sprintf("Execute: sudo %s %s %s", PackageManagerCmd(), verb, strings.Join(tt.wantPackages, " "))
+				if execute != want {
+					t.Fatalf("execute action = %q, want %q", execute, want)
+				}
+			}
+
+			if tt.wantFailedCode != 0 {
+				if len(prep.Failed) != 1 || prep.Failed[0].Name != tt.names[0] || prep.Failed[0].Code != tt.wantFailedCode || prep.Failed[0].Error != tt.wantFailedErr {
+					t.Fatalf("prepared failures = %#v, want one code %d", prep.Failed, tt.wantFailedCode)
+				}
+			}
+			if tt.wantOwner != "" && prep.PkgToExt[tt.wantPackages[0]] != tt.wantOwner {
+				t.Fatalf("package owner = %q, want %q", prep.PkgToExt[tt.wantPackages[0]], tt.wantOwner)
+			}
+		})
 	}
 }
 
@@ -389,6 +455,25 @@ func TestBuildRmPlan_WithDependents(t *testing.T) {
 	if !foundDependentRisk {
 		t.Error("Risks should mention dependent extensions (postgis_topology depends on postgis)")
 	}
+}
+
+func TestBuildRmPlan_SharedPackagePreservesDependencyRisk(t *testing.T) {
+	cleanup := setupTestCatalog()
+	defer cleanup()
+
+	plan := BuildRmPlan(17, []string{"postgis_topology", "postgis"}, false)
+	if got := packageResources(plan); !reflect.DeepEqual(got, []string{"postgis35_17*"}) {
+		t.Fatalf("plan packages = %v, want one shared package", got)
+	}
+	if !strings.Contains(plan.Expected, "postgis_topology, postgis") {
+		t.Fatalf("plan expected text lost a resolved extension: %q", plan.Expected)
+	}
+	for _, risk := range plan.Risks {
+		if strings.Contains(risk, "postgis_topology") && strings.Contains(risk, "postgis") {
+			return
+		}
+	}
+	t.Fatalf("shared-package plan lost dependency risk: %v", plan.Risks)
 }
 
 func TestBuildRmPlan_NotInstalled(t *testing.T) {
@@ -574,7 +659,7 @@ func TestBuildAddRisks_NeedLoad(t *testing.T) {
 	resolved := []resolvedExt{
 		{name: "timescaledb", ext: &Extension{Name: "timescaledb", NeedLoad: true}},
 	}
-	risks := buildAddRisks(resolved, nil, nil)
+	risks := buildAddRisks(resolved, nil)
 	foundLoadRisk := false
 	for _, risk := range risks {
 		if strings.Contains(risk, "shared_preload_libraries") {
@@ -648,4 +733,66 @@ func TestBuildRmCommand(t *testing.T) {
 	if cmd != "pig ext rm postgis" {
 		t.Errorf("Expected 'pig ext rm postgis', got %q", cmd)
 	}
+}
+
+func setupPlanParityCatalog() func() {
+	oldCatalog := Catalog
+	oldPostgres := Postgres
+	oldOSType := config.OSType
+	oldOSVersion := config.OSVersion
+	oldOSCode := config.OSCode
+	oldOSArch := config.OSArch
+
+	config.OSType = config.DistroEL
+	config.OSVersion = "9"
+	config.OSCode = "el9"
+	config.OSArch = "amd64"
+	Postgres = nil
+
+	alpha := &Extension{Name: "alpha", Pkg: "alpha_pkg", Lead: true, RpmPkg: "alpha_$v"}
+	beta := &Extension{Name: "beta", Pkg: "beta_pkg", Lead: true, RpmPkg: "beta_$v beta_tools_$v"}
+	noPkg := &Extension{Name: "no_pkg", Pkg: "no_pkg", Lead: true}
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{alpha, beta, noPkg},
+		ExtNameMap: map[string]*Extension{
+			alpha.Name: alpha,
+			beta.Name:  beta,
+			noPkg.Name: noPkg,
+		},
+		ExtPkgMap: map[string]*Extension{
+			alpha.Pkg: alpha,
+			beta.Pkg:  beta,
+			noPkg.Pkg: noPkg,
+		},
+		Dependency: map[string][]string{},
+		AliasMap:   map[string]string{},
+	}
+
+	return func() {
+		Catalog = oldCatalog
+		Postgres = oldPostgres
+		config.OSType = oldOSType
+		config.OSVersion = oldOSVersion
+		config.OSCode = oldOSCode
+		config.OSArch = oldOSArch
+	}
+}
+
+func packageResources(plan *output.Plan) []string {
+	packages := make([]string, 0)
+	for _, resource := range plan.Affects {
+		if resource.Type == "package" {
+			packages = append(packages, resource.Name)
+		}
+	}
+	return packages
+}
+
+func executeAction(plan *output.Plan) string {
+	for _, action := range plan.Actions {
+		if strings.HasPrefix(action.Description, "Execute: ") {
+			return action.Description
+		}
+	}
+	return ""
 }

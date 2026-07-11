@@ -7,12 +7,22 @@ import (
 	"strings"
 )
 
+// resolvedExt holds the extension metadata and unique packages contributed by
+// one resolved request. It is shared by runtime package resolution and plans.
+type resolvedExt struct {
+	name     string
+	ext      *Extension
+	packages []string
+}
+
 // PackageResolveResult contains resolved package names and resolution metadata.
 type PackageResolveResult struct {
 	Packages     []string
 	PackageOwner map[string]string
 	NotFound     []string
 	NoPackage    []string
+	resolved     []resolvedExt
+	unresolved   []string
 }
 
 type packageResolveOptions struct {
@@ -82,6 +92,7 @@ func resolvePackageRequests(pgVer int, names []string, opts packageResolveOption
 	res := &PackageResolveResult{
 		Packages:     make([]string, 0, len(names)),
 		PackageOwner: make(map[string]string),
+		resolved:     make([]resolvedExt, 0, len(names)),
 	}
 	seenPackages := make(map[string]struct{})
 
@@ -91,17 +102,20 @@ func resolvePackageRequests(pgVer int, names []string, opts packageResolveOption
 
 	for _, raw := range names {
 		name, version := splitNameVersion(raw, opts.ParseVersion)
-		pkgPattern, owner, reason := resolvePackagePattern(pgVer, raw, name, opts)
+		pkgPattern, owner, ext, reason := resolvePackagePattern(pgVer, raw, name, opts)
 
 		switch reason {
 		case "not_found":
 			res.NotFound = append(res.NotFound, raw)
+			res.unresolved = append(res.unresolved, raw)
 			continue
 		case "no_package":
 			res.NoPackage = append(res.NoPackage, raw)
+			res.unresolved = append(res.unresolved, raw)
 			continue
 		}
 
+		requestPackages := make([]string, 0)
 		for _, pkg := range ProcessPkgName(pkgPattern, pgVer) {
 			resolvedPkg := applyPackageVersion(pkg, version)
 			if _, exists := seenPackages[resolvedPkg]; exists {
@@ -110,7 +124,17 @@ func resolvePackageRequests(pgVer int, names []string, opts packageResolveOption
 			seenPackages[resolvedPkg] = struct{}{}
 			res.Packages = append(res.Packages, resolvedPkg)
 			res.PackageOwner[resolvedPkg] = owner
+			requestPackages = append(requestPackages, resolvedPkg)
 		}
+		resolvedName := name
+		if ext != nil {
+			resolvedName = ext.Name
+		}
+		res.resolved = append(res.resolved, resolvedExt{
+			name:     resolvedName,
+			ext:      ext,
+			packages: requestPackages,
+		})
 	}
 
 	return res
@@ -128,37 +152,37 @@ func splitNameVersion(raw string, parse bool) (name string, version string) {
 	return raw, ""
 }
 
-func resolvePackagePattern(pgVer int, rawName, baseName string, opts packageResolveOptions) (pkgPattern string, owner string, reason string) {
+func resolvePackagePattern(pgVer int, rawName, baseName string, opts packageResolveOptions) (pkgPattern string, owner string, ext *Extension, reason string) {
 	if opts.EnableTranslation && Catalog != nil {
 		if ext, ok := Catalog.ExtNameMap[baseName]; ok {
 			pkgName := ext.PackageName(pgVer)
 			if pkgName == "" {
-				return "", "", "no_package"
+				return "", "", ext, "no_package"
 			}
-			return pkgName, ext.Name, ""
+			return pkgName, ext.Name, ext, ""
 		}
 		if ext, ok := Catalog.ExtPkgMap[baseName]; ok {
 			pkgName := ext.PackageName(pgVer)
 			if pkgName == "" {
-				return "", "", "no_package"
+				return "", "", ext, "no_package"
 			}
-			return pkgName, ext.Name, ""
+			return pkgName, ext.Name, ext, ""
 		}
 		if pgPkg, matched, noPackage := resolveAliasPattern(pgVer, baseName); matched {
 			if noPackage {
-				return "", "", "no_package"
+				return "", "", nil, "no_package"
 			}
-			return pgPkg, rawName, ""
+			return pgPkg, rawName, nil, ""
 		}
 		if !opts.FallbackToRaw {
-			return "", "", "not_found"
+			return "", "", nil, "not_found"
 		}
 	}
 
 	if opts.FallbackToRaw {
-		return baseName, baseName, ""
+		return baseName, baseName, nil, ""
 	}
-	return "", "", "not_found"
+	return "", "", nil, "not_found"
 }
 
 func applyPackageVersion(pkg, version string) string {
