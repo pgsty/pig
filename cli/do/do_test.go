@@ -2,6 +2,10 @@ package do
 
 import (
 	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"pig/internal/config"
 	"reflect"
 	"strings"
 	"testing"
@@ -180,4 +184,239 @@ func TestSingleSelectorBuildersRejectExtraArgs(t *testing.T) {
 	if err := RemovePgmon("", []string{"pg-meta", "ignored"}); err == nil {
 		t.Fatal("RemovePgmon should reject an ignored positional argument")
 	}
+}
+
+func TestRunAnsibleUsesAnsibleFromPigstyHome(t *testing.T) {
+	home, _, caller, capture := setupAnsibleRunnerTest(t, "ansible")
+	before, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != caller {
+		t.Fatalf("test cwd = %q, want %q", before, caller)
+	}
+
+	args := []string{"all", "-m", "ping"}
+	if err := RunAnsible("inventory.yml", args); err != nil {
+		t.Fatalf("RunAnsible() error = %v", err)
+	}
+	after, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("process cwd changed from %q to %q", before, after)
+	}
+
+	assertAnsibleCapture(t, capture, home, append([]string{"-i", "inventory.yml"}, args...))
+}
+
+func TestRunPlaybookUsesAnsiblePlaybookWithoutChangingCWD(t *testing.T) {
+	home, inventory, caller, capture := setupAnsibleRunnerTest(t, "ansible-playbook")
+	before, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != caller {
+		t.Fatalf("test cwd = %q, want %q", before, caller)
+	}
+
+	args := []string{"site.yml", "--check"}
+	if err := RunPlaybook(inventory, args); err != nil {
+		t.Fatalf("RunPlaybook() error = %v", err)
+	}
+	after, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("process cwd changed from %q to %q", before, after)
+	}
+
+	assertAnsibleCapture(t, capture, home, append([]string{"-i", inventory}, args...))
+}
+
+func TestAnsibleRunnersCheckActualBinary(t *testing.T) {
+	tests := []struct {
+		name    string
+		run     func(string, []string) error
+		wantErr string
+	}{
+		{name: "ansible", run: RunAnsible, wantErr: "ansible command not found"},
+		{name: "ansible-playbook", run: RunPlaybook, wantErr: "ansible-playbook command not found"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, inventory, _, _ := setupAnsibleRunnerTest(t)
+			err := tt.run(inventory, []string{"--version"})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("runner error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestAnsibleRunnerPrecheckErrors(t *testing.T) {
+	t.Run("empty home", func(t *testing.T) {
+		_, inventory, _, _ := setupAnsibleRunnerTest(t, "ansible", "ansible-playbook")
+		config.PigstyHome = ""
+		err := RunAnsible(inventory, nil)
+		if err == nil || !strings.Contains(err.Error(), "pigsty home not found") {
+			t.Fatalf("RunAnsible() error = %v, want missing home", err)
+		}
+	})
+
+	t.Run("missing home", func(t *testing.T) {
+		home, inventory, _, _ := setupAnsibleRunnerTest(t, "ansible", "ansible-playbook")
+		config.PigstyHome = filepath.Join(home, "missing")
+		err := RunAnsible(inventory, nil)
+		if err == nil || !strings.Contains(err.Error(), "pigsty home") || !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("RunAnsible() error = %v, want missing home path", err)
+		}
+	})
+
+	t.Run("relative inventory", func(t *testing.T) {
+		setupAnsibleRunnerTest(t, "ansible", "ansible-playbook")
+		err := RunAnsible("missing.yml", nil)
+		if err == nil || !strings.Contains(err.Error(), "inventory") || !strings.Contains(err.Error(), "missing.yml") {
+			t.Fatalf("RunAnsible() error = %v, want missing relative inventory", err)
+		}
+	})
+
+	t.Run("default inventory", func(t *testing.T) {
+		setupAnsibleRunnerTest(t, "ansible", "ansible-playbook")
+		config.PigstyConfig = ""
+		err := RunAnsible("", nil)
+		if err == nil || !strings.Contains(err.Error(), "pigsty config inventory not found") {
+			t.Fatalf("RunAnsible() error = %v, want missing default inventory", err)
+		}
+	})
+}
+
+func TestRunAnsiblePreservesStructuredOutputStreams(t *testing.T) {
+	_, inventory, _, capture := setupAnsibleRunnerTest(t, "ansible", "ansible-playbook")
+	binDir := filepath.Join(filepath.Dir(capture), "bin")
+	writeFakeAnsibleTool(t, binDir, "ansible", `#!/bin/sh
+printf 'stdout-marker\n'
+printf 'stderr-marker\n' >&2
+`)
+	config.OutputFormat = config.OUTPUT_JSON
+
+	stdout, stderr, runErr := captureAnsibleOutput(t, func() error {
+		return RunAnsible(inventory, []string{"all", "-m", "ping"})
+	})
+	if runErr != nil {
+		t.Fatalf("RunAnsible() error = %v", runErr)
+	}
+	if stdout != "" {
+		t.Fatalf("structured command stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "stdout-marker\n") || !strings.Contains(stderr, "stderr-marker\n") {
+		t.Fatalf("structured command stderr = %q, want both command streams", stderr)
+	}
+}
+
+func setupAnsibleRunnerTest(t *testing.T, binaries ...string) (home, inventory, caller, capture string) {
+	t.Helper()
+	originalHome := config.PigstyHome
+	originalConfig := config.PigstyConfig
+	originalOutput := config.OutputFormat
+	t.Cleanup(func() {
+		config.PigstyHome = originalHome
+		config.PigstyConfig = originalConfig
+		config.OutputFormat = originalOutput
+	})
+
+	root := t.TempDir()
+	binDir := filepath.Join(root, "bin")
+	home = filepath.Join(root, "pigsty")
+	caller = filepath.Join(root, "caller")
+	for _, dir := range []string{binDir, home, caller} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inventory = filepath.Join(home, "inventory.yml")
+	if err := os.WriteFile(inventory, []byte("all: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	capture = filepath.Join(root, "capture")
+	t.Setenv("PIG_TEST_CAPTURE", capture)
+	t.Setenv("PATH", binDir)
+	for _, binary := range binaries {
+		writeFakeAnsibleTool(t, binDir, binary, `#!/bin/sh
+printf '%s\n' "$PWD" "$@" > "$PIG_TEST_CAPTURE"
+`)
+	}
+	config.PigstyHome = home
+	config.PigstyConfig = inventory
+	t.Chdir(caller)
+	return home, inventory, caller, capture
+}
+
+func writeFakeAnsibleTool(t *testing.T, binDir, name, script string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertAnsibleCapture(t *testing.T, capture, workDir string, args []string) {
+	t.Helper()
+	raw, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	if len(lines) == 0 {
+		t.Fatal("fake ansible capture is empty")
+	}
+	gotDir, err := os.Stat(lines[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDir, err := os.Stat(workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(gotDir, wantDir) {
+		t.Fatalf("command cwd = %q, want %q", lines[0], workDir)
+	}
+	if !reflect.DeepEqual(lines[1:], args) {
+		t.Fatalf("command args = %#v, want %#v", lines[1:], args)
+	}
+}
+
+func captureAnsibleOutput(t *testing.T, run func() error) (stdout, stderr string, runErr error) {
+	t.Helper()
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		t.Fatal(err)
+	}
+	originalStdout := os.Stdout
+	originalStderr := os.Stderr
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+	runErr = run()
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+	os.Stdout = originalStdout
+	os.Stderr = originalStderr
+	stdoutBytes, stdoutErr := io.ReadAll(stdoutR)
+	stderrBytes, stderrErr := io.ReadAll(stderrR)
+	_ = stdoutR.Close()
+	_ = stderrR.Close()
+	if stdoutErr != nil {
+		t.Fatal(stdoutErr)
+	}
+	if stderrErr != nil {
+		t.Fatal(stderrErr)
+	}
+	return string(stdoutBytes), string(stderrBytes), runErr
 }

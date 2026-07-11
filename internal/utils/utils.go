@@ -35,11 +35,17 @@ func configureCmdIO(cmd *exec.Cmd) {
 
 // Command runs a command with current user
 func Command(args []string) error {
+	return CommandInDir(args, "")
+}
+
+// CommandInDir runs a command with current user in the given working directory.
+func CommandInDir(args []string, dir string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no command specified")
 	}
 	logrus.Debugf("executing command: %v", args)
 	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Dir = dir
 	configureCmdIO(cmd)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("command failed: %w", err)
