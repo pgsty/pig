@@ -1,7 +1,9 @@
 package do
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -105,6 +107,59 @@ func TestSimplePlaybookBuilders(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("builder result = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEncodeCommaListExtraVarPreservesOrdinaryOutput(t *testing.T) {
+	got, err := encodeCommaListExtraVar("pg_extensions", []string{"postgis", "vector&search<>"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"pg_extensions":["postgis,vector&search<>"]}`
+	if got != want {
+		t.Fatalf("encoded extra var = %q, want byte-identical %q", got, want)
+	}
+}
+
+func TestListExtraVarBuildersEscapeJSONInjection(t *testing.T) {
+	injected := `x"],"become":true,"z":["y`
+	tests := []struct {
+		name  string
+		build PlaybookBuilder
+		key   string
+		args  []string
+	}{
+		{name: "pgsql extensions", build: BuildPgsqlExtCommands, key: "pg_extensions", args: []string{"pg-meta", `quote"value`, `path\pkg`, injected}},
+		{name: "node packages", build: BuildNodePackageCommands, key: "node_packages", args: []string{"all", `quote"value`, `path\pkg`, injected}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			commands, err := tt.build(tt.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := commands[0]
+			encoded := command[len(command)-1]
+			if !json.Valid([]byte(encoded)) {
+				t.Fatalf("builder emitted invalid JSON: %q", encoded)
+			}
+
+			var decoded map[string][]string
+			if err := json.Unmarshal([]byte(encoded), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if len(decoded) != 1 {
+				t.Fatalf("decoded extra vars = %#v, want exactly one key", decoded)
+			}
+			values, ok := decoded[tt.key]
+			if !ok || len(values) != 1 {
+				t.Fatalf("decoded %s = %#v, want one string value", tt.key, values)
+			}
+			if want := strings.Join(tt.args[1:], ","); values[0] != want {
+				t.Fatalf("decoded value = %q, want %q", values[0], want)
 			}
 		})
 	}

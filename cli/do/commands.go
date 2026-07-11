@@ -1,6 +1,7 @@
 package do
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -85,7 +86,10 @@ func BuildPgsqlExtCommands(args []string) ([][]string, error) {
 	}
 	command := []string{"pgsql.yml", "-l", args[0], "-t", "pg_extension"}
 	if len(args) > 1 {
-		packages := fmt.Sprintf(`{"pg_extensions":["%s"]}`, strings.Join(args[1:], ","))
+		packages, err := encodeCommaListExtraVar("pg_extensions", args[1:])
+		if err != nil {
+			return nil, err
+		}
 		command = append(command, "-e", packages)
 	}
 	return singleCommand(command), nil
@@ -157,7 +161,10 @@ func BuildNodePackageCommands(args []string) ([][]string, error) {
 	}
 	command := []string{"node.yml", "-l", args[0], "-t", "node_pkg_extra"}
 	if len(args) > 1 {
-		packages := fmt.Sprintf(`{"node_packages":["%s"]}`, strings.Join(args[1:], ","))
+		packages, err := encodeCommaListExtraVar("node_packages", args[1:])
+		if err != nil {
+			return nil, err
+		}
 		command = append(command, "-e", packages)
 	}
 	return singleCommand(command), nil
@@ -222,6 +229,21 @@ func BuildRedisRmCommands(args []string, uninstall bool) ([][]string, error) {
 
 func singleCommand(command []string) [][]string {
 	return [][]string{command}
+}
+
+// encodeCommaListExtraVar preserves the historical single comma-joined list
+// value while using a real JSON encoder so package names cannot inject extra
+// Ansible variables. HTML escaping is disabled to keep ordinary output stable.
+func encodeCommaListExtraVar(key string, values []string) (string, error) {
+	var encoded strings.Builder
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(map[string][]string{
+		key: []string{strings.Join(values, ",")},
+	}); err != nil {
+		return "", fmt.Errorf("failed to encode %s extra variable: %w", key, err)
+	}
+	return strings.TrimSuffix(encoded.String(), "\n"), nil
 }
 
 func requireArgs(args []string, count int, message string) error {
