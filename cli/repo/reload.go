@@ -1,15 +1,12 @@
 package repo
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
-	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -36,15 +33,26 @@ func ReloadRepoCatalogWithResult() *output.Result {
 		return nil
 	}
 
-	content, sourceURL, err := utils.FetchFirstValidWithTimeout(0, urls, validate)
+	catalogPath := filepath.Join(config.ConfigDir, "repo.yml")
+	syncResult, err := utils.SyncFirstValidFile(0, urls, catalogPath, 0644, validate)
 	if err != nil {
+		var syncErr *utils.MirrorSyncError
+		if errors.As(err, &syncErr) && syncErr.Stage == utils.MirrorSyncWrite {
+			result := output.Fail(output.CodeRepoReloadFailed, fmt.Sprintf("failed to write repo catalog file: %v", syncErr.Err))
+			result.Data = &RepoReloadData{
+				SourceURL:    syncResult.SourceURL,
+				RepoCount:    len(repos),
+				DurationMs:   time.Since(startTime).Milliseconds(),
+				DownloadedAt: time.Now().Format(time.RFC3339),
+			}
+			return result
+		}
 		msg := "failed to download repo catalog"
-		var ne interface{ Timeout() bool }
-		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
+		if utils.IsTimeoutError(err) {
 			msg = "download timed out"
 		}
 		result := output.Fail(output.CodeRepoReloadFailed, msg)
-		result.Detail = fmt.Sprintf("attempted:\n- %s\n- %s\nerrors:\n%s", urls[0], urls[1], strings.TrimSpace(err.Error()))
+		result.Detail = utils.MirrorAttemptDetail(urls, err)
 		result.Data = &RepoReloadData{
 			DurationMs:   time.Since(startTime).Milliseconds(),
 			DownloadedAt: time.Now().Format(time.RFC3339),
@@ -53,26 +61,15 @@ func ReloadRepoCatalogWithResult() *output.Result {
 	}
 
 	repoNum := len(repos)
-	catalogPath := filepath.Join(config.ConfigDir, "repo.yml")
-	if err := os.WriteFile(catalogPath, content, 0644); err != nil {
-		result := output.Fail(output.CodeRepoReloadFailed, fmt.Sprintf("failed to write repo catalog file: %v", err))
-		result.Data = &RepoReloadData{
-			SourceURL:    sourceURL,
-			RepoCount:    repoNum,
-			DurationMs:   time.Since(startTime).Milliseconds(),
-			DownloadedAt: time.Now().Format(time.RFC3339),
-		}
-		return result
-	}
 
 	data := &RepoReloadData{
-		SourceURL:    sourceURL,
+		SourceURL:    syncResult.SourceURL,
 		RepoCount:    repoNum,
 		CatalogPath:  catalogPath,
 		DownloadedAt: time.Now().Format(time.RFC3339),
 		DurationMs:   time.Since(startTime).Milliseconds(),
 	}
 
-	message := fmt.Sprintf("Reloaded repo catalog: %d repositories from %s", repoNum, sourceURL)
+	message := fmt.Sprintf("Reloaded repo catalog: %d repositories from %s", repoNum, syncResult.SourceURL)
 	return output.OK(message, data)
 }

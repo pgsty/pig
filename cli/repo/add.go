@@ -67,22 +67,8 @@ func isSafeModuleName(module string) bool {
 }
 
 func isPathWithinBase(basePath, targetPath string) bool {
-	baseAbs, err := filepath.Abs(basePath)
-	if err != nil {
-		return false
-	}
-	targetAbs, err := filepath.Abs(targetPath)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(baseAbs, targetAbs)
-	if err != nil {
-		return false
-	}
-	if rel == "." {
-		return true
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+	within, err := utils.IsPathWithin(basePath, targetPath)
+	return err == nil && within
 }
 
 // getModuleContent returns the multiple repo content together
@@ -136,21 +122,21 @@ func ExpandModuleArgs(args []string) []string {
 	return newArgs
 }
 
-// AddRepos adds repositories and returns a structured Result
-// This function is used for YAML/JSON output modes
-func AddRepos(modules []string, region string, doRemove, doUpdate bool) *output.Result {
-	return AddReposWithOptions(modules, AddOptions{
-		Region: region,
-		Remove: doRemove,
-		Update: doUpdate,
-	})
-}
-
 type AddOptions struct {
 	Region string
 	Remove bool
 	Update bool
 	Mirror bool
+}
+
+// ConfigureRepos is the shared entry point for CLI workflows that add or set
+// repository modules. It owns the default module and comma-expansion rules so
+// callers do not need to duplicate command-layer argument normalization.
+func ConfigureRepos(args []string, opts AddOptions) *output.Result {
+	if len(args) == 0 {
+		args = []string{"all"}
+	}
+	return AddReposWithOptions(ExpandModuleArgs(args), opts)
 }
 
 func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
