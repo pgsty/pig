@@ -79,6 +79,43 @@ func TestParsePatroniListJSON_Normal(t *testing.T) {
 	}
 }
 
+func TestParsePatroniListJSON_LooseLagValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		lag     string
+		wantLag int
+		wantNil bool
+	}{
+		{name: "numeric", lag: "7", wantLag: 7},
+		{name: "unknown", lag: `"unknown"`, wantNil: true},
+		{name: "asterisk", lag: `"*"`, wantNil: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := `[{"Cluster":"pg-test","Member":"pg-test-2","Host":"10.0.0.2","Role":"Replica","State":"running","TL":7,"Lag in MB":` + tt.lag + `}]`
+			data, err := parsePatroniListJSON(input)
+			if err != nil {
+				t.Fatalf("parsePatroniListJSON() error = %v", err)
+			}
+			if data.Cluster != "pg-test" || len(data.Members) != 1 {
+				t.Fatalf("parsed data = %+v, want pg-test with one member", data)
+			}
+			member := data.Members[0]
+			if member.Member != "pg-test-2" || member.Host != "10.0.0.2" || member.Role != "replica" || member.State != "running" || member.TL != 7 {
+				t.Errorf("member metadata lost while parsing lag: %+v", member)
+			}
+			if tt.wantNil {
+				if member.Lag != nil {
+					t.Errorf("lag = %d, want nil", *member.Lag)
+				}
+			} else if member.Lag == nil || *member.Lag != tt.wantLag {
+				t.Errorf("lag = %v, want %d", member.Lag, tt.wantLag)
+			}
+		})
+	}
+}
+
 func TestParsePatroniListJSON_Empty(t *testing.T) {
 	input := `[]`
 	data, err := parsePatroniListJSON(input)

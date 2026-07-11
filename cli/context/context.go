@@ -806,180 +806,42 @@ func checkFileExistsAsDBSU(dbsu, path string) (bool, error) {
 	return false, fmt.Errorf("permission denied")
 }
 
-// PatroniListEntry represents a member entry from patronictl list JSON output.
-type PatroniListEntry struct {
-	Cluster string `json:"Cluster"`
-	Member  string `json:"Member"`
-	Host    string `json:"Host"`
-	Role    string `json:"Role"`
-	State   string `json:"State"`
-	TL      int    `json:"TL"`
-	LagInMB *int   `json:"Lag in MB"`
-}
-
 // collectPatroniContext collects Patroni cluster information
 func collectPatroniContext() *PatroniContext {
-	ctx := &PatroniContext{Available: false}
-
-	// Check if patronictl is installed
-	if _, err := exec.LookPath("patronictl"); err != nil {
-		logrus.Debug("patronictl not found in PATH")
+	result := patroni.StatusResult(utils.GetDBSU(""))
+	ctx := &PatroniContext{}
+	if result == nil {
 		return ctx
 	}
 
-	ctx.Available = true
-
-	// Try to get cluster info from config file (may fail due to permissions)
-	clusterName := getPatroniClusterName()
-	if clusterName != "" {
-		ctx.Cluster = clusterName
+	ctx.Available = result.Code != output.CodePtNotFound
+	status, ok := result.Data.(*patroni.PtStatusResultData)
+	if !ok || status == nil {
+		return ctx
 	}
 
-	// Check if patroni process is running
-	ctx.Running = isPatroniRunning()
-	if ctx.Running {
-		ctx.State = "running"
-		// Get detailed runtime info from patronictl
-		info := getPatroniRuntimeInfo()
-		if info != nil {
-			if info.Role != "" {
-				ctx.Role = info.Role
+	ctx.Running = status.ServiceRunning
+	ctx.Cluster = status.Cluster
+	if !ctx.Running {
+		return ctx
+	}
+	ctx.State = "running"
+	identifiers := hostIdentifiers()
+	for _, member := range status.Members {
+		if identifierMatches(identifiers, member.Member) || identifierMatches(identifiers, member.Host) {
+			ctx.Role = member.Role
+			if member.State != "" {
+				ctx.State = member.State
 			}
-			if info.State != "" {
-				ctx.State = info.State
+			ctx.Timeline = member.TL
+			if member.Lag != nil {
+				ctx.Lag = fmt.Sprintf("%d MB", *member.Lag)
 			}
-			if info.Timeline > 0 {
-				ctx.Timeline = info.Timeline
-			}
-			if info.Lag != "" {
-				ctx.Lag = info.Lag
-			}
-			// If cluster name wasn't obtained from config, use from runtime
-			if ctx.Cluster == "" && info.Cluster != "" {
-				ctx.Cluster = info.Cluster
-			}
+			break
 		}
 	}
 
 	return ctx
-}
-
-// getPatroniClusterName reads the cluster name (scope) from patroni config file.
-// Returns empty string if config cannot be read or parsed.
-func getPatroniClusterName() string {
-	// Try direct read first
-	content, err := os.ReadFile(patroni.DefaultConfigPath)
-	if err != nil {
-		logrus.Debugf("cannot read patroni config directly: %v", err)
-		// Try with DBSU privilege
-		dbsu := utils.GetDBSU("")
-		contentStr, err := utils.DBSUCommandStdout(dbsu, []string{"cat", patroni.DefaultConfigPath})
-		if err != nil {
-			logrus.Debugf("cannot read patroni config as DBSU: %v", err)
-			return ""
-		}
-		content = []byte(contentStr)
-	}
-
-	// Simple YAML parsing for scope (cluster name)
-	lines := strings.Split(string(content), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "scope:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				cluster := strings.TrimSpace(parts[1])
-				cluster = strings.Trim(cluster, "\"'")
-				return cluster
-			}
-		}
-	}
-
-	return ""
-}
-
-// isPatroniRunning checks if patroni process is running.
-// Uses systemctl first, falls back to pgrep.
-func isPatroniRunning() bool {
-	// Method A: systemctl is-active
-	cmd := exec.Command("systemctl", "is-active", "--quiet", "patroni")
-	if err := cmd.Run(); err == nil {
-		return true
-	}
-
-	// Method B: pgrep
-	cmd = exec.Command("pgrep", "-f", "patroni")
-	if err := cmd.Run(); err == nil {
-		return true
-	}
-
-	return false
-}
-
-// patroniRuntimeInfo holds runtime information from patronictl list.
-type patroniRuntimeInfo struct {
-	Cluster  string
-	Role     string
-	State    string
-	Timeline int
-	Lag      string
-}
-
-// getPatroniRuntimeInfo executes patronictl list to get runtime status.
-// Returns nil if command fails or current host not found.
-func getPatroniRuntimeInfo() *patroniRuntimeInfo {
-	dbsu := utils.GetDBSU("")
-	binPath, err := exec.LookPath("patronictl")
-	if err != nil {
-		logrus.Debug("patronictl not found in PATH")
-		return nil
-	}
-	args := []string{binPath, "-c", patroni.DefaultConfigPath, "list", "-f", "json"}
-
-	output, err := utils.DBSUCommandStdout(dbsu, args)
-	if err != nil {
-		logrus.Debugf("patronictl list failed: %v", err)
-		return nil
-	}
-
-	var entries []PatroniListEntry
-	if err := json.Unmarshal([]byte(output), &entries); err != nil {
-		logrus.Debugf("failed to parse patronictl list output: %v", err)
-		return nil
-	}
-
-	if len(entries) == 0 {
-		logrus.Debug("patronictl list returned empty result")
-		return nil
-	}
-
-	identifiers := hostIdentifiers()
-	// Find entry matching current host identifiers
-	for _, entry := range entries {
-		if identifierMatches(identifiers, entry.Member) || identifierMatches(identifiers, entry.Host) {
-			info := &patroniRuntimeInfo{
-				Cluster:  strings.TrimSpace(entry.Cluster),
-				Role:     normalizePatroniRole(entry.Role), // leader, replica, standby_leader
-				State:    entry.State,
-				Timeline: entry.TL,
-			}
-			if entry.LagInMB != nil {
-				info.Lag = fmt.Sprintf("%d MB", *entry.LagInMB)
-			}
-			return info
-		}
-	}
-
-	return nil
-}
-
-func normalizePatroniRole(role string) string {
-	role = strings.TrimSpace(strings.ToLower(role))
-	if role == "" {
-		return role
-	}
-	parts := strings.Fields(role)
-	return strings.Join(parts, "_")
 }
 
 func hostIdentifiers() map[string]struct{} {

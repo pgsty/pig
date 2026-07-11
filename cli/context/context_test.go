@@ -8,10 +8,12 @@ package context
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"pig/internal/config"
 	"pig/internal/output"
 
 	"gopkg.in/yaml.v3"
@@ -838,6 +840,112 @@ func TestPatroniContext_Text_StoppedNoTimelineLag(t *testing.T) {
 	if strings.Contains(text, "Timeline:") {
 		t.Error("Should not show timeline when not running")
 	}
+}
+
+func TestCollectPatroniContext_LagVariants(t *testing.T) {
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		t.Fatalf("hostname = %q, err = %v", hostname, err)
+	}
+
+	tests := []struct {
+		name    string
+		role    string
+		lag     string
+		wantLag string
+	}{
+		{name: "leader null lag", role: "Leader", lag: "null"},
+		{name: "replica numeric lag", role: "Replica", lag: "5", wantLag: "5 MB"},
+		{name: "replica unknown lag", role: "Replica", lag: `"unknown"`},
+		{name: "replica star lag", role: "Replica", lag: `"*"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := `[
+  {"Cluster":"pg-test","Member":"remote","Host":"192.0.2.10","Role":"Replica","State":"running","TL":7,"Lag in MB":0},
+  {"Cluster":"pg-test","Member":"` + hostname + `","Host":"192.0.2.11","Role":"` + tt.role + `","State":"running","TL":7,"Lag in MB":` + tt.lag + `}
+]`
+			stubPatroniContextCommands(t, "printf '%s\\n' "+shellSingleQuote(fixture))
+
+			got := collectPatroniContext()
+			if !got.Available || !got.Running {
+				t.Fatalf("availability = %v, running = %v; want both true", got.Available, got.Running)
+			}
+			if got.Cluster == "" {
+				t.Error("cluster should be retained from canonical status data")
+			}
+			wantRole := strings.ToLower(tt.role)
+			if got.Role != wantRole {
+				t.Errorf("role = %q, want %q", got.Role, wantRole)
+			}
+			if got.State != "running" {
+				t.Errorf("state = %q, want running", got.State)
+			}
+			if got.Timeline != 7 {
+				t.Errorf("timeline = %d, want 7", got.Timeline)
+			}
+			if got.Lag != tt.wantLag {
+				t.Errorf("lag = %q, want %q", got.Lag, tt.wantLag)
+			}
+		})
+	}
+}
+
+func TestCollectPatroniContext_StatusFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "patronictl error", body: "exit 1"},
+		{name: "empty members", body: "printf '[]\\n'"},
+		{name: "malformed json", body: "printf 'not-json\\n'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stubPatroniContextCommands(t, tt.body)
+
+			got := collectPatroniContext()
+			if !got.Available || !got.Running {
+				t.Fatalf("availability = %v, running = %v; want graceful running fallback", got.Available, got.Running)
+			}
+			if got.Cluster == "" {
+				t.Error("cluster should be retained on canonical status failure")
+			}
+			if got.State != "running" {
+				t.Errorf("state = %q, want running", got.State)
+			}
+			if got.Role != "" || got.Timeline != 0 || got.Lag != "" {
+				t.Errorf("member fields = role %q, timeline %d, lag %q; want empty", got.Role, got.Timeline, got.Lag)
+			}
+		})
+	}
+}
+
+func stubPatroniContextCommands(t *testing.T, patronictlBody string) {
+	t.Helper()
+	binDir := t.TempDir()
+	writeContextTestCommand(t, binDir, "patronictl", patronictlBody)
+	writeContextTestCommand(t, binDir, "systemctl", "exit 0")
+	writeContextTestCommand(t, binDir, "cat", "printf 'scope: pg-test\\n'")
+	t.Setenv("PATH", binDir)
+	oldCurrentUser := config.CurrentUser
+	config.CurrentUser = "context-test-dbsu"
+	t.Cleanup(func() { config.CurrentUser = oldCurrentUser })
+	t.Setenv("PIG_DBSU", config.CurrentUser)
+}
+
+func writeContextTestCommand(t *testing.T, dir, name, body string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatalf("write fake %s: %v", name, err)
+	}
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 // ============================================================================
