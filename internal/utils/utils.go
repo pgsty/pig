@@ -237,42 +237,14 @@ func PadHeader(str string, length int) string {
 }
 
 func DownloadFile(srcURL, dstPath string) error {
-	client := DefaultClient()
-
-	// Best-effort remote size probe via HEAD.
-	// HEAD is an optimization: it should not make downloads fail, and we must close the response
-	// body to avoid leaking connections/HTTP2 streams.
-	remoteSize := int64(-1)
-	resp, err := client.Head(srcURL)
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
-	}
-	if err == nil {
-		if resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength > 0 {
-			remoteSize = resp.ContentLength
-		}
-	} else {
-		logrus.Debugf("HEAD failed for %s: %v", srcURL, err)
-	}
-
-	// If local file exists and we know the remote size, skip download when sizes match.
-	if remoteSize > 0 {
-		if fi, err := os.Stat(dstPath); err == nil {
-			localSize := fi.Size()
-			if localSize == remoteSize {
-				logrus.Debugf("file already exists with same size: %s", dstPath)
-				return nil
-			}
-		}
-	}
-
-	// Download the file
-	logrus.Debugf("downloading: %s -> %s", srcURL, dstPath)
-	resp, err = client.Get(srcURL)
+	mode, err := existingFileMode(dstPath, 0644)
 	if err != nil {
-		if resp != nil && resp.Body != nil {
-			_ = resp.Body.Close()
-		}
+		return err
+	}
+
+	logrus.Debugf("downloading: %s -> %s", srcURL, dstPath)
+	resp, err := DefaultClient().Get(srcURL)
+	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)
 	}
 	defer resp.Body.Close()
@@ -281,36 +253,19 @@ func DownloadFile(srcURL, dstPath string) error {
 		return fmt.Errorf("bad http status: %d", resp.StatusCode)
 	}
 
-	// If HEAD did not provide a usable size, fallback to Content-Length from GET response.
-	if remoteSize <= 0 && resp.ContentLength > 0 {
-		remoteSize = resp.ContentLength
-	}
-
-	// Create the file with a temporary name first
-	tmpPath := dstPath + ".tmp"
-	out, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
-	}
-
-	// Copy the content
-	written, err := io.Copy(out, resp.Body)
-	out.Close() // Close before rename
-	if err != nil {
-		os.Remove(tmpPath) // Clean up on error
-		return fmt.Errorf("failed to write file: %w", err)
-	}
-
-	// Verify downloaded size
-	if remoteSize > 0 && written != remoteSize {
-		os.Remove(tmpPath)
-		return fmt.Errorf("size mismatch: got %d bytes, expected %d bytes", written, remoteSize)
-	}
-
-	// Rename temporary file to final destination
-	if err := os.Rename(tmpPath, dstPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename temporary file: %w", err)
+	var written int64
+	if err := AtomicWrite(dstPath, mode, func(w io.Writer) error {
+		var copyErr error
+		written, copyErr = io.Copy(w, resp.Body)
+		if copyErr != nil {
+			return fmt.Errorf("failed to copy download: %w", copyErr)
+		}
+		if resp.ContentLength >= 0 && written != resp.ContentLength {
+			return fmt.Errorf("size mismatch: got %d bytes, expected %d bytes", written, resp.ContentLength)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	logrus.Debugf("downloaded: %s (%d bytes)", dstPath, written)
