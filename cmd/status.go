@@ -17,6 +17,7 @@ var statusCmd = &cobra.Command{
 	Aliases:     []string{"st", "info"},
 	Short:       "Show Environment Status",
 	Annotations: ancsAnn("pig status", "query", "volatile", "safe", true, "safe", "none", "current", 1000),
+	Args:        cobra.NoArgs,
 	Long: `Display current pigsty status info, including:
     - Configuration
     - OS Environment

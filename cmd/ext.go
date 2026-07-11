@@ -71,11 +71,8 @@ var extListCmd = &cobra.Command{
   pig ext ls gis -v 16        # list gis category for pg 16
 `,
 	Annotations: ancsAnn("pig ext list", "query", "stable", "safe", true, "safe", "none", "current", 100),
+	Args:        cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) > 1 {
-			return handleAuxResult(output.Fail(output.CodeExtensionInvalidArgs, "too many arguments, only one search query allowed"))
-		}
-
 		pgVer, err := extProbeVersion()
 		if err != nil {
 			return handleExtProbeError(err)
@@ -91,10 +88,11 @@ var extListCmd = &cobra.Command{
 }
 
 var extInfoCmd = &cobra.Command{
-	Use:         "info [ext...]",
+	Use:         "info <ext...>",
 	Short:       "get extension information",
 	Aliases:     []string{"i"},
 	Annotations: ancsAnn("pig ext info", "query", "stable", "safe", true, "safe", "none", "current", 50),
+	Args:        cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := ext.GetExtensionInfo(args)
 		return handleAuxResult(result)
@@ -132,10 +130,11 @@ var extScanCmd = &cobra.Command{
 }
 
 var extAddCmd = &cobra.Command{
-	Use:         "add",
+	Use:         "add <ext...>",
 	Short:       "install postgres extension",
 	Aliases:     []string{"a", "install", "ins"},
 	Annotations: ancsAnn("pig ext add", "action", "stable", "restricted", true, "low", "none", "root", 10000),
+	Args:        cobra.MinimumNArgs(1),
 	Example: `
 Description:
   pig ext add     pg_duckdb                  # install one extension
@@ -161,9 +160,6 @@ Description:
 
 		// Plan mode: show plan without executing
 		if extAddPlan {
-			if len(args) == 0 {
-				return handleAuxResult(output.Fail(output.CodeExtensionInvalidArgs, "no extensions specified"))
-			}
 			plan := ext.BuildAddPlan(pgVer, args, extYes)
 			return handlePlanOutput(plan)
 		}
@@ -174,10 +170,11 @@ Description:
 }
 
 var extRmCmd = &cobra.Command{
-	Use:         "rm",
+	Use:         "rm <ext...>",
 	Short:       "remove postgres extension",
 	Aliases:     []string{"r", "remove"},
 	Annotations: ancsAnn("pig ext rm", "action", "stable", "restricted", false, "medium", "recommended", "root", 10000),
+	Args:        cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgVer, err := extProbeVersion()
 		if err != nil {
@@ -186,9 +183,6 @@ var extRmCmd = &cobra.Command{
 
 		// Plan mode: show plan without executing
 		if extRmPlan {
-			if len(args) == 0 {
-				return handleAuxResult(output.Fail(output.CodeExtensionInvalidArgs, "no extensions specified"))
-			}
 			plan := ext.BuildRmPlan(pgVer, args, extYes)
 			return handlePlanOutput(plan)
 		}
@@ -199,10 +193,11 @@ var extRmCmd = &cobra.Command{
 }
 
 var extUpdateCmd = &cobra.Command{
-	Use:         "update",
+	Use:         "update [ext...]",
 	Short:       "update installed extensions for current pg version",
 	Aliases:     []string{"u", "upd"},
 	Annotations: ancsAnn("pig ext update", "action", "stable", "restricted", true, "low", "none", "root", 10000),
+	Args:        cobra.ArbitraryArgs,
 	Example: `
 Description:
   pig ext update                     # no-op (safety), requires explicit targets
@@ -245,11 +240,12 @@ var (
 )
 
 var extImportCmd = &cobra.Command{
-	Use:          "import [ext...]",
+	Use:          "import <ext...>",
 	Short:        "import extension packages to local repo",
 	Aliases:      []string{"get"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig ext import", "action", "stable", "restricted", true, "low", "none", "root", 30000),
+	Args:         cobra.MinimumNArgs(1),
 	Example: `
   pig ext import postgis                # import postgis extension packages
   pig ext import timescaledb pg_cron    # import multiple extensions
@@ -268,11 +264,12 @@ var extImportCmd = &cobra.Command{
 }
 
 var extLinkCmd = &cobra.Command{
-	Use:          "link <-v pgver|-p pgpath>",
+	Use:          "link <version|path|none>",
 	Short:        "link postgres to active PATH",
 	Aliases:      []string{"ln"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig ext link", "action", "stable", "unsafe", true, "medium", "none", "root", 100),
+	Args:         cobra.ExactArgs(1),
 	Example: `
   pig ext link 18                      # link pgdg postgresql 18 to /usr/pgsql
   pig ext link pg17                    # link postgresql 17 to /usr/pgsql (pg prefix stripped)
@@ -312,6 +309,7 @@ var extAvailCmd = &cobra.Command{
   pig ext matrix citus              # alias for avail command
 `,
 	Annotations: ancsAnn("pig ext avail", "query", "stable", "safe", true, "safe", "none", "current", 100),
+	Args:        cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := ext.GetExtensionAvailability(args)
 		return handleAuxResult(result)

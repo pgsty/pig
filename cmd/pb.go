@@ -255,6 +255,7 @@ var pbExpireCmd = &cobra.Command{
 	Aliases:     []string{"e"},
 	Short:       "Cleanup expired backups",
 	Annotations: ancsAnn("pig pgbackrest expire", "action", "volatile", "restricted", true, "medium", "recommended", "dbsu", 30000),
+	Args:        cobra.NoArgs,
 	Long: `Clean up expired backups and WAL archives according to retention policy.
 
 The retention policy is configured in pgbackrest.conf:
@@ -325,6 +326,7 @@ var pbRestoreCmd = &cobra.Command{
 	Aliases:     []string{"r"}, // B01: "rt" (=restart elsewhere) and "pitr" (=the orchestrator) removed
 	Short:       "Restore from backup (low-level primitive)",
 	Annotations: ancsAnn("pig pgbackrest restore", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 600000),
+	Args:        cobra.ArbitraryArgs,
 	Long: `Restore from backup with point-in-time recovery (PITR) support.
 For orchestrated point-in-time recovery on a managed cluster, use pig pitr.
 
@@ -464,6 +466,7 @@ var pbCheckCmd = &cobra.Command{
 	Aliases:     []string{"ck"},
 	Short:       "Verify backup repository",
 	Annotations: ancsAnn("pig pgbackrest check", "query", "volatile", "safe", true, "safe", "none", "dbsu", 10000),
+	Args:        cobra.NoArgs,
 	Long:        `Verify the backup repository integrity and configuration.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModulePb, "pig pgbackrest check", args, nil, func() error {
@@ -477,6 +480,7 @@ var pbStartCmd = &cobra.Command{
 	Aliases:     []string{"up"},
 	Short:       "Enable pgBackRest operations",
 	Annotations: ancsAnn("pig pgbackrest start", "action", "volatile", "restricted", true, "low", "none", "dbsu", 1000),
+	Args:        cobra.NoArgs,
 	Long:        `Allow pgBackRest to perform operations on the stanza.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModulePb, "pig pgbackrest start", args, nil, func() error {
@@ -492,6 +496,7 @@ var pbStopCmd = &cobra.Command{
 	Aliases:     []string{"dw"},
 	Short:       "Disable pgBackRest operations",
 	Annotations: ancsAnn("pig pgbackrest stop", "action", "volatile", "restricted", true, "medium", "recommended", "dbsu", 1000),
+	Args:        cobra.NoArgs,
 	Long:        `Prevent pgBackRest from performing operations on the stanza (for maintenance).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModulePb, "pig pgbackrest stop", args, map[string]interface{}{
@@ -530,36 +535,23 @@ subcommand for real-time output.`,
 	  pig pb log show                  # show latest log content`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateLogLines(pbLogLines); err != nil {
-			return err
-		}
 		dbsu := pbConfig.DbSU
 		if pbLogFollow {
-			if config.IsStructuredOutput() {
-				return structuredParamError(
-					output.MODULE_PB,
-					"pig pgbackrest log",
-					"streaming log tail is not supported in structured output",
-					"use 'pig pb log show -n N -o json' in structured mode to get a log snapshot",
-					args,
-					map[string]interface{}{"follow": pbLogFollow, "lines": pbLogLines},
-				)
-			}
-			return pgbackrest.LogTail(pbConfig.ConfigPath, dbsu, "", pbLogLines)
+			return runLogStream(output.MODULE_PB, "pig pgbackrest log", "pig pb log show", pbLogLines, args,
+				map[string]interface{}{"follow": pbLogFollow, "lines": pbLogLines}, func() error {
+					return pgbackrest.LogTail(pbConfig.ConfigPath, dbsu, "", pbLogLines)
+				})
 		}
-
-		if err := rejectUnsupportedLogOutputFormat("pig pb log"); err != nil {
-			return err
-		}
-		if isJSONLogOutput() {
-			return pgbackrest.LogShowJSONL(pbConfig.ConfigPath, dbsu, "", pbLogLines)
-		}
-		return runLegacyStructured(legacyModulePb, "pig pgbackrest log", args, map[string]interface{}{
-			"follow": pbLogFollow,
-			"lines":  pbLogLines,
-		}, func() error {
-			return pgbackrest.LogCat(pbConfig.ConfigPath, dbsu, "", pbLogLines)
-		})
+		return runLogSnapshot("pig pb log", pbLogLines,
+			func() error { return pgbackrest.LogShowJSONL(pbConfig.ConfigPath, dbsu, "", pbLogLines) },
+			func() error {
+				return runLegacyStructured(legacyModulePb, "pig pgbackrest log", args, map[string]interface{}{
+					"follow": pbLogFollow,
+					"lines":  pbLogLines,
+				}, func() error {
+					return pgbackrest.LogCat(pbConfig.ConfigPath, dbsu, "", pbLogLines)
+				})
+			})
 	},
 }
 
@@ -584,20 +576,10 @@ var pbLogTailCmd = &cobra.Command{
 	Annotations: ancsAnn("pig pgbackrest log tail", "query", "volatile", "safe", true, "safe", "none", "dbsu", 0),
 	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateLogLines(pbLogLines); err != nil {
-			return err
-		}
-		if config.IsStructuredOutput() {
-			return structuredParamError(
-				output.MODULE_PB,
-				"pig pgbackrest log tail",
-				"streaming log tail is not supported in structured output",
-				"use 'pig pb log show -n N -o json' in structured mode to get a log snapshot",
-				args,
-				map[string]interface{}{"lines": pbLogLines},
-			)
-		}
-		return pgbackrest.LogTail(pbConfig.ConfigPath, pbConfig.DbSU, "", pbLogLines)
+		return runLogStream(output.MODULE_PB, "pig pgbackrest log tail", "pig pb log show", pbLogLines, args,
+			map[string]interface{}{"lines": pbLogLines}, func() error {
+				return pgbackrest.LogTail(pbConfig.ConfigPath, pbConfig.DbSU, "", pbLogLines)
+			})
 	},
 }
 
@@ -608,20 +590,15 @@ var pbLogCatCmd = &cobra.Command{
 	Annotations: ancsAnn("pig pgbackrest log show", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateLogLines(pbLogLines); err != nil {
-			return err
-		}
-		if err := rejectUnsupportedLogOutputFormat("pig pb log show"); err != nil {
-			return err
-		}
-		if isJSONLogOutput() {
-			return pgbackrest.LogShowJSONL(pbConfig.ConfigPath, pbConfig.DbSU, "", pbLogLines)
-		}
-		return runLegacyStructured(legacyModulePb, "pig pgbackrest log show", args, map[string]interface{}{
-			"lines": pbLogLines,
-		}, func() error {
-			return pgbackrest.LogCat(pbConfig.ConfigPath, pbConfig.DbSU, "", pbLogLines)
-		})
+		return runLogSnapshot("pig pb log show", pbLogLines,
+			func() error { return pgbackrest.LogShowJSONL(pbConfig.ConfigPath, pbConfig.DbSU, "", pbLogLines) },
+			func() error {
+				return runLegacyStructured(legacyModulePb, "pig pgbackrest log show", args, map[string]interface{}{
+					"lines": pbLogLines,
+				}, func() error {
+					return pgbackrest.LogCat(pbConfig.ConfigPath, pbConfig.DbSU, "", pbLogLines)
+				})
+			})
 	},
 }
 
@@ -638,6 +615,7 @@ var pbInfoCmd = &cobra.Command{
 	Aliases:     []string{"i"},
 	Short:       "Show backup repository info",
 	Annotations: ancsAnn("pig pgbackrest info", "query", "volatile", "safe", true, "safe", "none", "dbsu", 5000),
+	Args:        cobra.NoArgs,
 	Long: `Display detailed information about the backup repository including
 all backup sets, recovery window, WAL archive status, and backup list.
 
@@ -776,6 +754,7 @@ var pbCreateCmd = &cobra.Command{
 	Aliases:     []string{"c"},
 	Short:       "Create stanza (stanza-create)",
 	Annotations: ancsAnn("pig pgbackrest create", "action", "stable", "unsafe", true, "low", "none", "dbsu", 5000),
+	Args:        cobra.NoArgs,
 	Long:        `Initialize a new stanza. Must be run before the first backup.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := &pgbackrest.CreateOptions{
@@ -799,6 +778,7 @@ var pbUpgradeCmd = &cobra.Command{
 	Aliases:     []string{"u"},
 	Short:       "Upgrade stanza (stanza-upgrade)",
 	Annotations: ancsAnn("pig pgbackrest upgrade", "action", "stable", "unsafe", true, "low", "none", "dbsu", 5000),
+	Args:        cobra.NoArgs,
 	Long:        `Update stanza after PostgreSQL major version upgrade.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := &pgbackrest.UpgradeOptions{
@@ -822,6 +802,7 @@ var pbDeleteCmd = &cobra.Command{
 	Aliases:     []string{"d"},
 	Short:       "Delete stanza (stanza-delete)",
 	Annotations: ancsAnn("pig pgbackrest delete", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 5000),
+	Args:        cobra.NoArgs,
 	Long: `Delete a stanza and all its backups.
 
 WARNING: This is a DESTRUCTIVE and IRREVERSIBLE operation!

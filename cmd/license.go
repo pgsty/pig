@@ -52,6 +52,7 @@ var licenseStatusCmd = &cobra.Command{
 	Short:       "Show pigsty license status",
 	Annotations: ancsAnn("pig license status", "query", "volatile", "safe", true, "safe", "none", "current", 500),
 	Aliases:     []string{"st", "s"},
+	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleSty, "pig license status", args, nil, func() error {
 			lic := viper.GetString("license")
@@ -77,6 +78,7 @@ var licenseIssueCmd = &cobra.Command{
 	Short:       "Issue a new pigsty license",
 	Annotations: ancsAnn("pig license issue", "action", "volatile", "safe", false, "low", "none", "current", 1000),
 	Aliases:     []string{"i", "iss"},
+	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleSty, "pig license issue", args, map[string]interface{}{
 			"key":   issueKey,
@@ -88,11 +90,6 @@ var licenseIssueCmd = &cobra.Command{
 		}, func() error {
 			logrus.Debug("Starting license issuance process")
 
-			// Ensure audience name is provided
-			if len(args) != 1 {
-				logrus.Error("License audience name not provided")
-				return fmt.Errorf("license audience name is required as the first arg")
-			}
 			issueName := args[0]
 
 			// Ensure private key is provided or fallback to default
@@ -157,13 +154,10 @@ var licenseVerifyCmd = &cobra.Command{
 	Short:       "Verify a pigsty license",
 	Annotations: ancsAnn("pig license verify", "query", "stable", "safe", true, "safe", "none", "current", 500),
 	Aliases:     []string{"v"},
+	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleSty, "pig license verify", args, nil, func() error {
 			logrus.Debug("Starting license verification process")
-			if len(args) != 1 {
-				logrus.Error("JWT license string or path not provided")
-				return fmt.Errorf("jwt license string|path is required as the first arg")
-			}
 			lic, err := license.GetLicense(args[0])
 			if err != nil {
 				logrus.Errorf("Failed to get license: %v", err)
@@ -189,6 +183,7 @@ var licenseListCmd = &cobra.Command{
 	Short:       "List of license issue",
 	Annotations: ancsAnn("pig license list", "query", "volatile", "safe", true, "safe", "none", "current", 500),
 	Aliases:     []string{"l", "ls"},
+	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleSty, "pig license list", args, nil, func() error {
 			fmt.Println(license.Manager.LicenseType())
@@ -205,14 +200,10 @@ var licenseAddCmd = &cobra.Command{
 	Short:       "Add license to pigsty configuration",
 	Annotations: ancsAnn("pig license add", "action", "volatile", "safe", true, "low", "none", "current", 500),
 	Aliases:     []string{"a"},
+	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleSty, "pig license add", args, nil, func() error {
 			logrus.Debug("Starting license add process")
-			if len(args) != 1 {
-				logrus.Error("License string not provided")
-				return fmt.Errorf("license string is required as the first arg")
-			}
-
 			// Get and validate the license
 			lic, err := license.GetLicense(args[0])
 			if err != nil {

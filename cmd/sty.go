@@ -98,10 +98,11 @@ const styConfigureExample = `
 `
 
 var pigstyInitCmd = &cobra.Command{
-	Use:         "init",
+	Use:         "init [version]",
 	Short:       "Install Pigsty",
 	Annotations: ancsAnn("pig sty init", "action", "volatile", "unsafe", false, "medium", "recommended", "root", 30000),
 	Aliases:     []string{"i"},
+	Args:        cobra.MaximumNArgs(1),
 	Long: `
 pig sty init
   -p | --path    : where to install, ~/pigsty by default
@@ -146,6 +147,7 @@ var pigstyBootCmd = &cobra.Command{
 	Short:       "Bootstrap Pigsty",
 	Annotations: ancsAnn("pig sty boot", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
 	Aliases:     []string{"b", "bootstrap"},
+	Args:        cobra.NoArgs,
 	Long: `Bootstrap pigsty with ./bootstrap script
 
 pig sty boot
@@ -168,9 +170,6 @@ Check https://pigsty.io/docs/setup/offline/#bootstrap for details
 			"keep":     pigstyBootKeep,
 			"pig_home": config.PigstyHome,
 		}, func() error {
-			if len(args) > 0 {
-				return fmt.Errorf("unexpected argument: %v", args)
-			}
 			return stycli.Bootstrap(stycli.BootstrapOptions{
 				PigstyHome:  config.PigstyHome,
 				Region:      bootRegion,
@@ -186,6 +185,7 @@ var pigstyConfCmd = &cobra.Command{
 	Short:       "Configure Pigsty",
 	Annotations: ancsAnn("pig sty conf", "action", "volatile", "safe", true, "medium", "recommended", "root", 10000),
 	Aliases:     []string{"c", "configure"},
+	Args:        cobra.NoArgs,
 	Long:        styConfigureLong,
 	Example:     styConfigureExample,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -280,10 +280,11 @@ func addStyConfigureFlags(cmd *cobra.Command) {
 }
 
 var pigstyListcmd = &cobra.Command{
-	Use:         "list",
+	Use:         "list [version]",
 	Short:       "list pigsty available versions",
 	Annotations: ancsAnn("pig sty list", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
 	Aliases:     []string{"l", "ls"},
+	Args:        cobra.MaximumNArgs(1),
 	Long: `List available pigsty versions
 
 	pig sty list [-v version]
@@ -309,10 +310,11 @@ var pigstyListcmd = &cobra.Command{
 }
 
 var pigstyGetcmd = &cobra.Command{
-	Use:         "get",
+	Use:         "get [version]",
 	Short:       "download pigsty available versions",
 	Annotations: ancsAnn("pig sty get", "action", "volatile", "safe", true, "low", "none", "current", 30000),
 	Aliases:     []string{"g", "download"},
+	Args:        cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleSty, "pig sty get", args, map[string]interface{}{
 			"version": pigstyVersion,
@@ -339,6 +341,7 @@ var pigstyDeployCmd = &cobra.Command{
 	Short:       "run pigsty deploy.yml playbook",
 	Annotations: ancsAnn("pig sty deploy", "action", "volatile", "unsafe", false, "high", "required", "root", 600000),
 	Aliases:     []string{"d", "de", "install", "ins"},
+	Args:        cobra.NoArgs,
 	Long: `Deploy Pigsty using the deploy.yml playbook
 
 This command runs the deploy.yml playbook from your Pigsty installation.

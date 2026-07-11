@@ -80,6 +80,7 @@ func newGetCommand(opts *exporterOptions) *cobra.Command {
 		Use:         "get",
 		Short:       "Get all PostgreSQL metrics",
 		Annotations: ancsAnn("pig pg_exporter get", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
+		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLegacyStructured(output.MODULE_PE, "pig pg_exporter get", args, opts.params(), func() error {
 				url := opts.url("/metrics")
@@ -105,6 +106,7 @@ func newListCommand(opts *exporterOptions) *cobra.Command {
 		Use:         "list",
 		Short:       "List metric types",
 		Annotations: ancsAnn("pig pg_exporter list", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
+		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLegacyStructured(output.MODULE_PE, "pig pg_exporter list", args, opts.params(), func() error {
 				body, err := getExporterBody(opts.url("/metrics"))
@@ -135,6 +137,7 @@ func newReloadCommand(opts *exporterOptions) *cobra.Command {
 		Use:         "reload",
 		Short:       "Reload pg_exporter configuration",
 		Annotations: ancsAnn("pig pg_exporter reload", "action", "volatile", "restricted", true, "low", "none", "current", 1000),
+		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLegacyStructured(output.MODULE_PE, "pig pg_exporter reload", args, opts.params(), func() error {
 				url := opts.url("/reload")
@@ -155,6 +158,7 @@ func newStatCommand(opts *exporterOptions) *cobra.Command {
 		Use:         "stat",
 		Short:       "Show pg_exporter statistics",
 		Annotations: ancsAnn("pig pg_exporter stat", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
+		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLegacyStructured(output.MODULE_PE, "pig pg_exporter stat", args, opts.params(), func() error {
 				body, err := getExporterBody(opts.url("/stat"))

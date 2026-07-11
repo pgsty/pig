@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"pig/cli/ext"
 	"pig/cli/install"
-	"pig/internal/output"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -23,10 +22,11 @@ var (
 
 // installCmd represents the install command
 var installCmd = &cobra.Command{
-	Use:         "install",
+	Use:         "install <package...>",
 	Short:       "Install packages using native package manager",
 	Annotations: ancsAnn("pig install", "action", "stable", "restricted", true, "low", "none", "root", 30000),
 	Aliases:     []string{"i", "ins"},
+	Args:        cobra.MinimumNArgs(1),
 	Long: `pig install - Install packages using native package manager with alias translation
 
 This command acts like a smart wrapper around yum/dnf/apt-get, providing automatic
@@ -53,10 +53,6 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Plan mode: show plan without executing install.
 		if installPlan {
-			if len(args) == 0 {
-				return handleAuxResult(output.Fail(output.CodeExtensionInvalidArgs, "no package names provided"))
-			}
-
 			var pgVer int
 			if !installNoTranslation {
 				probed, err := installProbeVersion()

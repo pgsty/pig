@@ -1,19 +1,19 @@
 package cmd
 
 import (
-	"fmt"
 	"pig/cli/repo"
-	"pig/internal/config"
-	"pig/internal/output"
 
 	"github.com/spf13/cobra"
 )
 
 var (
-	repoRegion string
-	repoUpdate bool
-	repoRemove bool
-	repoMirror bool
+	repoAddRegion string
+	repoAddMirror bool
+	repoAddUpdate bool
+	repoAddRemove bool
+	repoSetRegion string
+	repoSetMirror bool
+	repoRmUpdate  bool
 
 	repoCacheDir string
 	repoCachePkg string
@@ -56,11 +56,13 @@ var repoCmd = &cobra.Command{
 }
 
 var repoListCmd = &cobra.Command{
-	Use:          "list",
+	Use:          "list [all]",
 	Short:        "print available repo list",
 	Aliases:      []string{"l", "ls"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo list", "query", "stable", "safe", true, "safe", "none", "current", 100),
+	ValidArgs:    []string{"all"},
+	Args:         cobra.MatchAll(cobra.MaximumNArgs(1), cobra.OnlyValidArgs),
 	Example: `
   pig repo list                # list available repos on current system
   pig repo list all            # list all unfiltered repo raw data
@@ -73,11 +75,12 @@ var repoListCmd = &cobra.Command{
 }
 
 var repoInfoCmd = &cobra.Command{
-	Use:          "info",
+	Use:          "info [repo|module...]",
 	Short:        "get repo detailed information",
 	Aliases:      []string{"i"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo info", "query", "stable", "safe", true, "safe", "none", "current", 50),
+	Args:         cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := repo.GetRepoInfo(args)
 		return handleAuxResult(result)
@@ -85,11 +88,12 @@ var repoInfoCmd = &cobra.Command{
 }
 
 var repoAddCmd = &cobra.Command{
-	Use:          "add",
+	Use:          "add [module...]",
 	Short:        "add new repository",
 	Aliases:      []string{"a", "append"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo add", "action", "stable", "safe", true, "low", "none", "root", 2000),
+	Args:         cobra.ArbitraryArgs,
 	Example: `
   pig repo add                      # = pig repo add all
   pig repo add all                  # add node,pgsql,infra repo (recommended)
@@ -111,31 +115,23 @@ var repoAddCmd = &cobra.Command{
   # check available repo & modules with pig repo list
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
-			result := output.Fail(output.CodeRepoUnsupportedOS,
-				fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-			return handleAuxResult(result)
-		}
-		if len(args) == 0 {
-			args = []string{"all"}
-		}
-		modules := repo.ExpandModuleArgs(args)
-		result := repo.AddReposWithOptions(modules, repo.AddOptions{
-			Region: repoRegion,
-			Remove: repoRemove,
-			Update: repoUpdate,
-			Mirror: repoMirror,
+		result := repo.ConfigureRepos(args, repo.AddOptions{
+			Region: repoAddRegion,
+			Remove: repoAddRemove,
+			Update: repoAddUpdate,
+			Mirror: repoAddMirror,
 		})
 		return handleAuxResult(result)
 	},
 }
 
 var repoSetCmd = &cobra.Command{
-	Use:          "set",
+	Use:          "set [module...]",
 	Short:        "wipe, overwrite, and update repository",
 	Aliases:      []string{"overwrite"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo set", "action", "stable", "restricted", true, "medium", "recommended", "root", 5000),
+	Args:         cobra.ArbitraryArgs,
 	Example: `
   pig repo set                      # set repo to node,pgsql,infra (= pig repo add all -ru)
   pig repo set node,pgsql           # use pgdg + pigsty repo
@@ -146,44 +142,31 @@ var repoSetCmd = &cobra.Command{
   (Beware that system repo management require sudo/root privilege)
 	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
-			result := output.Fail(output.CodeRepoUnsupportedOS,
-				fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-			return handleAuxResult(result)
-		}
-		if len(args) == 0 {
-			args = []string{"all"}
-		}
-		modules := repo.ExpandModuleArgs(args)
-		result := repo.AddReposWithOptions(modules, repo.AddOptions{
-			Region: repoRegion,
+		result := repo.ConfigureRepos(args, repo.AddOptions{
+			Region: repoSetRegion,
 			Remove: true,
 			Update: true,
-			Mirror: repoMirror,
+			Mirror: repoSetMirror,
 		})
 		return handleAuxResult(result)
 	},
 }
 
 var repoRmCmd = &cobra.Command{
-	Use:          "rm",
+	Use:          "rm [module...]",
 	Short:        "remove repository",
 	Aliases:      []string{"remove"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo rm", "action", "stable", "restricted", true, "medium", "recommended", "root", 2000),
+	Args:         cobra.ArbitraryArgs,
 	Example: `
   pig repo rm                      # remove (backup) all existing repo to backup dir
   pig repo rm all --update         # remove module 'all' and update repo cache
   pig repo rm node pigsty -u       # remove module 'node' & 'pigsty' and update repo cache
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
-			result := output.Fail(output.CodeRepoUnsupportedOS,
-				fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-			return handleAuxResult(result)
-		}
 		modules := repo.ExpandModuleArgs(args)
-		result := repo.RmRepos(modules, repoUpdate)
+		result := repo.RmRepos(modules, repoRmUpdate)
 		return handleAuxResult(result)
 	},
 }
@@ -194,15 +177,11 @@ var repoUpdateCmd = &cobra.Command{
 	Aliases:      []string{"u"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo update", "action", "volatile", "safe", true, "safe", "none", "root", 10000),
+	Args:         cobra.NoArgs,
 	Example: `
   pig repo update                  # yum makecache or apt update
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
-			result := output.Fail(output.CodeRepoUnsupportedOS,
-				fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
-			return handleAuxResult(result)
-		}
 		result := repo.UpdateCache()
 		return handleAuxResult(result)
 	},
@@ -214,6 +193,7 @@ var repoStatusCmd = &cobra.Command{
 	Aliases:      []string{"s", "st"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo status", "query", "volatile", "safe", true, "safe", "none", "current", 500),
+	Args:         cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := repo.GetRepoStatus()
 		return handleAuxResult(result)
@@ -226,6 +206,7 @@ var repoBootCmd = &cobra.Command{
 	Aliases:      []string{"b", "bt"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo boot", "action", "stable", "restricted", true, "medium", "recommended", "root", 10000),
+	Args:         cobra.NoArgs,
 	Example: `
   pig repo boot                    # boot repo from /tmp/pkg.tgz to /www
   pig repo boot -p /tmp/pkg.tgz    # boot repo from given package path
@@ -238,11 +219,12 @@ var repoBootCmd = &cobra.Command{
 }
 
 var repoCacheCmd = &cobra.Command{
-	Use:          "cache",
+	Use:          "cache [repo...]",
 	Short:        "create offline package from local repo",
 	Aliases:      []string{"c"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo cache", "action", "stable", "restricted", true, "low", "none", "root", 30000),
+	Args:         cobra.ArbitraryArgs,
 	Example: `
   pig repo cache                    # create /tmp/pkg.tgz offline package from /www/pigsty
   pig repo cache -f                 # force overwrite existing package
@@ -263,11 +245,12 @@ var repoCacheCmd = &cobra.Command{
 }
 
 var repoCreateCmd = &cobra.Command{
-	Use:          "create",
+	Use:          "create [path...]",
 	Short:        "create local YUM/APT repository",
 	Aliases:      []string{"cr"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo create", "action", "stable", "restricted", true, "low", "none", "root", 5000),
+	Args:         cobra.ArbitraryArgs,
 	Example: `
   pig repo create                    # create repo on /www/pigsty
   pig repo create /www/pigsty /www/b # create repo on multiple locations
@@ -290,6 +273,7 @@ var repoReloadCmd = &cobra.Command{
 	SilenceUsage: true,
 	Aliases:      []string{"r", "re"},
 	Annotations:  ancsAnn("pig repo reload", "action", "volatile", "safe", true, "safe", "none", "current", 3000),
+	Args:         cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := repo.ReloadRepoCatalogWithResult()
 		return handleAuxResult(result)
@@ -297,13 +281,13 @@ var repoReloadCmd = &cobra.Command{
 }
 
 func init() {
-	repoAddCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
-	repoAddCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
-	repoAddCmd.Flags().BoolVarP(&repoRemove, "remove", "r", false, "remove existing repo")
-	repoAddCmd.Flags().BoolVarP(&repoMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
-	repoSetCmd.Flags().StringVar(&repoRegion, "region", "", "region code")
-	repoSetCmd.Flags().BoolVarP(&repoMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
-	repoRmCmd.Flags().BoolVarP(&repoUpdate, "update", "u", false, "run apt update or dnf makecache")
+	repoAddCmd.Flags().StringVar(&repoAddRegion, "region", "", "region code")
+	repoAddCmd.Flags().BoolVarP(&repoAddUpdate, "update", "u", false, "run apt update or dnf makecache")
+	repoAddCmd.Flags().BoolVarP(&repoAddRemove, "remove", "r", false, "remove existing repo")
+	repoAddCmd.Flags().BoolVarP(&repoAddMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
+	repoSetCmd.Flags().StringVar(&repoSetRegion, "region", "", "region code")
+	repoSetCmd.Flags().BoolVarP(&repoSetMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
+	repoRmCmd.Flags().BoolVarP(&repoRmUpdate, "update", "u", false, "run apt update or dnf makecache")
 
 	// boot command flags
 	repoBootCmd.Flags().StringVarP(&repoBootDir, "dir", "d", "/www/", "target repo path")

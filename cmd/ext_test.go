@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"errors"
 	"testing"
 
 	"pig/internal/output"
-	"pig/internal/utils"
 )
 
 func TestExtCommandsRejectUnexpectedArgs(t *testing.T) {
@@ -42,57 +40,20 @@ func TestExtCommandsRejectUnexpectedArgs(t *testing.T) {
 	}
 }
 
-func TestExtAddPlanRequiresTargets(t *testing.T) {
-	oldPlan := extAddPlan
-	oldYes := extYes
-	oldOutput := outputFormat
-	defer func() {
-		extAddPlan = oldPlan
-		extYes = oldYes
-		outputFormat = oldOutput
-	}()
-
-	extAddPlan = true
-	extYes = false
-	outputFormat = "text"
-
-	err := extAddCmd.RunE(extAddCmd, []string{})
-	if err == nil {
-		t.Fatal("expected error for ext add --plan without targets")
+func TestExtAddAndRmRequireTargets(t *testing.T) {
+	tests := []struct {
+		name string
+		args func() error
+	}{
+		{name: "add", args: func() error { return extAddCmd.Args(extAddCmd, nil) }},
+		{name: "rm", args: func() error { return extRmCmd.Args(extRmCmd, nil) }},
 	}
-	var exitErr *utils.ExitCodeError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitCodeError, got %T: %v", err, err)
-	}
-	if exitErr.Code != output.ExitCode(output.CodeExtensionInvalidArgs) {
-		t.Fatalf("unexpected exit code: got %d want %d", exitErr.Code, output.ExitCode(output.CodeExtensionInvalidArgs))
-	}
-}
-
-func TestExtRmPlanRequiresTargets(t *testing.T) {
-	oldPlan := extRmPlan
-	oldYes := extYes
-	oldOutput := outputFormat
-	defer func() {
-		extRmPlan = oldPlan
-		extYes = oldYes
-		outputFormat = oldOutput
-	}()
-
-	extRmPlan = true
-	extYes = false
-	outputFormat = "text"
-
-	err := extRmCmd.RunE(extRmCmd, []string{})
-	if err == nil {
-		t.Fatal("expected error for ext rm --plan without targets")
-	}
-	var exitErr *utils.ExitCodeError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitCodeError, got %T: %v", err, err)
-	}
-	if exitErr.Code != output.ExitCode(output.CodeExtensionInvalidArgs) {
-		t.Fatalf("unexpected exit code: got %d want %d", exitErr.Code, output.ExitCode(output.CodeExtensionInvalidArgs))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.args(); err == nil {
+				t.Fatalf("ext %s should require at least one target", tt.name)
+			}
+		})
 	}
 }
 

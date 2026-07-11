@@ -28,3 +28,33 @@ func TestDoCommandUseStringsDescribeArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestDoRemoveUninstallFlagsAreIndependent(t *testing.T) {
+	origPgsql, origRedis := doPgsqlRmUninstall, doRedisRmUninstall
+	defer func() {
+		doPgsqlRmUninstall = origPgsql
+		doRedisRmUninstall = origRedis
+	}()
+	doPgsqlRmUninstall = false
+	doRedisRmUninstall = false
+
+	pgsqlFlag := doPgsqlRmCmd.Flags().Lookup("uninstall")
+	redisFlag := doRedisRmCmd.Flags().Lookup("uninstall")
+	if pgsqlFlag == nil || redisFlag == nil {
+		t.Fatal("both removal commands must declare --uninstall")
+	}
+	if err := pgsqlFlag.Value.Set("true"); err != nil {
+		t.Fatal(err)
+	}
+	if !doPgsqlRmUninstall || doRedisRmUninstall {
+		t.Fatalf("pgsql flag leaked: pgsql=%v redis=%v", doPgsqlRmUninstall, doRedisRmUninstall)
+	}
+
+	doPgsqlRmUninstall = false
+	if err := redisFlag.Value.Set("true"); err != nil {
+		t.Fatal(err)
+	}
+	if doPgsqlRmUninstall || !doRedisRmUninstall {
+		t.Fatalf("redis flag leaked: pgsql=%v redis=%v", doPgsqlRmUninstall, doRedisRmUninstall)
+	}
+}

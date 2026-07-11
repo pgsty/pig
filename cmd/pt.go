@@ -123,14 +123,7 @@ func registerPatroniFlags() {
 }
 
 func registerPatroniSvcCommands() {
-	// Build service subcommand group
-	patroniSvcCmd.AddCommand(
-		patroniSvcStartCmd,
-		patroniSvcStopCmd,
-		patroniSvcRestartCmd,
-		patroniSvcReloadCmd,
-		patroniSvcStatusCmd,
-	)
+	patroniSvcCmd.AddCommand(patroniSvcStartCmd, patroniSvcStopCmd, patroniSvcRestartCmd, patroniSvcReloadCmd, patroniSvcStatusCmd)
 }
 
 func registerPatroniCommands() {
@@ -644,9 +637,9 @@ var patroniResumeCmd = &cobra.Command{
 	},
 }
 
-// patroniConfigCmd: pig pt config <action> [key=value ...]
+// patroniConfigCmd: pig pt config [action] [key=value ...]
 var patroniConfigCmd = &cobra.Command{
-	Use:     "config <action> [key=value ...]",
+	Use:     "config [action] [key=value ...]",
 	Aliases: []string{"c"},
 	Short:   "Show or edit cluster config",
 	Long: `Manage Patroni cluster configuration.
@@ -678,6 +671,7 @@ restart-required. After changing those parameters, inspect the cluster with
 			"args.action.type": "enum",
 		},
 	),
+	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbsu := utils.GetDBSU(patroniDBSU)
 
@@ -822,36 +816,24 @@ var patroniLogCmd = &cobra.Command{
 	  pig pt log -n 100      # Show last 100 lines`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateLogLines(patroniLogLines); err != nil {
-			return err
+		if patroniLogFollow {
+			return runLogStream(output.MODULE_PT, "pig patroni log", "pig pt log show", patroniLogLines, args,
+				map[string]interface{}{"follow": patroniLogFollow, "lines": patroniLogLines}, func() error {
+					return patroni.LogTail(patroni.LogDir(patroniLogDir, patroniDBSU), patroniDBSU, patroniLogLines)
+				})
 		}
-		if config.IsStructuredOutput() && patroniLogFollow {
-			return structuredParamError(
-				output.MODULE_PT,
-				"pig patroni log",
-				"log follow mode is not supported in structured output",
-				"use 'pig pt log show -n N -o json' without --follow for structured snapshot",
-				args,
-				map[string]interface{}{"follow": patroniLogFollow, "lines": patroniLogLines},
-			)
-		}
-		if err := rejectUnsupportedLogOutputFormat("pig pt log"); err != nil {
-			return err
-		}
-		if isJSONLogOutput() {
-			return patroni.LogShowJSONL(patroniLogDir, patroniDBSU, patroniLogLines)
-		}
-		logDir := patroni.LogDir(patroniLogDir, patroniDBSU)
-		return runLegacyStructured(legacyModulePt, "pig patroni log", args, map[string]interface{}{
-			"log_dir": logDir,
-			"follow":  patroniLogFollow,
-			"lines":   patroniLogLines,
-		}, func() error {
-			if patroniLogFollow {
-				return patroni.LogTail(logDir, patroniDBSU, patroniLogLines)
-			}
-			return patroni.LogCat(logDir, patroniDBSU, patroniLogLines)
-		})
+		return runLogSnapshot("pig pt log", patroniLogLines,
+			func() error { return patroni.LogShowJSONL(patroniLogDir, patroniDBSU, patroniLogLines) },
+			func() error {
+				logDir := patroni.LogDir(patroniLogDir, patroniDBSU)
+				return runLegacyStructured(legacyModulePt, "pig patroni log", args, map[string]interface{}{
+					"log_dir": logDir,
+					"follow":  patroniLogFollow,
+					"lines":   patroniLogLines,
+				}, func() error {
+					return patroni.LogCat(logDir, patroniDBSU, patroniLogLines)
+				})
+			})
 	},
 }
 
@@ -862,22 +844,17 @@ var patroniLogCatCmd = &cobra.Command{
 	Annotations: ancsAnn("pig patroni log show", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateLogLines(patroniLogLines); err != nil {
-			return err
-		}
-		if err := rejectUnsupportedLogOutputFormat("pig pt log show"); err != nil {
-			return err
-		}
-		if isJSONLogOutput() {
-			return patroni.LogShowJSONL(patroniLogDir, patroniDBSU, patroniLogLines)
-		}
-		logDir := patroni.LogDir(patroniLogDir, patroniDBSU)
-		return runLegacyStructured(legacyModulePt, "pig patroni log show", args, map[string]interface{}{
-			"log_dir": logDir,
-			"lines":   patroniLogLines,
-		}, func() error {
-			return patroni.LogCat(logDir, patroniDBSU, patroniLogLines)
-		})
+		return runLogSnapshot("pig pt log show", patroniLogLines,
+			func() error { return patroni.LogShowJSONL(patroniLogDir, patroniDBSU, patroniLogLines) },
+			func() error {
+				logDir := patroni.LogDir(patroniLogDir, patroniDBSU)
+				return runLegacyStructured(legacyModulePt, "pig patroni log show", args, map[string]interface{}{
+					"log_dir": logDir,
+					"lines":   patroniLogLines,
+				}, func() error {
+					return patroni.LogCat(logDir, patroniDBSU, patroniLogLines)
+				})
+			})
 	},
 }
 
@@ -888,20 +865,10 @@ var patroniLogTailCmd = &cobra.Command{
 	Annotations: ancsAnn("pig patroni log tail", "query", "volatile", "safe", true, "safe", "none", "dbsu", 0),
 	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateLogLines(patroniLogLines); err != nil {
-			return err
-		}
-		if config.IsStructuredOutput() {
-			return structuredParamError(
-				output.MODULE_PT,
-				"pig patroni log tail",
-				"log follow mode is not supported in structured output",
-				"use 'pig pt log show -n N -o json' for structured snapshot",
-				args,
-				map[string]interface{}{"lines": patroniLogLines},
-			)
-		}
-		return patroni.LogTail(patroniLogDir, patroniDBSU, patroniLogLines)
+		return runLogStream(output.MODULE_PT, "pig patroni log tail", "pig pt log show", patroniLogLines, args,
+			map[string]interface{}{"lines": patroniLogLines}, func() error {
+				return patroni.LogTail(patroniLogDir, patroniDBSU, patroniLogLines)
+			})
 	},
 }
 
@@ -970,6 +937,7 @@ var patroniStatusCmd = &cobra.Command{
   pig pt status          # Show comprehensive status
   pig pt status -o json  # Structured JSON output`,
 	Annotations: ancsAnn("pig patroni status", "query", "stable", "safe", true, "safe", "none", "dbsu", 3000),
+	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbsu := utils.GetDBSU(patroniDBSU)
 
@@ -998,7 +966,7 @@ var patroniStartCmd = &cobra.Command{
 	Long:         `Hidden shortcut for 'pig pt svc start'. Starts the Patroni daemon service through systemctl.`,
 	Example: `
   pig pt start       # Shortcut for pig pt svc start`,
-	Args: cobra.ArbitraryArgs,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("start", args)
 	},
@@ -1014,7 +982,7 @@ var patroniStopCmd = &cobra.Command{
 	Long:         `Hidden shortcut for 'pig pt svc stop'. Stops the Patroni daemon service through systemctl.`,
 	Example: `
   pig pt stop        # Shortcut for pig pt svc stop`,
-	Args: cobra.ArbitraryArgs,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runPatroniSvcAction("stop", args)
 	},
@@ -1037,55 +1005,13 @@ instances it manages. For PostgreSQL operations, use:
   - pig pt reload    (reload PostgreSQL config)`,
 }
 
-var patroniSvcStartCmd = &cobra.Command{
-	Use:         "start",
-	Aliases:     []string{"up"},
-	Short:       "Start patroni service",
-	Annotations: ancsAnn("pig patroni service start", "action", "volatile", "unsafe", true, "medium", "none", "root", 10000),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPatroniSvcAction("start", args)
-	},
-}
-
-var patroniSvcStopCmd = &cobra.Command{
-	Use:         "stop",
-	Aliases:     []string{"dn"},
-	Short:       "Stop patroni service",
-	Annotations: ancsAnn("pig patroni service stop", "action", "volatile", "unsafe", true, "high", "recommended", "root", 10000),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPatroniSvcAction("stop", args)
-	},
-}
-
-var patroniSvcRestartCmd = &cobra.Command{
-	Use:         "restart",
-	Aliases:     []string{"rs"},
-	Short:       "Restart patroni service",
-	Annotations: ancsAnn("pig patroni service restart", "action", "volatile", "unsafe", false, "high", "recommended", "root", 30000),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPatroniSvcAction("restart", args)
-	},
-}
-
-var patroniSvcReloadCmd = &cobra.Command{
-	Use:         "reload",
-	Aliases:     []string{"rl"},
-	Short:       "Reload patroni service",
-	Annotations: ancsAnn("pig patroni service reload", "action", "volatile", "restricted", true, "low", "none", "root", 1000),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPatroniSvcAction("reload", args)
-	},
-}
-
-var patroniSvcStatusCmd = &cobra.Command{
-	Use:         "status",
-	Aliases:     []string{"st"},
-	Short:       "Show patroni service status",
-	Annotations: ancsAnn("pig patroni service status", "query", "volatile", "safe", true, "safe", "none", "root", 500),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPatroniSvcAction("status", args)
-	},
-}
+var (
+	patroniSvcStartCmd   = newServiceActionCommand(legacyModulePt, "pig patroni service", "patroni service", "start", []string{"up"}, "", patroni.Systemctl)
+	patroniSvcStopCmd    = newServiceActionCommand(legacyModulePt, "pig patroni service", "patroni service", "stop", []string{"dn"}, "", patroni.Systemctl)
+	patroniSvcRestartCmd = newServiceActionCommand(legacyModulePt, "pig patroni service", "patroni service", "restart", []string{"rs"}, "", patroni.Systemctl)
+	patroniSvcReloadCmd  = newServiceActionCommand(legacyModulePt, "pig patroni service", "patroni service", "reload", []string{"rl"}, "", patroni.Systemctl)
+	patroniSvcStatusCmd  = newServiceActionCommand(legacyModulePt, "pig patroni service", "patroni service", "status", []string{"st"}, "", patroni.Systemctl)
+)
 
 func runPatroniSvcAction(action string, args []string) error {
 	return runLegacyStructured(legacyModulePt, "pig patroni service "+action, args, nil, func() error {

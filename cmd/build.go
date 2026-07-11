@@ -3,6 +3,7 @@ package cmd
 import (
 	"pig/cli/build"
 	"pig/cli/ext"
+	"pig/cli/repo"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -22,8 +23,11 @@ var (
 	buildSpecForce  bool
 	buildRustYes    bool
 	buildRustMirror bool
-	buildMirror     bool
+	buildSpecMirror bool
+	buildGetMirror  bool
+	buildPkgMirror  bool
 	buildRepoBeta   bool
+	buildRepoMirror bool
 	buildToolBeta   bool
 )
 
@@ -66,14 +70,19 @@ Quick Start:
 
 // buildRepoCmd represents the `build repo` command
 var buildRepoCmd = &cobra.Command{
-	Use:         "repo",
+	Use:         "repo [module...]",
 	Short:       "Initialize required repos",
 	Annotations: ancsAnn("pig build repo", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
 	Aliases:     []string{"r"},
+	Args:        cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		repoRemove = true
-		repoUpdate = true
-		return repoSetCmd.RunE(cmd, buildRepoModules(args, buildRepoBeta))
+		result := repo.ConfigureRepos(buildRepoModules(args, buildRepoBeta), repo.AddOptions{
+			Region: "",
+			Remove: true,
+			Update: true,
+			Mirror: buildRepoMirror,
+		})
+		return handleAuxResult(result)
 	},
 }
 
@@ -83,6 +92,7 @@ var buildToolCmd = &cobra.Command{
 	Short:       "Initialize build tools",
 	Annotations: ancsAnn("pig build tool", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
 	Aliases:     []string{"t"},
+	Args:        cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleBuild, "pig build tool", args, nil, func() error {
 			var mode string
@@ -150,6 +160,7 @@ var buildRustCmd = &cobra.Command{
 	Short:       "Install Rust toolchain",
 	Annotations: ancsAnn("pig build rust", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
 	Aliases:     []string{"rs"},
+	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleBuild, "pig build rust", args, map[string]interface{}{
 			"yes":    buildRustYes,
@@ -166,6 +177,7 @@ var buildPgrxCmd = &cobra.Command{
 	Short:       "Install and initialize pgrx (requires Rust)",
 	Annotations: ancsAnn("pig build pgrx", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
 	Aliases:     []string{"rx"},
+	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleBuild, "pig build pgrx", args, map[string]interface{}{
 			"pgrx": buildPgrxVer,
@@ -188,9 +200,9 @@ var buildSpecCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleBuild, "pig build spec", args, map[string]interface{}{
 			"force":  buildSpecForce,
-			"mirror": buildMirror,
+			"mirror": buildSpecMirror,
 		}, func() error {
-			return build.SpecDirSetup(buildSpecForce, buildMirror)
+			return build.SpecDirSetup(buildSpecForce, buildSpecMirror)
 		})
 	},
 }
@@ -205,9 +217,9 @@ var buildGetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleBuild, "pig build get", args, map[string]interface{}{
 			"force":  buildGetForce,
-			"mirror": buildMirror,
+			"mirror": buildGetMirror,
 		}, func() error {
-			return build.DownloadSources(args, buildGetForce, buildMirror)
+			return build.DownloadSources(args, buildGetForce, buildGetMirror)
 		})
 	},
 }
@@ -257,16 +269,16 @@ var buildPkgCmd = &cobra.Command{
 		return runLegacyStructured(legacyModuleBuild, "pig build pkg", args, map[string]interface{}{
 			"pg":     buildAllPg,
 			"symbol": buildAllSymbol,
-			"mirror": buildMirror,
+			"mirror": buildPkgMirror,
 		}, func() error {
-			return build.BuildPackages(args, buildAllPg, buildAllSymbol, buildMirror)
+			return build.BuildPackages(args, buildAllPg, buildAllSymbol, buildPkgMirror)
 		})
 	},
 }
 
 func init() {
 	// Parse build flags
-	buildRepoCmd.Flags().BoolVarP(&repoMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
+	buildRepoCmd.Flags().BoolVarP(&buildRepoMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
 	buildRepoCmd.Flags().BoolVarP(&buildRepoBeta, "beta", "b", false, "include PostgreSQL beta repository")
 	buildToolCmd.Flags().BoolVarP(&buildToolBeta, "beta", "b", false, "include PostgreSQL beta build packages")
 	buildPgrxCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", build.DefaultPgrxVersion, "pgrx version to install")
@@ -279,11 +291,11 @@ func init() {
 
 	// Add spec specific flags
 	buildSpecCmd.Flags().BoolVarP(&buildSpecForce, "force", "f", false, "force re-download tarball even if exists")
-	buildSpecCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
+	buildSpecCmd.Flags().BoolVarP(&buildSpecMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
 	// Add get specific flags
 	buildGetCmd.Flags().BoolVarP(&buildGetForce, "force", "f", false, "force download even if file exists")
-	buildGetCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
+	buildGetCmd.Flags().BoolVarP(&buildGetMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
 	// Add dep specific flags
 	buildDepCmd.Flags().StringVar(&buildDepPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
@@ -295,7 +307,7 @@ func init() {
 	// Add pkg specific flags (formerly all)
 	buildPkgCmd.Flags().StringVar(&buildAllPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
 	buildPkgCmd.Flags().BoolVarP(&buildAllSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
-	buildPkgCmd.Flags().BoolVarP(&buildMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
+	buildPkgCmd.Flags().BoolVarP(&buildPkgMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
 	// Add subcommands
 	buildCmd.AddCommand(

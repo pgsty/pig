@@ -37,6 +37,7 @@ var contextCmd = &cobra.Command{
 	Aliases:     []string{"ctx"},
 	GroupID:     "pigsty",
 	Annotations: ancsAnn("pig context", "query", "volatile", "safe", true, "safe", "none", "current", 500),
+	Args:        cobra.NoArgs,
 	Long: `Collect and display a comprehensive environment context snapshot.
 
 This command gathers information about the current environment including:

@@ -170,6 +170,7 @@ var pgInitCmd = &cobra.Command{
 	Short:       "Initialize PostgreSQL data directory",
 	Aliases:     []string{"initdb", "i"},
 	Annotations: ancsAnn("pig postgres init", "action", "volatile", "unsafe", false, "high", "recommended", "dbsu", 30000),
+	Args:        pgInitExtraArgs,
 	Example: `  pig pg init                      # use default settings
   pig pg init -v 18                # use PostgreSQL 18
   pig pg init -D /data/pg18        # specify datadir with default checksums
@@ -245,6 +246,16 @@ var pgInitCmd = &cobra.Command{
 	},
 }
 
+func pgInitExtraArgs(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	if cmd == nil || cmd.ArgsLenAtDash() != 0 {
+		return fmt.Errorf("invalid argument: initdb options must follow --")
+	}
+	return nil
+}
+
 // ============================================================================
 // Subcommand: pig pg start
 // ============================================================================
@@ -254,6 +265,7 @@ var pgStartCmd = &cobra.Command{
 	Short:       "Start PostgreSQL server",
 	Aliases:     []string{"boot", "up"},
 	Annotations: ancsAnn("pig postgres start", "action", "volatile", "unsafe", true, "medium", "none", "dbsu", 10000),
+	Args:        cobra.NoArgs,
 	Example: `  pig pg start                     # start with defaults (no-op if already running)
   pig pg start -D /data/pg18       # specify data directory
   pig pg start -l /pg/log/pg.log   # redirect output to log file
@@ -286,6 +298,7 @@ var pgStopCmd = &cobra.Command{
 	Use:     "stop",
 	Short:   "Stop PostgreSQL server",
 	Aliases: []string{"halt", "down"},
+	Args:    cobra.NoArgs,
 	Annotations: mergeAnn(
 		ancsAnn("pig postgres stop", "action", "volatile", "unsafe", true, "high", "recommended", "dbsu", 10000),
 		map[string]string{
@@ -329,6 +342,7 @@ var pgRestartCmd = &cobra.Command{
 	Use:     "restart",
 	Short:   "Restart PostgreSQL server",
 	Aliases: []string{"reboot"},
+	Args:    cobra.NoArgs,
 	Annotations: mergeAnn(
 		ancsAnn("pig postgres restart", "action", "volatile", "unsafe", false, "high", "recommended", "dbsu", 30000),
 		map[string]string{
@@ -374,6 +388,7 @@ var pgReloadCmd = &cobra.Command{
 	Short:       "Reload PostgreSQL configuration",
 	Aliases:     []string{"hup"},
 	Annotations: ancsAnn("pig postgres reload", "action", "volatile", "restricted", true, "low", "none", "dbsu", 1000),
+	Args:        cobra.NoArgs,
 	Example: `  pig pg reload                    # reload config (SIGHUP)
   pig pg reload -D /data/pg18      # specify data directory
   pig pg reload -o json            # structured output (JSON)`,
@@ -398,6 +413,7 @@ var pgStatusCmd = &cobra.Command{
 	Short:       "Show PostgreSQL server status",
 	Aliases:     []string{"st", "stat"},
 	Annotations: ancsAnn("pig postgres status", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
+	Args:        cobra.NoArgs,
 	Example: `  pig pg status                    # check server status
   pig pg status -D /data/pg18      # specify data directory
   pig pg status -o json            # structured output (JSON)
@@ -423,6 +439,7 @@ var pgPromoteCmd = &cobra.Command{
 	Short:       "Promote standby to primary",
 	Aliases:     []string{"pro"},
 	Annotations: ancsAnn("pig postgres promote", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 10000),
+	Args:        cobra.NoArgs,
 	Example: `  pig pg promote                   # promote standby
   pig pg promote -D /data/pg18     # specify data directory
   pig pg promote -o json           # structured output (JSON)`,
@@ -482,6 +499,7 @@ var pgRoleCmd = &cobra.Command{
 	Short:       "Detect PostgreSQL instance role (primary or replica)",
 	Aliases:     []string{"r"},
 	Annotations: ancsAnn("pig postgres role", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
+	Args:        cobra.NoArgs,
 	Example: `  pig pg role                     # output: primary, replica, or unknown
   pig pg role -V                  # verbose output with detection details
   pig pg role -D /data/pg18       # specify data directory`,
@@ -661,13 +679,7 @@ func registerPgMaintenanceCommands() {
 }
 
 func registerPgServiceCommands() {
-	pgSvcCmd.AddCommand(
-		pgSvcStartCmd,
-		pgSvcStopCmd,
-		pgSvcRestartCmd,
-		pgSvcReloadCmd,
-		pgSvcStatusCmd,
-	)
+	pgSvcCmd.AddCommand(pgSvcStartCmd, pgSvcStopCmd, pgSvcRestartCmd, pgSvcReloadCmd, pgSvcStatusCmd)
 	pgCmd.AddCommand(pgSvcCmd)
 }
 
@@ -841,6 +853,7 @@ var pgPsqlCmd = &cobra.Command{
 	Short:       "Connect to PostgreSQL database via psql",
 	Aliases:     []string{"sql", "connect"},
 	Annotations: ancsAnn("pig postgres psql", "action", "volatile", "safe", false, "medium", "none", "dbsu", 0),
+	Args:        cobra.MaximumNArgs(1),
 	Example: `  pig pg psql                    # connect to postgres database
   pig pg psql mydb               # connect to specific database
   pig pg psql mydb -c "SELECT 1" # run single command
@@ -879,6 +892,7 @@ var pgPsCmd = &cobra.Command{
 	Short:       "Show PostgreSQL connections",
 	Aliases:     []string{"activity", "act"},
 	Annotations: ancsAnn("pig postgres ps", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
+	Args:        cobra.NoArgs,
 	Example: `  pig pg ps                      # show client connections
   pig pg ps -a                   # show all connections
   pig pg ps -u admin             # filter by user
@@ -904,6 +918,7 @@ var pgKillCmd = &cobra.Command{
 	Short:       "Kill PostgreSQL connections (dry-run by default)",
 	Aliases:     []string{"k"},
 	Annotations: ancsAnn("pig postgres kill", "action", "volatile", "unsafe", false, "high", "recommended", "dbsu", 1000),
+	Args:        cobra.NoArgs,
 	Example: `  pig pg kill                    # show what would be killed (dry-run)
   pig pg kill -x                 # actually kill connections
   pig pg kill --pid 12345 -x     # kill specific PID
@@ -1570,35 +1585,23 @@ var pgLogCmd = &cobra.Command{
 	  pig pg log grep <pattern>    # search logs`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateLogLines(pgLogNum); err != nil {
-			return err
-		}
 		if pgLogFollow {
-			if config.IsStructuredOutput() {
-				return structuredParamError(
-					output.MODULE_PG,
-					"pig postgres log",
-					"log follow mode is not supported in structured output",
-					"use 'pig pg log show -n N -o json' for structured snapshot",
-					args,
-					map[string]interface{}{"follow": pgLogFollow, "lines": pgLogNum},
-				)
-			}
-			return postgres.LogTail(postgres.GetLogDir(pgConfig), "", pgLogNum)
+			return runLogStream(output.MODULE_PG, "pig postgres log", "pig pg log show", pgLogNum, args,
+				map[string]interface{}{"follow": pgLogFollow, "lines": pgLogNum}, func() error {
+					return postgres.LogTail(postgres.GetLogDir(pgConfig), "", pgLogNum)
+				})
 		}
-		if err := rejectUnsupportedLogOutputFormat("pig pg log"); err != nil {
-			return err
-		}
-		if isJSONLogOutput() {
-			return postgres.LogShowJSONL(postgres.GetLogDir(pgConfig), "", pgLogNum)
-		}
-		return runLegacyStructured(legacyModulePg, "pig postgres log", args, map[string]interface{}{
-			"log_dir": postgres.GetLogDir(pgConfig),
-			"follow":  pgLogFollow,
-			"lines":   pgLogNum,
-		}, func() error {
-			return postgres.LogCat(postgres.GetLogDir(pgConfig), "", pgLogNum)
-		})
+		return runLogSnapshot("pig pg log", pgLogNum,
+			func() error { return postgres.LogShowJSONL(postgres.GetLogDir(pgConfig), "", pgLogNum) },
+			func() error {
+				return runLegacyStructured(legacyModulePg, "pig postgres log", args, map[string]interface{}{
+					"log_dir": postgres.GetLogDir(pgConfig),
+					"follow":  pgLogFollow,
+					"lines":   pgLogNum,
+				}, func() error {
+					return postgres.LogCat(postgres.GetLogDir(pgConfig), "", pgLogNum)
+				})
+			})
 	},
 }
 
@@ -1624,24 +1627,14 @@ var pgLogTailCmd = &cobra.Command{
 	Annotations: ancsAnn("pig postgres log tail", "query", "volatile", "safe", true, "safe", "none", "dbsu", 0),
 	Args:        cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateLogLines(pgLogNum); err != nil {
-			return err
-		}
 		file := ""
 		if len(args) > 0 {
 			file = args[0]
 		}
-		if config.IsStructuredOutput() {
-			return structuredParamError(
-				output.MODULE_PG,
-				"pig postgres log tail",
-				"log tail follow mode is not supported in structured output",
-				"use 'pig pg log show -n N -o json' for structured snapshot",
-				args,
-				map[string]interface{}{"file": file, "lines": pgLogNum},
-			)
-		}
-		return postgres.LogTail(postgres.GetLogDir(pgConfig), file, pgLogNum)
+		return runLogStream(output.MODULE_PG, "pig postgres log tail", "pig pg log show", pgLogNum, args,
+			map[string]interface{}{"file": file, "lines": pgLogNum}, func() error {
+				return postgres.LogTail(postgres.GetLogDir(pgConfig), file, pgLogNum)
+			})
 	},
 }
 
@@ -1652,26 +1645,21 @@ var pgLogCatCmd = &cobra.Command{
 	Annotations: ancsAnn("pig postgres log show", "query", "volatile", "safe", true, "safe", "none", "dbsu", 500),
 	Args:        cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateLogLines(pgLogNum); err != nil {
-			return err
-		}
-		if err := rejectUnsupportedLogOutputFormat("pig pg log show"); err != nil {
-			return err
-		}
 		file := ""
 		if len(args) > 0 {
 			file = args[0]
 		}
-		if isJSONLogOutput() {
-			return postgres.LogShowJSONL(postgres.GetLogDir(pgConfig), file, pgLogNum)
-		}
-		return runLegacyStructured(legacyModulePg, "pig postgres log show", args, map[string]interface{}{
-			"log_dir": postgres.GetLogDir(pgConfig),
-			"file":    file,
-			"lines":   pgLogNum,
-		}, func() error {
-			return postgres.LogCat(postgres.GetLogDir(pgConfig), file, pgLogNum)
-		})
+		return runLogSnapshot("pig pg log show", pgLogNum,
+			func() error { return postgres.LogShowJSONL(postgres.GetLogDir(pgConfig), file, pgLogNum) },
+			func() error {
+				return runLegacyStructured(legacyModulePg, "pig postgres log show", args, map[string]interface{}{
+					"log_dir": postgres.GetLogDir(pgConfig),
+					"file":    file,
+					"lines":   pgLogNum,
+				}, func() error {
+					return postgres.LogCat(postgres.GetLogDir(pgConfig), file, pgLogNum)
+				})
+			})
 	},
 }
 
@@ -1757,6 +1745,7 @@ var pgVacuumCmd = &cobra.Command{
 	Short:       "Vacuum database tables",
 	Aliases:     []string{"vac", "vc"},
 	Annotations: ancsAnn("pig postgres vacuum", "action", "volatile", "restricted", true, "low", "none", "dbsu", 60000),
+	Args:        cobra.MaximumNArgs(1),
 	Example: `  pig pg vacuum                  # vacuum current database
   pig pg vacuum mydb             # vacuum specific database
   pig pg vacuum -a               # vacuum all databases
@@ -1837,6 +1826,7 @@ var pgAnalyzeCmd = &cobra.Command{
 	Short:       "Analyze database tables",
 	Aliases:     []string{"ana", "az"},
 	Annotations: ancsAnn("pig postgres analyze", "action", "volatile", "restricted", true, "safe", "none", "dbsu", 60000),
+	Args:        cobra.MaximumNArgs(1),
 	Example: `  pig pg analyze                 # analyze current database
   pig pg analyze mydb            # analyze specific database
   pig pg analyze -a              # analyze all databases
@@ -1868,6 +1858,7 @@ var pgFreezeCmd = &cobra.Command{
 	Use:         "freeze [dbname]",
 	Short:       "Vacuum freeze database",
 	Annotations: ancsAnn("pig postgres freeze", "action", "volatile", "restricted", true, "low", "none", "dbsu", 60000),
+	Args:        cobra.MaximumNArgs(1),
 	Example: `  pig pg freeze                  # vacuum freeze current database
   pig pg freeze mydb             # vacuum freeze specific database
   pig pg freeze -a               # vacuum freeze all databases`,
@@ -1899,6 +1890,7 @@ var pgRepackCmd = &cobra.Command{
 	Short:       "Repack database tables (requires pg_repack)",
 	Aliases:     []string{"rp"},
 	Annotations: ancsAnn("pig postgres repack", "action", "volatile", "unsafe", true, "medium", "recommended", "dbsu", 300000),
+	Args:        cobra.MaximumNArgs(1),
 	Example: `  pig pg repack mydb             # repack all tables in database
   pig pg repack -a               # repack all databases
   pig pg repack mydb -t mytable  # repack specific table
@@ -2008,70 +2000,19 @@ Use these commands when PostgreSQL is managed as a systemd service.
 For direct pg_ctl operations, use the parent commands instead.`,
 }
 
-var pgSvcStartCmd = &cobra.Command{
-	Use:         "start",
-	Aliases:     []string{"boot", "up"},
-	Short:       "Start postgres systemd service",
-	Annotations: ancsAnn("pig postgres service start", "action", "volatile", "unsafe", true, "medium", "none", "root", 10000),
-	Example:     `  pig pg svc start                 # systemctl start postgres`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePg, "pig postgres service start", args, nil, func() error {
-			return postgres.RunSystemctl("start", postgres.DefaultSystemdService)
-		})
-	},
+func newPostgresServiceCommand(action string, aliases []string, example string) *cobra.Command {
+	return newServiceActionCommand(legacyModulePg, "pig postgres service", "postgres systemd service", action, aliases, example, func(action string) error {
+		return postgres.RunSystemctl(action, postgres.DefaultSystemdService)
+	})
 }
 
-var pgSvcStopCmd = &cobra.Command{
-	Use:         "stop",
-	Aliases:     []string{"halt", "dn", "down"},
-	Short:       "Stop postgres systemd service",
-	Annotations: ancsAnn("pig postgres service stop", "action", "volatile", "unsafe", true, "high", "recommended", "root", 10000),
-	Example:     `  pig pg svc stop                  # systemctl stop postgres`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePg, "pig postgres service stop", args, nil, func() error {
-			return postgres.RunSystemctl("stop", postgres.DefaultSystemdService)
-		})
-	},
-}
-
-var pgSvcRestartCmd = &cobra.Command{
-	Use:         "restart",
-	Aliases:     []string{"reboot", "rt"},
-	Short:       "Restart postgres systemd service",
-	Annotations: ancsAnn("pig postgres service restart", "action", "volatile", "unsafe", false, "high", "recommended", "root", 30000),
-	Example:     `  pig pg svc restart               # systemctl restart postgres`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePg, "pig postgres service restart", args, nil, func() error {
-			return postgres.RunSystemctl("restart", postgres.DefaultSystemdService)
-		})
-	},
-}
-
-var pgSvcReloadCmd = &cobra.Command{
-	Use:         "reload",
-	Aliases:     []string{"rl", "hup"},
-	Short:       "Reload postgres systemd service",
-	Annotations: ancsAnn("pig postgres service reload", "action", "volatile", "restricted", true, "low", "none", "root", 1000),
-	Example:     `  pig pg svc reload                # systemctl reload postgres`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePg, "pig postgres service reload", args, nil, func() error {
-			return postgres.RunSystemctl("reload", postgres.DefaultSystemdService)
-		})
-	},
-}
-
-var pgSvcStatusCmd = &cobra.Command{
-	Use:         "status",
-	Aliases:     []string{"st", "stat"},
-	Short:       "Show postgres systemd service status",
-	Annotations: ancsAnn("pig postgres service status", "query", "volatile", "safe", true, "safe", "none", "root", 500),
-	Example:     `  pig pg svc status                # systemctl status postgres`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModulePg, "pig postgres service status", args, nil, func() error {
-			return postgres.RunSystemctl("status", postgres.DefaultSystemdService)
-		})
-	},
-}
+var (
+	pgSvcStartCmd   = newPostgresServiceCommand("start", []string{"boot", "up"}, `  pig pg svc start                 # systemctl start postgres`)
+	pgSvcStopCmd    = newPostgresServiceCommand("stop", []string{"halt", "dn", "down"}, `  pig pg svc stop                  # systemctl stop postgres`)
+	pgSvcRestartCmd = newPostgresServiceCommand("restart", []string{"reboot", "rt"}, `  pig pg svc restart               # systemctl restart postgres`)
+	pgSvcReloadCmd  = newPostgresServiceCommand("reload", []string{"rl", "hup"}, `  pig pg svc reload                # systemctl reload postgres`)
+	pgSvcStatusCmd  = newPostgresServiceCommand("status", []string{"st", "stat"}, `  pig pg svc status                # systemctl status postgres`)
+)
 
 func addPlanFlags(cmd *cobra.Command, plan *bool, yes *bool) {
 	cmd.PersistentFlags().BoolVar(plan, "plan", false, "show execution plan without running")

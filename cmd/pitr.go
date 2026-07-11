@@ -120,6 +120,7 @@ The command uses the same execution privilege strategy as other pig commands:
   # Pass extra pgBackRest restore args after --
   pig pitr -d -- --delta`,
 	Annotations: ancsAnn("pig pitr", "action", "volatile", "unsafe", false, "critical", "required", "root", 600000),
+	Args:        cobra.ArbitraryArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if err := initAll(); err != nil {
 			return err

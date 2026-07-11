@@ -21,6 +21,7 @@ var updateCmd = &cobra.Command{
 	Annotations:  ancsAnn("pig update", "action", "volatile", "unsafe", true, "medium", "recommended", "root", 30000),
 	Aliases:      []string{"upd", "u"},
 	SilenceUsage: true,
+	Args:         cobra.NoArgs,
 	Example: `
   
   pig update 				    # update pig to the latest version

@@ -42,6 +42,48 @@ type primitiveContractData struct {
 	NativeOutput string               `json:"native_output,omitempty" yaml:"native_output,omitempty"`
 }
 
+type serviceActionSpec struct {
+	Verb       string
+	Type       string
+	Parallel   string
+	Idempotent bool
+	Risk       string
+	Confirm    string
+	Cost       int
+}
+
+var systemdServiceActions = map[string]serviceActionSpec{
+	"start":   {Verb: "Start", Type: "action", Parallel: "unsafe", Idempotent: true, Risk: "medium", Confirm: "none", Cost: 10000},
+	"stop":    {Verb: "Stop", Type: "action", Parallel: "unsafe", Idempotent: true, Risk: "high", Confirm: "recommended", Cost: 10000},
+	"restart": {Verb: "Restart", Type: "action", Parallel: "unsafe", Idempotent: false, Risk: "high", Confirm: "recommended", Cost: 30000},
+	"reload":  {Verb: "Reload", Type: "action", Parallel: "restricted", Idempotent: true, Risk: "low", Confirm: "none", Cost: 1000},
+	"status":  {Verb: "Show", Type: "query", Parallel: "safe", Idempotent: true, Risk: "safe", Confirm: "none", Cost: 500},
+}
+
+// newServiceActionCommand shares the identical five-action Cobra workflow
+// while leaving PostgreSQL and Patroni with separate systemctl executors.
+func newServiceActionCommand(module int, command, target, action string, aliases []string, example string, run func(string) error) *cobra.Command {
+	spec, ok := systemdServiceActions[action]
+	if !ok {
+		panic("unknown systemd service action: " + action)
+	}
+	short := fmt.Sprintf("%s %s", spec.Verb, target)
+	if action == "status" {
+		short += " status"
+	}
+	return &cobra.Command{
+		Use:         action,
+		Aliases:     aliases,
+		Short:       short,
+		Annotations: ancsAnn(command+" "+action, spec.Type, "volatile", spec.Parallel, spec.Idempotent, spec.Risk, spec.Confirm, "root", spec.Cost),
+		Example:     example,
+		Args:        cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runLegacyStructured(module, command+" "+action, args, nil, func() error { return run(action) })
+		},
+	}
+}
+
 func ancsAnn(name, typ, volatility, parallel string, idempotent bool, risk, confirm, osUser string, cost int) map[string]string {
 	return map[string]string{
 		"name":       name,
@@ -296,6 +338,42 @@ func rejectUnsupportedLogOutputFormat(command string) error {
 	default:
 		return nil
 	}
+}
+
+// runLogSnapshot is the shared output policy for bounded log reads. Backends
+// keep their own file discovery and parsing; this helper only owns the common
+// line validation and text-versus-JSONL dispatch.
+func runLogSnapshot(command string, lines int, jsonl, text func() error) error {
+	if err := validateLogLines(lines); err != nil {
+		return err
+	}
+	if err := rejectUnsupportedLogOutputFormat(command); err != nil {
+		return err
+	}
+	if isJSONLogOutput() {
+		return jsonl()
+	}
+	return text()
+}
+
+// runLogStream is the shared policy for follow/tail commands. Streaming stays
+// text-only; structured callers receive a stable typed parameter error that
+// points to the corresponding bounded snapshot command.
+func runLogStream(module int, command, snapshotCommand string, lines int, args []string, params map[string]interface{}, stream func() error) error {
+	if err := validateLogLines(lines); err != nil {
+		return err
+	}
+	if config.IsStructuredOutput() {
+		return structuredParamError(
+			module,
+			command,
+			"streaming log output is not supported in structured output",
+			fmt.Sprintf("use '%s -n N -o json' for a structured snapshot", snapshotCommand),
+			args,
+			params,
+		)
+	}
+	return stream()
 }
 
 func captureLegacyOutput(fn func() error, limit int) (captured string, truncated bool, runErr error) {

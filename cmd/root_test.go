@@ -7,8 +7,11 @@ import (
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
+	"sort"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestOutputFlagExists(t *testing.T) {
@@ -27,6 +30,74 @@ func TestOutputFlagExists(t *testing.T) {
 	// Test default value
 	if flag.DefValue != "text" {
 		t.Errorf("--output default value = %q, want %q", flag.DefValue, "text")
+	}
+}
+
+// TestRunnableCommandsDeclareArgs keeps the command-line contract explicit.
+// A nil Args validator makes Cobra silently accept misspelled positional
+// arguments, which is especially dangerous for destructive commands.
+func TestRunnableCommandsDeclareArgs(t *testing.T) {
+	// Keep this allowlist narrow and document why an exception cannot declare
+	// cobra.ArbitraryArgs instead. There are currently no such exceptions.
+	allowed := map[string]string{}
+
+	var missing []string
+	var walk func(*cobra.Command)
+	walk = func(parent *cobra.Command) {
+		for _, cmd := range parent.Commands() {
+			if (cmd.Run != nil || cmd.RunE != nil) && cmd.Args == nil {
+				if _, ok := allowed[cmd.CommandPath()]; !ok {
+					missing = append(missing, cmd.CommandPath())
+				}
+			}
+			walk(cmd)
+		}
+	}
+	walk(rootCmd)
+	sort.Strings(missing)
+	if len(missing) != 0 {
+		t.Fatalf("runnable commands without explicit Args validators:\n%s", strings.Join(missing, "\n"))
+	}
+}
+
+func TestRiskyCommandsRejectUndeclaredPositionals(t *testing.T) {
+	// These commands intentionally consume a positional operand. Raw restore
+	// and initdb operands still have their own "--" placement validation.
+	allowed := map[string]string{
+		"pig do node-rm":         "node selector(s)",
+		"pig do pgsql-rm":        "cluster and instance selector(s)",
+		"pig do redis-rm":        "redis selector and port(s)",
+		"pig patroni failover":   "optional failover candidate",
+		"pig patroni reinit":     "required member name",
+		"pig patroni restart":    "optional member name",
+		"pig pgbackrest restore": "raw pgBackRest args after --",
+		"pig pitr":               "raw pgBackRest args after --",
+		"pig postgres clone":     "source and destination database names",
+		"pig postgres fork":      "legacy fork target or action",
+		"pig postgres fork init": "fork name",
+		"pig postgres fork rm":   "fork name",
+		"pig postgres fork stop": "fork name",
+	}
+
+	var unsafe []string
+	var walk func(*cobra.Command)
+	walk = func(parent *cobra.Command) {
+		for _, cmd := range parent.Commands() {
+			risk := cmd.Annotations["risk"]
+			if (risk == "high" || risk == "critical") && cmd.Args != nil {
+				if err := cmd.Args(cmd, []string{"unexpected"}); err == nil {
+					if _, ok := allowed[cmd.CommandPath()]; !ok {
+						unsafe = append(unsafe, cmd.CommandPath())
+					}
+				}
+			}
+			walk(cmd)
+		}
+	}
+	walk(rootCmd)
+	sort.Strings(unsafe)
+	if len(unsafe) != 0 {
+		t.Fatalf("risky commands accepting undocumented positionals:\n%s", strings.Join(unsafe, "\n"))
 	}
 }
 

@@ -1,11 +1,19 @@
 package do
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 )
+
+// PlaybookBuilder converts command arguments into one or more ansible-playbook
+// argument lists. Keeping this mapping in cli/do makes Cobra commands declarative
+// and gives every playbook workflow the same validation and execution path.
+type PlaybookBuilder func(args []string) ([][]string, error)
 
 // RunPlaybooks runs a sequence of ansible playbook commands.
 func RunPlaybooks(inventory string, commands [][]string) error {
@@ -17,10 +25,11 @@ func RunPlaybooks(inventory string, commands [][]string) error {
 	return nil
 }
 
-func BuildPgsqlAddCommands(cluster string, ips []string) ([][]string, error) {
-	if cluster == "" {
-		return nil, fmt.Errorf("pgsql cluster is required")
+func BuildPgsqlAddCommands(args []string) ([][]string, error) {
+	if err := requireArgs(args, 1, "pgsql cluster is required"); err != nil {
+		return nil, err
 	}
+	cluster, ips := args[0], args[1:]
 	if len(ips) == 0 {
 		return [][]string{{"pgsql.yml", "-l", cluster}}, nil
 	}
@@ -34,10 +43,11 @@ func BuildPgsqlAddCommands(cluster string, ips []string) ([][]string, error) {
 	}, nil
 }
 
-func BuildPgsqlRmCommands(cluster string, ips []string, uninstall bool) ([][]string, error) {
-	if cluster == "" {
-		return nil, fmt.Errorf("pgsql cluster is required")
+func BuildPgsqlRmCommands(args []string, uninstall bool) ([][]string, error) {
+	if err := requireArgs(args, 1, "pgsql cluster is required"); err != nil {
+		return nil, err
 	}
+	cluster, ips := args[0], args[1:]
 	selector := cluster
 	if len(ips) > 0 {
 		target, _, err := buildPgsqlInstancePatterns(cluster, ips)
@@ -53,23 +63,81 @@ func BuildPgsqlRmCommands(cluster string, ips []string, uninstall bool) ([][]str
 	return [][]string{command}, nil
 }
 
-func BuildNodeAddCommand(selectors []string) ([]string, error) {
-	selector, err := joinSelectors(selectors)
+func BuildPgsqlUserCommands(args []string) ([][]string, error) {
+	if err := requireArgs(args, 2, "pgsql cluster and username are required"); err != nil {
+		return nil, err
+	}
+	command := []string{"pgsql-user.yml", "-l", args[0], "-e", fmt.Sprintf("username=%s", args[1])}
+	return singleCommand(append(command, args[2:]...)), nil
+}
+
+func BuildPgsqlDBCommands(args []string) ([][]string, error) {
+	if err := requireArgs(args, 2, "pgsql cluster and database name are required"); err != nil {
+		return nil, err
+	}
+	command := []string{"pgsql-db.yml", "-l", args[0], "-e", fmt.Sprintf("dbname=%s", args[1])}
+	return singleCommand(append(command, args[2:]...)), nil
+}
+
+func BuildPgsqlExtCommands(args []string) ([][]string, error) {
+	if err := requireArgs(args, 1, "pgsql selector is required"); err != nil {
+		return nil, err
+	}
+	command := []string{"pgsql.yml", "-l", args[0], "-t", "pg_extension"}
+	if len(args) > 1 {
+		packages := fmt.Sprintf(`{"pg_extensions":["%s"]}`, strings.Join(args[1:], ","))
+		command = append(command, "-e", packages)
+	}
+	return singleCommand(command), nil
+}
+
+func BuildPgsqlHBACommands(args []string) ([][]string, error) {
+	if err := requireExactArgs(args, 1, "exactly one pgsql selector is required"); err != nil {
+		return nil, err
+	}
+	return singleCommand([]string{"pgsql.yml", "-l", args[0], "-t", "pg_hba,pg_reload,pgbouncer_hba,pgbouncer_reload"}), nil
+}
+
+func BuildPgsqlServiceCommands(args []string) ([][]string, error) {
+	if err := requireExactArgs(args, 1, "exactly one pgsql selector is required"); err != nil {
+		return nil, err
+	}
+	return singleCommand([]string{"pgsql.yml", "-l", args[0], "-t", "pg_service"}), nil
+}
+
+func BuildPgmonAddCommands(args []string) ([][]string, error) {
+	if err := requireExactArgs(args, 1, "exactly one pgsql cluster is required"); err != nil {
+		return nil, err
+	}
+	return singleCommand([]string{"pgsql-monitor.yml", "-e", fmt.Sprintf("clsname=%s", args[0])}), nil
+}
+
+func RemovePgmon(inventory string, args []string) error {
+	if err := requireExactArgs(args, 1, "exactly one pgsql cluster is required"); err != nil {
+		return err
+	}
+	target := fmt.Sprintf("/etc/prometheus/targets/pgrds/%s.yml", args[0])
+	logrus.Infof("removing pgsql monitor target %s", args[0])
+	return RunAnsible(inventory, []string{"infra", "-m", "file", "-b", "-a", fmt.Sprintf("path=%s state=absent", target)})
+}
+
+func BuildNodeAddCommands(args []string) ([][]string, error) {
+	selector, err := joinSelectors(args)
 	if err != nil {
 		return nil, err
 	}
-	return []string{"node.yml", "-l", selector}, nil
+	return singleCommand([]string{"node.yml", "-l", selector}), nil
 }
 
-func BuildNodeRmCommand(selectors []string) ([]string, error) {
-	selector, err := joinSelectors(selectors)
+func BuildNodeRmCommands(args []string) ([][]string, error) {
+	selector, err := joinSelectors(args)
 	if err != nil {
 		return nil, err
 	}
-	return []string{"node-rm.yml", "-l", selector}, nil
+	return singleCommand([]string{"node-rm.yml", "-l", selector}), nil
 }
 
-func BuildNodeRepoCommand(args []string) ([]string, error) {
+func BuildNodeRepoCommands(args []string) ([][]string, error) {
 	if len(args) > 2 {
 		return nil, fmt.Errorf("node-repo accepts at most selector and module")
 	}
@@ -80,13 +148,33 @@ func BuildNodeRepoCommand(args []string) ([]string, error) {
 	if len(args) == 2 && args[1] != "" {
 		command = append(command, "-e", fmt.Sprintf("node_repo_modules=%s", args[1]))
 	}
-	return command, nil
+	return singleCommand(command), nil
 }
 
-func BuildRedisAddCommands(selector string, ports []string) ([][]string, error) {
-	if selector == "" {
-		return nil, fmt.Errorf("redis selector is required")
+func BuildNodePackageCommands(args []string) ([][]string, error) {
+	if err := requireArgs(args, 1, "node selector is required"); err != nil {
+		return nil, err
 	}
+	command := []string{"node.yml", "-l", args[0], "-t", "node_pkg_extra"}
+	if len(args) > 1 {
+		packages := fmt.Sprintf(`{"node_packages":["%s"]}`, strings.Join(args[1:], ","))
+		command = append(command, "-e", packages)
+	}
+	return singleCommand(command), nil
+}
+
+func BuildRepoBuildCommands(args []string) ([][]string, error) {
+	if len(args) != 0 {
+		return nil, fmt.Errorf("repo-build accepts no arguments")
+	}
+	return singleCommand([]string{"infra.yml", "-l", "infra", "-t", "repo_build"}), nil
+}
+
+func BuildRedisAddCommands(args []string) ([][]string, error) {
+	if err := requireArgs(args, 1, "redis selector is required"); err != nil {
+		return nil, err
+	}
+	selector, ports := args[0], args[1:]
 	if len(ports) == 0 {
 		return [][]string{{"redis.yml", "-l", selector}}, nil
 	}
@@ -103,10 +191,11 @@ func BuildRedisAddCommands(selector string, ports []string) ([][]string, error) 
 	return commands, nil
 }
 
-func BuildRedisRmCommands(selector string, ports []string, uninstall bool) ([][]string, error) {
-	if selector == "" {
-		return nil, fmt.Errorf("redis selector is required")
+func BuildRedisRmCommands(args []string, uninstall bool) ([][]string, error) {
+	if err := requireArgs(args, 1, "redis selector is required"); err != nil {
+		return nil, err
 	}
+	selector, ports := args[0], args[1:]
 	if len(ports) == 0 {
 		command := []string{"redis-rm.yml", "-l", selector}
 		if uninstall {
@@ -129,6 +218,29 @@ func BuildRedisRmCommands(selector string, ports []string, uninstall bool) ([][]
 		commands = append(commands, command)
 	}
 	return commands, nil
+}
+
+func singleCommand(command []string) [][]string {
+	return [][]string{command}
+}
+
+func requireArgs(args []string, count int, message string) error {
+	if len(args) < count {
+		return errors.New(message)
+	}
+	for _, arg := range args[:count] {
+		if arg == "" {
+			return errors.New(message)
+		}
+	}
+	return nil
+}
+
+func requireExactArgs(args []string, count int, message string) error {
+	if len(args) != count {
+		return errors.New(message)
+	}
+	return requireArgs(args, count, message)
 }
 
 func buildPgsqlInstancePatterns(cluster string, ips []string) (string, string, error) {

@@ -13,6 +13,7 @@ var versionCmd = &cobra.Command{
 	Short:       "Show pig version info",
 	Annotations: ancsAnn("pig version", "query", "immutable", "safe", true, "safe", "none", "current", 100),
 	Aliases:     []string{"v"},
+	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if config.IsStructuredOutput() {
 			result := statuscli.GetVersionResult()
