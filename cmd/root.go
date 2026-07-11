@@ -235,6 +235,7 @@ func isUsageExecutionError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "unknown command") ||
 		strings.Contains(msg, "unknown flag") ||
+		strings.Contains(msg, "unknown shorthand flag") ||
 		strings.Contains(msg, "flag needs an argument") ||
 		strings.Contains(msg, "accepts ") ||
 		strings.Contains(msg, "requires at least") ||

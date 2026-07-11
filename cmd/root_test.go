@@ -380,8 +380,10 @@ func TestIsUsageExecutionError(t *testing.T) {
 		want bool
 	}{
 		{name: "unknown command", err: fmt.Errorf(`unknown command "x" for "pig"`), want: true},
-		{name: "unknown flag", err: fmt.Errorf("unknown flag: --bad"), want: true},
+		{name: "unknown long flag", err: fmt.Errorf("unknown flag: --bad"), want: true},
+		{name: "unknown shorthand flag", err: fmt.Errorf("unknown shorthand flag: 'Z' in -Z"), want: true},
 		{name: "arg count", err: fmt.Errorf("accepts 1 arg(s), received 2"), want: true},
+		{name: "invalid argument", err: fmt.Errorf(`invalid argument "bad" for "--output" flag`), want: true},
 		{name: "runtime error", err: fmt.Errorf("dial tcp timeout"), want: false},
 		{name: "nil", err: nil, want: false},
 	}
@@ -400,23 +402,52 @@ func TestEmitStructuredExecutionErrorUsage(t *testing.T) {
 		config.OutputFormat = origFormat
 	}()
 
-	args := []string{"unknown", "-o", "json"}
-	prepareEarlyOutputSettings(args)
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "unknown long flag", err: fmt.Errorf("unknown flag: --bad")},
+		{name: "unknown shorthand flag", err: fmt.Errorf("unknown shorthand flag: 'Z' in -Z")},
+		{name: "arg count", err: fmt.Errorf("accepts 1 arg(s), received 2")},
+		{name: "invalid argument", err: fmt.Errorf(`invalid argument "bad" for "--output" flag`)},
+		{name: "unknown command", err: fmt.Errorf(`unknown command "unknown" for "pig"`)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := []string{"unknown", "-o", "json"}
+			prepareEarlyOutputSettings(args)
+			out := captureStdout(t, func() {
+				exitCode, handled := emitStructuredExecutionError(tt.err, args)
+				if !handled {
+					t.Fatal("expected structured execution error to be handled")
+				}
+				if exitCode != 2 {
+					t.Fatalf("exitCode=%d, want 2", exitCode)
+				}
+			})
+			if !strings.Contains(out, `"success":false`) {
+				t.Fatalf("expected JSON output, got: %q", out)
+			}
+			if !strings.Contains(out, `"code":990101`) {
+				t.Fatalf("expected system invalid-args code in output, got: %q", out)
+			}
+		})
+	}
+}
+
+func TestEmitStructuredExecutionErrorText(t *testing.T) {
 	out := captureStdout(t, func() {
-		exitCode, handled := emitStructuredExecutionError(fmt.Errorf(`unknown command "unknown" for "pig"`), args)
-		if !handled {
-			t.Fatal("expected structured execution error to be handled")
-		}
-		wantExit := output.ExitCode(output.CodeSystemInvalidArgs)
-		if exitCode != wantExit {
-			t.Fatalf("exitCode=%d, want %d", exitCode, wantExit)
+		exitCode, handled := emitStructuredExecutionError(
+			fmt.Errorf("unknown shorthand flag: 'Z' in -Z"),
+			[]string{"-Z"},
+		)
+		if handled || exitCode != 0 {
+			t.Fatalf("text error should not be handled, got handled=%v exitCode=%d", handled, exitCode)
 		}
 	})
-	if !strings.Contains(out, `"success":false`) {
-		t.Fatalf("expected JSON output, got: %q", out)
-	}
-	if !strings.Contains(out, `"code":990101`) {
-		t.Fatalf("expected system invalid-args code in output, got: %q", out)
+	if out != "" {
+		t.Fatalf("text error should not print structured output, got %q", out)
 	}
 }
 
