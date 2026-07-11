@@ -3,11 +3,19 @@ package utils
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+type timeoutTestError struct{}
+
+func (timeoutTestError) Error() string { return "timed out" }
+func (timeoutTestError) Timeout() bool { return true }
 
 func TestFetchFirstValid_SucceedsWhenOneMirrorFails(t *testing.T) {
 	srvBad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -111,5 +119,116 @@ func TestFetchFirstValidWithTimeout_DeadlineExceeded(t *testing.T) {
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+}
+
+func TestIsTimeoutError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "deadline exceeded", err: context.DeadlineExceeded, want: true},
+		{name: "wrapped deadline exceeded", err: fmt.Errorf("fetch failed: %w", context.DeadlineExceeded), want: true},
+		{name: "timeout interface", err: timeoutTestError{}, want: true},
+		{name: "ordinary error", err: errors.New("connection refused"), want: false},
+		{name: "nil", err: nil, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsTimeoutError(tt.err); got != tt.want {
+				t.Fatalf("IsTimeoutError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSyncFirstValidFileValidatesAndPreservesExistingMode(t *testing.T) {
+	srvInvalid := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("invalid"))
+	}))
+	t.Cleanup(srvInvalid.Close)
+	srvValid := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("valid"))
+	}))
+	t.Cleanup(srvValid.Close)
+
+	dst := filepath.Join(t.TempDir(), "catalog")
+	if err := os.WriteFile(dst, []byte("previous"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dst, 0644); err != nil {
+		t.Fatal(err)
+	}
+	validate := func(content []byte) error {
+		if string(content) != "valid" {
+			return errors.New("invalid catalog")
+		}
+		return nil
+	}
+	result, err := SyncFirstValidFile(time.Second, []string{srvInvalid.URL, srvValid.URL}, dst, 0600, validate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SourceURL != srvValid.URL {
+		t.Fatalf("source url = %q, want %q", result.SourceURL, srvValid.URL)
+	}
+	content, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "valid" {
+		t.Fatalf("content = %q", content)
+	}
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0644 {
+		t.Fatalf("mode = %04o, want preserved 0644", info.Mode().Perm())
+	}
+}
+
+func TestSyncFirstValidFileUsesDefaultModeForNewFile(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("valid"))
+	}))
+	t.Cleanup(srv.Close)
+
+	dst := filepath.Join(t.TempDir(), "new-catalog")
+	if _, err := SyncFirstValidFile(time.Second, []string{srv.URL}, dst, 0600, nil); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("mode = %04o, want default 0600", info.Mode().Perm())
+	}
+}
+
+func TestSyncFirstValidFileReportsWriteStage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("valid"))
+	}))
+	t.Cleanup(srv.Close)
+
+	dst := t.TempDir() // Renaming a file over a directory must fail.
+	result, err := SyncFirstValidFile(time.Second, []string{srv.URL}, dst, 0644, nil)
+	if err == nil {
+		t.Fatal("expected write error")
+	}
+	if result.SourceURL != srv.URL {
+		t.Fatalf("source url = %q, want %q", result.SourceURL, srv.URL)
+	}
+	var syncErr *MirrorSyncError
+	if !errors.As(err, &syncErr) || syncErr.Stage != MirrorSyncWrite {
+		t.Fatalf("error = %v, want MirrorSyncWrite", err)
 	}
 }

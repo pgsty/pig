@@ -100,21 +100,10 @@ func BuildDBSUCommand(dbsu string, args []string) (*exec.Cmd, error) {
 }
 
 func runDBSUCommand(dbsu string, args []string, preserveStdout bool) error {
-	if len(args) == 0 {
-		return fmt.Errorf("no command specified")
-	}
-
-	cmd := buildDBSUCmd(dbsu, args)
-	var out bytes.Buffer
-	var stdout io.Writer
-	var stderr io.Writer
-	cmd.Stdin = os.Stdin
-	stdout, stderr = commandWriters(config.IsStructuredOutput(), preserveStdout)
-	cmd.Stdout = io.MultiWriter(stdout, &out)
-	cmd.Stderr = io.MultiWriter(stderr, &out)
-
-	if err := cmd.Run(); err != nil {
-		outStr := strings.TrimSpace(out.String())
+	stdout, stderr := commandWriters(config.IsStructuredOutput(), preserveStdout)
+	result, err := executeDBSUCommand(dbsu, args, os.Stdin, stdout, stderr)
+	if err != nil {
+		outStr := strings.TrimSpace(result.CombinedOutput())
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if outStr != "" {
 				err = fmt.Errorf("%w: %s", err, outStr)
@@ -130,6 +119,65 @@ func runDBSUCommand(dbsu string, args []string, preserveStdout bool) error {
 	return nil
 }
 
+// DBSUCommandResult keeps subprocess stdout and stderr separate. This is
+// important for callers that parse stdout as JSON, YAML, or another
+// machine-readable format while still retaining stderr for diagnostics.
+type DBSUCommandResult struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int
+}
+
+// CombinedOutput returns captured stdout followed by captured stderr. It is
+// provided for legacy callers whose output was historically merged.
+func (r DBSUCommandResult) CombinedOutput() string {
+	return r.Stdout + r.Stderr
+}
+
+// CaptureDBSUCommand executes a command as DBSU and captures stdout and stderr
+// independently. The returned error is the underlying command execution error;
+// ExitCode is zero on success and non-zero on failure.
+func CaptureDBSUCommand(dbsu string, args []string) (DBSUCommandResult, error) {
+	return executeDBSUCommand(dbsu, args, nil, nil, nil)
+}
+
+// executeDBSUCommand is the single execution primitive used by both streaming
+// and captured DBSU commands. Separate buffers avoid concurrent stdout/stderr
+// writes to the same bytes.Buffer when os/exec copies both pipes in parallel.
+func executeDBSUCommand(dbsu string, args []string, stdin io.Reader, stdout, stderr io.Writer) (DBSUCommandResult, error) {
+	if len(args) == 0 {
+		return DBSUCommandResult{ExitCode: 1}, fmt.Errorf("no command specified")
+	}
+
+	cmd := buildDBSUCmd(dbsu, args)
+	var stdoutBuffer bytes.Buffer
+	var stderrBuffer bytes.Buffer
+	cmd.Stdin = stdin
+	cmd.Stdout = captureWriter(stdout, &stdoutBuffer)
+	cmd.Stderr = captureWriter(stderr, &stderrBuffer)
+
+	err := cmd.Run()
+	result := DBSUCommandResult{
+		Stdout: stdoutBuffer.String(),
+		Stderr: stderrBuffer.String(),
+	}
+	if err == nil {
+		return result, nil
+	}
+	result.ExitCode = 1
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		result.ExitCode = exitErr.ExitCode()
+	}
+	return result, err
+}
+
+func captureWriter(stream io.Writer, capture io.Writer) io.Writer {
+	if stream == nil {
+		return capture
+	}
+	return io.MultiWriter(stream, capture)
+}
+
 func commandWriters(structuredOutput bool, preserveStdout bool) (io.Writer, io.Writer) {
 	if structuredOutput && !preserveStdout {
 		return os.Stderr, os.Stderr
@@ -137,45 +185,40 @@ func commandWriters(structuredOutput bool, preserveStdout bool) (io.Writer, io.W
 	return os.Stdout, os.Stderr
 }
 
-// DBSUCommandOutput executes a command as the database superuser and captures output.
-// Uses the same execution strategy as DBSUCommand.
+// DBSUCommandOutput executes a command as the database superuser and returns
+// combined stdout and stderr. Prefer DBSUCommandStdout for machine-readable
+// output; this helper is intended for diagnostic command output.
 func DBSUCommandOutput(dbsu string, args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("no command specified")
 	}
 
+	// Deliberately give os/exec the same comparable writer for both streams.
+	// It then connects stdout and stderr to one child pipe, preserving their
+	// cross-stream order without the data race caused by two MultiWriters that
+	// shared an unprotected buffer in the streaming path.
 	cmd := buildDBSUCmd(dbsu, args)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
-		return out.String(), fmt.Errorf("command failed: %w", err)
+		return output.String(), fmt.Errorf("command failed: %w", err)
 	}
-	return out.String(), nil
+	return output.String(), nil
 }
 
 // DBSUCommandStdout executes a command as the database superuser and returns
 // stdout only. Stderr is reserved for error details and is not mixed into data.
 func DBSUCommandStdout(dbsu string, args []string) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("no command specified")
-	}
-
-	cmd := buildDBSUCmd(dbsu, args)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errText := strings.TrimSpace(stderr.String())
+	result, err := CaptureDBSUCommand(dbsu, args)
+	if err != nil {
+		errText := strings.TrimSpace(result.Stderr)
 		if errText != "" {
-			return stdout.String(), fmt.Errorf("command failed: %w: %s", err, errText)
+			return result.Stdout, fmt.Errorf("command failed: %w: %s", err, errText)
 		}
-		return stdout.String(), fmt.Errorf("command failed: %w", err)
+		return result.Stdout, fmt.Errorf("command failed: %w", err)
 	}
-	return stdout.String(), nil
+	return result.Stdout, nil
 }
 
 // buildDBSUCmd creates an exec.Cmd for running a command as DBSU.

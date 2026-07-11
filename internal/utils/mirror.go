@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -18,6 +20,27 @@ type mirrorFetchResult struct {
 	content []byte
 	err     error
 }
+
+type MirrorSyncStage string
+
+const (
+	MirrorSyncFetch MirrorSyncStage = "fetch"
+	MirrorSyncWrite MirrorSyncStage = "write"
+)
+
+type MirrorSyncResult struct {
+	SourceURL string
+}
+
+// MirrorSyncError identifies whether mirror synchronization failed while
+// fetching/validating content or while atomically replacing the destination.
+type MirrorSyncError struct {
+	Stage MirrorSyncStage
+	Err   error
+}
+
+func (e *MirrorSyncError) Error() string { return e.Err.Error() }
+func (e *MirrorSyncError) Unwrap() error { return e.Err }
 
 func shouldFallbackToGetOnHeadStatus(code int) bool {
 	// Some servers may not implement HEAD correctly. In these cases, still try GET.
@@ -139,4 +162,43 @@ func FetchFirstValidWithTimeout(timeout time.Duration, urls []string, validate f
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return FetchFirstValid(ctx, urls, validate)
+}
+
+// SyncFirstValidFile fetches the first valid mirror response and atomically
+// replaces dstPath. A failed fetch or write leaves the previous file untouched.
+// Existing files retain their permission mode; mode is the default for new files.
+func SyncFirstValidFile(timeout time.Duration, urls []string, dstPath string, mode os.FileMode, validate func([]byte) error) (MirrorSyncResult, error) {
+	var result MirrorSyncResult
+	content, sourceURL, err := FetchFirstValidWithTimeout(timeout, urls, validate)
+	if err != nil {
+		return result, &MirrorSyncError{Stage: MirrorSyncFetch, Err: err}
+	}
+	result.SourceURL = sourceURL
+	writeMode, err := existingFileMode(dstPath, mode)
+	if err != nil {
+		return result, &MirrorSyncError{Stage: MirrorSyncWrite, Err: err}
+	}
+	if err := AtomicWriteFile(dstPath, content, writeMode); err != nil {
+		return result, &MirrorSyncError{Stage: MirrorSyncWrite, Err: err}
+	}
+	return result, nil
+}
+
+// IsTimeoutError reports timeout errors through wrapped network and context errors.
+func IsTimeoutError(err error) bool {
+	var netErr interface{ Timeout() bool }
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout())
+}
+
+// MirrorAttemptDetail formats the common diagnostics used by catalog reloads.
+func MirrorAttemptDetail(urls []string, err error) string {
+	attempted := strings.Join(urls, "\n- ")
+	if attempted != "" {
+		attempted = "- " + attempted
+	}
+	errText := ""
+	if err != nil {
+		errText = strings.TrimSpace(err.Error())
+	}
+	return fmt.Sprintf("attempted:\n%s\nerrors:\n%s", attempted, errText)
 }

@@ -8,10 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"pig/internal/config"
 	"strings"
-	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -168,51 +166,14 @@ func QuietSudoCommand(args []string) error {
 // It performs the following steps:
 // 1. Checks if file exists and has identical content (to avoid unnecessary writes)
 // 2. Ensures parent directory exists
-// 3. Attempts direct write with standard permissions
-// 4. Falls back to sudo if permission denied
+// 3. Atomically replaces the file while preserving an existing permission mode
+// 4. Falls back to a privileged install if the directory is not writable
 func PutFile(filePath string, content []byte) error {
-	logrus.Debugf("put file %q", filePath)
-
-	// Skip write if file exists with identical content
-	if data, err := os.ReadFile(filePath); err == nil && bytes.Equal(data, content) {
-		return nil
+	mode, err := existingFileMode(filePath, 0644)
+	if err != nil {
+		return err
 	}
-
-	// Ensure parent directory exists
-	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create parent directories %q: %w", dir, err)
-	}
-
-	// Attempt direct write first
-	if err := os.WriteFile(filePath, content, 0644); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrPermission) {
-		return fmt.Errorf("failed to write file %q: %w", filePath, err)
-	}
-
-	// Fall back to sudo mv approach for permission issues
-	tmpFileName := filepath.Join(os.TempDir(), fmt.Sprintf("%s.%d", filepath.Base(filePath), time.Now().UnixNano()))
-	defer func(name string) {
-		err := os.Remove(name)
-		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				logrus.Debugf("failed to remove temporary file %q: %v", name, err)
-			}
-		}
-	}(tmpFileName) // Clean up temp file regardless of outcome
-
-	// Write content to temporary file
-	if err := os.WriteFile(tmpFileName, content, 0644); err != nil {
-		return fmt.Errorf("failed to write content to temporary file %q: %w", tmpFileName, err)
-	}
-
-	// Use sudo to move temp file to target location
-	if err := SudoCommand([]string{"mv", tmpFileName, filePath}); err != nil {
-		return fmt.Errorf("failed to move file with sudo %q -> %q: %w", tmpFileName, filePath, err)
-	}
-
-	return nil
+	return PutFileMode(filePath, content, mode)
 }
 
 // DelFile removes a file, if permission denied, try to remove with sudo
