@@ -193,6 +193,68 @@ func TestExtractLeaderAndTimeline_HighTimeline(t *testing.T) {
 	}
 }
 
+func TestStatusResultClusterPrecedence(t *testing.T) {
+	tests := []struct {
+		name          string
+		configContent string
+		listCluster   string
+		wantCluster   string
+	}{
+		{
+			name:          "config cluster wins",
+			configContent: "scope: config-cluster\n",
+			listCluster:   "runtime-cluster",
+			wantCluster:   "config-cluster",
+		},
+		{
+			name:          "list cluster fallback",
+			configContent: "restapi:\n  listen: 127.0.0.1:8008\n",
+			listCluster:   "runtime-cluster",
+			wantCluster:   "runtime-cluster",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			patroniTestDepsMu.Lock()
+			oldLookPath := patroniLookPath
+			oldReadFile := patroniReadFile
+			oldDBSUCommandStdout := patroniDBSUCommandStdout
+			t.Cleanup(func() {
+				patroniLookPath = oldLookPath
+				patroniReadFile = oldReadFile
+				patroniDBSUCommandStdout = oldDBSUCommandStdout
+				patroniTestDepsMu.Unlock()
+			})
+
+			binDir := t.TempDir()
+			writeTestCommand(t, binDir, "systemctl", "exit 0\n")
+			t.Setenv("PATH", binDir)
+			patroniLookPath = func(string) (string, error) {
+				return "/usr/bin/patronictl", nil
+			}
+			patroniReadFile = func(string) ([]byte, error) {
+				return []byte(tt.configContent), nil
+			}
+			patroniDBSUCommandStdout = func(string, []string) (string, error) {
+				return `[{"Cluster":"` + tt.listCluster + `","Member":"pg-test-1","Host":"10.0.0.1","Role":"Leader","State":"running","TL":7,"Lag in MB":null}]`, nil
+			}
+
+			result := StatusResult("postgres")
+			if !result.Success {
+				t.Fatalf("StatusResult() = code %d, detail %q", result.Code, result.Detail)
+			}
+			data, ok := result.Data.(*PtStatusResultData)
+			if !ok {
+				t.Fatalf("StatusResult().Data type = %T, want *PtStatusResultData", result.Data)
+			}
+			if data.Cluster != tt.wantCluster {
+				t.Errorf("cluster = %q, want %q", data.Cluster, tt.wantCluster)
+			}
+		})
+	}
+}
+
 // ============================================================================
 // Lag Field null Handling Tests
 // ============================================================================

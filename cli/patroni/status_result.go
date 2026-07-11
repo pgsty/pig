@@ -92,6 +92,9 @@ func StatusResult(dbsu string) *output.Result {
 		return output.Fail(output.CodePtParseFailed, "Failed to parse patronictl output").
 			WithData(statusData).WithDetail(err.Error())
 	}
+	if statusData.Cluster == "" {
+		statusData.Cluster = listData.Cluster
+	}
 
 	// 6. Build complete status data
 	statusData.Members = listData.Members
