@@ -436,10 +436,10 @@ func TestListWrapperUsesOptionalCluster(t *testing.T) {
 func TestGetClusterNameUsesDBSUFallbackHook(t *testing.T) {
 	patroniTestDepsMu.Lock()
 	oldReadFile := patroniReadFile
-	oldDBSUCommandOutput := patroniDBSUCommandOutput
+	oldDBSUCommandStdout := patroniDBSUCommandStdout
 	t.Cleanup(func() {
 		patroniReadFile = oldReadFile
-		patroniDBSUCommandOutput = oldDBSUCommandOutput
+		patroniDBSUCommandStdout = oldDBSUCommandStdout
 		patroniTestDepsMu.Unlock()
 	})
 
@@ -448,7 +448,7 @@ func TestGetClusterNameUsesDBSUFallbackHook(t *testing.T) {
 	patroniReadFile = func(name string) ([]byte, error) {
 		return nil, errors.New("permission denied")
 	}
-	patroniDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+	patroniDBSUCommandStdout = func(dbsu string, args []string) (string, error) {
 		gotDBSU = dbsu
 		gotArgs = append([]string(nil), args...)
 		return "scope: pg-fallback\n", nil

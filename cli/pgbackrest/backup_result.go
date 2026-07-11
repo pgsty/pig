@@ -141,7 +141,7 @@ func getLatestBackupInfo(cfg *Config, windowStart, windowStop time.Time, labelHi
 	// Execute pgbackrest info --output=json
 	// Suppress console logs to keep JSON output clean.
 	args := []string{"--output=json", "--log-level-console=error"}
-	jsonOutput, err := RunPgBackRestOutput(cfg, "info", args)
+	jsonOutput, err := runPgBackRestStdout(cfg, "info", args)
 	if err != nil {
 		return nil, err
 	}

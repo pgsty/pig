@@ -129,7 +129,7 @@ func GetPgPathFromConfig(configPath, stanza, dbsu string) string {
 }
 
 // readConfigFile reads the config file content, using DBSU privilege escalation if needed.
-// Uses the 3-tier execution strategy from utils.DBSUCommandOutput:
+// Uses the 3-tier execution strategy from utils.DBSUCommandStdout:
 //   - If current user is DBSU: read directly
 //   - If current user is root: use "su - <dbsu> -c cat"
 //   - Otherwise: use "sudo -inu <dbsu> cat"
@@ -156,7 +156,7 @@ func readConfigFile(configPath, dbsu string) (string, error) {
 	// Check if it's a permission error - if so, use DBSU
 	if os.IsPermission(err) {
 		logrus.Debugf("permission denied reading %s, trying as %s", configPath, dbsu)
-		return utils.DBSUCommandOutput(dbsu, []string{"cat", configPath})
+		return utils.DBSUCommandStdout(dbsu, []string{"cat", configPath})
 	}
 
 	return "", err
@@ -286,8 +286,17 @@ func RunPgBackRestRaw(cfg *Config, command string, extraArgs []string, hint bool
 	return utils.DBSUCommandPreserveStdout(cfg.DbSU, args)
 }
 
-// RunPgBackRestOutput executes pgbackrest and captures output.
+// RunPgBackRestOutput executes pgbackrest and captures combined diagnostic
+// output. Machine-readable callers should use runPgBackRestStdout instead.
 func RunPgBackRestOutput(cfg *Config, command string, extraArgs []string) (string, error) {
+	return capturePgBackRest(cfg, command, extraArgs, utils.DBSUCommandOutput)
+}
+
+func runPgBackRestStdout(cfg *Config, command string, extraArgs []string) (string, error) {
+	return capturePgBackRest(cfg, command, extraArgs, utils.DBSUCommandStdout)
+}
+
+func capturePgBackRest(cfg *Config, command string, extraArgs []string, capture func(string, []string) (string, error)) (string, error) {
 	args, err := buildPgBackRestArgs(cfg, command, extraArgs)
 	if err != nil {
 		return "", err
@@ -296,5 +305,5 @@ func RunPgBackRestOutput(cfg *Config, command string, extraArgs []string) (strin
 	if dbsu == "" {
 		dbsu = utils.GetDBSU("")
 	}
-	return utils.DBSUCommandOutput(dbsu, args)
+	return capture(dbsu, args)
 }

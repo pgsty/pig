@@ -36,7 +36,7 @@ func GetClusterName(dbsu string) (string, error) {
 		if dbsu == "" {
 			dbsu = utils.DefaultDBSU
 		}
-		text, dbsuErr := patroniDBSUCommandOutput(dbsu, []string{"cat", DefaultConfigPath})
+		text, dbsuErr := patroniDBSUCommandStdout(dbsu, []string{"cat", DefaultConfigPath})
 		if dbsuErr != nil {
 			return "", newClusterConfigReadError(
 				fmt.Errorf("cannot read %s (direct: %v; as %s: %v)", DefaultConfigPath, err, dbsu, dbsuErr),
@@ -255,7 +255,7 @@ func readPatroniLogConfig(dbsu string) ([]byte, error) {
 	if dbsu == "" {
 		dbsu = utils.GetDBSU("")
 	}
-	text, dbsuErr := patroniDBSUCommandOutput(dbsu, []string{"cat", DefaultConfigPath})
+	text, dbsuErr := patroniDBSUCommandStdout(dbsu, []string{"cat", DefaultConfigPath})
 	if dbsuErr != nil {
 		return nil, fmt.Errorf("cannot read Patroni config %s: direct: %v; as %s: %w", DefaultConfigPath, err, dbsu, dbsuErr)
 	}

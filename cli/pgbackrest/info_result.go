@@ -30,7 +30,7 @@ func InfoResult(cfg *Config, opts *InfoOptions) *output.Result {
 	}
 
 	// Execute pgbackrest info and capture JSON output
-	jsonOutput, err := RunPgBackRestOutput(effCfg, "info", args)
+	jsonOutput, err := runPgBackRestStdout(effCfg, "info", args)
 	if err != nil {
 		errMsg := combineCommandError(jsonOutput, err)
 		return output.Fail(output.CodePbInfoFailed, "Failed to execute pgbackrest info").

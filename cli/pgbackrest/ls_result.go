@@ -79,7 +79,7 @@ func backupListResult(cfg *Config) *output.Result {
 		return pbConfigErrorResult(err, output.CodePbInfoFailed, "Failed to get pgBackRest configuration")
 	}
 
-	jsonOutput, err := RunPgBackRestOutput(effCfg, "info", []string{"--output=json", "--log-level-console=error"})
+	jsonOutput, err := runPgBackRestStdout(effCfg, "info", []string{"--output=json", "--log-level-console=error"})
 	if err != nil {
 		return output.Fail(output.CodePbInfoFailed, "Failed to execute pgbackrest info").
 			WithDetail(combineCommandError(jsonOutput, err))

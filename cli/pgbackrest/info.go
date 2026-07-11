@@ -154,7 +154,7 @@ func LoadInfo(cfg *Config, set string) ([]PgBackRestInfo, error) {
 		args = append(args, "--set="+set)
 	}
 
-	output, err := RunPgBackRestOutput(effCfg, "info", args)
+	output, err := runPgBackRestStdout(effCfg, "info", args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute pgbackrest info: %w", err)
 	}
@@ -192,7 +192,7 @@ func Info(cfg *Config, opts *InfoOptions) error {
 		args = append(args, "--set="+opts.Set)
 	}
 
-	output, err := RunPgBackRestOutput(effCfg, "info", args)
+	output, err := runPgBackRestStdout(effCfg, "info", args)
 	if err != nil {
 		return fmt.Errorf("failed to get backup info: %w", err)
 	}

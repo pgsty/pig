@@ -266,7 +266,7 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 		return output.Fail(output.CodeStyConfigureFailed, fmt.Sprintf("rendered yaml is invalid: %v", err))
 	}
 
-	if err := utils.PutFile(outputPath, []byte(mutated)); err != nil {
+	if err := utils.PutFileMode(outputPath, []byte(mutated), 0600); err != nil {
 		return output.Fail(output.CodeStyConfigureWriteFailed, fmt.Sprintf("failed to write output: %v", err))
 	}
 

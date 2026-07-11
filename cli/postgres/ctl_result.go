@@ -727,7 +727,7 @@ func getTimeline(cfg *Config, dbsu string) int {
 	// Try pg_control_checkpoint() SQL function
 	cmdArgs := []string{pg.Psql(), "-AXtqw", "-d", "postgres", "-c",
 		"SELECT timeline_id FROM pg_control_checkpoint()"}
-	output, err := utils.DBSUCommandOutput(dbsu, cmdArgs)
+	output, err := utils.DBSUCommandStdout(dbsu, cmdArgs)
 	if err == nil {
 		output = strings.TrimSpace(output)
 		if timeline, parseErr := strconv.Atoi(output); parseErr == nil {
@@ -739,7 +739,7 @@ func getTimeline(cfg *Config, dbsu string) int {
 	// Fall back to pg_controldata
 	dataDir := GetPgData(cfg)
 	cmdArgs = []string{pg.PgControldata(), "-D", dataDir}
-	output, err = utils.DBSUCommandOutput(dbsu, cmdArgs)
+	output, err = utils.DBSUCommandStdout(dbsu, cmdArgs)
 	if err != nil {
 		logrus.Debugf("pg_controldata failed: %v", err)
 		return 0

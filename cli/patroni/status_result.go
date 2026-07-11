@@ -72,7 +72,7 @@ func StatusResult(dbsu string) *output.Result {
 
 	// 4. Get cluster member information
 	args := []string{binPath, "-c", DefaultConfigPath, "list", "-f", "json"}
-	jsonOutput, err := patroniDBSUCommandOutput(dbsu, args)
+	jsonOutput, err := patroniDBSUCommandStdout(dbsu, args)
 	if err != nil {
 		if isPermissionDenied(err, jsonOutput) {
 			return output.Fail(output.CodePtPermDenied, "Permission denied executing patronictl list").

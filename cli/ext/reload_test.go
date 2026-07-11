@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"pig/internal/config"
+	"pig/internal/utils"
 )
 
 func TestExtensionCatalogURLsMirrorUsesPigstyCCOnly(t *testing.T) {
@@ -32,8 +33,8 @@ func TestExtensionCatalogURLsDefaultKeepsFallbackOrder(t *testing.T) {
 	}
 }
 
-func TestReloadAttemptDetailHandlesSingleMirrorURL(t *testing.T) {
-	detail := reloadAttemptDetail([]string{config.RepoPigstyCC + "/ext/data/extension.csv"}, errors.New("boom"))
+func TestMirrorAttemptDetailHandlesSingleMirrorURL(t *testing.T) {
+	detail := utils.MirrorAttemptDetail([]string{config.RepoPigstyCC + "/ext/data/extension.csv"}, errors.New("boom"))
 	if !strings.Contains(detail, config.RepoPigstyCC+"/ext/data/extension.csv") {
 		t.Fatalf("detail missing mirror url: %q", detail)
 	}

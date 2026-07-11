@@ -66,8 +66,8 @@ func GetAllDatabases(cfg *Config) ([]string, error) {
 	cmdArgs := []string{pg.Psql(), "-d", "postgres", "-t", "-A", "-c",
 		"SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname"}
 
-	// Use DBSUCommandOutput for proper handling of all user types (dbsu, root, sudo user)
-	output, err := utils.DBSUCommandOutput(dbsu, cmdArgs)
+	// Capture stdout only so diagnostics cannot become database names.
+	output, err := utils.DBSUCommandStdout(dbsu, cmdArgs)
 	if err != nil {
 		return nil, err
 	}

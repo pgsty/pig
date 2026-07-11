@@ -554,7 +554,7 @@ func runPsqlQuery(dbsu, psql string, port int, connDB string, sql string) (strin
 		"-d", connDB,
 		"-c", sql,
 	}
-	out, err := utils.DBSUCommandOutput(dbsu, args)
+	out, err := utils.DBSUCommandStdout(dbsu, args)
 	if err != nil {
 		if msg := strings.TrimSpace(out); msg != "" {
 			return out, fmt.Errorf("%w: %s", err, msg)

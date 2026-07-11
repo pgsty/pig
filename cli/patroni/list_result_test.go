@@ -365,11 +365,11 @@ func TestListResultUsesOptionalCluster(t *testing.T) {
 	patroniTestDepsMu.Lock()
 	oldLookPath := patroniLookPath
 	oldStat := patroniStat
-	oldDBSUCommandOutput := patroniDBSUCommandOutput
+	oldDBSUCommandStdout := patroniDBSUCommandStdout
 	t.Cleanup(func() {
 		patroniLookPath = oldLookPath
 		patroniStat = oldStat
-		patroniDBSUCommandOutput = oldDBSUCommandOutput
+		patroniDBSUCommandStdout = oldDBSUCommandStdout
 		patroniTestDepsMu.Unlock()
 	})
 
@@ -380,7 +380,7 @@ func TestListResultUsesOptionalCluster(t *testing.T) {
 	patroniStat = func(name string) (os.FileInfo, error) {
 		return os.Stat(".")
 	}
-	patroniDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+	patroniDBSUCommandStdout = func(dbsu string, args []string) (string, error) {
 		captured = append([]string(nil), args...)
 		return `[{"Member":"pg-meta-1","Host":"10.0.0.1","Role":"Leader","State":"running","TL":1,"Lag in MB":null}]`, nil
 	}

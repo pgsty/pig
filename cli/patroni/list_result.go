@@ -92,7 +92,7 @@ func ListResult(dbsu string, cluster string) *output.Result {
 	}
 
 	args := buildListResultArgs(binPath, cluster)
-	jsonOutput, err := patroniDBSUCommandOutput(dbsu, args)
+	jsonOutput, err := patroniDBSUCommandStdout(dbsu, args)
 	if err != nil {
 		if isPermissionDenied(err, jsonOutput) {
 			return output.Fail(output.CodePtPermDenied, "Permission denied executing patronictl list").

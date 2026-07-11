@@ -100,7 +100,7 @@ var (
 	pitrDataDirEmptyAsDBSU         = dataDirEmptyAsDBSU
 	pitrCheckDataDirAsDBSU         = postgres.CheckDataDirAsDBSU
 	pitrCheckPostgresRunningAsDBSU = postgres.CheckPostgresRunningAsDBSU
-	pitrDBSUCommandOutput          = utils.DBSUCommandOutput
+	pitrDBSUCommandOutput          = utils.DBSUCommandStdout
 	pitrLoadPgBackRestInfo         = pgbackrest.LoadInfo
 	pitrQueryRecoveryState         = queryRecoveryState
 	pitrQueryPostRestoreState      = queryPostRestoreState
@@ -500,7 +500,7 @@ func classifyPITRSideRestore(dataDir string, managedDataDir string, resolver fun
 }
 
 func resolvePathAsDBSU(dbsu string, path string) (string, error) {
-	out, err := utils.DBSUCommandOutput(dbsu, []string{"readlink", "-f", path})
+	out, err := utils.DBSUCommandStdout(dbsu, []string{"readlink", "-f", path})
 	if err != nil {
 		return "", err
 	}
@@ -547,7 +547,7 @@ func validatePITRRestoreTarget(dbsu string, dataDir string, sideRestore bool, ex
 }
 
 func dataDirOwnerAsDBSU(dbsu string, dataDir string) (string, error) {
-	out, err := utils.DBSUCommandOutput(dbsu, []string{"stat", "-L", "-c", "%U", dataDir})
+	out, err := utils.DBSUCommandStdout(dbsu, []string{"stat", "-L", "-c", "%U", dataDir})
 	if err != nil {
 		return "", fmt.Errorf("check data directory owner: %w", err)
 	}
@@ -555,7 +555,7 @@ func dataDirOwnerAsDBSU(dbsu string, dataDir string) (string, error) {
 }
 
 func dataDirEmptyAsDBSU(dbsu string, dataDir string) (bool, error) {
-	out, err := utils.DBSUCommandOutput(dbsu, []string{"find", dataDir, "-mindepth", "1", "-maxdepth", "1", "-print", "-quit"})
+	out, err := utils.DBSUCommandStdout(dbsu, []string{"find", dataDir, "-mindepth", "1", "-maxdepth", "1", "-print", "-quit"})
 	if err != nil {
 		return false, fmt.Errorf("check data directory empty: %w", err)
 	}

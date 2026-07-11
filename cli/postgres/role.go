@@ -3,9 +3,9 @@ Copyright 2018-2026 Ruohang Feng <rh@vonng.com>
 
 PostgreSQL role detection: determine if instance is primary or replica.
 Uses multiple fallback strategies:
-  1. SQL query (pg_is_in_recovery) - most reliable when PG is running
-  2. Process detection (walreceiver, recovering) - works if PG is running
-  3. Data directory inspection (standby.signal, recovery.signal, recovery.conf) - works even if PG is down
+ 1. SQL query (pg_is_in_recovery) - most reliable when PG is running
+ 2. Process detection (walreceiver, recovering) - works if PG is running
+ 3. Data directory inspection (standby.signal, recovery.signal, recovery.conf) - works even if PG is down
 */
 package postgres
 
@@ -214,8 +214,8 @@ func roleFromSQL(cfg *Config, dbsu string, verbose bool) *RoleResult {
 	// Build psql command to check pg_is_in_recovery()
 	cmdArgs := []string{pg.Psql(), "-AXtqw", "-d", "postgres", "-c", "SELECT pg_is_in_recovery()"}
 
-	// Use utils.DBSUCommandOutput for consistent privilege escalation
-	output, err := utils.DBSUCommandOutput(dbsu, cmdArgs)
+	// Capture stdout only so diagnostics cannot corrupt the scalar result.
+	output, err := utils.DBSUCommandStdout(dbsu, cmdArgs)
 	if err != nil {
 		if verbose {
 			fmt.Printf("    psql command failed: %v\n", err)
@@ -258,7 +258,7 @@ func roleFromDataDir(dbsu, dataDir string, verbose bool) *RoleResult {
 	}
 
 	// List directory contents as dbsu
-	output, err := utils.DBSUCommandOutput(dbsu, []string{"ls", "-1", dataDir})
+	output, err := utils.DBSUCommandStdout(dbsu, []string{"ls", "-1", dataDir})
 	if err != nil {
 		if verbose {
 			fmt.Printf("    cannot list data directory %s: %v\n", dataDir, err)
@@ -325,13 +325,13 @@ func roleFromDataDir(dbsu, dataDir string, verbose bool) *RoleResult {
 
 // fileExistsAsDBSU checks if a file exists as the database superuser
 func fileExistsAsDBSU(dbsu, path string) bool {
-	_, err := utils.DBSUCommandOutput(dbsu, []string{"test", "-f", path})
+	_, err := utils.DBSUCommandStdout(dbsu, []string{"test", "-f", path})
 	return err == nil
 }
 
 // checkRecoveryConfAsDBSU checks if recovery.conf indicates replica mode (as dbsu)
 func checkRecoveryConfAsDBSU(dbsu, path string, verbose bool) bool {
-	output, err := utils.DBSUCommandOutput(dbsu, []string{"cat", path})
+	output, err := utils.DBSUCommandStdout(dbsu, []string{"cat", path})
 	if err != nil {
 		return false
 	}
@@ -357,7 +357,7 @@ func checkRecoveryConfAsDBSU(dbsu, path string, verbose bool) bool {
 
 // checkAutoConfForReplicationAsDBSU checks if postgresql.auto.conf has replication settings (as dbsu)
 func checkAutoConfForReplicationAsDBSU(dbsu, path string, verbose bool) bool {
-	output, err := utils.DBSUCommandOutput(dbsu, []string{"cat", path})
+	output, err := utils.DBSUCommandStdout(dbsu, []string{"cat", path})
 	if err != nil {
 		return false
 	}

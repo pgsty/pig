@@ -243,7 +243,7 @@ func resolveRestorePathAsDBSU(cfg *Config, path string) (string, error) {
 	if cfg != nil && cfg.DbSU != "" {
 		dbsu = cfg.DbSU
 	}
-	out, err := utils.DBSUCommandOutput(dbsu, []string{"readlink", "-f", path})
+	out, err := utils.DBSUCommandStdout(dbsu, []string{"readlink", "-f", path})
 	return strings.TrimSpace(out), err
 }
 

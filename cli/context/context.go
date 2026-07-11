@@ -765,7 +765,7 @@ func collectConnectionInfo(port int, dbsu string) (connections, maxConnections i
 	}
 
 	// Execute via DBSU
-	output, err := utils.DBSUCommandOutput(dbsu, args)
+	output, err := utils.DBSUCommandStdout(dbsu, args)
 	if err != nil {
 		logrus.Debugf("failed to collect connection info: %v", err)
 		return 0, 0, err
@@ -873,7 +873,7 @@ func getPatroniClusterName() string {
 		logrus.Debugf("cannot read patroni config directly: %v", err)
 		// Try with DBSU privilege
 		dbsu := utils.GetDBSU("")
-		contentStr, err := utils.DBSUCommandOutput(dbsu, []string{"cat", patroni.DefaultConfigPath})
+		contentStr, err := utils.DBSUCommandStdout(dbsu, []string{"cat", patroni.DefaultConfigPath})
 		if err != nil {
 			logrus.Debugf("cannot read patroni config as DBSU: %v", err)
 			return ""
@@ -936,7 +936,7 @@ func getPatroniRuntimeInfo() *patroniRuntimeInfo {
 	}
 	args := []string{binPath, "-c", patroni.DefaultConfigPath, "list", "-f", "json"}
 
-	output, err := utils.DBSUCommandOutput(dbsu, args)
+	output, err := utils.DBSUCommandStdout(dbsu, args)
 	if err != nil {
 		logrus.Debugf("patronictl list failed: %v", err)
 		return nil
@@ -1047,7 +1047,7 @@ func readPgVersionString(cfg *postgres.Config, dataDir string) string {
 	}
 	dbsu := postgres.GetDbSU(cfg)
 	pgVersionFile := filepath.Join(dataDir, "PG_VERSION")
-	output, err := utils.DBSUCommandOutput(dbsu, []string{"cat", pgVersionFile})
+	output, err := utils.DBSUCommandStdout(dbsu, []string{"cat", pgVersionFile})
 	if err != nil {
 		logrus.Debugf("failed to read PG_VERSION: %v", err)
 		return ""

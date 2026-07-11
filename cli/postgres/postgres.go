@@ -23,7 +23,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var postgresDBSUCommandOutput = utils.DBSUCommandOutput
+var postgresDBSUCommandOutput = utils.DBSUCommandStdout
 
 // ============================================================================
 // Default Constants
@@ -141,7 +141,7 @@ func GetPgInstall(cfg *Config) (*ext.PostgresInstall, error) {
 // ReadPgVersionAsDBSU reads major version from PG_VERSION file as database superuser
 func ReadPgVersionAsDBSU(dbsu, dataDir string) (int, error) {
 	pgVersionFile := filepath.Join(dataDir, "PG_VERSION")
-	output, err := utils.DBSUCommandOutput(dbsu, []string{"cat", pgVersionFile})
+	output, err := utils.DBSUCommandStdout(dbsu, []string{"cat", pgVersionFile})
 	if err != nil {
 		return 0, err
 	}

@@ -184,7 +184,7 @@ func (e *ForkError) Unwrap() error {
 var forkNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
 var forkDBSUCommand = utils.DBSUCommand
-var forkDBSUCommandOutput = utils.DBSUCommandOutput
+var forkDBSUCommandOutput = utils.DBSUCommandStdout
 var forkCheckDataDir = CheckDataDirAsDBSU
 var forkCheckPostgresRunning = CheckPostgresRunningAsDBSU
 var forkReadFileAsDBSU = utils.ReadFileAsDBSU
@@ -1559,7 +1559,7 @@ func verifyInstance(dbsu string, port int) error {
 	if err != nil {
 		return err
 	}
-	_, err = utils.DBSUCommandOutput(dbsu, forkPsqlProbeArgs(pg.Psql(), port))
+	_, err = utils.DBSUCommandStdout(dbsu, forkPsqlProbeArgs(pg.Psql(), port))
 	return err
 }
 
@@ -1701,7 +1701,7 @@ func isPortFree(port int) bool {
 }
 
 func hasPostmasterPID(dbsu, dataDir string) bool {
-	_, err := utils.DBSUCommandOutput(dbsu, []string{"cat", filepath.Join(dataDir, "postmaster.pid")})
+	_, err := utils.DBSUCommandStdout(dbsu, []string{"cat", filepath.Join(dataDir, "postmaster.pid")})
 	return err == nil
 }
 

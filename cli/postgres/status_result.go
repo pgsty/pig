@@ -274,10 +274,14 @@ func checkProcessRunningAsDBSUWithError(dbsu string, pid int) (bool, error) {
 	}
 
 	// Use kill -0 via DBSU privilege escalation
-	output, err := utils.DBSUCommandOutput(dbsu, []string{"kill", "-0", strconv.Itoa(pid)})
+	output, err := utils.DBSUCommandStdout(dbsu, []string{"kill", "-0", strconv.Itoa(pid)})
 	if err != nil {
 		if isPermissionOutput(output) || isPermissionErr(err) {
-			return false, fmt.Errorf("permission denied running kill -0: %s", strings.TrimSpace(output))
+			detail := strings.TrimSpace(output)
+			if detail == "" {
+				return false, fmt.Errorf("permission denied running kill -0: %w", err)
+			}
+			return false, fmt.Errorf("permission denied running kill -0: %s: %w", detail, err)
 		}
 		return false, nil
 	}

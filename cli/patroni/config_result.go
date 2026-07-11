@@ -65,7 +65,7 @@ func ConfigShowResult(dbsu string) *output.Result {
 
 	// 3. Execute show-config
 	args := []string{binPath, "-c", DefaultConfigPath, "show-config"}
-	yamlOutput, err := utils.DBSUCommandOutput(dbsu, args)
+	yamlOutput, err := utils.DBSUCommandStdout(dbsu, args)
 	if err != nil {
 		if isPermissionDenied(err, yamlOutput) {
 			return output.Fail(output.CodePtPermDenied,

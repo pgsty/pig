@@ -492,6 +492,45 @@ func TestConfigureNativeEndToEndAbsoluteOutput(t *testing.T) {
 	}
 }
 
+func TestConfigureNativeOutputUsesPrivateFileMode(t *testing.T) {
+	tmp := t.TempDir()
+	confDir := filepath.Join(tmp, "conf")
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	template := `all:
+  vars:
+    admin_ip: 10.10.10.10
+    region: default
+    pg_version: 18
+    grafana_admin_password: pigsty
+`
+	if err := os.WriteFile(filepath.Join(confDir, "meta.yml"), []byte(template), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(tmp, "generated.yml")
+	locale := false
+	result := ConfigureNative(ConfigureOptions{
+		PigstyHome:       tmp,
+		Mode:             "meta",
+		PrimaryIP:        "192.168.0.10",
+		OutputFile:       outPath,
+		Generate:         true,
+		LocaleAvailable:  &locale,
+		DisablePreflight: true,
+	})
+	if result == nil || !result.Success {
+		t.Fatalf("expected success, got %+v", result)
+	}
+	info, err := os.Stat(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("generated config mode = %04o, want 0600", got)
+	}
+}
+
 func TestConfigureNativeBetaPGSuggestsDedicatedTemplate(t *testing.T) {
 	tmp := t.TempDir()
 	confDir := filepath.Join(tmp, "conf")
