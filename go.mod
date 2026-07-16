@@ -1,6 +1,6 @@
 module pig
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/gofrs/uuid/v5 v5.4.0
