@@ -8,6 +8,7 @@ import (
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/inventory"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -254,6 +255,9 @@ func TestValidateInventoryDiagnosticsAndStrictWarnings(t *testing.T) {
 	if !ok {
 		t.Fatalf("validation data type = %T", result.Data)
 	}
+	if data.Kind != InventoryValidateKind {
+		t.Fatalf("validation kind = %q, want %q", data.Kind, InventoryValidateKind)
+	}
 	want := map[string]bool{"PIG_ADMIN_IP": false, "PIG_HOST_IP": false, "PIG_PG_CLUSTER": false, "PIG_SEQ_TYPE": false, "PIG_PG_ROLE": false, "PIG_PG_UPSTREAM": false}
 	for _, diagnostic := range data.Diagnostics {
 		if _, exists := want[diagnostic.Code]; exists {
@@ -271,11 +275,23 @@ func TestValidateInventoryDiagnosticsAndStrictWarnings(t *testing.T) {
 	if err := os.WriteFile(valid, []byte(warningSource), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if got := ValidateInventory(ValidateOptions{Path: valid}); !got.Success {
-		t.Fatalf("warning-only validation failed by default: %+v", got)
+	defaultResult := ValidateInventory(ValidateOptions{Path: valid})
+	if !defaultResult.Success {
+		t.Fatalf("warning-only validation failed by default: %+v", defaultResult)
 	}
-	if got := ValidateInventory(ValidateOptions{Path: valid, Strict: true}); got.Success {
+	strictResult := ValidateInventory(ValidateOptions{Path: valid, Strict: true})
+	if strictResult.Success {
 		t.Fatal("strict validation accepted warning")
+	}
+	defaultData := defaultResult.Data.(*ValidateData)
+	strictData := strictResult.Data.(*ValidateData)
+	if !reflect.DeepEqual(defaultData.Diagnostics, strictData.Diagnostics) {
+		t.Fatalf("strict rewrote diagnostics:\ndefault=%+v\nstrict=%+v", defaultData.Diagnostics, strictData.Diagnostics)
+	}
+	for _, diagnostic := range strictData.Diagnostics {
+		if diagnostic.Code == "INV_GROUP_NAME" && diagnostic.Severity != inventory.SeverityWarning {
+			t.Fatalf("strict rewrote warning severity: %+v", diagnostic)
+		}
 	}
 }
 
@@ -286,11 +302,45 @@ func TestValidateMalformedYAMLReturnsStableDiagnostic(t *testing.T) {
 	}
 	result := ValidateInventory(ValidateOptions{Path: path})
 	data, ok := result.Data.(*ValidateData)
-	if result.Success || !ok || len(data.Diagnostics) != 1 || data.Diagnostics[0].Code != "YAML_PARSE" {
+	if result.Success || !ok || data.Kind != InventoryValidateKind || len(data.Diagnostics) != 1 || data.Diagnostics[0].Code != "YAML_PARSE" {
 		t.Fatalf("malformed validation result = %+v", result)
 	}
 	if strings.Contains(strings.ToLower(data.Diagnostics[0].Message), "secret") {
 		t.Fatal("parse diagnostic leaked source content")
+	}
+}
+
+func TestValidateRequiresCompleteStaticInventorySource(t *testing.T) {
+	dir := t.TempDir()
+	if result := ValidateInventory(ValidateOptions{Path: dir}); result.Success || result.Code != output.CodeStyValidateInvalidArgs {
+		t.Fatalf("directory validation result = %+v", result)
+	}
+
+	dynamic := filepath.Join(t.TempDir(), "dynamic.yml")
+	if err := os.WriteFile(dynamic, []byte("#!/bin/sh\necho all:\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if result := ValidateInventory(ValidateOptions{Path: dynamic}); result.Success || result.Code != output.CodeStyValidateInvalidArgs {
+		t.Fatalf("dynamic validation result = %+v", result)
+	}
+
+	partial := filepath.Join(t.TempDir(), "partial.yml")
+	if err := os.WriteFile(partial, []byte("all:\n  vars:\n    version: v4.4.0\n    admin_ip: 10.0.0.1\n    region: default\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result := ValidateInventory(ValidateOptions{Path: partial})
+	data, ok := result.Data.(*ValidateData)
+	if result.Success || !ok {
+		t.Fatalf("partial validation result = %+v", result)
+	}
+	found := false
+	for _, diagnostic := range data.Diagnostics {
+		if diagnostic.Code == "INV_CHILDREN_REQUIRED" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing complete-file diagnostic: %+v", data.Diagnostics)
 	}
 }
 

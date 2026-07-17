@@ -80,10 +80,12 @@ func TestStyInventoryCommandsAndFlags(t *testing.T) {
 		{args: []string{"sty", "inventory", "list"}, want: pigstyInventoryListCmd},
 		{args: []string{"sty", "inventory", "show"}, want: pigstyInventoryShowCmd},
 		{args: []string{"sty", "inventory", "edit"}, want: pigstyInventoryEditCmd},
+		{args: []string{"sty", "inventory", "validate"}, want: pigstyInventoryValidateCmd},
 		{args: []string{"sty", "edit"}, want: pigstyEditCmd},
 		{args: []string{"sty", "e"}, want: pigstyEditCmd},
 		{args: []string{"sty", "validate"}, want: pigstyValidateCmd},
 		{args: []string{"sty", "val"}, want: pigstyValidateCmd},
+		{args: []string{"sty", "v"}, want: pigstyValidateCmd},
 	} {
 		found, _, err := rootCmd.Find(test.args)
 		if err != nil {
@@ -93,8 +95,10 @@ func TestStyInventoryCommandsAndFlags(t *testing.T) {
 			t.Fatalf("Find(%v) = %v, want %v", test.args, found, test.want)
 		}
 	}
-	if pigstyValidateCmd.Flags().Lookup("strict") == nil || pigstyValidateCmd.Flags().Lookup("ansible") == nil {
-		t.Fatal("pig sty validate is missing --strict or --ansible")
+	for _, command := range []*cobra.Command{pigstyInventoryValidateCmd, pigstyValidateCmd} {
+		if command.Flags().Lookup("strict") == nil || command.Flags().Lookup("ansible") == nil {
+			t.Fatalf("%s is missing --strict or --ansible", command.CommandPath())
+		}
 	}
 	if pigstyEditCmd.Flags().Lookup("output") != nil {
 		t.Fatal("pig sty edit must not shadow the global output flag")
@@ -105,14 +109,18 @@ func TestStyInventoryCanonicalAndDelegateUseCases(t *testing.T) {
 	originalEdit := pigstyEditExec
 	originalList := pigstyInventoryListExec
 	originalShow := pigstyInventoryShowExec
+	originalValidate := pigstyValidateExec
 	originalPath := config.PigstyConfig
 	originalFormat := config.OutputFormat
+	originalStrict, originalAnsible := pigstyValidateStrict, pigstyValidateAnsible
 	defer func() {
 		pigstyEditExec = originalEdit
 		pigstyInventoryListExec = originalList
 		pigstyInventoryShowExec = originalShow
+		pigstyValidateExec = originalValidate
 		config.PigstyConfig = originalPath
 		config.OutputFormat = originalFormat
+		pigstyValidateStrict, pigstyValidateAnsible = originalStrict, originalAnsible
 	}()
 	config.PigstyConfig = "/tmp/selected.yml"
 	config.OutputFormat = config.OUTPUT_TEXT
@@ -162,6 +170,24 @@ func TestStyInventoryCanonicalAndDelegateUseCases(t *testing.T) {
 	}
 	if shown.String() != "secret: exact\n" {
 		t.Fatalf("show output = %q", shown.String())
+	}
+
+	pigstyValidateStrict, pigstyValidateAnsible = true, true
+	var validated []stycli.ValidateOptions
+	pigstyValidateExec = func(opts stycli.ValidateOptions) *output.Result {
+		validated = append(validated, opts)
+		return output.OK("validated", nil)
+	}
+	_ = captureStdout(t, func() {
+		if err := pigstyValidateCmd.RunE(pigstyValidateCmd, []string{"/tmp/explicit.yml"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := pigstyInventoryValidateCmd.RunE(pigstyInventoryValidateCmd, []string{"/tmp/explicit.yml"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if len(validated) != 2 || validated[0] != validated[1] || validated[0].Path != "/tmp/explicit.yml" || !validated[0].Strict || !validated[0].Ansible {
+		t.Fatalf("validate delegates = %+v", validated)
 	}
 }
 

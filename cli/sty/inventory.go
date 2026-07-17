@@ -95,29 +95,37 @@ func ShowInventory(opts InventoryOptions) ([]byte, *output.Result) {
 }
 
 func loadStaticInventory(path string, invalidCode int) (*inventory.Document, *output.Result) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil, output.Fail(output.CodeStyInventoryNotFound, "inventory path is not configured")
-	}
-	info, err := os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, output.Fail(output.CodeStyInventoryNotFound, fmt.Sprintf("inventory not found: %s", path))
-	}
-	if err != nil {
-		return nil, output.Fail(output.CodeStyInventoryReadFailed, fmt.Sprintf("failed to inspect inventory: %v", err))
-	}
-	if failure := staticInventorySourceFailure(info, invalidCode); failure != nil {
+	path, source, failure := readStaticInventorySource(path, invalidCode)
+	if failure != nil {
 		return nil, failure
-	}
-	source, err := os.ReadFile(path)
-	if err != nil {
-		return nil, output.Fail(output.CodeStyInventoryReadFailed, fmt.Sprintf("failed to read inventory: %v", err))
 	}
 	doc, err := inventory.Parse(path, source)
 	if err != nil {
 		return nil, output.Fail(output.CodeStyInventoryInvalid, "inventory YAML could not be parsed").WithDetail(parseErrorSummary(err))
 	}
 	return doc, nil
+}
+
+func readStaticInventorySource(path string, invalidCode int) (string, []byte, *output.Result) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return path, nil, output.Fail(output.CodeStyInventoryNotFound, "inventory path is not configured")
+	}
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return path, nil, output.Fail(output.CodeStyInventoryNotFound, fmt.Sprintf("inventory not found: %s", path))
+	}
+	if err != nil {
+		return path, nil, output.Fail(output.CodeStyInventoryReadFailed, fmt.Sprintf("failed to inspect inventory: %v", err))
+	}
+	if failure := staticInventorySourceFailure(info, invalidCode); failure != nil {
+		return path, nil, failure
+	}
+	source, err := os.ReadFile(path)
+	if err != nil {
+		return path, nil, output.Fail(output.CodeStyInventoryReadFailed, fmt.Sprintf("failed to read inventory: %v", err))
+	}
+	return path, source, nil
 }
 
 func staticInventorySourceFailure(info os.FileInfo, invalidCode int) *output.Result {

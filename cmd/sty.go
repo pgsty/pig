@@ -56,7 +56,8 @@ var styCmd = &cobra.Command{
   pig sty inventory list [selector]     # list ordered, redacted inventory metadata
   pig sty inventory show [selector]     # show verbatim YAML in text mode
   pig sty inventory edit [selector]     # edit inventory or one YAML fragment
-  pig sty validate [file]               # validate a Pigsty inventory
+  pig sty inventory validate [file]     # validate a Pigsty inventory
+  pig sty validate [file]               # delegate to inventory validate
   pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
   pig sty get                     # download pigsty source tarball
   pig sty list                    # list available pigsty versions
@@ -302,25 +303,51 @@ func styInventorySelector(args []string) string {
 	return ""
 }
 
+const styInventoryValidateLong = `Validate one complete static Pigsty Inventory with deterministic native rules.
+
+The validator analyzes declarations only; it does not resolve Ansible effective
+variables. --ansible adds a bounded compatibility parse whose stdout is discarded.`
+
+var pigstyInventoryValidateCmd = &cobra.Command{
+	Use:         "validate [file]",
+	Short:       "Validate a complete static Pigsty Inventory",
+	Annotations: ancsAnn("pig sty inventory validate", "query", "stable", "safe", true, "safe", "none", "current", 1000),
+	Args:        cobra.MaximumNArgs(1),
+	Long:        styInventoryValidateLong,
+	Example: `  pig sty inventory validate
+  pig sty inventory validate ./pigsty.yml
+  pig sty inventory validate --ansible
+  pig sty inventory validate --strict -o json`,
+	RunE: runPigstyInventoryValidate,
+}
+
 var pigstyValidateCmd = &cobra.Command{
 	Use:         "validate [file]",
-	Short:       "Validate a Pigsty inventory",
+	Short:       "Validate a Pigsty Inventory (inventory validate delegate)",
 	Annotations: ancsAnn("pig sty validate", "query", "stable", "safe", true, "safe", "none", "current", 1000),
-	Aliases:     []string{"val"},
+	Aliases:     []string{"val", "v"},
 	Args:        cobra.MaximumNArgs(1),
+	Long:        styInventoryValidateLong,
 	Example: `  pig sty validate
   pig sty validate ./pigsty.yml
   pig sty validate --ansible
   pig sty validate --strict -o json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		path := config.PigstyConfig
-		if len(args) == 1 {
-			path = args[0]
-		}
-		return handleAuxResult(pigstyValidateExec(stycli.ValidateOptions{
-			Path: path, Strict: pigstyValidateStrict, Ansible: pigstyValidateAnsible,
-		}))
-	},
+	RunE: runPigstyInventoryValidate,
+}
+
+func runPigstyInventoryValidate(_ *cobra.Command, args []string) error {
+	path := config.PigstyConfig
+	if len(args) == 1 {
+		path = args[0]
+	}
+	return handleAuxResult(pigstyValidateExec(stycli.ValidateOptions{
+		Path: path, Strict: pigstyValidateStrict, Ansible: pigstyValidateAnsible,
+	}))
+}
+
+func addStyValidateFlags(command *cobra.Command) {
+	command.Flags().BoolVar(&pigstyValidateStrict, "strict", false, "treat warnings as validation failures")
+	command.Flags().BoolVar(&pigstyValidateAnsible, "ansible", false, "also parse with a bounded ansible-inventory adapter")
 }
 
 func styConfigureParams(region string) map[string]interface{} {
@@ -528,8 +555,8 @@ func init() {
 
 	addStyConfigureFlags(pigstyConfCmd)
 	pigstyConfCmd.Flags().BoolVar(&pigstyConfRaw, "raw", false, "use raw shell configure implementation")
-	pigstyValidateCmd.Flags().BoolVar(&pigstyValidateStrict, "strict", false, "treat warnings as validation failures")
-	pigstyValidateCmd.Flags().BoolVar(&pigstyValidateAnsible, "ansible", false, "also validate with ansible-inventory")
+	addStyValidateFlags(pigstyInventoryValidateCmd)
+	addStyValidateFlags(pigstyValidateCmd)
 
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
@@ -540,7 +567,7 @@ func init() {
 	pigstyReleaseGetCmd.Flags().BoolVarP(&pigstyGetMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 	pigstyReleaseListCmd.Flags().BoolVarP(&pigstyListMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
-	pigstyInventoryCmd.AddCommand(pigstyInventoryListCmd, pigstyInventoryShowCmd, pigstyInventoryEditCmd)
+	pigstyInventoryCmd.AddCommand(pigstyInventoryListCmd, pigstyInventoryShowCmd, pigstyInventoryEditCmd, pigstyInventoryValidateCmd)
 	pigstyReleaseCmd.AddCommand(pigstyReleaseListCmd, pigstyReleaseGetCmd)
 	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyInventoryCmd, pigstyEditCmd, pigstyValidateCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
 }

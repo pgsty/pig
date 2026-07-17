@@ -2,9 +2,7 @@ package sty
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"pig/internal/output"
 	"pig/inventory"
 	"regexp"
@@ -12,6 +10,8 @@ import (
 	"strings"
 	"time"
 )
+
+const InventoryValidateKind = "pig.sty.inventory.validate/v1"
 
 // ValidateOptions controls static and optional external inventory validation.
 type ValidateOptions struct {
@@ -23,6 +23,7 @@ type ValidateOptions struct {
 
 // ValidateData is the stable structured validation payload.
 type ValidateData struct {
+	Kind        string                 `json:"kind" yaml:"kind"`
 	Path        string                 `json:"path" yaml:"path"`
 	Valid       bool                   `json:"valid" yaml:"valid"`
 	Strict      bool                   `json:"strict" yaml:"strict"`
@@ -46,26 +47,17 @@ func (d *ValidateData) Text() string {
 
 // ValidateInventory parses and validates one static YAML inventory.
 func ValidateInventory(opts ValidateOptions) *output.Result {
-	path := strings.TrimSpace(opts.Path)
-	if path == "" {
-		return output.Fail(output.CodeStyInventoryNotFound, "inventory path is not configured")
-	}
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return output.Fail(output.CodeStyInventoryNotFound, fmt.Sprintf("inventory not found: %s", path))
-	} else if err != nil {
-		return output.Fail(output.CodeStyValidateInvalidArgs, fmt.Sprintf("failed to inspect inventory: %v", err))
-	}
-	source, err := os.ReadFile(path)
-	if err != nil {
-		return output.Fail(output.CodeStyValidateInvalidArgs, fmt.Sprintf("failed to read inventory: %v", err))
+	path, source, failure := readStaticInventorySource(opts.Path, output.CodeStyValidateInvalidArgs)
+	if failure != nil {
+		return failure
 	}
 	doc, err := inventory.Parse(path, source)
 	if err != nil {
 		diagnostic := parseDiagnostic(err)
-		data := &ValidateData{Path: path, Strict: opts.Strict, Diagnostics: []inventory.Diagnostic{diagnostic}}
+		data := &ValidateData{Kind: InventoryValidateKind, Path: path, Strict: opts.Strict, Diagnostics: []inventory.Diagnostic{diagnostic}}
 		return output.Fail(output.CodeStyValidationFailed, "inventory is invalid").WithData(data)
 	}
-	diagnostics := doc.Validate()
+	diagnostics := doc.Validate(inventory.YAMLRules, inventory.AnsibleRules, inventory.PigstyRules, inventory.CompleteInventoryRules)
 	if opts.Ansible {
 		timeout := opts.Timeout
 		if timeout <= 0 {
@@ -77,7 +69,7 @@ func ValidateInventory(opts ValidateOptions) *output.Result {
 	}
 	inventory.SortDiagnostics(diagnostics)
 	failed := inventory.HasErrors(diagnostics) || opts.Strict && hasWarnings(diagnostics)
-	data := &ValidateData{Path: path, Valid: !failed, Strict: opts.Strict, Diagnostics: diagnostics}
+	data := &ValidateData{Kind: InventoryValidateKind, Path: path, Valid: !failed, Strict: opts.Strict, Diagnostics: diagnostics}
 	if failed {
 		return output.Fail(output.CodeStyValidationFailed, "inventory validation failed").WithData(data)
 	}
