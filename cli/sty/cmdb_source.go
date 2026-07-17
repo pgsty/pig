@@ -26,6 +26,7 @@ type CMDBSourceResolveOptions struct {
 	UserHome            string
 	UserConfigPath      string
 	RuntimeRoot         string
+	RuntimePath         string
 	PigBinary           string
 	LookupEnv           func(string) (string, bool)
 }
@@ -69,7 +70,7 @@ func ResolveCMDBSource(options CMDBSourceResolveOptions) (CMDBSourceResolution, 
 	if failure != nil {
 		return resolution, failure
 	}
-	runtimeContext := newCMDBRuntimeSourceContext(home, options.RuntimeRoot, options.PigBinary)
+	runtimeContext := newCMDBRuntimeSourceContext(home, options.RuntimeRoot, options.RuntimePath, options.PigBinary)
 
 	persistent, persistentPresent, persistentCode := resolvePersistentCMDBSource(home, runtimeContext)
 	resolution.Persistent = persistent
@@ -167,7 +168,7 @@ func resolveCMDBSourceValue(value, base, userHome string, origin CMDBSourceOrigi
 	if !ok {
 		return CMDBSourceDescriptor{
 			Kind: CMDBSourceUnsupported, Origin: origin,
-			Locator: strings.TrimSpace(value), Persistent: persistent,
+			Persistent: persistent,
 		}, "CMDB_SOURCE_UNSUPPORTED"
 	}
 	return classifyCMDBSourcePath(path, origin, persistent, forceStatic, runtimeContext)
@@ -211,11 +212,21 @@ func classifyCMDBSourcePath(path string, origin CMDBSourceOrigin, persistent, fo
 	return descriptor, ""
 }
 
-func newCMDBRuntimeSourceContext(home, runtimeRoot, pigBinary string) cmdbRuntimeSourceContext {
+func newCMDBRuntimeSourceContext(home, runtimeRoot, runtimePath, pigBinary string) cmdbRuntimeSourceContext {
 	context := cmdbRuntimeSourceContext{pigBinary: pigBinary}
-	recordPath, err := cmdb.RuntimeRecordPath(home, runtimeRoot)
-	if err != nil {
-		return context
+	recordPath := runtimePath
+	if recordPath == "" {
+		var err error
+		recordPath, err = cmdb.RuntimeRecordPath(home, runtimeRoot)
+		if err != nil {
+			return context
+		}
+	} else {
+		absolute, err := filepath.Abs(recordPath)
+		if err != nil {
+			return context
+		}
+		recordPath = filepath.Clean(absolute)
 	}
 	context.recordPath = recordPath
 	context.expectedAdapter = filepath.Join(filepath.Dir(recordPath), "inventory")
@@ -336,11 +347,18 @@ func readCMDBUserInventory(name string) (string, bool, error) {
 		if key.Kind != yaml.ScalarNode || key.Value != "inventory" {
 			continue
 		}
-		if found || item.Kind != yaml.ScalarNode || item.Tag != "!!str" {
+		if found || item.Kind != yaml.ScalarNode {
 			return "", false, errors.New("invalid user inventory value")
 		}
 		found = true
-		value = item.Value
+		switch item.Tag {
+		case "!!str":
+			value = item.Value
+		case "!!null":
+			value = ""
+		default:
+			return "", false, errors.New("invalid user inventory value")
+		}
 	}
 	return value, found, nil
 }

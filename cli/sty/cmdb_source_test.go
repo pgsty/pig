@@ -41,6 +41,9 @@ func TestResolveCMDBSourceExactPrecedenceAndPersistentDescriptor(t *testing.T) {
 	writeCMDBSourceFile(t, fixture.userConfig, "license: test\n", 0o600)
 	resolution, failure = ResolveCMDBSource(options)
 	assertCMDBSource(t, failure, resolution.Effective, CMDBSourceStatic, CMDBSourceAnsibleConfig, persistentPath, true)
+	writeCMDBSourceFile(t, fixture.userConfig, "inventory: null\n", 0o600)
+	resolution, failure = ResolveCMDBSource(options)
+	assertCMDBSource(t, failure, resolution.Effective, CMDBSourceStatic, CMDBSourceAnsibleConfig, persistentPath, true)
 
 	if err := os.Remove(fixture.ansibleConfig); err != nil {
 		t.Fatal(err)
@@ -82,6 +85,9 @@ func TestResolveCMDBSourceSelectedInvalidTierNeverFallsThrough(t *testing.T) {
 			if failure == nil || resolution.Effective.Kind != CMDBSourceUnsupported ||
 				resolution.Effective.Origin != CMDBSourceEnvironment || resolution.Effective.Locator == fallback {
 				t.Fatalf("selected %q fell through: resolution=%+v failure=%+v", selected, resolution, failure)
+			}
+			if name == "list" && resolution.Effective.Locator != "" {
+				t.Fatalf("invalid source grammar was echoed as locator: %+v", resolution.Effective)
 			}
 		})
 	}
