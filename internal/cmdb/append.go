@@ -51,18 +51,14 @@ func (s *Store) appendRevision(ctx context.Context, request appendRequest) (Appe
 	if request.expectedHead != nil && request.expectedHead.String() == "" {
 		return AppendResult{}, invalidRevisionToken()
 	}
-	if err := validateToolVersion(request.static.ToolVersion); err != nil {
-		return AppendResult{}, err
-	}
 	if request.kind == appendStatic {
-		if request.static.Snapshot == nil || !validCanonicalStaticLocator(request.static.SourceLocator) {
-			return AppendResult{}, failure("CMDB_PARAMETER_INVALID", "static Snapshot provenance is invalid")
-		}
-		parsed, err := inventory.ParseSnapshot(request.static.Snapshot.CanonicalBytes())
-		if err != nil || !parsed.Equal(request.static.Snapshot) {
-			return AppendResult{}, failure("CMDB_SNAPSHOT_INVALID", "static Snapshot is not canonical CMDB v1 data")
+		if err := validateStaticLoad(request.static); err != nil {
+			return AppendResult{}, err
 		}
 	} else if request.kind == appendRollback {
+		if err := validateToolVersion(request.static.ToolVersion); err != nil {
+			return AppendResult{}, err
+		}
 		if request.target.String() == "" {
 			return AppendResult{}, invalidRevisionToken()
 		}
