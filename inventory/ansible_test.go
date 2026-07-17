@@ -21,7 +21,7 @@ func TestValidateWithAnsibleDiscardsAndRedactsSecrets(t *testing.T) {
 	}
 	dir := t.TempDir()
 	success := filepath.Join(dir, "ansible-success")
-	if err := os.WriteFile(success, []byte("#!/bin/sh\nmode=$(stat -c '%a' \"$2\" 2>/dev/null || stat -f '%Lp' \"$2\")\n[ \"$mode\" = 600 ] || { echo \"candidate mode $mode\" >&2; exit 9; }\necho 'password: leaked-on-stdout'\nexit 0\n"), 0700); err != nil {
+	if err := os.WriteFile(success, []byte("#!/bin/sh\n[ \"$#\" = 3 ] && [ \"$1\" = -i ] && [ \"$3\" = --list ] || { echo 'unexpected arguments' >&2; exit 8; }\nmode=$(stat -c '%a' \"$2\" 2>/dev/null || stat -f '%Lp' \"$2\")\n[ \"$mode\" = 600 ] || { echo \"candidate mode $mode\" >&2; exit 9; }\necho 'password: leaked-on-stdout'\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if diagnostics := ValidateWithAnsible(context.Background(), success, doc); len(diagnostics) != 0 {

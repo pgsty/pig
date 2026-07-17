@@ -258,16 +258,24 @@ const (
 	CodeStyValidateInvalidArgs       = MODULE_STY + CAT_PARAM + 3     // Invalid inventory validation arguments
 	CodeStyInventoryListInvalidArgs  = MODULE_STY + CAT_PARAM + 4     // Invalid inventory list arguments
 	CodeStyInventoryShowInvalidArgs  = MODULE_STY + CAT_PARAM + 5     // Invalid inventory show arguments
+	CodeStyCheckInvalidArgs          = MODULE_STY + CAT_PARAM + 6     // Invalid Check profile or probe arguments
+	CodeStyCheckPermissionDenied     = MODULE_STY + CAT_PERM + 1      // Check observed a permission or privilege failure
+	CodeStyCheckDependencyMissing    = MODULE_STY + CAT_DEPEND + 1    // A required local Check executable is unavailable
+	CodeStyCheckNetworkFailed        = MODULE_STY + CAT_NETWORK + 1   // A selected target failed its TCP reachability probe
 	CodeStyConfigureTemplateNotFound = MODULE_STY + CAT_RESOURCE + 1  // Configure template file not found
 	CodeStyInventoryNotFound         = MODULE_STY + CAT_RESOURCE + 2  // Inventory file not found
+	CodeStyCheckResourceMissing      = MODULE_STY + CAT_RESOURCE + 3  // Pigsty home or required project layout is unavailable
 	CodeStyInventoryInvalid          = MODULE_STY + CAT_CONFIG + 1    // Inventory YAML or semantics are invalid
 	CodeStyValidationFailed          = MODULE_STY + CAT_CONFIG + 2    // Inventory validation reported diagnostics
+	CodeStyCheckValidationFailed     = MODULE_STY + CAT_CONFIG + 3    // Check found an invalid active Inventory
 	CodeStyEditConflict              = MODULE_STY + CAT_STATE + 1     // Inventory changed during an edit session
 	CodeStyConfigureFailed           = MODULE_STY + CAT_OPERATION + 1 // Configure generation failed
 	CodeStyConfigureWriteFailed      = MODULE_STY + CAT_OPERATION + 2 // Configure output write failed
 	CodeStyEditFailed                = MODULE_STY + CAT_OPERATION + 3 // Editor or fragment replacement failed
 	CodeStyEditWriteFailed           = MODULE_STY + CAT_OPERATION + 4 // Edited inventory could not be written
 	CodeStyInventoryReadFailed       = MODULE_STY + CAT_OPERATION + 5 // Inventory could not be read
+	CodeStyCheckProbeFailed          = MODULE_STY + CAT_OPERATION + 6 // A bounded local or Ansible Check probe failed
+	CodeStyCheckSSHFailed            = MODULE_STY + CAT_OPERATION + 7 // An allowlisted SSH observation failed
 )
 
 // System module specific codes (MODULE_SYSTEM = 990000)
