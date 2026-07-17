@@ -915,8 +915,16 @@ Owner approval unlocks code in this order only:
    merge fixtures; no DB write. Functional commits: `ad23ddf`, `1ad05de`, and
    `73b3ffc`. The final package/full tests, race tests, `go vet ./...`, and
    `git diff --check` passed with the pre-existing `go.sum` change excluded.
-2. **P2.2 PostgreSQL adapter:** bounded connection, embedded migrations,
-   immutable revision store, CAS, reset backup/restore, and container gates.
+2. **P2.2 PostgreSQL adapter — PASSED 2026-07-17:** bounded secret-safe
+   connection, embedded migration/shape validation, immutable revision store,
+   exact CAS, versioned reset backup/restore, and fail-closed destructive
+   guards. Functional commits: `a923827`, `7d9097c`, `b23cb1d`, and `7c8668c`.
+   The full package compatibility suite passed on the pinned PostgreSQL 14
+   reference (selected `linux/arm64@sha256:f838127495dec165fa388f047a8908a0464eb1aa3995a53e0bb12798baac528e`),
+   and the complete PostgreSQL 18 container race gate passed (selected
+   `linux/arm64@sha256:122c9942437efcbbb8d595fc578dee7d26ee1543c2a8634d183adfa4a1e55b4d`).
+   The final full tests, full race tests, `go vet ./...`, and
+   `git diff --check` passed with the pre-existing `go.sum` change excluded.
 3. **P2.3 Load/dump/check:** plans, confirmation, rollback, provenance, raw-body
    separation, and split-brain diagnostics.
 4. **P2.4 Source switch:** runtime adapter, strict parser, backups, atomic narrow
