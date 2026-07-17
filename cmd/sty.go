@@ -39,6 +39,13 @@ var (
 	pigstyCheckSudo          bool
 	pigstyCheckPort          int
 	pigstyCheckUser          string
+	pigstyDashboardEndpoint  string
+	pigstyDashboardUsername  string
+	pigstyDashboardPassword  string
+	pigstyDashboardManifest  string
+	pigstyDashboardDumpDir   string
+	pigstyDashboardPrune     bool
+	pigstyDashboardYes       bool
 
 	pigstyDownloadDir string
 	pigstyVersion     string
@@ -63,6 +70,8 @@ var styCmd = &cobra.Command{
   pig sty inventory validate [file]     # validate a Pigsty inventory
   pig sty validate [file]               # delegate to inventory validate
   pig sty check                         # local readiness; remote profiles are opt-in
+  pig sty dashboard list|check|diff     # inspect repository-managed Grafana state
+  pig sty dashboard init|dump|clean     # reconcile, export, or remove managed UIDs
   pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
   pig sty get                     # download pigsty source tarball
   pig sty list                    # list available pigsty versions
@@ -393,6 +402,124 @@ var pigstyCheckCmd = &cobra.Command{
 	},
 }
 
+var pigstyDashboardCmd = &cobra.Command{
+	Use:         "dashboard",
+	Aliases:     []string{"ds"},
+	Short:       "Manage manifest-owned Grafana dashboards and datasources",
+	Annotations: ancsAnn("pig sty dashboard", "query", "volatile", "safe", true, "safe", "none", "current", 100),
+	Long: `Manage Grafana through the native HTTP API and a versioned repository manifest.
+
+UID membership in the active manifest defines ownership. Folder placement does
+not confer ownership, copied dashboards are left untouched, and removed UIDs
+can be deleted only through tombstone-aware init --prune.`,
+}
+
+var pigstyDashboardListCmd = &cobra.Command{
+	Use:         "list",
+	Short:       "List managed, tombstoned, and unmanaged Grafana resources",
+	Annotations: ancsAnn("pig sty dashboard list", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
+	Args:        cobra.NoArgs,
+	RunE: func(_ *cobra.Command, _ []string) error {
+		return handleAuxResult(pigstyDashboardListExec(styDashboardOptions()))
+	},
+}
+
+var pigstyDashboardCheckCmd = &cobra.Command{
+	Use:         "check",
+	Short:       "Check manifest integrity and Grafana API compatibility",
+	Annotations: ancsAnn("pig sty dashboard check", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
+	Args:        cobra.NoArgs,
+	RunE: func(_ *cobra.Command, _ []string) error {
+		return handleAuxResult(pigstyDashboardCheckExec(styDashboardOptions()))
+	},
+}
+
+var pigstyDashboardDiffCmd = &cobra.Command{
+	Use:         "diff",
+	Short:       "Show normalized repository-versus-live Grafana drift",
+	Annotations: ancsAnn("pig sty dashboard diff", "query", "volatile", "safe", true, "safe", "none", "current", 10000),
+	Args:        cobra.NoArgs,
+	RunE: func(_ *cobra.Command, _ []string) error {
+		return handleAuxResult(pigstyDashboardDiffExec(styDashboardOptions()))
+	},
+}
+
+var pigstyDashboardInitCmd = &cobra.Command{
+	Use:         "init",
+	Short:       "Idempotently upsert active manifest resources",
+	Annotations: ancsAnn("pig sty dashboard init", "action", "volatile", "restricted", true, "medium", "recommended", "current", 30000),
+	Args:        cobra.NoArgs,
+	Long: `Idempotently upsert active manifest resources without a global clean.
+
+--prune additionally selects only live UIDs in removed-UID tombstone lineage.
+That deletion plan requires an interactive confirmation or --yes.`,
+	RunE: func(_ *cobra.Command, _ []string) error {
+		return runPigstyDashboardConfirmed(
+			styDashboardOptions(), pigstyDashboardInitExec,
+			"dashboard tombstone deletion plan",
+			"This will delete only live Grafana UIDs in the manifest tombstone lineage.",
+			"pig sty dashboard init --prune",
+		)
+	},
+}
+
+var pigstyDashboardDumpCmd = &cobra.Command{
+	Use:         "dump",
+	Short:       "Atomically export managed dashboards to a new directory",
+	Annotations: ancsAnn("pig sty dashboard dump", "action", "volatile", "safe", false, "low", "none", "current", 30000),
+	Args:        cobra.NoArgs,
+	Long: `Export active manifest dashboards through private atomic staging.
+
+Datasource credentials are never exported; dump is not a datasource backup or
+restore mechanism. The destination supplied by --dir must not already exist.`,
+	RunE: func(_ *cobra.Command, _ []string) error {
+		return handleAuxResult(pigstyDashboardDumpExec(styDashboardOptions()))
+	},
+}
+
+var pigstyDashboardCleanCmd = &cobra.Command{
+	Use:         "clean",
+	Short:       "Delete active manifest-owned Grafana resources",
+	Annotations: ancsAnn("pig sty dashboard clean", "action", "volatile", "unsafe", true, "high", "required", "current", 30000),
+	Args:        cobra.NoArgs,
+	Long: `Delete only active dashboard and datasource UIDs in the manifest.
+
+Unmanaged copies and tombstoned resources are outside this command's scope.
+Placement folders are deleted only after they are empty.`,
+	RunE: func(_ *cobra.Command, _ []string) error {
+		return runPigstyDashboardConfirmed(
+			styDashboardOptions(), pigstyDashboardCleanExec,
+			"dashboard managed-resource deletion plan",
+			"This will delete active manifest-owned Grafana dashboards and datasources.",
+			"pig sty dashboard clean",
+		)
+	},
+}
+
+func styDashboardOptions() stycli.DashboardOptions {
+	return stycli.DashboardOptions{
+		Home: config.PigstyHome, Inventory: config.PigstyConfig,
+		Manifest: pigstyDashboardManifest, Endpoint: pigstyDashboardEndpoint,
+		Username: pigstyDashboardUsername, PasswordFile: pigstyDashboardPassword,
+		DumpDir: pigstyDashboardDumpDir, Prune: pigstyDashboardPrune, Yes: pigstyDashboardYes,
+	}
+}
+
+func runPigstyDashboardConfirmed(options stycli.DashboardOptions, execute func(stycli.DashboardOptions) *output.Result, planMessage, warning, action string) error {
+	result := execute(options)
+	if result == nil || result.Code != output.CodeStyDashboardConfirmationRequired || config.IsStructuredOutput() {
+		return handleAuxResult(result)
+	}
+	if err := output.Print(output.OK(planMessage, result.Data)); err != nil {
+		return err
+	}
+	if err := highRiskTextConfirm(warning, action); err != nil {
+		return err
+	}
+	options.Yes = true
+	return handleAuxResult(execute(options))
+}
+
 func styConfigureParams(region string) map[string]interface{} {
 	return map[string]interface{}{
 		"conf":            pigstyConfName,
@@ -545,13 +672,19 @@ func runPigstyReleaseGet(args []string) error {
 }
 
 var (
-	pigstyGetExec           = stycli.Download
-	pigstyListExec          = stycli.ListVersionsWithOptions
-	pigstyEditExec          = stycli.Edit
-	pigstyValidateExec      = stycli.ValidateInventory
-	pigstyCheckExec         = stycli.Check
-	pigstyInventoryListExec = stycli.ListInventory
-	pigstyInventoryShowExec = stycli.ShowInventory
+	pigstyGetExec            = stycli.Download
+	pigstyListExec           = stycli.ListVersionsWithOptions
+	pigstyEditExec           = stycli.Edit
+	pigstyValidateExec       = stycli.ValidateInventory
+	pigstyCheckExec          = stycli.Check
+	pigstyInventoryListExec  = stycli.ListInventory
+	pigstyInventoryShowExec  = stycli.ShowInventory
+	pigstyDashboardListExec  = stycli.DashboardList
+	pigstyDashboardCheckExec = stycli.DashboardCheck
+	pigstyDashboardDiffExec  = stycli.DashboardDiff
+	pigstyDashboardInitExec  = stycli.DashboardInit
+	pigstyDashboardDumpExec  = stycli.DashboardDump
+	pigstyDashboardCleanExec = stycli.DashboardClean
 )
 
 var pigstyDeployCmd = &cobra.Command{
@@ -605,6 +738,14 @@ func init() {
 	pigstyCheckCmd.Flags().BoolVar(&pigstyCheckSudo, "sudo", false, "with the ssh profile, also observe sudo -n true")
 	pigstyCheckCmd.Flags().IntVar(&pigstyCheckPort, "port", 22, "TCP/SSH target port (no Inventory effective-var inference)")
 	pigstyCheckCmd.Flags().StringVar(&pigstyCheckUser, "user", "", "explicit SSH user (defaults to the controller user)")
+	pigstyDashboardCmd.PersistentFlags().StringVar(&pigstyDashboardEndpoint, "endpoint", "", "Grafana origin and optional path prefix")
+	pigstyDashboardCmd.PersistentFlags().StringVar(&pigstyDashboardUsername, "username", "", "Grafana API username")
+	pigstyDashboardCmd.PersistentFlags().StringVar(&pigstyDashboardPassword, "password-file", "", "owner-only file containing the Grafana API password")
+	pigstyDashboardCmd.PersistentFlags().StringVar(&pigstyDashboardManifest, "manifest", "", "explicit versioned Grafana manifest path")
+	pigstyDashboardInitCmd.Flags().BoolVar(&pigstyDashboardPrune, "prune", false, "delete only live UIDs in removed-UID tombstone lineage")
+	pigstyDashboardInitCmd.Flags().BoolVarP(&pigstyDashboardYes, "yes", "y", false, "confirm the tombstone deletion plan")
+	pigstyDashboardDumpCmd.Flags().StringVar(&pigstyDashboardDumpDir, "dir", "", "new destination directory for the atomic export")
+	pigstyDashboardCleanCmd.Flags().BoolVarP(&pigstyDashboardYes, "yes", "y", false, "confirm deletion of active manifest-owned resources")
 
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
@@ -616,6 +757,7 @@ func init() {
 	pigstyReleaseListCmd.Flags().BoolVarP(&pigstyListMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
 	pigstyInventoryCmd.AddCommand(pigstyInventoryListCmd, pigstyInventoryShowCmd, pigstyInventoryEditCmd, pigstyInventoryValidateCmd)
+	pigstyDashboardCmd.AddCommand(pigstyDashboardListCmd, pigstyDashboardCheckCmd, pigstyDashboardDiffCmd, pigstyDashboardInitCmd, pigstyDashboardDumpCmd, pigstyDashboardCleanCmd)
 	pigstyReleaseCmd.AddCommand(pigstyReleaseListCmd, pigstyReleaseGetCmd)
-	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyInventoryCmd, pigstyEditCmd, pigstyValidateCmd, pigstyCheckCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
+	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyInventoryCmd, pigstyEditCmd, pigstyValidateCmd, pigstyCheckCmd, pigstyDashboardCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
 }
