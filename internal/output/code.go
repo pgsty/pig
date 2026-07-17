@@ -256,6 +256,8 @@ const (
 	CodeStyConfigureInvalidArgs      = MODULE_STY + CAT_PARAM + 1     // Invalid configure arguments
 	CodeStyEditInvalidArgs           = MODULE_STY + CAT_PARAM + 2     // Invalid inventory edit arguments
 	CodeStyValidateInvalidArgs       = MODULE_STY + CAT_PARAM + 3     // Invalid inventory validation arguments
+	CodeStyInventoryListInvalidArgs  = MODULE_STY + CAT_PARAM + 4     // Invalid inventory list arguments
+	CodeStyInventoryShowInvalidArgs  = MODULE_STY + CAT_PARAM + 5     // Invalid inventory show arguments
 	CodeStyConfigureTemplateNotFound = MODULE_STY + CAT_RESOURCE + 1  // Configure template file not found
 	CodeStyInventoryNotFound         = MODULE_STY + CAT_RESOURCE + 2  // Inventory file not found
 	CodeStyInventoryInvalid          = MODULE_STY + CAT_CONFIG + 1    // Inventory YAML or semantics are invalid
@@ -265,6 +267,7 @@ const (
 	CodeStyConfigureWriteFailed      = MODULE_STY + CAT_OPERATION + 2 // Configure output write failed
 	CodeStyEditFailed                = MODULE_STY + CAT_OPERATION + 3 // Editor or fragment replacement failed
 	CodeStyEditWriteFailed           = MODULE_STY + CAT_OPERATION + 4 // Edited inventory could not be written
+	CodeStyInventoryReadFailed       = MODULE_STY + CAT_OPERATION + 5 // Inventory could not be read
 )
 
 // System module specific codes (MODULE_SYSTEM = 990000)

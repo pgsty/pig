@@ -23,12 +23,15 @@ type EditOptions struct {
 
 // EditData is safe structured metadata; it never contains inventory values.
 type EditData struct {
-	Path        string                 `json:"path" yaml:"path"`
-	Selector    string                 `json:"selector,omitempty" yaml:"selector,omitempty"`
-	Resolved    string                 `json:"resolved" yaml:"resolved"`
-	Changed     bool                   `json:"changed" yaml:"changed"`
-	Changes     inventory.ChangeSet    `json:"changes,omitempty" yaml:"changes,omitempty"`
-	Diagnostics []inventory.Diagnostic `json:"diagnostics,omitempty" yaml:"diagnostics,omitempty"`
+	Path          string                 `json:"path" yaml:"path"`
+	Selector      string                 `json:"selector,omitempty" yaml:"selector,omitempty"`
+	Resolved      string                 `json:"resolved" yaml:"resolved"`
+	Changed       bool                   `json:"changed" yaml:"changed"`
+	ModeBefore    string                 `json:"mode_before,omitempty" yaml:"mode_before,omitempty"`
+	ModeAfter     string                 `json:"mode_after,omitempty" yaml:"mode_after,omitempty"`
+	ModeTightened bool                   `json:"mode_tightened,omitempty" yaml:"mode_tightened,omitempty"`
+	Changes       inventory.ChangeSet    `json:"changes,omitempty" yaml:"changes,omitempty"`
+	Diagnostics   []inventory.Diagnostic `json:"diagnostics,omitempty" yaml:"diagnostics,omitempty"`
 }
 
 func (d *EditData) Text() string {
@@ -39,7 +42,11 @@ func (d *EditData) Text() string {
 	if d.Changed {
 		state = "updated"
 	}
-	return fmt.Sprintf("  %s %s (%s)", state, d.Path, d.Resolved)
+	lines := []string{fmt.Sprintf("  %s %s (%s)", state, d.Path, d.Resolved)}
+	if d.ModeTightened {
+		lines = append(lines, fmt.Sprintf("  notice: permissions tightened from %s to %s", d.ModeBefore, d.ModeAfter))
+	}
+	return strings.Join(lines, "\n")
 }
 
 var (
@@ -66,6 +73,9 @@ func Edit(opts EditOptions) *output.Result {
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		return output.Fail(output.CodeStyEditInvalidArgs, "refusing to edit an inventory symlink")
+	}
+	if failure := staticInventorySourceFailure(info, output.CodeStyEditInvalidArgs); failure != nil {
+		return failure
 	}
 	source, err := os.ReadFile(path)
 	if err != nil {
@@ -145,16 +155,26 @@ func Edit(opts EditOptions) *output.Result {
 		return retainedEditFailure(output.CodeStyInventoryInvalid, firstDiagnosticMessage(diagnostics), tempPath).
 			WithData(&EditData{Path: path, Selector: data.Selector, Resolved: data.Resolved, Diagnostics: diagnostics})
 	}
+	latestInfo, err := os.Lstat(path)
+	if err != nil || latestInfo.Mode()&os.ModeSymlink != 0 || !latestInfo.Mode().IsRegular() {
+		removeTemp = false
+		return retainedEditFailure(output.CodeStyEditConflict, "inventory source changed shape while the editor was open; no file was written", tempPath)
+	}
 	latest, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(latest, source) {
 		removeTemp = false
 		return retainedEditFailure(output.CodeStyEditConflict, "inventory changed while the editor was open; no file was written", tempPath)
 	}
-	if err := utils.AtomicWriteFile(path, candidate.Bytes(), 0600); err != nil {
+	modeBefore := latestInfo.Mode().Perm()
+	modeAfter := modeBefore & 0600
+	if err := utils.AtomicWriteFile(path, candidate.Bytes(), modeAfter); err != nil {
 		removeTemp = false
 		return retainedEditFailure(output.CodeStyEditWriteFailed, fmt.Sprintf("failed to write edited inventory: %v", err), tempPath)
 	}
 	data.Changed = true
+	data.ModeBefore = fmt.Sprintf("%04o", modeBefore)
+	data.ModeAfter = fmt.Sprintf("%04o", modeAfter)
+	data.ModeTightened = modeBefore != modeAfter
 	data.Changes = changes
 	data.Diagnostics = diagnostics
 	return output.OK("inventory updated", data)

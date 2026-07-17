@@ -151,7 +151,7 @@ func InitConfig(inventory, pigstyHome string) {
 	PigstyHome = findPigstyHome(pigstyHome)
 
 	// setup inventory
-	PigstyConfig = findInventoryPath(inventory)
+	PigstyConfig = findInventoryPath(inventory, PigstyHome)
 
 	// fill missing pigsty.yml if pigsty home is set
 	if PigstyHome != "" && PigstyConfig == "" {
@@ -182,11 +182,12 @@ func findPigstyHome(pigstyHome string) string {
 			}
 			pigstyHome = filepath.Join(cwd, pigstyHome)
 		}
-		pigstyHomePath = pigstyHome
-		if validatePigstyHome(pigstyHomePath) {
-			logrus.Debugf("pigsty home from cli arg: %s", pigstyHomePath)
-			return pigstyHomePath
+		pigstyHomePath = filepath.Clean(pigstyHome)
+		if !validatePigstyHome(pigstyHomePath) {
+			logrus.Debugf("pigsty home from cli arg does not contain ansible.cfg: %s", pigstyHomePath)
 		}
+		logrus.Debugf("pigsty home from cli arg: %s", pigstyHomePath)
+		return pigstyHomePath
 	}
 
 	// if pigstyHomePath is not set or not valid, use home from config
@@ -219,39 +220,111 @@ func validatePigstyHome(pigstyHomePath string) bool {
 	return false
 }
 
-func findInventoryPath(inventory string) string {
-	var inventoryPaths, inventorySources []string
+func findInventoryPath(inventory, pigstyHome string) string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
+	choose := func(value, source, base string) string {
+		path := resolveInventoryCandidate(value, base)
+		if path != "" {
+			logrus.Debugf("inventory selected (%s): %s", source, path)
+		}
+		return path
+	}
 
-	if inventory != "" {
-		// if relative path, convert to absolute path with current working directory
-		if !filepath.IsAbs(inventory) {
-			cwd, err := os.Getwd()
-			if err != nil {
-				cwd = "."
+	// An invocation-specific source is authoritative even when it does not yet
+	// exist. Callers must report that concrete source instead of silently
+	// falling through to an unrelated Inventory.
+	if path := choose(inventory, "cli arg", cwd); path != "" {
+		return path
+	}
+	if path := choose(os.Getenv("PIGSTY_INVENTORY"), "environment", cwd); path != "" {
+		return path
+	}
+	if path := choose(viper.GetString("inventory"), "config", cwd); path != "" {
+		return path
+	}
+
+	if pigstyHome != "" {
+		if value, err := readAnsibleInventoryDirective(filepath.Join(pigstyHome, "ansible.cfg")); err == nil {
+			if path := choose(value, "ansible.cfg", pigstyHome); path != "" {
+				return path
 			}
-			inventory = filepath.Join(cwd, inventory)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			logrus.Debugf("failed to read ansible.cfg inventory directive: %v", err)
 		}
-		inventoryPaths = append(inventoryPaths, inventory)
-		inventorySources = append(inventorySources, "cli arg")
+		return choose("pigsty.yml", "pigsty home default", pigstyHome)
 	}
 
-	if configInventory := viper.GetString("inventory"); configInventory != "" {
-		inventoryPaths = append(inventoryPaths, configInventory)
-		inventorySources = append(inventorySources, "config/env")
-	}
-
-	defaultPath := filepath.Join(HomeDir, "pigsty", "pigsty.yml")
-	inventoryPaths = append(inventoryPaths, defaultPath)
-	inventorySources = append(inventorySources, "default")
-
-	for i, path := range inventoryPaths {
-		if _, err := os.Stat(path); err == nil {
-			logrus.Debugf("inventory found (%s): %s", inventorySources[i], path)
-			return path
-		}
-	}
-	logrus.Debugf("inventory not found")
+	logrus.Debugf("inventory source is not configured")
 	return ""
+}
+
+func resolveInventoryCandidate(value, base string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if value == "~" {
+		value = HomeDir
+	} else if strings.HasPrefix(value, "~/") {
+		value = filepath.Join(HomeDir, strings.TrimPrefix(value, "~/"))
+	}
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(base, value)
+	}
+	return filepath.Clean(value)
+}
+
+// readAnsibleInventoryDirective deliberately reads only the inventory setting
+// in the [defaults] section. It is not a general INI parser and does not infer
+// an Inventory source from database reachability or adjacent files.
+func readAnsibleInventoryDirective(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	inDefaults := false
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			inDefaults = strings.EqualFold(strings.TrimSpace(line[1:len(line)-1]), "defaults")
+			continue
+		}
+		if !inDefaults {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "inventory") {
+			continue
+		}
+		return cleanAnsibleInventoryValue(value), nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
+func cleanAnsibleInventoryValue(value string) string {
+	value = strings.TrimSpace(value)
+	for index := 0; index < len(value); index++ {
+		if (value[index] == '#' || value[index] == ';') && index > 0 && (value[index-1] == ' ' || value[index-1] == '\t') {
+			value = strings.TrimSpace(value[:index])
+			break
+		}
+	}
+	if len(value) >= 2 && (value[0] == '\'' && value[len(value)-1] == '\'' || value[0] == '"' && value[len(value)-1] == '"') {
+		value = value[1 : len(value)-1]
+	}
+	return strings.TrimSpace(value)
 }
 
 // InitConfigFile will init the config file with provided path
