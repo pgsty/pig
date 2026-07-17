@@ -17,6 +17,9 @@ type CMDBInitOptions struct {
 	PigBinary      string
 	ConnectionFile string
 	ToolVersion    string
+	Reset          bool
+	RestorePath    string
+	Yes            bool
 }
 
 type CMDBInitData struct {
@@ -28,6 +31,18 @@ type CMDBInitData struct {
 	ConnectionSource cmdb.ConnectionSource `json:"connection_source" yaml:"connection_source"`
 	RuntimePath      string                `json:"runtime_path,omitempty" yaml:"runtime_path,omitempty"`
 	AdapterIdentity  string                `json:"adapter_identity,omitempty" yaml:"adapter_identity,omitempty"`
+	Reset            bool                  `json:"reset,omitempty" yaml:"reset,omitempty"`
+	Absent           bool                  `json:"absent,omitempty" yaml:"absent,omitempty"`
+	MigrationCount   int                   `json:"migration_count,omitempty" yaml:"migration_count,omitempty"`
+	BackupPath       string                `json:"backup_path,omitempty" yaml:"backup_path,omitempty"`
+	BackupSHA256     string                `json:"backup_sha256,omitempty" yaml:"backup_sha256,omitempty"`
+	RestorePath      string                `json:"restore_path,omitempty" yaml:"restore_path,omitempty"`
+	RestoreSHA256    string                `json:"restore_sha256,omitempty" yaml:"restore_sha256,omitempty"`
+	RestoreRevisions int64                 `json:"restore_revisions,omitempty" yaml:"restore_revisions,omitempty"`
+	RestoreHead      *cmdb.RevisionToken   `json:"restore_head,omitempty" yaml:"restore_head,omitempty"`
+	RequiresConfirm  bool                  `json:"requires_confirmation,omitempty" yaml:"requires_confirmation,omitempty"`
+	ResetApplied     bool                  `json:"reset_applied,omitempty" yaml:"reset_applied,omitempty"`
+	Restored         bool                  `json:"restored,omitempty" yaml:"restored,omitempty"`
 	FindingCode      string                `json:"finding_code,omitempty" yaml:"finding_code,omitempty"`
 }
 
@@ -45,6 +60,22 @@ func (d *CMDBInitData) Text() string {
 	if d.RuntimePath != "" {
 		lines = append(lines, "  runtime: "+d.RuntimePath)
 	}
+	if d.Reset {
+		lines = append(lines,
+			"  reset: true",
+			"  schema absent: "+fmt.Sprint(d.Absent),
+			"  migration records: "+fmt.Sprint(d.MigrationCount),
+		)
+		if d.BackupPath != "" {
+			lines = append(lines, "  backup: "+d.BackupPath)
+		}
+		if d.RestorePath != "" {
+			lines = append(lines,
+				"  restore: "+d.RestorePath,
+				"  restore revisions: "+fmt.Sprint(d.RestoreRevisions),
+			)
+		}
+	}
 	if d.FindingCode != "" {
 		lines = append(lines, "  finding: "+d.FindingCode)
 	}
@@ -58,6 +89,12 @@ type cmdbInitializer interface {
 }
 
 func CMDBInit(ctx context.Context, store *cmdb.Store, options CMDBInitOptions) *output.Result {
+	if failure := ValidateCMDBInitOptions(options); failure != nil {
+		return failure
+	}
+	if options.Reset {
+		return CMDBReset(ctx, store, options)
+	}
 	return cmdbInit(ctx, store, options, cmdb.PrepareRuntime)
 }
 
