@@ -1,0 +1,25 @@
+all:
+  children:
+    infra:
+      hosts:
+        10.0.0.1: { infra_seq: 1 }
+    etcd:
+      hosts:
+        10.0.0.1: { etcd_seq: 1 }
+      vars: { etcd_cluster: etcd }
+    pgsql:
+      hosts:
+        10.0.0.1: { pg_seq: 1, pg_role: primary, pg_users: [ { name: 42 } ] }
+      vars: { pg_cluster: pgsql }
+  vars:
+    version: v4.4.0
+    admin_ip: 10.0.0.1
+    region: default
+    pg_users:
+      - { name: 42, password: placeholder }
+    pg_databases:
+      - { name: app, schemas: [ 1 ] }
+    pg_services:
+      - { name: app, port: 15432, dest: invalid }
+    pg_hba_rules:
+      - { title: invalid global rule, user: all, db: all, addr: invalid, auth: invalid }

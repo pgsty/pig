@@ -1,0 +1,15 @@
+{
+  "schema": "pig.sty.validate.corpus-baseline/v1",
+  "root": "../pigsty/conf",
+  "captured": "2026-07-17",
+  "inventory_paths": 49,
+  "regular_yaml_files": 48,
+  "symlinked_inventory_paths": 1,
+  "errors": 0,
+  "warnings": {
+    "INV_GROUP_NAME": 78,
+    "PIG_INFRA_GROUP_MISSING": 1,
+    "PIG_USER_PASSWORD_MISSING": 11
+  },
+  "info": {}
+}

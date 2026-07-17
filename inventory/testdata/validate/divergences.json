@@ -1,0 +1,82 @@
+{
+  "schema": "pig.sty.validate.divergences/v1",
+  "entries": [
+    {
+      "rule_id": "DIV_IPV4_BOUNDS",
+      "fixture": "native-fixes.yml",
+      "legacy_result": "accepts digit groups without checking IPv4 octet bounds",
+      "native_result": "PIG_ADMIN_IP and PIG_HOST_IP reject invalid addresses",
+      "rationale": "declarations must contain real IPv4 addresses, not only IPv4-shaped text"
+    },
+    {
+      "rule_id": "DIV_CIDR_BOUNDS",
+      "fixture": "native-fixes.yml",
+      "legacy_result": "accepts digit groups and a one-or-two digit prefix without network bounds",
+      "native_result": "PIG_HBA_ADDR rejects invalid IPv4 CIDR declarations",
+      "rationale": "CIDR parsing uses netip so octets and prefix length are checked"
+    },
+    {
+      "rule_id": "DIV_BOOL_INTEGER",
+      "fixture": "native-fixes.yml",
+      "legacy_result": "Python treats a boolean sequence as an integer",
+      "native_result": "PIG_SEQ_TYPE requires an actual YAML integer",
+      "rationale": "boolean and integer declarations are distinct YAML types"
+    },
+    {
+      "rule_id": "DIV_SEQUENCE_UNIQUENESS",
+      "fixture": "native-fixes.yml",
+      "legacy_result": "does not compare sequence values within one module identity",
+      "native_result": "PIG_SEQ_DUPLICATE rejects duplicate sequence declarations",
+      "rationale": "module sequence uniqueness is part of the IaC declaration contract"
+    },
+    {
+      "rule_id": "DIV_REDIS_SEQUENCE",
+      "fixture": "native-fixes.yml",
+      "legacy_result": "classifies Redis groups but does not validate redis_node",
+      "native_result": "PIG_SEQ_TYPE validates redis_node type and range",
+      "rationale": "all declared module sequences use the same deterministic safety rule"
+    },
+    {
+      "rule_id": "DIV_SERVICE_FIELD_FAILURE",
+      "fixture": "native-fixes.yml",
+      "legacy_result": "prints a service field type error but leaves the success flag unchanged",
+      "native_result": "PIG_SERVICE_FIELD_TYPE is an error and fails validation",
+      "rationale": "an emitted type error cannot result in successful validation"
+    },
+    {
+      "rule_id": "DIV_RESERVED_PORT_UNIQUENESS",
+      "fixture": "native-fixes.yml",
+      "legacy_result": "warns for reserved ports but omits them from duplicate tracking",
+      "native_result": "PIG_SERVICE_PORT_DUPLICATE detects duplicates while preserving the reserved warning",
+      "rationale": "reservation and uniqueness are independent rules"
+    },
+    {
+      "rule_id": "DIV_VIP_ENABLED_ADDRESS",
+      "fixture": "native-fixes.yml",
+      "legacy_result": "skips address validation when pg_vip_enabled is true and an address exists",
+      "native_result": "PIG_VIP_ADDRESS validates every explicit address",
+      "rationale": "enablement must not bypass validation of its required address"
+    },
+    {
+      "rule_id": "DIV_DECLARATION_SCOPE",
+      "fixture": "global-declarations.yml",
+      "legacy_result": "validates object declarations only in PostgreSQL group vars",
+      "native_result": "validates explicitly declared users, databases, services, and HBA at global, group, and host scope",
+      "rationale": "native validation checks declarations where written without resolving effective vars"
+    },
+    {
+      "rule_id": "DIV_OPAQUE_VALUES",
+      "fixture": "opaque.yml",
+      "legacy_result": "safe_load rejects unknown or vault tags before semantic validation",
+      "native_result": "UNVERIFIABLE records an informational finding and does not inspect plaintext",
+      "rationale": "tagged and vault values remain lossless and opaque"
+    },
+    {
+      "rule_id": "DIV_VIP_HOST_COVERAGE",
+      "fixture": "vip-host-coverage.yml",
+      "legacy_result": "requires pg_vip_address in group vars whenever group VIP is enabled",
+      "native_result": "accepts a valid explicit address on every declared group host",
+      "rationale": "Citus-style per-host VIP declarations are complete without simulating Ansible effective vars"
+    }
+  ]
+}

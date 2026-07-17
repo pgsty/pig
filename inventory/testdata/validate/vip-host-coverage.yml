@@ -1,0 +1,20 @@
+all:
+  children:
+    infra:
+      hosts:
+        10.0.0.1: { infra_seq: 1 }
+    etcd:
+      hosts:
+        10.0.0.1: { etcd_seq: 1 }
+      vars: { etcd_cluster: etcd }
+    pgsql:
+      hosts:
+        10.0.0.1: { pg_seq: 1, pg_role: primary, pg_vip_address: 10.0.0.3/24 }
+        10.0.0.2: { pg_seq: 2, pg_role: replica, pg_vip_address: 10.0.0.4/24 }
+      vars:
+        pg_cluster: pgsql
+        pg_vip_enabled: true
+  vars:
+    version: v4.4.0
+    admin_ip: 10.0.0.1
+    region: default

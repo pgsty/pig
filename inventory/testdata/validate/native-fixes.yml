@@ -1,0 +1,30 @@
+all:
+  children:
+    infra:
+      hosts:
+        10.0.0.1: { infra_seq: true }
+    etcd:
+      hosts:
+        10.0.0.1: { etcd_seq: 1 }
+      vars: { etcd_cluster: etcd }
+    redis:
+      hosts:
+        10.0.0.3: { redis_node: invalid }
+      vars: { redis_cluster: redis }
+    pgsql:
+      hosts:
+        999.1.1.1: { pg_seq: 1, pg_role: primary }
+        999.1.1.2: { pg_seq: 1, pg_role: replica }
+      vars:
+        pg_cluster: pgsql
+        pg_services:
+          - { name: reserved-a, port: 5432, selector: [ primary ] }
+          - { name: reserved-b, port: 5432 }
+        pg_hba_rules:
+          - { title: lax legacy CIDR, user: all, db: all, addr: 999.1.1.1/99, auth: pwd }
+        pg_vip_enabled: true
+        pg_vip_address: 999.1.1.3/99
+  vars:
+    version: v4.4.0
+    admin_ip: 999.1.1.1
+    region: default

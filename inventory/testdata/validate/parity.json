@@ -1,0 +1,81 @@
+{
+  "schema": "pig.sty.validate.parity/v1",
+  "legacy_sha256": "bb54927a945d11e0c60ca114579157bebbc6e1bbd4e36294ea77eea9b2a405d6",
+  "cases": [
+    {
+      "fixture": "valid.yml",
+      "legacy_success": true,
+      "native_success": true,
+      "native_codes": []
+    },
+    {
+      "fixture": "invalid-declarations.yml",
+      "legacy_success": false,
+      "native_success": false,
+      "native_codes": [
+        "PIG_DATABASE_NAME_REQUIRED",
+        "PIG_HBA_ADDR",
+        "PIG_HBA_AUTH",
+        "PIG_SERVICE_FIELD_TYPE",
+        "PIG_SERVICE_PORT",
+        "PIG_USER_FIELD_TYPE",
+        "PIG_USER_PASSWORD_MISSING",
+        "PIG_VIP_ADDRESS_REQUIRED"
+      ]
+    },
+    {
+      "fixture": "native-fixes.yml",
+      "legacy_success": true,
+      "native_success": false,
+      "native_codes": [
+        "PIG_ADMIN_IP",
+        "PIG_HBA_ADDR",
+        "PIG_HOST_IP",
+        "PIG_SEQ_DUPLICATE",
+        "PIG_SEQ_TYPE",
+        "PIG_SERVICE_FIELD_TYPE",
+        "PIG_SERVICE_PORT_DUPLICATE",
+        "PIG_SERVICE_PORT_RESERVED",
+        "PIG_VIP_ADDRESS"
+      ],
+      "divergences": [
+        "DIV_IPV4_BOUNDS",
+        "DIV_CIDR_BOUNDS",
+        "DIV_BOOL_INTEGER",
+        "DIV_SEQUENCE_UNIQUENESS",
+        "DIV_REDIS_SEQUENCE",
+        "DIV_SERVICE_FIELD_FAILURE",
+        "DIV_RESERVED_PORT_UNIQUENESS",
+        "DIV_VIP_ENABLED_ADDRESS"
+      ]
+    },
+    {
+      "fixture": "global-declarations.yml",
+      "legacy_success": true,
+      "native_success": false,
+      "native_codes": [
+        "PIG_DATABASE_FIELD_TYPE",
+        "PIG_HBA_ADDR",
+        "PIG_HBA_AUTH",
+        "PIG_SERVICE_FIELD_TYPE",
+        "PIG_USER_FIELD_TYPE",
+        "PIG_USER_PASSWORD_MISSING"
+      ],
+      "divergences": ["DIV_DECLARATION_SCOPE"]
+    },
+    {
+      "fixture": "opaque.yml",
+      "legacy_success": false,
+      "native_success": true,
+      "native_codes": ["UNVERIFIABLE"],
+      "divergences": ["DIV_OPAQUE_VALUES"]
+    },
+    {
+      "fixture": "vip-host-coverage.yml",
+      "legacy_success": false,
+      "native_success": true,
+      "native_codes": [],
+      "divergences": ["DIV_VIP_HOST_COVERAGE"]
+    }
+  ]
+}

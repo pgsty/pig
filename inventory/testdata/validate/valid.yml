@@ -1,0 +1,34 @@
+all:
+  children:
+    infra:
+      hosts:
+        10.0.0.1: { infra_seq: 1 }
+    etcd:
+      hosts:
+        10.0.0.1: { etcd_seq: 1 }
+      vars: { etcd_cluster: etcd }
+    minio:
+      hosts:
+        10.0.0.1: { minio_seq: 1 }
+      vars: { minio_cluster: minio }
+    pgsql:
+      hosts:
+        10.0.0.1: { pg_seq: 1, pg_role: primary }
+        10.0.0.2: { pg_seq: 2, pg_role: replica, pg_upstream: 10.0.0.1 }
+      vars:
+        pg_cluster: pgsql
+        pg_users:
+          - { name: app, password: placeholder, roles: [ dbrole_readwrite ] }
+        pg_databases:
+          - { name: app, owner: app, schemas: [ public ] }
+        pg_services:
+          - { name: app-primary, port: 15432, dest: postgres, selector: primary }
+        pg_hba_rules:
+          - { title: app access, user: app, db: app, addr: intra, auth: pwd }
+        pg_vip_enabled: true
+        pg_vip_address: 10.0.0.3/24
+  vars:
+    version: v4.4.0
+    admin_ip: 10.0.0.1
+    region: default
+    pgbackrest_method: minio

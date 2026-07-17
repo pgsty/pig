@@ -2,7 +2,6 @@ package inventory
 
 import (
 	"fmt"
-	"net/netip"
 	"regexp"
 	"sort"
 	"strings"
@@ -51,6 +50,9 @@ var (
 	AnsibleRules RuleSet = ruleSet{name: "ansible-inventory", fn: validateAnsible}
 	// PigstyRules validates only critical, explicitly declared Pigsty identities.
 	PigstyRules RuleSet = ruleSet{name: "pigsty", fn: validatePigsty}
+	// CompleteInventoryRules validates requirements that apply to a complete
+	// inventory file but not to partial documents used by lossless mutations.
+	CompleteInventoryRules RuleSet = ruleSet{name: "pigsty-inventory-file", fn: validateCompleteInventory}
 )
 
 // Validate runs the supplied rules in order. With no arguments it runs all
@@ -69,8 +71,26 @@ func (d *Document) Validate(rules ...RuleSet) []Diagnostic {
 		}
 		diagnostics = append(diagnostics, ruleset.Validate(d)...)
 	}
+	diagnostics = uniqueDiagnostics(diagnostics)
 	SortDiagnostics(diagnostics)
 	return diagnostics
+}
+
+func uniqueDiagnostics(diagnostics []Diagnostic) []Diagnostic {
+	seen := make(map[string]struct{}, len(diagnostics))
+	result := diagnostics[:0]
+	for _, diagnostic := range diagnostics {
+		key := diagnostic.Code + "\x00" + diagnostic.Path.String()
+		if diagnostic.Code != "UNVERIFIABLE" {
+			key += "\x00" + diagnostic.Message
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, diagnostic)
+	}
+	return result
 }
 
 // SortDiagnostics orders diagnostics by source position, severity, and code.
@@ -150,7 +170,10 @@ func validateAnsible(doc *Document) []Diagnostic {
 		return nil
 	}
 	var diagnostics []Diagnostic
-	if len(doc.root.Content) < 2 || doc.root.Content[0].Value != "all" {
+	_, hasAll := mappingNodeValue(doc.root, "all")
+	if !hasAll {
+		diagnostics = append(diagnostics, doc.diagnostic("INV_ALL_REQUIRED", SeverityError, Keys("all"), doc.nodeSpan(doc.root), "top-level group all is required"))
+	} else if len(doc.root.Content) < 2 || doc.root.Content[0].Value != "all" {
 		diagnostics = append(diagnostics, doc.diagnostic("INV_ALL_FIRST", SeverityWarning, nil, doc.nodeSpan(doc.root), "top-level group all should be the first mapping entry"))
 	}
 	declarations := make(map[string]string)
@@ -171,7 +194,14 @@ func validateAnsible(doc *Document) []Diagnostic {
 		} else {
 			declarations[name] = pathID
 		}
+		if isOpaqueYAMLNode(node) {
+			diagnostics = append(diagnostics, doc.diagnostic("UNVERIFIABLE", SeverityInfo, path, doc.nodeSpan(node), "plaintext value is unavailable for static Inventory structure validation"))
+			return
+		}
 		if isNullNode(node) {
+			if name == "all" {
+				diagnostics = append(diagnostics, doc.diagnostic("INV_GROUP_TYPE", SeverityError, path, doc.nodeSpan(node), "group all must be a mapping"))
+			}
 			return
 		}
 		if node.Kind != yaml.MappingNode {
@@ -179,16 +209,24 @@ func validateAnsible(doc *Document) []Diagnostic {
 			return
 		}
 		descendants := append(append([]string{}, ancestors...), name)
+		hasVars := false
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			keyNode := node.Content[i]
 			valueNode := node.Content[i+1]
 			childPath := appendPath(path, Key(keyNode.Value))
 			switch keyNode.Value {
 			case "vars":
-				if !isMappingOrNull(valueNode) {
+				hasVars = true
+				if isOpaqueYAMLNode(valueNode) {
+					diagnostics = append(diagnostics, doc.diagnostic("UNVERIFIABLE", SeverityInfo, childPath, doc.nodeSpan(valueNode), "plaintext value is unavailable for group vars validation"))
+				} else if !isMappingOrNull(valueNode) {
 					diagnostics = append(diagnostics, doc.diagnostic("INV_VARS_TYPE", SeverityError, childPath, doc.nodeSpan(valueNode), "group vars must be a mapping"))
 				}
 			case "hosts":
+				if isOpaqueYAMLNode(valueNode) {
+					diagnostics = append(diagnostics, doc.diagnostic("UNVERIFIABLE", SeverityInfo, childPath, doc.nodeSpan(valueNode), "plaintext value is unavailable for group hosts validation"))
+					continue
+				}
 				if !isMappingOrNull(valueNode) {
 					diagnostics = append(diagnostics, doc.diagnostic("INV_HOSTS_TYPE", SeverityError, childPath, doc.nodeSpan(valueNode), "group hosts must be a mapping"))
 					continue
@@ -198,12 +236,18 @@ func validateAnsible(doc *Document) []Diagnostic {
 						hostName := valueNode.Content[hostIndex].Value
 						hostNode := valueNode.Content[hostIndex+1]
 						hostPath := appendPath(childPath, Key(hostName))
-						if !isMappingOrNull(hostNode) {
+						if isOpaqueYAMLNode(hostNode) {
+							diagnostics = append(diagnostics, doc.diagnostic("UNVERIFIABLE", SeverityInfo, hostPath, doc.nodeSpan(hostNode), "plaintext value is unavailable for host vars validation"))
+						} else if !isMappingOrNull(hostNode) {
 							diagnostics = append(diagnostics, doc.diagnostic("INV_HOST_VARS_TYPE", SeverityError, hostPath, doc.nodeSpan(hostNode), fmt.Sprintf("host %q vars must be a mapping", hostName)))
 						}
 					}
 				}
 			case "children":
+				if isOpaqueYAMLNode(valueNode) {
+					diagnostics = append(diagnostics, doc.diagnostic("UNVERIFIABLE", SeverityInfo, childPath, doc.nodeSpan(valueNode), "plaintext value is unavailable for child group validation"))
+					continue
+				}
 				if !isMappingOrNull(valueNode) {
 					diagnostics = append(diagnostics, doc.diagnostic("INV_CHILDREN_TYPE", SeverityError, childPath, doc.nodeSpan(valueNode), "group children must be a mapping"))
 					continue
@@ -219,12 +263,118 @@ func validateAnsible(doc *Document) []Diagnostic {
 				diagnostics = append(diagnostics, doc.diagnostic("INV_GROUP_KEY", SeverityWarning, childPath, doc.nodeSpan(keyNode), fmt.Sprintf("unsupported group field %q; expected hosts, vars, or children", keyNode.Value)))
 			}
 		}
+		if name == "all" {
+			if !hasVars {
+				diagnostics = append(diagnostics, doc.diagnostic("INV_VARS_REQUIRED", SeverityWarning, path.ChildKey("vars"), doc.nodeSpan(node), "all.vars is not declared"))
+			}
+		}
 	}
 	for i := 0; i+1 < len(doc.root.Content); i += 2 {
 		name := doc.root.Content[i].Value
 		validateGroup(name, doc.root.Content[i+1], Keys(name), nil)
 	}
 	return diagnostics
+}
+
+func validateCompleteInventory(doc *Document) []Diagnostic {
+	if doc == nil || doc.root == nil || doc.root.Kind != yaml.MappingNode {
+		return nil
+	}
+	all, exists := mappingNodeValue(doc.root, "all")
+	if !exists || all == nil || all.Kind != yaml.MappingNode || isOpaqueYAMLNode(all) {
+		return nil
+	}
+	diagnostics := validatePigstyCompleteness(doc)
+	diagnostics = append(diagnostics, validateCompleteNullVars(doc, all, Keys("all"))...)
+	diagnostics = append(diagnostics, validateCompleteGroupHosts(doc, all, Keys("all"))...)
+	children, exists := mappingNodeValue(all, "children")
+	if !exists {
+		return append(diagnostics, doc.diagnostic("INV_CHILDREN_REQUIRED", SeverityError, Keys("all", "children"), doc.nodeSpan(all), "all.children is required"))
+	}
+	if isOpaqueYAMLNode(children) {
+		return diagnostics
+	}
+	if children.Kind != yaml.MappingNode {
+		return append(diagnostics, doc.diagnostic("INV_CHILDREN_TYPE", SeverityError, Keys("all", "children"), doc.nodeSpan(children), "all.children must be a mapping"))
+	}
+	return diagnostics
+}
+
+func validateCompleteGroupHosts(doc *Document, group *yaml.Node, path Path) []Diagnostic {
+	if group == nil || group.Kind != yaml.MappingNode || isOpaqueYAMLNode(group) {
+		return nil
+	}
+	children, exists := mappingNodeValue(group, "children")
+	if !exists || children == nil || children.Kind != yaml.MappingNode || isOpaqueYAMLNode(children) {
+		return nil
+	}
+	var diagnostics []Diagnostic
+	for index := 0; index+1 < len(children.Content); index += 2 {
+		name := children.Content[index].Value
+		child := children.Content[index+1]
+		childPath := path.ChildKey("children").ChildKey(name)
+		if child == nil || child.Kind != yaml.MappingNode || isOpaqueYAMLNode(child) {
+			continue
+		}
+		hosts, declared := mappingNodeValue(child, "hosts")
+		switch {
+		case !declared:
+			diagnostics = append(diagnostics, doc.diagnostic("PIG_GROUP_HOSTS_REQUIRED", SeverityError, childPath.ChildKey("hosts"), doc.nodeSpan(child), fmt.Sprintf("group %q must declare hosts", name)))
+		case isOpaqueYAMLNode(hosts):
+		case isNullNode(hosts), hosts.Kind == yaml.MappingNode && len(hosts.Content) == 0:
+			diagnostics = append(diagnostics, doc.diagnostic("PIG_GROUP_HOSTS_EMPTY", SeverityError, childPath.ChildKey("hosts"), doc.nodeSpan(hosts), fmt.Sprintf("group %q has no hosts", name)))
+		}
+		diagnostics = append(diagnostics, validateCompleteGroupHosts(doc, child, childPath)...)
+	}
+	return diagnostics
+}
+
+func validateCompleteNullVars(doc *Document, group *yaml.Node, path Path) []Diagnostic {
+	if group == nil || group.Kind != yaml.MappingNode || isOpaqueYAMLNode(group) {
+		return nil
+	}
+	var diagnostics []Diagnostic
+	if vars, exists := mappingNodeValue(group, "vars"); exists && !isOpaqueYAMLNode(vars) && isNullNode(vars) {
+		diagnostics = append(diagnostics, doc.diagnostic("INV_VARS_TYPE", SeverityError, path.ChildKey("vars"), doc.nodeSpan(vars), "group vars must be a mapping"))
+	}
+	children, exists := mappingNodeValue(group, "children")
+	if !exists || children == nil || children.Kind != yaml.MappingNode || isOpaqueYAMLNode(children) {
+		return diagnostics
+	}
+	for index := 0; index+1 < len(children.Content); index += 2 {
+		name := children.Content[index].Value
+		diagnostics = append(diagnostics, validateCompleteNullVars(doc, children.Content[index+1], path.ChildKey("children").ChildKey(name))...)
+	}
+	return diagnostics
+}
+
+func mappingNodeValue(mapping *yaml.Node, key string) (*yaml.Node, bool) {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1], true
+		}
+	}
+	return nil, false
+}
+
+func isOpaqueYAMLNode(node *yaml.Node) bool {
+	if node == nil {
+		return false
+	}
+	if node.Kind == yaml.AliasNode {
+		return true
+	}
+	return isCustomYAMLTag(node.Tag)
+}
+
+func isCustomYAMLTag(tag string) bool {
+	if tag == "" || strings.HasPrefix(tag, "!!") || strings.HasPrefix(tag, "tag:yaml.org,2002:") {
+		return false
+	}
+	return true
 }
 
 func isNullNode(node *yaml.Node) bool {
@@ -235,168 +385,9 @@ func isMappingOrNull(node *yaml.Node) bool {
 	return node != nil && (node.Kind == yaml.MappingNode || isNullNode(node))
 }
 
-func validatePigsty(doc *Document) []Diagnostic {
-	if doc.inventory == nil || doc.inventory.All == nil {
-		return nil
-	}
-	var diagnostics []Diagnostic
-	globalVars := mappingValues(doc.inventory.All.Vars)
-	if admin, ok := globalVars["admin_ip"]; !ok {
-		diagnostics = append(diagnostics, Diagnostic{Code: "PIG_ADMIN_IP_REQUIRED", Severity: SeverityError, Path: AllVars("admin_ip"), Message: "all.vars.admin_ip is required"})
-	} else if !validIPv4(scalarString(admin)) {
-		diagnostics = append(diagnostics, Diagnostic{Code: "PIG_ADMIN_IP", Severity: SeverityError, Path: admin.Path, Range: admin.Range, Message: "admin_ip must be a valid IPv4 address"})
-	}
-
-	seenSeq := make(map[string]map[int]string)
-	memberships := make(map[string]map[string]string)
-	clusterName := regexp.MustCompile(`^[A-Za-z0-9-]+$`)
-	registerMember := func(module string, group *Group, host *Host) {
-		if memberships[module] == nil {
-			memberships[module] = make(map[string]string)
-		}
-		if previous, exists := memberships[module][host.Name]; exists && previous != group.Path.String() {
-			diagnostics = append(diagnostics, Diagnostic{Code: "PIG_HOST_MULTI_GROUP", Severity: SeverityError, Path: host.Path, Range: host.Range, Message: fmt.Sprintf("host %q belongs to multiple %s groups: %s and %s", host.Name, module, previous, group.Path.String())})
-		} else {
-			memberships[module][host.Name] = group.Path.String()
-		}
-	}
-	validateSeq := func(host *Host, value *Value, name, identity string) {
-		seq, ok := nonNegativeInteger(value)
-		if !ok {
-			diagnostics = append(diagnostics, Diagnostic{Code: "PIG_SEQ_TYPE", Severity: SeverityError, Path: value.Path, Range: value.Range, Message: fmt.Sprintf("%s for host %q must be a non-negative integer", name, host.Name)})
-			return
-		}
-		scope := name + "\x00" + identity
-		if seenSeq[scope] == nil {
-			seenSeq[scope] = make(map[int]string)
-		}
-		if previous, exists := seenSeq[scope][seq]; exists {
-			diagnostics = append(diagnostics, Diagnostic{Code: "PIG_SEQ_DUPLICATE", Severity: SeverityError, Path: value.Path, Range: value.Range, Message: fmt.Sprintf("%s %d is duplicated by hosts %q and %q for identity %q", name, seq, previous, host.Name, identity)})
-		} else {
-			seenSeq[scope][seq] = host.Name
-		}
-	}
-	var visit func(*Group)
-	visit = func(group *Group) {
-		if group == nil {
-			return
-		}
-		groupVars := mappingValues(group.Vars)
-		if group.Name != "all" && len(group.Hosts) == 0 && len(group.Children) == 0 {
-			diagnostics = append(diagnostics, Diagnostic{Code: "PIG_GROUP_HOSTS_EMPTY", Severity: SeverityError, Path: group.Path.ChildKey("hosts"), Range: group.Range, Message: fmt.Sprintf("group %q has no hosts", group.Name)})
-		}
-		pgIdentity := scalarString(groupVars["pg_cluster"])
-		if pgIdentity != "" && !clusterName.MatchString(pgIdentity) {
-			value := groupVars["pg_cluster"]
-			diagnostics = append(diagnostics, Diagnostic{Code: "PIG_PG_CLUSTER", Severity: SeverityError, Path: value.Path, Range: value.Range, Message: "pg_cluster must contain only letters, digits, and hyphens"})
-		}
-		if address, exists := groupVars["pg_vip_address"]; exists && !validIPv4CIDR(scalarString(address)) {
-			diagnostics = append(diagnostics, Diagnostic{Code: "PIG_VIP_ADDRESS", Severity: SeverityError, Path: address.Path, Range: address.Range, Message: "pg_vip_address must be a valid IPv4 CIDR"})
-		}
-		vipEnabled := scalarBool(groupVars["pg_vip_enabled"])
-		for _, host := range group.Hosts {
-			hostVars := mappingValues(&host.Vars)
-			if !validIPv4(host.Name) {
-				diagnostics = append(diagnostics, Diagnostic{Code: "PIG_HOST_IP", Severity: SeverityError, Path: host.Path, Range: host.Range, Message: fmt.Sprintf("host %q must be a valid IPv4 address", host.Name)})
-			}
-
-			hostPG := scalarString(hostVars["pg_cluster"])
-			if hostPG == "" {
-				hostPG = pgIdentity
-			}
-			_, hasPGSeq := hostVars["pg_seq"]
-			_, hasPGRole := hostVars["pg_role"]
-			if hostPG != "" || hasPGSeq || hasPGRole {
-				registerMember("pgsql", group, host)
-				identity := hostPG
-				if identity == "" {
-					identity = group.Name
-					diagnostics = append(diagnostics, Diagnostic{Code: "PIG_IDENTITY_MISSING", Severity: SeverityError, Path: host.Path, Range: host.Range, Message: fmt.Sprintf("host %q has no pg_cluster identity", host.Name)})
-				}
-				if value, ok := hostVars["pg_seq"]; ok {
-					validateSeq(host, value, "pg_seq", identity)
-				} else {
-					diagnostics = append(diagnostics, Diagnostic{Code: "PIG_PG_SEQ_REQUIRED", Severity: SeverityError, Path: host.Path, Range: host.Range, Message: fmt.Sprintf("host %q requires pg_seq", host.Name)})
-				}
-				if role, ok := hostVars["pg_role"]; !ok {
-					diagnostics = append(diagnostics, Diagnostic{Code: "PIG_PG_ROLE_REQUIRED", Severity: SeverityError, Path: host.Path, Range: host.Range, Message: fmt.Sprintf("host %q requires pg_role", host.Name)})
-				} else if !validPGRole(scalarString(role)) {
-					diagnostics = append(diagnostics, Diagnostic{Code: "PIG_PG_ROLE", Severity: SeverityError, Path: role.Path, Range: role.Range, Message: fmt.Sprintf("pg_role for host %q must be primary, replica, standby, offline, or delayed", host.Name)})
-				}
-				if upstream, ok := hostVars["pg_upstream"]; ok && !validIPv4(scalarString(upstream)) {
-					diagnostics = append(diagnostics, Diagnostic{Code: "PIG_PG_UPSTREAM", Severity: SeverityError, Path: upstream.Path, Range: upstream.Range, Message: "pg_upstream must be a valid IPv4 address"})
-				}
-				vipAddress, hasVIP := hostVars["pg_vip_address"]
-				if !hasVIP {
-					vipAddress, hasVIP = groupVars["pg_vip_address"]
-				}
-				if hasVIP && !validIPv4CIDR(scalarString(vipAddress)) {
-					diagnostics = append(diagnostics, Diagnostic{Code: "PIG_VIP_ADDRESS", Severity: SeverityError, Path: vipAddress.Path, Range: vipAddress.Range, Message: "pg_vip_address must be a valid IPv4 CIDR"})
-				} else if vipEnabled && !hasVIP {
-					enabled := groupVars["pg_vip_enabled"]
-					diagnostics = append(diagnostics, Diagnostic{Code: "PIG_VIP_ADDRESS_REQUIRED", Severity: SeverityError, Path: enabled.Path, Range: enabled.Range, Message: fmt.Sprintf("host %q requires pg_vip_address when pg_vip_enabled is true", host.Name)})
-				}
-			}
-
-			for _, spec := range []struct{ module, seq, cluster string }{
-				{module: "etcd", seq: "etcd_seq", cluster: "etcd_cluster"},
-				{module: "minio", seq: "minio_seq", cluster: "minio_cluster"},
-				{module: "infra", seq: "infra_seq"},
-			} {
-				identity := group.Name
-				cluster := scalarString(hostVars[spec.cluster])
-				if cluster == "" {
-					cluster = scalarString(groupVars[spec.cluster])
-				}
-				seqValue, hasSeq := hostVars[spec.seq]
-				explicit := hasSeq || cluster != "" || spec.module == "infra" && group.Name == "infra"
-				if !explicit {
-					continue
-				}
-				registerMember(spec.module, group, host)
-				if spec.cluster != "" {
-					if cluster == "" {
-						diagnostics = append(diagnostics, Diagnostic{Code: "PIG_IDENTITY_MISSING", Severity: SeverityError, Path: host.Path, Range: host.Range, Message: fmt.Sprintf("host %q has no %s identity", host.Name, spec.cluster)})
-					} else {
-						identity = cluster
-					}
-				}
-				if !hasSeq {
-					diagnostics = append(diagnostics, Diagnostic{Code: "PIG_SEQ_REQUIRED", Severity: SeverityError, Path: host.Path, Range: host.Range, Message: fmt.Sprintf("host %q requires %s", host.Name, spec.seq)})
-				} else {
-					validateSeq(host, seqValue, spec.seq, identity)
-				}
-			}
-		}
-		for _, child := range group.Children {
-			visit(child)
-		}
-	}
-	visit(doc.inventory.All)
-	return diagnostics
-}
-
-func validPGRole(role string) bool {
-	return role == "primary" || role == "replica" || role == "standby" || role == "offline" || role == "delayed"
-}
-
-func validIPv4(value string) bool {
-	address, err := netip.ParseAddr(value)
-	return err == nil && address.Is4()
-}
-
-func validIPv4CIDR(value string) bool {
-	prefix, err := netip.ParsePrefix(value)
-	return err == nil && prefix.Addr().Is4()
-}
-
-func scalarBool(value *Value) bool {
-	return value != nil && value.Scalar != nil && value.Scalar.Kind == BoolScalar && value.Scalar.Value == true
-}
-
 func mappingValues(value *Value) map[string]*Value {
 	result := make(map[string]*Value)
-	if value == nil || value.Kind != MappingValue {
+	if value == nil || value.Kind != MappingValue || isOpaqueValue(value) {
 		return result
 	}
 	for i := range value.Mapping {
@@ -404,29 +395,6 @@ func mappingValues(value *Value) map[string]*Value {
 		result[fmt.Sprint(entry.Key.Value)] = &entry.Value
 	}
 	return result
-}
-
-func nonNegativeInteger(value *Value) (int, bool) {
-	if value == nil || value.Kind != ScalarValue || value.Scalar == nil || value.Scalar.Kind != IntegerScalar {
-		return 0, false
-	}
-	switch number := value.Scalar.Value.(type) {
-	case int:
-		return number, number >= 0
-	case int64:
-		return int(number), number >= 0
-	case uint64:
-		return int(number), true
-	default:
-		return 0, false
-	}
-}
-
-func scalarString(value *Value) string {
-	if value == nil || value.Kind != ScalarValue || value.Scalar == nil || value.Scalar.Value == nil {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(fmt.Sprint(value.Scalar.Value)))
 }
 
 func (d *Document) diagnostic(code string, severity Severity, path Path, span byteSpan, message string) Diagnostic {

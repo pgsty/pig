@@ -17,6 +17,7 @@ import (
 const maxAnsibleStderr = 8 * 1024
 
 var sensitiveDiagnosticLine = regexp.MustCompile(`(?i)(password|passwd|secret|token|private[_ -]?key|access[_ -]?key|credential|proxy|dsn|connection[_ -]?(url|uri))`) //nolint:lll
+var candidateDiagnosticLocation = regexp.MustCompile(`<candidate>(?::[0-9]+(?::[0-9]+)?)?`)
 
 // ValidateWithAnsible asks an installed ansible-inventory executable to parse
 // a private temporary candidate. Stdout is always discarded because --list
@@ -38,6 +39,10 @@ func ValidateWithAnsible(ctx context.Context, executable string, doc *Document) 
 	}
 	name := temp.Name()
 	defer os.Remove(name)
+	if err := temp.Chmod(0600); err != nil {
+		temp.Close()
+		return []Diagnostic{{Code: "ANSIBLE_TEMPFILE", Severity: SeverityError, Message: "failed to secure candidate used by ansible-inventory"}}
+	}
 	if _, err := temp.Write(doc.source); err != nil {
 		temp.Close()
 		return []Diagnostic{{Code: "ANSIBLE_TEMPFILE", Severity: SeverityError, Message: "failed to write candidate used by ansible-inventory"}}
@@ -106,12 +111,11 @@ func redactAnsibleStderr(stderr, tempPath string) string {
 		}
 		if sensitiveDiagnosticLine.MatchString(line) || (strings.Contains(line, "://") && strings.Contains(line, "@")) {
 			clean = append(clean, "<redacted sensitive diagnostic line>")
-			continue
+		} else if location := candidateDiagnosticLocation.FindString(line); location != "" {
+			clean = append(clean, "failure references "+location)
+		} else {
+			clean = append(clean, "<redacted diagnostic line>")
 		}
-		if len(line) > 512 {
-			line = line[:512] + "..."
-		}
-		clean = append(clean, line)
 		if len(clean) == 3 {
 			break
 		}

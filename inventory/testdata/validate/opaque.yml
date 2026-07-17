@@ -1,0 +1,27 @@
+all:
+  children:
+    infra:
+      hosts:
+        10.0.0.1: { infra_seq: 1 }
+    etcd:
+      hosts:
+        10.0.0.1: { etcd_seq: 1 }
+      vars: { etcd_cluster: etcd }
+    pgsql:
+      hosts:
+        10.0.0.1:
+          pg_seq: !vault |
+            $ANSIBLE_VAULT;1.1;AES256
+            6630
+          pg_role: primary
+      vars:
+        pg_cluster: pgsql
+        pg_users: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          6631
+  vars:
+    version: v4.4.0
+    admin_ip: !vault |
+      $ANSIBLE_VAULT;1.1;AES256
+      6632
+    region: default

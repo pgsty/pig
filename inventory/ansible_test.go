@@ -21,7 +21,7 @@ func TestValidateWithAnsibleDiscardsAndRedactsSecrets(t *testing.T) {
 	}
 	dir := t.TempDir()
 	success := filepath.Join(dir, "ansible-success")
-	if err := os.WriteFile(success, []byte("#!/bin/sh\necho 'password: leaked-on-stdout'\nexit 0\n"), 0700); err != nil {
+	if err := os.WriteFile(success, []byte("#!/bin/sh\nmode=$(stat -c '%a' \"$2\" 2>/dev/null || stat -f '%Lp' \"$2\")\n[ \"$mode\" = 600 ] || { echo \"candidate mode $mode\" >&2; exit 9; }\necho 'password: leaked-on-stdout'\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if diagnostics := ValidateWithAnsible(context.Background(), success, doc); len(diagnostics) != 0 {
@@ -29,7 +29,7 @@ func TestValidateWithAnsibleDiscardsAndRedactsSecrets(t *testing.T) {
 	}
 
 	failure := filepath.Join(dir, "ansible-failure")
-	if err := os.WriteFile(failure, []byte("#!/bin/sh\necho 'password: leaked-on-stderr' >&2\necho \"failed at $2\" >&2\nexit 7\n"), 0700); err != nil {
+	if err := os.WriteFile(failure, []byte("#!/bin/sh\necho 'password: leaked-on-stderr' >&2\necho \"failed at $2\" >&2\necho 'arbitrary-value: leaked-unlabeled' >&2\nexit 7\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	diagnostics := ValidateWithAnsible(context.Background(), failure, doc)
@@ -37,7 +37,7 @@ func TestValidateWithAnsibleDiscardsAndRedactsSecrets(t *testing.T) {
 		t.Fatalf("failure diagnostics = %+v", diagnostics)
 	}
 	message := diagnostics[0].Message
-	if strings.Contains(message, "top-secret") || strings.Contains(message, "leaked-on-stderr") || strings.Contains(message, dir) {
+	if strings.Contains(message, "top-secret") || strings.Contains(message, "leaked-on-stderr") || strings.Contains(message, "leaked-unlabeled") || strings.Contains(message, dir) {
 		t.Fatalf("diagnostic leaked a secret or private path: %q", message)
 	}
 	if !strings.Contains(message, "exit=7") || !strings.Contains(message, "<candidate>") {
