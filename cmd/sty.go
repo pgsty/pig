@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"pig/cli/ext"
 	stycli "pig/cli/sty"
 	"pig/internal/config"
 	"pig/internal/output"
+	"pig/internal/utils"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -46,6 +49,18 @@ var (
 	pigstyDashboardDumpDir   string
 	pigstyDashboardPrune     bool
 	pigstyDashboardYes       bool
+	pigstyCMDBConnectionFile string
+	pigstyCMDBReset          bool
+	pigstyCMDBRestore        string
+	pigstyCMDBInitYes        bool
+	pigstyCMDBLoadRevision   string
+	pigstyCMDBLoadPrune      bool
+	pigstyCMDBLoadYes        bool
+	pigstyCMDBDumpOutput     string
+	pigstyCMDBDumpRevision   string
+	pigstyCMDBDumpMerge      bool
+	pigstyCMDBDumpExpectBase string
+	pigstyCMDBDisableStatic  string
 
 	pigstyDownloadDir string
 	pigstyVersion     string
@@ -72,6 +87,8 @@ var styCmd = &cobra.Command{
   pig sty check                         # local readiness; remote profiles are opt-in
   pig sty dashboard list|check|diff     # inspect repository-managed Grafana state
   pig sty dashboard init|dump|clean     # reconcile, export, or remove managed UIDs
+  pig sty cmdb init|load|dump|check      # experimental native CMDB control plane
+  pig sty cmdb enable|disable            # atomically switch the persistent source
   pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
   pig sty get                     # download pigsty source tarball
   pig sty list                    # list available pigsty versions
@@ -402,6 +419,349 @@ var pigstyCheckCmd = &cobra.Command{
 	},
 }
 
+func styCMDBAnnotations(name, typ, volatility, parallel string, idempotent bool, risk, confirm string, cost int) map[string]string {
+	return mergeAnn(
+		ancsAnn(name, typ, volatility, parallel, idempotent, risk, confirm, "current", cost),
+		map[string]string{"maturity": "experimental"},
+	)
+}
+
+var pigstyCMDBCmd = &cobra.Command{
+	Use:         "cmdb",
+	Short:       "Manage the experimental native Pigsty CMDB",
+	Annotations: styCMDBAnnotations("pig sty cmdb", "query", "volatile", "restricted", true, "low", "none", 100),
+	Long: `Manage the experimental declaration-oriented native CMDB.
+
+This surface never calls the legacy destructive CMDB scripts and never
+computes Ansible effective variables. Connection values are accepted only
+through --connection-file, PIGSTY_CMDB_DSN, or service=meta.`,
+}
+
+var pigstyCMDBInitCmd = &cobra.Command{
+	Use:         "init",
+	Short:       "Apply native migrations and prepare the private adapter",
+	Annotations: mergeAnn(styCMDBAnnotations("pig sty cmdb init", "action", "volatile", "unsafe", false, "critical", "required", 30000), map[string]string{"plan": "reset renders an exact native plan"}),
+	Args:        cobra.NoArgs,
+	Long: `Apply idempotent native migrations and refresh the private adapter.
+
+--reset selects destructive scope but never grants consent. A reset first
+renders an exact value-free plan and requires an interactive terminal or
+--yes. --restore is valid only together with --reset and is fully verified
+before confirmation.`,
+	RunE: runPigstyCMDBInit,
+}
+
+var pigstyCMDBLoadCmd = &cobra.Command{
+	Use:   "load [static-file]",
+	Short: "Plan and append one verified Inventory Snapshot",
+	Annotations: mergeAnn(styCMDBAnnotations("pig sty cmdb load", "action", "volatile", "unsafe", false, "high", "required", 30000), map[string]string{
+		"args.static-file.desc": "optional static Inventory file",
+		"args.static-file.type": "path",
+	}),
+	Args: cobra.MaximumNArgs(1),
+	Long: `Load exactly one validated static Inventory or historical revision.
+
+Declaration removals require both --prune scope and confirmation. Historical
+rollback always requires confirmation and creates a new append-only head.`,
+	RunE: runPigstyCMDBLoad,
+}
+
+var pigstyCMDBDumpCmd = &cobra.Command{
+	Use:   "dump",
+	Short: "Write a verified canonical or lossless merged Inventory",
+	Annotations: mergeAnn(styCMDBAnnotations("pig sty cmdb dump", "action", "stable", "restricted", false, "low", "none", 30000), map[string]string{
+		"flags.format.choices": "text,yaml,json,json-pretty",
+	}),
+	Args: cobra.NoArgs,
+	Long: `Write secret-bearing Inventory content only to a new owner-only file.
+
+The command-local --output is the destination path. For structured metadata,
+use the dump-local spelling of the global -o contract, for example:
+  pig sty cmdb dump -o json --output /private/generated.yml`,
+	RunE: runPigstyCMDBDump,
+}
+
+var pigstyCMDBEnableCmd = &cobra.Command{
+	Use:         "enable",
+	Short:       "Atomically select the verified native Inventory adapter",
+	Annotations: styCMDBAnnotations("pig sty cmdb enable", "action", "volatile", "unsafe", true, "medium", "none", 10000),
+	Args:        cobra.NoArgs,
+	RunE:        runPigstyCMDBEnable,
+}
+
+var pigstyCMDBDisableCmd = &cobra.Command{
+	Use:         "disable",
+	Short:       "Atomically restore one verified static Inventory source",
+	Annotations: styCMDBAnnotations("pig sty cmdb disable", "action", "volatile", "unsafe", true, "medium", "none", 10000),
+	Args:        cobra.NoArgs,
+	RunE:        runPigstyCMDBDisable,
+}
+
+var pigstyCMDBCheckCmd = &cobra.Command{
+	Use:         "check",
+	Short:       "Read-only verification of native state and active-source parity",
+	Annotations: styCMDBAnnotations("pig sty cmdb check", "query", "volatile", "safe", true, "low", "none", 10000),
+	Args:        cobra.NoArgs,
+	RunE:        runPigstyCMDBCheck,
+}
+
+var pigstyCMDBInventoryAdapterCmd = &cobra.Command{
+	Use:                "_inventory",
+	Short:              "private native Ansible Inventory protocol adapter",
+	Annotations:        styCMDBAnnotations("pig sty cmdb _inventory", "query", "volatile", "safe", true, "low", "none", 10000),
+	Hidden:             true,
+	DisableFlagParsing: true,
+	Args:               cobra.ArbitraryArgs,
+	RunE:               runPigstyCMDBInventoryAdapter,
+}
+
+func runPigstyCMDBInit(cmd *cobra.Command, _ []string) error {
+	pigBinary, failure := styCMDBCurrentBinary()
+	if failure != nil {
+		return handleAuxResult(failure)
+	}
+	options := stycli.CMDBInitOptions{
+		PigstyHome: config.PigstyHome, PigBinary: pigBinary,
+		ConnectionFile: pigstyCMDBConnectionFile, Reset: pigstyCMDBReset,
+		RestorePath: pigstyCMDBRestore, Yes: pigstyCMDBInitYes,
+	}
+	if failure := stycli.ValidateCMDBInitOptions(options); failure != nil {
+		return handleAuxResult(failure)
+	}
+	store, openFailure := pigstyCMDBOpenStore(cmd.Context(), stycli.CMDBConnectionOptions{ConnectionFile: pigstyCMDBConnectionFile})
+	if openFailure != nil {
+		return handleAuxResult(openFailure)
+	}
+	defer store.Close()
+	if !options.Reset {
+		return handleAuxResult(pigstyCMDBInitExec(cmd.Context(), store, options))
+	}
+	operation, planFailure := pigstyCMDBPlanResetExec(cmd.Context(), store, options)
+	if planFailure != nil {
+		return handleAuxResult(planFailure)
+	}
+	result := pigstyCMDBApplyResetExec(cmd.Context(), operation, options.Yes)
+	return runPigstyCMDBConfirmed(
+		cmd, result, "CMDB reset plan",
+		"This will back up and replace only the verified pigsty_cmdb schema.",
+		"pig sty cmdb init --reset",
+		func() *output.Result { return pigstyCMDBApplyResetExec(cmd.Context(), operation, true) },
+	)
+}
+
+func runPigstyCMDBLoad(cmd *cobra.Command, args []string) error {
+	invocation := styCMDBInvocationInventory()
+	options := stycli.CMDBLoadOptions{
+		Revision: pigstyCMDBLoadRevision, InvocationSource: invocation,
+		Prune: pigstyCMDBLoadPrune, Yes: pigstyCMDBLoadYes,
+	}
+	if len(args) == 1 {
+		options.StaticFile = args[0]
+	}
+	if failure := stycli.ValidateCMDBLoadOptions(options); failure != nil {
+		return handleAuxResult(failure)
+	}
+	if options.Revision == "" {
+		selected := invocation
+		if options.StaticFile != "" {
+			selected = options.StaticFile
+		}
+		resolution, staticPath, sourceFailure := pigstyCMDBResolveLoadSourceExec(styCMDBSourceOptions(selected))
+		if emitErr := styCMDBEmitNotice(cmd, resolution); emitErr != nil {
+			return emitErr
+		}
+		if sourceFailure != nil {
+			return handleAuxResult(sourceFailure)
+		}
+		if options.StaticFile != "" {
+			options.StaticFile = staticPath
+		} else {
+			options.ResolvedStatic = staticPath
+		}
+	}
+	store, openFailure := pigstyCMDBOpenStore(cmd.Context(), stycli.CMDBConnectionOptions{ConnectionFile: pigstyCMDBConnectionFile})
+	if openFailure != nil {
+		return handleAuxResult(openFailure)
+	}
+	defer store.Close()
+	operation, planFailure := pigstyCMDBPlanLoadExec(cmd.Context(), store, options)
+	if planFailure != nil {
+		return handleAuxResult(planFailure)
+	}
+	result := pigstyCMDBApplyLoadExec(cmd.Context(), operation, options)
+	return runPigstyCMDBConfirmed(
+		cmd, result, "CMDB load plan",
+		"This will apply the displayed declaration removal or historical rollback plan.",
+		"pig sty cmdb load",
+		func() *output.Result {
+			confirmed := options
+			confirmed.Yes = true
+			return pigstyCMDBApplyLoadExec(cmd.Context(), operation, confirmed)
+		},
+	)
+}
+
+func runPigstyCMDBDump(cmd *cobra.Command, _ []string) error {
+	options := stycli.CMDBDumpOptions{
+		OutputPath: pigstyCMDBDumpOutput, Revision: pigstyCMDBDumpRevision,
+		Merge: pigstyCMDBDumpMerge, ExpectBase: pigstyCMDBDumpExpectBase,
+		InvocationSource: styCMDBInvocationInventory(),
+	}
+	if failure := stycli.ValidateCMDBDumpOptions(options); failure != nil {
+		return handleAuxResult(failure)
+	}
+	store, openFailure := pigstyCMDBOpenStore(cmd.Context(), stycli.CMDBConnectionOptions{ConnectionFile: pigstyCMDBConnectionFile})
+	if openFailure != nil {
+		return handleAuxResult(openFailure)
+	}
+	defer store.Close()
+	return handleAuxResult(pigstyCMDBDumpExec(cmd.Context(), store, options))
+}
+
+func runPigstyCMDBEnable(cmd *cobra.Command, _ []string) error {
+	return runPigstyCMDBSourceSwitch(cmd, false)
+}
+
+func runPigstyCMDBDisable(cmd *cobra.Command, _ []string) error {
+	return runPigstyCMDBSourceSwitch(cmd, true)
+}
+
+func runPigstyCMDBSourceSwitch(cmd *cobra.Command, disable bool) error {
+	pigBinary, failure := styCMDBCurrentBinary()
+	if failure != nil {
+		return handleAuxResult(failure)
+	}
+	store, openFailure := pigstyCMDBOpenStore(cmd.Context(), stycli.CMDBConnectionOptions{ConnectionFile: pigstyCMDBConnectionFile})
+	if openFailure != nil {
+		return handleAuxResult(openFailure)
+	}
+	defer store.Close()
+	options := stycli.CMDBSourceSwitchOptions{
+		PigstyHome: config.PigstyHome, PigBinary: pigBinary,
+	}
+	if disable {
+		options.StaticPath = pigstyCMDBDisableStatic
+		return handleAuxResult(pigstyCMDBDisableExec(cmd.Context(), store, options))
+	}
+	return handleAuxResult(pigstyCMDBEnableExec(cmd.Context(), store, options))
+}
+
+func runPigstyCMDBCheck(cmd *cobra.Command, _ []string) error {
+	pigBinary, failure := styCMDBCurrentBinary()
+	if failure != nil {
+		return handleAuxResult(failure)
+	}
+	store, openFailure := pigstyCMDBOpenStore(cmd.Context(), stycli.CMDBConnectionOptions{ConnectionFile: pigstyCMDBConnectionFile})
+	if openFailure != nil {
+		return handleAuxResult(openFailure)
+	}
+	defer store.Close()
+	result := pigstyCMDBCheckExec(cmd.Context(), store, stycli.CMDBCheckOptions{
+		PigstyHome: config.PigstyHome, InvocationInventory: styCMDBInvocationInventory(),
+		UserHome: config.HomeDir, UserConfigPath: config.ConfigFile, PigBinary: pigBinary,
+	})
+	if result != nil {
+		data, ok := result.Data.(*stycli.CMDBCheckData)
+		if ok && data != nil {
+			if emitErr := styCMDBEmitNotice(cmd, stycli.CMDBSourceResolution{
+				Effective: data.EffectiveSource, Persistent: data.PersistentSource,
+			}); emitErr != nil {
+				return emitErr
+			}
+		}
+	}
+	return handleAuxResult(result)
+}
+
+func runPigstyCMDBInventoryAdapter(cmd *cobra.Command, args []string) error {
+	body, failure := pigstyCMDBInventoryAdapterExec(cmd.Context(), stycli.CMDBInventoryAdapterOptions{Arguments: args})
+	if failure != nil {
+		return styCMDBAdapterFailure(cmd, failure)
+	}
+	if !json.Valid(body) {
+		return styCMDBAdapterFailure(cmd, output.Fail(output.CodeStyCMDBOperationFailed, "CMDB inventory adapter produced invalid protocol output").
+			WithData(&stycli.CMDBFailureData{Kind: stycli.CMDBFailureKind, CMDBCode: "CMDB_SNAPSHOT_INVALID"}))
+	}
+	written, err := cmd.OutOrStdout().Write(body)
+	if err != nil || written != len(body) {
+		return styCMDBAdapterFailure(cmd, output.Fail(output.CodeStyCMDBOutputFailed, "CMDB inventory adapter stdout write failed").
+			WithData(&stycli.CMDBFailureData{Kind: stycli.CMDBFailureKind, CMDBCode: "CMDB_OUTPUT_FAILED"}))
+	}
+	return nil
+}
+
+func styCMDBAdapterFailure(cmd *cobra.Command, result *output.Result) error {
+	if result == nil {
+		result = output.Fail(output.CodeStyCMDBOperationFailed, "CMDB inventory adapter failed").
+			WithData(&stycli.CMDBFailureData{Kind: stycli.CMDBFailureKind, CMDBCode: "CMDB_INTERNAL"})
+	}
+	if err := output.PrintTo(cmd.ErrOrStderr(), result); err != nil {
+		return err
+	}
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message), Silent: true}
+}
+
+func runPigstyCMDBConfirmed(cmd *cobra.Command, result *output.Result, planMessage, warning, action string, confirmed func() *output.Result) error {
+	if result == nil || result.Code != output.CodeStyCMDBConfirmationRequired {
+		return handleAuxResult(result)
+	}
+	if config.IsStructuredOutput() || !styCMDBTextInputIsTerminal() {
+		return handleAuxResult(result)
+	}
+	if err := output.Print(output.OK(planMessage, result.Data)); err != nil {
+		return err
+	}
+	if err := highRiskTextConfirm(warning, action); err != nil {
+		return err
+	}
+	if confirmed == nil {
+		return handleAuxResult(result)
+	}
+	return handleAuxResult(confirmed())
+}
+
+func styCMDBInvocationInventory() string {
+	flag := rootCmd.PersistentFlags().Lookup("inventory")
+	if flag == nil || !flag.Changed {
+		return ""
+	}
+	return inventory
+}
+
+func styCMDBSourceOptions(invocation string) stycli.CMDBSourceResolveOptions {
+	return stycli.CMDBSourceResolveOptions{
+		PigstyHome: config.PigstyHome, InvocationInventory: invocation,
+		UserHome: config.HomeDir, UserConfigPath: config.ConfigFile,
+	}
+}
+
+func styCMDBEmitNotice(cmd *cobra.Command, resolution stycli.CMDBSourceResolution) error {
+	emitter := stycli.NewCMDBNoticeEmitter(cmd.ErrOrStderr())
+	if err := emitter.Emit(resolution.Effective, resolution.Persistent); err != nil {
+		return handleAuxResult(output.Fail(output.CodeStyCMDBOperationFailed, "CMDB split-brain notice could not be written").
+			WithData(&stycli.CMDBFailureData{Kind: stycli.CMDBFailureKind, CMDBCode: "CMDB_OUTPUT_FAILED"}))
+	}
+	return nil
+}
+
+func styCMDBCurrentBinary() (string, *output.Result) {
+	path, err := pigstyCMDBExecutable()
+	if err != nil || path == "" {
+		return "", output.Fail(output.CodeStyCMDBConfigInvalid, "CMDB current Pig binary is unavailable").
+			WithData(&stycli.CMDBFailureData{Kind: stycli.CMDBFailureKind, CMDBCode: "CMDB_RUNTIME_PIG_INVALID"})
+	}
+	return path, nil
+}
+
+func cmdbTextInputIsTerminal() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+var styCMDBTextInputIsTerminal = cmdbTextInputIsTerminal
+
 var pigstyDashboardCmd = &cobra.Command{
 	Use:         "dashboard",
 	Aliases:     []string{"ds"},
@@ -672,19 +1032,32 @@ func runPigstyReleaseGet(args []string) error {
 }
 
 var (
-	pigstyGetExec            = stycli.Download
-	pigstyListExec           = stycli.ListVersionsWithOptions
-	pigstyEditExec           = stycli.Edit
-	pigstyValidateExec       = stycli.ValidateInventory
-	pigstyCheckExec          = stycli.Check
-	pigstyInventoryListExec  = stycli.ListInventory
-	pigstyInventoryShowExec  = stycli.ShowInventory
-	pigstyDashboardListExec  = stycli.DashboardList
-	pigstyDashboardCheckExec = stycli.DashboardCheck
-	pigstyDashboardDiffExec  = stycli.DashboardDiff
-	pigstyDashboardInitExec  = stycli.DashboardInit
-	pigstyDashboardDumpExec  = stycli.DashboardDump
-	pigstyDashboardCleanExec = stycli.DashboardClean
+	pigstyGetExec                   = stycli.Download
+	pigstyListExec                  = stycli.ListVersionsWithOptions
+	pigstyEditExec                  = stycli.Edit
+	pigstyValidateExec              = stycli.ValidateInventory
+	pigstyCheckExec                 = stycli.Check
+	pigstyInventoryListExec         = stycli.ListInventory
+	pigstyInventoryShowExec         = stycli.ShowInventory
+	pigstyDashboardListExec         = stycli.DashboardList
+	pigstyDashboardCheckExec        = stycli.DashboardCheck
+	pigstyDashboardDiffExec         = stycli.DashboardDiff
+	pigstyDashboardInitExec         = stycli.DashboardInit
+	pigstyDashboardDumpExec         = stycli.DashboardDump
+	pigstyDashboardCleanExec        = stycli.DashboardClean
+	pigstyCMDBOpenStore             = stycli.OpenCMDBStore
+	pigstyCMDBInitExec              = stycli.CMDBInit
+	pigstyCMDBPlanResetExec         = stycli.PlanCMDBReset
+	pigstyCMDBApplyResetExec        = stycli.ApplyCMDBReset
+	pigstyCMDBResolveLoadSourceExec = stycli.ResolveCMDBLoadSource
+	pigstyCMDBPlanLoadExec          = stycli.PlanCMDBLoad
+	pigstyCMDBApplyLoadExec         = stycli.ApplyCMDBLoad
+	pigstyCMDBDumpExec              = stycli.CMDBDump
+	pigstyCMDBEnableExec            = stycli.CMDBEnable
+	pigstyCMDBDisableExec           = stycli.CMDBDisable
+	pigstyCMDBCheckExec             = stycli.CMDBCheck
+	pigstyCMDBInventoryAdapterExec  = stycli.CMDBInventoryAdapter
+	pigstyCMDBExecutable            = os.Executable
 )
 
 var pigstyDeployCmd = &cobra.Command{
@@ -746,6 +1119,19 @@ func init() {
 	pigstyDashboardInitCmd.Flags().BoolVarP(&pigstyDashboardYes, "yes", "y", false, "confirm the tombstone deletion plan")
 	pigstyDashboardDumpCmd.Flags().StringVar(&pigstyDashboardDumpDir, "dir", "", "new destination directory for the atomic export")
 	pigstyDashboardCleanCmd.Flags().BoolVarP(&pigstyDashboardYes, "yes", "y", false, "confirm deletion of active manifest-owned resources")
+	pigstyCMDBCmd.PersistentFlags().StringVar(&pigstyCMDBConnectionFile, "connection-file", "", "owner-only PostgreSQL conninfo or URI file")
+	pigstyCMDBInitCmd.Flags().BoolVar(&pigstyCMDBReset, "reset", false, "select verified native schema reset scope")
+	pigstyCMDBInitCmd.Flags().StringVar(&pigstyCMDBRestore, "restore", "", "verified private native reset bundle")
+	pigstyCMDBInitCmd.Flags().BoolVarP(&pigstyCMDBInitYes, "yes", "y", false, "confirm the exact reset plan")
+	pigstyCMDBLoadCmd.Flags().StringVar(&pigstyCMDBLoadRevision, "revision", "", "exact historical CMDB revision token")
+	pigstyCMDBLoadCmd.Flags().BoolVar(&pigstyCMDBLoadPrune, "prune", false, "select displayed declaration removals")
+	pigstyCMDBLoadCmd.Flags().BoolVarP(&pigstyCMDBLoadYes, "yes", "y", false, "confirm the exact load or rollback plan")
+	pigstyCMDBDumpCmd.Flags().StringVar(&pigstyCMDBDumpOutput, "output", "", "new owner-only Inventory destination")
+	pigstyCMDBDumpCmd.Flags().StringVarP(&outputFormat, "format", "o", "text", "result format: text, yaml, json, json-pretty")
+	pigstyCMDBDumpCmd.Flags().StringVar(&pigstyCMDBDumpRevision, "revision", "", "exact historical CMDB revision token")
+	pigstyCMDBDumpCmd.Flags().BoolVar(&pigstyCMDBDumpMerge, "merge", false, "perform provenance-sensitive three-way merge")
+	pigstyCMDBDumpCmd.Flags().StringVar(&pigstyCMDBDumpExpectBase, "expect-base", "", "exact expected static merge-base token")
+	pigstyCMDBDisableCmd.Flags().StringVar(&pigstyCMDBDisableStatic, "static", "", "literal verified static fallback file")
 
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
@@ -758,6 +1144,7 @@ func init() {
 
 	pigstyInventoryCmd.AddCommand(pigstyInventoryListCmd, pigstyInventoryShowCmd, pigstyInventoryEditCmd, pigstyInventoryValidateCmd)
 	pigstyDashboardCmd.AddCommand(pigstyDashboardListCmd, pigstyDashboardCheckCmd, pigstyDashboardDiffCmd, pigstyDashboardInitCmd, pigstyDashboardDumpCmd, pigstyDashboardCleanCmd)
+	pigstyCMDBCmd.AddCommand(pigstyCMDBInitCmd, pigstyCMDBLoadCmd, pigstyCMDBDumpCmd, pigstyCMDBEnableCmd, pigstyCMDBDisableCmd, pigstyCMDBCheckCmd, pigstyCMDBInventoryAdapterCmd)
 	pigstyReleaseCmd.AddCommand(pigstyReleaseListCmd, pigstyReleaseGetCmd)
-	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyInventoryCmd, pigstyEditCmd, pigstyValidateCmd, pigstyCheckCmd, pigstyDashboardCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
+	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyInventoryCmd, pigstyEditCmd, pigstyValidateCmd, pigstyCheckCmd, pigstyDashboardCmd, pigstyCMDBCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
 }

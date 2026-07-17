@@ -77,6 +77,7 @@ func TestRiskyCommandsRejectUndeclaredPositionals(t *testing.T) {
 		"pig postgres fork init": "fork name",
 		"pig postgres fork rm":   "fork name",
 		"pig postgres fork stop": "fork name",
+		"pig sty cmdb load":      "optional static Inventory file",
 	}
 
 	var unsafe []string
