@@ -29,6 +29,7 @@ docs/spec/*
 !docs/spec/pitr.md
 !docs/spec/sty.md
 !docs/spec/sty-implementation-goal.md
+!docs/spec/sty-cmdb-rfc.md
 
 _bmad
 _bmad-output
