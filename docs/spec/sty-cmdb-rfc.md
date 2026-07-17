@@ -925,8 +925,18 @@ Owner approval unlocks code in this order only:
    `linux/arm64@sha256:122c9942437efcbbb8d595fc578dee7d26ee1543c2a8634d183adfa4a1e55b4d`).
    The final full tests, full race tests, `go vet ./...`, and
    `git diff --check` passed with the pre-existing `go.sum` change excluded.
-3. **P2.3 Load/dump/check:** plans, confirmation, rollback, provenance, raw-body
-   separation, and split-brain diagnostics.
+3. **P2.3 Load/dump/check — PASSED 2026-07-17:** sealed value-free load
+   plans, exact-head CAS, precise prune selection, confirmation, immutable
+   historical rollback, canonical private dump, provenance-sensitive lossless
+   merge, raw-body separation, native check DTOs, and exact once-only
+   split-brain diagnostics. Functional commits: `fd65400`, `96f81eb`,
+   `d05dc97`, and `12c9442`. The complete PostgreSQL 18 container race gate
+   passed (selected
+   `linux/arm64@sha256:122c9942437efcbbb8d595fc578dee7d26ee1543c2a8634d183adfa4a1e55b4d`),
+   and the full PostgreSQL 14 compatibility suite passed (selected
+   `linux/arm64@sha256:f838127495dec165fa388f047a8908a0464eb1aa3995a53e0bb12798baac528e`).
+   The final full tests, full race tests, `go vet ./...`, and
+   `git diff --check` passed with the pre-existing `go.sum` change excluded.
 4. **P2.4 Source switch:** runtime adapter, strict parser, backups, atomic narrow
    patch, enable/disable, and fail-closed fixtures.
 5. **P2.5 Cobra exposure:** flat `cmd/sty.go` wiring, experimental annotations,
