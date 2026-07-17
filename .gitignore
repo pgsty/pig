@@ -27,6 +27,8 @@ docs/spec/*
 !docs/spec/pb.md
 !docs/spec/pt.md
 !docs/spec/pitr.md
+!docs/spec/sty.md
+!docs/spec/sty-implementation-goal.md
 
 _bmad
 _bmad-output
