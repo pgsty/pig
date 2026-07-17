@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
 	stycli "pig/cli/sty"
@@ -64,6 +65,31 @@ func TestStyConfOutputFileFlagKeepsGlobalOutputFlag(t *testing.T) {
 	}
 	if inherited := pigstyConfCmd.InheritedFlags().Lookup("output"); inherited == nil {
 		t.Fatal("expected inherited global --output flag on pig sty conf")
+	}
+}
+
+func TestStyInventoryCommandsAndFlags(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want *cobra.Command
+	}{
+		{args: []string{"sty", "edit"}, want: pigstyEditCmd},
+		{args: []string{"sty", "validate"}, want: pigstyValidateCmd},
+		{args: []string{"sty", "val"}, want: pigstyValidateCmd},
+	} {
+		found, _, err := rootCmd.Find(test.args)
+		if err != nil {
+			t.Fatalf("Find(%v): %v", test.args, err)
+		}
+		if found != test.want {
+			t.Fatalf("Find(%v) = %v, want %v", test.args, found, test.want)
+		}
+	}
+	if pigstyValidateCmd.Flags().Lookup("strict") == nil || pigstyValidateCmd.Flags().Lookup("ansible") == nil {
+		t.Fatal("pig sty validate is missing --strict or --ansible")
+	}
+	if pigstyEditCmd.Flags().Lookup("output") != nil {
+		t.Fatal("pig sty edit must not shadow the global output flag")
 	}
 }
 

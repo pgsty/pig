@@ -32,6 +32,8 @@ var (
 	pigstyConfGenerate       bool
 	pigstyConfRaw            bool
 	pigstyConfMirror         bool
+	pigstyValidateStrict     bool
+	pigstyValidateAnsible    bool
 
 	pigstyDownloadDir string
 	pigstyVersion     string
@@ -50,6 +52,8 @@ var styCmd = &cobra.Command{
   pig sty init    [-mpfvd]        # install pigsty (~/pigsty by default)
   pig sty boot    [-rmpk]         # install ansible and prepare offline pkg
   pig sty conf    [-cvmrsoxnpg --raw] # configure pigsty and generate config
+  pig sty edit    [selector]            # edit inventory or one YAML fragment
+  pig sty validate [file]               # validate a Pigsty inventory
   pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
   pig sty get                     # download pigsty source tarball
   pig sty list                    # list available pigsty versions
@@ -221,6 +225,46 @@ var pigstyConfCmd = &cobra.Command{
 	},
 }
 
+var pigstyEditCmd = &cobra.Command{
+	Use:         "edit [selector]",
+	Short:       "Edit Pigsty inventory or a selected YAML fragment",
+	Annotations: ancsAnn("pig sty edit", "action", "volatile", "unsafe", false, "medium", "none", "current", 30000),
+	Args:        cobra.MaximumNArgs(1),
+	Example: `  pig sty edit
+  pig sty edit vars
+  pig sty edit pg-meta
+  pig sty edit pg-meta.vars.pg_databases
+  pig sty edit 'pg-meta.hosts["10.10.10.10"]'`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		selector := ""
+		if len(args) == 1 {
+			selector = args[0]
+		}
+		return handleAuxResult(pigstyEditExec(stycli.EditOptions{Path: config.PigstyConfig, Selector: selector}))
+	},
+}
+
+var pigstyValidateCmd = &cobra.Command{
+	Use:         "validate [file]",
+	Short:       "Validate a Pigsty inventory",
+	Annotations: ancsAnn("pig sty validate", "query", "stable", "safe", true, "safe", "none", "current", 1000),
+	Aliases:     []string{"val"},
+	Args:        cobra.MaximumNArgs(1),
+	Example: `  pig sty validate
+  pig sty validate ./pigsty.yml
+  pig sty validate --ansible
+  pig sty validate --strict -o json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		path := config.PigstyConfig
+		if len(args) == 1 {
+			path = args[0]
+		}
+		return handleAuxResult(pigstyValidateExec(stycli.ValidateOptions{
+			Path: path, Strict: pigstyValidateStrict, Ansible: pigstyValidateAnsible,
+		}))
+	},
+}
+
 func styConfigureParams(region string) map[string]interface{} {
 	return map[string]interface{}{
 		"conf":            pigstyConfName,
@@ -332,8 +376,10 @@ var pigstyGetcmd = &cobra.Command{
 }
 
 var (
-	pigstyGetExec  = stycli.Download
-	pigstyListExec = stycli.ListVersionsWithOptions
+	pigstyGetExec      = stycli.Download
+	pigstyListExec     = stycli.ListVersionsWithOptions
+	pigstyEditExec     = stycli.Edit
+	pigstyValidateExec = stycli.ValidateInventory
 )
 
 var pigstyDeployCmd = &cobra.Command{
@@ -381,11 +427,13 @@ func init() {
 
 	addStyConfigureFlags(pigstyConfCmd)
 	pigstyConfCmd.Flags().BoolVar(&pigstyConfRaw, "raw", false, "use raw shell configure implementation")
+	pigstyValidateCmd.Flags().BoolVar(&pigstyValidateStrict, "strict", false, "treat warnings as validation failures")
+	pigstyValidateCmd.Flags().BoolVar(&pigstyValidateAnsible, "ansible", false, "also validate with ansible-inventory")
 
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
 	pigstyGetcmd.Flags().BoolVarP(&pigstyGetMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 	pigstyListcmd.Flags().BoolVarP(&pigstyListMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
-	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyDeployCmd, pigstyListcmd, pigstyGetcmd)
+	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyEditCmd, pigstyValidateCmd, pigstyDeployCmd, pigstyListcmd, pigstyGetcmd)
 }

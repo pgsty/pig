@@ -1,0 +1,119 @@
+package sty
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"pig/internal/output"
+	"pig/inventory"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// ValidateOptions controls static and optional external inventory validation.
+type ValidateOptions struct {
+	Path    string
+	Strict  bool
+	Ansible bool
+	Timeout time.Duration
+}
+
+// ValidateData is the stable structured validation payload.
+type ValidateData struct {
+	Path        string                 `json:"path" yaml:"path"`
+	Valid       bool                   `json:"valid" yaml:"valid"`
+	Strict      bool                   `json:"strict" yaml:"strict"`
+	Diagnostics []inventory.Diagnostic `json:"diagnostics,omitempty" yaml:"diagnostics,omitempty"`
+}
+
+func (d *ValidateData) Text() string {
+	if d == nil {
+		return ""
+	}
+	var lines []string
+	for _, diagnostic := range d.Diagnostics {
+		location := diagnostic.Path.String()
+		if diagnostic.Range.Start.Line > 0 {
+			location = fmt.Sprintf("%s:%d:%d", d.Path, diagnostic.Range.Start.Line, diagnostic.Range.Start.Column)
+		}
+		lines = append(lines, fmt.Sprintf("  [%s] %s %s: %s", strings.ToUpper(string(diagnostic.Severity)), diagnostic.Code, location, diagnostic.Message))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ValidateInventory parses and validates one static YAML inventory.
+func ValidateInventory(opts ValidateOptions) *output.Result {
+	path := strings.TrimSpace(opts.Path)
+	if path == "" {
+		return output.Fail(output.CodeStyInventoryNotFound, "inventory path is not configured")
+	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return output.Fail(output.CodeStyInventoryNotFound, fmt.Sprintf("inventory not found: %s", path))
+	} else if err != nil {
+		return output.Fail(output.CodeStyValidateInvalidArgs, fmt.Sprintf("failed to inspect inventory: %v", err))
+	}
+	source, err := os.ReadFile(path)
+	if err != nil {
+		return output.Fail(output.CodeStyValidateInvalidArgs, fmt.Sprintf("failed to read inventory: %v", err))
+	}
+	doc, err := inventory.Parse(path, source)
+	if err != nil {
+		diagnostic := parseDiagnostic(err)
+		data := &ValidateData{Path: path, Strict: opts.Strict, Diagnostics: []inventory.Diagnostic{diagnostic}}
+		return output.Fail(output.CodeStyValidationFailed, "inventory is invalid").WithData(data)
+	}
+	diagnostics := doc.Validate()
+	if opts.Ansible {
+		timeout := opts.Timeout
+		if timeout <= 0 {
+			timeout = 10 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		diagnostics = append(diagnostics, inventory.LookPathAndValidateWithAnsible(ctx, doc)...)
+		cancel()
+	}
+	inventory.SortDiagnostics(diagnostics)
+	failed := inventory.HasErrors(diagnostics) || opts.Strict && hasWarnings(diagnostics)
+	data := &ValidateData{Path: path, Valid: !failed, Strict: opts.Strict, Diagnostics: diagnostics}
+	if failed {
+		return output.Fail(output.CodeStyValidationFailed, "inventory validation failed").WithData(data)
+	}
+	return output.OK("inventory is valid", data)
+}
+
+func hasWarnings(diagnostics []inventory.Diagnostic) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Severity == inventory.SeverityWarning {
+			return true
+		}
+	}
+	return false
+}
+
+var parseLinePattern = regexp.MustCompile(`(?i)line[ :]+([0-9]+)(?::([0-9]+))?`)
+
+func parseDiagnostic(err error) inventory.Diagnostic {
+	position := inventory.Position{}
+	if match := parseLinePattern.FindStringSubmatch(fmt.Sprint(err)); len(match) > 1 {
+		position.Line, _ = strconv.Atoi(match[1])
+		if len(match) > 2 {
+			position.Column, _ = strconv.Atoi(match[2])
+		}
+	}
+	return inventory.Diagnostic{
+		Code: "YAML_PARSE", Severity: inventory.SeverityError,
+		Range:   inventory.SourceRange{Start: position, End: position},
+		Message: "inventory YAML could not be parsed",
+	}
+}
+
+func parseErrorSummary(err error) string {
+	diagnostic := parseDiagnostic(err)
+	if diagnostic.Range.Start.Line > 0 {
+		return fmt.Sprintf("%s at line %d column %d", diagnostic.Message, diagnostic.Range.Start.Line, diagnostic.Range.Start.Column)
+	}
+	return diagnostic.Message
+}

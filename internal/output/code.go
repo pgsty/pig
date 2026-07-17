@@ -254,9 +254,17 @@ const (
 // Pigsty module specific codes (MODULE_STY = 200000)
 const (
 	CodeStyConfigureInvalidArgs      = MODULE_STY + CAT_PARAM + 1     // Invalid configure arguments
+	CodeStyEditInvalidArgs           = MODULE_STY + CAT_PARAM + 2     // Invalid inventory edit arguments
+	CodeStyValidateInvalidArgs       = MODULE_STY + CAT_PARAM + 3     // Invalid inventory validation arguments
 	CodeStyConfigureTemplateNotFound = MODULE_STY + CAT_RESOURCE + 1  // Configure template file not found
+	CodeStyInventoryNotFound         = MODULE_STY + CAT_RESOURCE + 2  // Inventory file not found
+	CodeStyInventoryInvalid          = MODULE_STY + CAT_CONFIG + 1    // Inventory YAML or semantics are invalid
+	CodeStyValidationFailed          = MODULE_STY + CAT_CONFIG + 2    // Inventory validation reported diagnostics
+	CodeStyEditConflict              = MODULE_STY + CAT_STATE + 1     // Inventory changed during an edit session
 	CodeStyConfigureFailed           = MODULE_STY + CAT_OPERATION + 1 // Configure generation failed
 	CodeStyConfigureWriteFailed      = MODULE_STY + CAT_OPERATION + 2 // Configure output write failed
+	CodeStyEditFailed                = MODULE_STY + CAT_OPERATION + 3 // Editor or fragment replacement failed
+	CodeStyEditWriteFailed           = MODULE_STY + CAT_OPERATION + 4 // Edited inventory could not be written
 )
 
 // System module specific codes (MODULE_SYSTEM = 990000)
