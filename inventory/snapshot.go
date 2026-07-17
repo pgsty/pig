@@ -116,10 +116,14 @@ type SnapshotValue struct {
 // gate. Callers remain responsible for selecting any additional Pigsty
 // completeness rules required by their use case before a database plan.
 func SnapshotFromDocument(doc *Document) (*Snapshot, error) {
+	return snapshotFromDocument(doc, true)
+}
+
+func snapshotFromDocument(doc *Document, enforceSourceLimit bool) (*Snapshot, error) {
 	if doc == nil || doc.root == nil {
 		return nil, snapshotFailure(nil, SnapshotReasonNilDocument)
 	}
-	if len(doc.source) > maxSnapshotSourceBytes {
+	if enforceSourceLimit && len(doc.source) > maxSnapshotSourceBytes {
 		return nil, snapshotFailure(nil, SnapshotReasonSourceTooLarge)
 	}
 	if doc.root.Kind != yaml.MappingNode {
