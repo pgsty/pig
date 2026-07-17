@@ -901,8 +901,11 @@ requirement.
 
 Owner approval unlocks code in this order only:
 
-1. **P2.1 Snapshot foundation:** typed canonical Snapshot, representability,
-   semantic diff, canonical dump, and three-way merge fixtures; no DB write.
+1. **P2.1 Snapshot foundation — PASSED 2026-07-17:** typed canonical
+   Snapshot, representability, semantic diff, canonical dump, and three-way
+   merge fixtures; no DB write. Functional commits: `ad23ddf`, `1ad05de`, and
+   `73b3ffc`. The final package/full tests, race tests, `go vet ./...`, and
+   `git diff --check` passed with the pre-existing `go.sum` change excluded.
 2. **P2.2 PostgreSQL adapter:** bounded connection, embedded migrations,
    immutable revision store, CAS, reset backup/restore, and container gates.
 3. **P2.3 Load/dump/check:** plans, confirmation, rollback, provenance, raw-body
