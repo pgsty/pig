@@ -299,8 +299,10 @@ Migration v1 supports PostgreSQL 14 through 18 with one schema and no
 major-version conditionals. PostgreSQL 14 is the minimum accepted server; an
 older server fails before DDL. The complete destructive/conflict gate runs on
 the pinned PostgreSQL 18 image in section 15, and P2.2 also pins an official
-`postgres:14.23-alpine` manifest for migration, load/dump, and reset/restore
-compatibility cases.
+`postgres:14.23-alpine@sha256:f1341c01408dc7278e9d365ed4f860cd3f87dd16b4464ac326fc0f422083a579`
+multi-platform manifest for migration, load/dump, and reset/restore
+compatibility cases. Changing either manifest digest is an explicit review
+change.
 
 The stable lock is `pg_advisory_xact_lock(bigint)` with the signed two's-
 complement value of the first eight big-endian bytes of
@@ -844,6 +846,13 @@ never use ambient `service=meta`.
 The container is removed in test cleanup. Sentinel rows in pre-created
 `pigsty`, `pglog`, and an unrelated third schema prove every reset and migration
 remains in scope and never treats the legacy names as native state.
+
+The PostgreSQL 14 minimum-version compatibility run uses the separately
+reviewed official multi-platform reference
+`postgres:14.23-alpine@sha256:f1341c01408dc7278e9d365ed4f860cd3f87dd16b4464ac326fc0f422083a579`.
+The same allowlisted harness, random-database guard, loopback binding, cleanup,
+and selected-platform digest recording apply to both images; an environment
+override can select only one of those two exact references.
 
 ### 15.2 Required cases
 

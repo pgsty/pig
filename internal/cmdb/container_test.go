@@ -3,7 +3,9 @@ package cmdb
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -19,8 +21,11 @@ import (
 )
 
 const (
-	containerTestFlag = "PIGSTY_CMDB_CONTAINER_TEST"
-	postgres18Image   = "postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"
+	containerTestFlag   = "PIGSTY_CMDB_CONTAINER_TEST"
+	containerImageEnv   = "PIGSTY_CMDB_CONTAINER_IMAGE"
+	postgres14Image     = "postgres:14.23-alpine@sha256:f1341c01408dc7278e9d365ed4f860cd3f87dd16b4464ac326fc0f422083a579"
+	postgres18Image     = "postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"
+	officialPostgresRef = "postgres@"
 )
 
 var cmdbContainer *containerDatabase
@@ -37,7 +42,11 @@ func TestMain(m *testing.M) {
 	if os.Getenv(containerTestFlag) != "1" {
 		os.Exit(m.Run())
 	}
-	harness, err := startContainerDatabase(postgres18Image)
+	image := os.Getenv(containerImageEnv)
+	if image == "" {
+		image = postgres18Image
+	}
+	harness, err := startContainerDatabase(image)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "CMDB container setup failed:", err)
 		os.Exit(1)
@@ -49,7 +58,8 @@ func TestMain(m *testing.M) {
 }
 
 func startContainerDatabase(image string) (*containerDatabase, error) {
-	if image != postgres18Image {
+	digest, reviewed := reviewedContainerImage(image)
+	if !reviewed {
 		return nil, fmt.Errorf("unreviewed PostgreSQL test image")
 	}
 	suffix, err := randomHex(8)
@@ -61,13 +71,15 @@ func startContainerDatabase(image string) (*containerDatabase, error) {
 	password := "test-" + suffix
 
 	inspect := exec.Command("docker", "image", "inspect", image,
-		"--format", "{{index .RepoDigests 0}}|{{.Os}}/{{.Architecture}}|{{.Id}}")
+		"--format", "{{json .RepoDigests}}|{{.Os}}/{{.Architecture}}|{{.Id}}")
 	identity, err := inspect.Output()
 	if err != nil {
 		return nil, fmt.Errorf("pinned image is unavailable locally")
 	}
 	parts := strings.Split(strings.TrimSpace(string(identity)), "|")
-	if len(parts) != 3 || !strings.Contains(parts[0], "@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15") {
+	var repoDigests []string
+	if len(parts) != 3 || json.Unmarshal([]byte(parts[0]), &repoDigests) != nil ||
+		!slicesContains(repoDigests, officialPostgresRef+digest) {
 		return nil, fmt.Errorf("pinned image identity mismatch")
 	}
 
@@ -156,6 +168,39 @@ func startContainerDatabase(image string) (*containerDatabase, error) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return harness, nil
+}
+
+func reviewedContainerImage(image string) (string, bool) {
+	for _, reviewed := range []string{postgres14Image, postgres18Image} {
+		if image == reviewed {
+			_, digest, ok := strings.Cut(reviewed, "@")
+			return digest, ok && strings.HasPrefix(digest, "sha256:")
+		}
+	}
+	return "", false
+}
+
+func slicesContains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func TestReviewedContainerImagesAreDigestPinned(t *testing.T) {
+	for _, image := range []string{postgres14Image, postgres18Image} {
+		digest, ok := reviewedContainerImage(image)
+		if !ok || len(digest) != len("sha256:")+sha256.Size*2 || !strings.HasPrefix(digest, "sha256:") {
+			t.Fatalf("reviewed image is not exactly digest pinned: %q", image)
+		}
+	}
+	for _, image := range []string{"postgres:14.23-alpine", "postgres:18.4-alpine", "postgres:latest"} {
+		if _, ok := reviewedContainerImage(image); ok {
+			t.Fatalf("unpinned image was reviewed: %q", image)
+		}
+	}
 }
 
 func (c *containerDatabase) guard() error {
