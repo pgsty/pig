@@ -8,6 +8,34 @@ import (
 // by the native adapter. The returned bytes may contain Inventory secrets and
 // must never be placed in a public Result, Plan, diagnostic, or log.
 func (s *Snapshot) AnsibleInventoryJSON() ([]byte, error) {
+	projection, err := s.ansibleProjection()
+	if err != nil {
+		return nil, err
+	}
+	return projection.json()
+}
+
+// AnsibleHostJSON renders the private host variable object used by the native
+// adapter for --host. An unknown host is represented by the empty object, as
+// required by the Ansible inventory script protocol. The returned bytes carry
+// the same secrecy boundary as AnsibleInventoryJSON.
+func (s *Snapshot) AnsibleHostJSON(name string) ([]byte, error) {
+	projection, err := s.ansibleProjection()
+	if err != nil {
+		return nil, err
+	}
+	writer := newSnapshotByteWriter(maxSnapshotOutputBytes)
+	if index, exists := projection.hostsByKey[name]; exists {
+		if err := writeProjectionValue(writer, projection.hosts[index].vars); err != nil {
+			return nil, err
+		}
+	} else if err := writer.literal(`{}`); err != nil {
+		return nil, snapshotFailure(nil, SnapshotReasonOutputTooLarge)
+	}
+	return writer.bytes(), nil
+}
+
+func (s *Snapshot) ansibleProjection() (*ansibleProjection, error) {
 	if s == nil || s.root.kind != SnapshotMap {
 		return nil, snapshotFailure(nil, SnapshotReasonInvalidProjection)
 	}
@@ -18,7 +46,7 @@ func (s *Snapshot) AnsibleInventoryJSON() ([]byte, error) {
 			return nil, err
 		}
 	}
-	return projection.json()
+	return projection, nil
 }
 
 type ansibleProjection struct {

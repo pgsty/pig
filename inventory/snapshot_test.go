@@ -228,6 +228,30 @@ func TestSnapshotProjectionIsDeclarationOnlyAndDeterministic(t *testing.T) {
 	}
 }
 
+func TestSnapshotAnsibleHostProjection(t *testing.T) {
+	doc := mustDocument(t, "host.yml", "all:\n  hosts:\n    db-a:\n      role: primary\n      password: secret\n")
+	snapshot, err := SnapshotFromDocument(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	host, err := snapshot.AnsibleHostJSON("db-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(host), `{"role":"primary","password":"secret"}`; got != want {
+		t.Fatalf("host projection = %s, want %s", got, want)
+	}
+
+	missing, err := snapshot.AnsibleHostJSON("missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(missing), `{}`; got != want {
+		t.Fatalf("missing host projection = %s, want %s", got, want)
+	}
+}
+
 func TestParseSnapshotRejectsNonCanonicalTypedShapes(t *testing.T) {
 	valid, err := SnapshotFromDocument(loadSnapshotFixture(t))
 	if err != nil {
