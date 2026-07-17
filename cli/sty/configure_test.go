@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"pig/cli/ext"
 	"pig/internal/output"
+	"pig/inventory"
 	"regexp"
 	"strings"
 	"testing"
@@ -111,8 +112,17 @@ func TestMutateTemplateBasic(t *testing.T) {
 	if !strings.Contains(got, "node_tune: tiny") || !strings.Contains(got, "pg_conf: tiny.yml") {
 		t.Fatalf("expected tiny tuning replacement, got:\n%s", got)
 	}
-	if !strings.Contains(got, "docker_registry_mirrors") || !strings.Contains(got, "PIP_MIRROR_URL") {
-		t.Fatalf("expected china mirror uncomment, got:\n%s", got)
+	parsed, err := inventory.Parse("mutated.yml", []byte(got))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []inventory.Path{
+		inventory.Keys("all", "children", "app", "vars", "docker_registry_mirrors"),
+		inventory.Keys("all", "children", "app", "vars", "PIP_MIRROR_URL"),
+	} {
+		if _, ok := parsed.Lookup(path); !ok {
+			t.Fatalf("expected active china mirror at %s, got:\n%s", path.String(), got)
+		}
 	}
 	if !strings.Contains(got, "pg_version: 17") || !strings.Contains(got, "pg17-main") {
 		t.Fatalf("expected pg version replacement, got:\n%s", got)
@@ -407,6 +417,128 @@ func TestMutateTemplateLocaleNeedsPgVersionLine(t *testing.T) {
 	}
 }
 
+func TestMutateTemplateInsertedLocalesPreserveSurroundingStyle(t *testing.T) {
+	content := `all:
+  vars:
+    version: v4.4.0                   # pigsty version string
+    node_repo_modules: node,infra,pgsql
+    pg_version: 18                    # default postgres version
+    pg_conf: oltp.yml                 # pgsql tuning spec
+`
+	got, _, _, err := mutateTemplate(content, mutationOptions{
+		Mode:            "meta",
+		PrimaryIP:       defaultPrimaryIP,
+		Region:          "default",
+		PGVersion:       17,
+		CPUCount:        8,
+		LocaleAvailable: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := []string{"pg_locale", "pg_lc_collate", "pg_lc_ctype"}
+	versionCommentColumn := inlineCommentColumnForKey(t, got, "pg_version")
+	previous := strings.Index(got, "pg_version:")
+	for _, key := range keys {
+		index := strings.Index(got, key+":")
+		if index <= previous {
+			t.Fatalf("locale key %s is missing or out of order:\n%s", key, got)
+		}
+		previous = index
+		if column := inlineCommentColumnForKey(t, got, key); column != versionCommentColumn {
+			t.Fatalf("%s comment column=%d, want %d:\n%s", key, column, versionCommentColumn, got)
+		}
+	}
+
+	withoutInserted := got
+	for _, key := range keys {
+		lines := strings.SplitAfter(withoutInserted, "\n")
+		withoutInserted = ""
+		for _, line := range lines {
+			if strings.HasPrefix(line, "    "+key+":") {
+				continue
+			}
+			withoutInserted += line
+		}
+	}
+	withoutInserted = strings.Replace(withoutInserted, "pg_version: 17", "pg_version: 18", 1)
+	if withoutInserted != content {
+		t.Fatalf("configure changed bytes outside pg_version and inserted locale lines\nwant:\n%s\ngot:\n%s", content, withoutInserted)
+	}
+}
+
+func TestMutateTemplateNewVersionAndLocalesStayTogether(t *testing.T) {
+	content := `all:
+  vars:
+    node_repo_modules: node,infra,pgsql  # repository modules
+    pg_conf: oltp.yml                    # tuning spec
+`
+	got, _, _, err := mutateTemplate(content, mutationOptions{
+		Mode:            "meta",
+		PrimaryIP:       defaultPrimaryIP,
+		PGVersion:       17,
+		CPUCount:        8,
+		LocaleAvailable: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeyOrder(t, got, "node_repo_modules", "pg_version", "pg_locale", "pg_lc_collate", "pg_lc_ctype", "pg_conf")
+}
+
+func TestMutateTemplateNewRegionAndProxyStayTogether(t *testing.T) {
+	content := `all:
+  vars:
+    admin_ip: 10.10.10.10              # admin address
+    node_tune: oltp                     # tuning spec
+`
+	got, _, _, err := mutateTemplate(content, mutationOptions{
+		Mode:      "meta",
+		PrimaryIP: defaultPrimaryIP,
+		Region:    "europe",
+		Proxy: map[string]string{
+			"http_proxy": "http://proxy.example",
+			"no_proxy":   "localhost",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeyOrder(t, got, "admin_ip", "region", "proxy_env", "node_tune")
+}
+
+func assertKeyOrder(t *testing.T, source string, keys ...string) {
+	t.Helper()
+	previous := -1
+	for _, key := range keys {
+		index := strings.Index(source, key+":")
+		if index < 0 {
+			t.Fatalf("key %s is missing:\n%s", key, source)
+		}
+		if index <= previous {
+			t.Fatalf("key %s is out of order in %v:\n%s", key, keys, source)
+		}
+		previous = index
+	}
+}
+
+func inlineCommentColumnForKey(t *testing.T, source, key string) int {
+	t.Helper()
+	for _, line := range strings.Split(source, "\n") {
+		trimmed := strings.TrimLeft(line, " \t")
+		if !strings.HasPrefix(trimmed, key+":") {
+			continue
+		}
+		column := strings.IndexByte(line, '#')
+		if column < 0 {
+			t.Fatalf("key %s has no inline comment in %q", key, line)
+		}
+		return column + 1
+	}
+	t.Fatalf("key %s not found", key)
+	return 0
+}
+
 func TestMutateTemplatePasswordGeneration(t *testing.T) {
 	content := `all:
   vars:
@@ -440,6 +572,223 @@ func TestMutateTemplatePasswordGeneration(t *testing.T) {
 	if !re.MatchString(got) {
 		t.Fatalf("expected generated password format, got:\n%s", got)
 	}
+}
+
+func TestMutateTemplateScopesPGVersionToAllVars(t *testing.T) {
+	content := `all:
+  children:
+    pg-a:
+      hosts: { 10.10.10.10: { pg_seq: 1, pg_role: primary } }
+      vars: { pg_cluster: pg-a, pg_version: 16 }
+    pg-b:
+      hosts: { 10.10.10.11: { pg_seq: 1, pg_role: primary } }
+      vars:
+        pg_cluster: pg-b
+        pg_version: 17
+  vars:
+    pg_version: 18
+    pg_packages: [ pg18-main ]
+`
+	got, _, _, err := mutateTemplate(content, mutationOptions{Mode: "meta", PrimaryIP: defaultPrimaryIP, PGVersion: 15})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "vars: { pg_cluster: pg-a, pg_version: 16 }") ||
+		!strings.Contains(got, "        pg_version: 17") {
+		t.Fatalf("cluster-specific pg_version changed:\n%s", got)
+	}
+	if !strings.Contains(got, "    pg_version: 15") || !strings.Contains(got, "pg15-main") {
+		t.Fatalf("all.vars version or package alias not updated:\n%s", got)
+	}
+}
+
+func TestMutateTemplateProxyPreservesHintsAndUnrelatedFields(t *testing.T) {
+	content := `all:
+  vars:
+    region: default
+    proxy_env:                        # keep proxy block comment
+      custom_proxy_flag: keep
+      no_proxy: "old"
+      http_proxy: "http://old"
+      # https_proxy: http://hint.example # keep this hint
+`
+	got, _, _, err := mutateTemplate(content, mutationOptions{
+		Mode: "meta", PrimaryIP: defaultPrimaryIP,
+		Proxy: map[string]string{
+			"http_proxy":  "http://new-http",
+			"https_proxy": "http://new-https",
+			"no_proxy":    "localhost,127.0.0.1",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"proxy_env:                        # keep proxy block comment",
+		"custom_proxy_flag: keep",
+		"# https_proxy: http://hint.example # keep this hint",
+		`http_proxy: "http://new-http"`,
+		`https_proxy: "http://new-https"`,
+		`no_proxy: "localhost,127.0.0.1"`,
+	} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("missing %q after proxy upsert:\n%s", expected, got)
+		}
+	}
+}
+
+func TestMutateRepresentativePigstyTemplates(t *testing.T) {
+	confRoot := pigstyConfTestRoot(t)
+	cases := []struct {
+		mode string
+		opts mutationOptions
+	}{
+		{mode: "meta", opts: mutationOptions{Mode: "meta", PrimaryIP: "192.168.10.10", Region: "china", PGVersion: 17, CPUCount: 2}},
+		{mode: "rich", opts: mutationOptions{Mode: "rich", PrimaryIP: "192.168.10.10", Region: "default", PGVersion: 17, CPUCount: 8}},
+		{mode: "ha/trio", opts: mutationOptions{Mode: "ha/trio", PrimaryIP: "192.168.10.10", Region: "default", PGVersion: 17, CPUCount: 8}},
+		{mode: "app/dify", opts: mutationOptions{Mode: "app/dify", PrimaryIP: "192.168.10.10", Region: "china", PGVersion: 17, CPUCount: 2}},
+		{mode: "build/oss", opts: mutationOptions{Mode: "build/oss", PrimaryIP: "192.168.10.10", Region: "default", PGVersion: 17, CPUCount: 8}},
+		{mode: "demo/kernel", opts: mutationOptions{Mode: "demo/kernel", PrimaryIP: defaultPrimaryIP, Region: "default", PGVersion: 17, CPUCount: 8}},
+	}
+	for _, tt := range cases {
+		t.Run(strings.ReplaceAll(tt.mode, "/", "_"), func(t *testing.T) {
+			path := filepath.Join(confRoot, filepath.FromSlash(tt.mode)+".yml")
+			source, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, _, _, err := mutateTemplate(string(source), tt.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := inventory.Parse(path, []byte(got)); err != nil {
+				t.Fatalf("mutated template does not parse: %v", err)
+			}
+			if tt.mode == "build/oss" && !strings.Contains(got, defaultPrimaryIP) {
+				t.Fatal("build/* template unexpectedly replaced primary IP placeholder")
+			}
+		})
+	}
+}
+
+func TestMutateChinaPigstyCorpusActivatesTemplateKeys(t *testing.T) {
+	root := pigstyConfTestRoot(t)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || strings.ToLower(filepath.Ext(path)) != ".yml" {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		mode := strings.TrimSuffix(filepath.ToSlash(relative), ".yml")
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		before, err := inventory.Parse(path, source)
+		if err != nil {
+			return err
+		}
+		counts := map[string]int{
+			"docker_registry_mirrors": before.CommentedKeyCount("docker_registry_mirrors"),
+			"PIP_MIRROR_URL":          before.CommentedKeyCount("PIP_MIRROR_URL"),
+		}
+		got, _, _, err := mutateTemplate(string(source), mutationOptions{
+			Mode: mode, PrimaryIP: defaultPrimaryIP, Region: "china", CPUCount: 8,
+		})
+		if err != nil {
+			return fmt.Errorf("%s: %w", relative, err)
+		}
+		after, err := inventory.Parse(path+"#china", []byte(got))
+		if err != nil {
+			return err
+		}
+		for key, count := range counts {
+			if count == 0 {
+				continue
+			}
+			if remaining := after.CommentedKeyCount(key); remaining != 0 {
+				return fmt.Errorf("%s: %s still has %d inactive entries", relative, key, remaining)
+			}
+			if active := len(after.PathsByKey(key)); active < count {
+				return fmt.Errorf("%s: %s active=%d, want at least %d", relative, key, active, count)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMutateDemoKernelKeepsClusterSpecificPGVersions(t *testing.T) {
+	path := filepath.Join(pigstyConfTestRoot(t), "demo", "kernel.yml")
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := inventory.Parse(path, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _, warnings, err := mutateTemplate(string(source), mutationOptions{
+		Mode: "demo/kernel", PrimaryIP: defaultPrimaryIP, PGVersion: 16, CPUCount: 8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := inventory.Parse(path, []byte(got))
+	if err != nil {
+		t.Fatal(err)
+	}
+	global := inventory.AllVars("pg_version").String()
+	for _, path := range before.PathsByKey("pg_version") {
+		if path.String() == global {
+			continue
+		}
+		beforeValue, _ := before.Lookup(path)
+		afterValue, ok := after.Lookup(path)
+		if !ok || beforeValue.Scalar == nil || afterValue.Scalar == nil || beforeValue.Scalar.Raw != afterValue.Scalar.Raw {
+			t.Fatalf("cluster-specific %s changed: before=%+v after=%+v", path.String(), beforeValue, afterValue)
+		}
+	}
+	value, ok := after.Lookup(inventory.AllVars("pg_version"))
+	if !ok || value.Scalar == nil || fmt.Sprint(value.Scalar.Value) != "16" {
+		t.Fatalf("all.vars.pg_version was not upserted: %+v", value)
+	}
+	if len(warnings) == 0 || !strings.Contains(strings.Join(warnings, "\n"), "/pg_version") {
+		t.Fatalf("expected path-specific pg_version override warnings, got %v", warnings)
+	}
+}
+
+func pigstyConfTestRoot(t *testing.T) string {
+	t.Helper()
+	if configured := os.Getenv("PIGSTY_CONF_DIR"); configured != "" {
+		info, err := os.Stat(configured)
+		if err != nil {
+			t.Fatalf("PIGSTY_CONF_DIR %q: %v", configured, err)
+		}
+		if !info.IsDir() {
+			t.Fatalf("PIGSTY_CONF_DIR %q is not a directory", configured)
+		}
+		return filepath.Clean(configured)
+	}
+	candidates := make([]string, 0, 2)
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, "pigsty", "conf"))
+	}
+	candidates = append(candidates, filepath.Join("..", "..", "..", "pigsty", "conf"))
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return filepath.Clean(candidate)
+		}
+	}
+	t.Skip("Pigsty conf corpus is unavailable; set PIGSTY_CONF_DIR to enable it")
+	return ""
 }
 
 func TestConfigureNativeEndToEndAbsoluteOutput(t *testing.T) {
@@ -539,6 +888,7 @@ func TestConfigureNativeBetaPGSuggestsDedicatedTemplate(t *testing.T) {
 	}
 	meta := `all:
   vars:
+    admin_ip: 10.10.10.10
     region: default
     node_repo_modules: 'node,infra,pgsql'
     pg_version: 18
@@ -597,6 +947,7 @@ func TestConfigureNativePGMajorTemplateSkipsVersionRewrite(t *testing.T) {
 	}
 	template := fmt.Sprintf(`all:
   vars:
+    admin_ip: 10.10.10.10
     region: default
     node_repo_modules: node,infra,pgsql,beta
     pg_version: %d
@@ -678,6 +1029,36 @@ func TestConfigureNativeTemplateNotFound(t *testing.T) {
 	}
 	if result.Code != output.CodeStyConfigureTemplateNotFound {
 		t.Fatalf("unexpected code: %d", result.Code)
+	}
+}
+
+func TestConfigureNativeValidationFailureDoesNotOverwriteOutput(t *testing.T) {
+	tmp := t.TempDir()
+	confDir := filepath.Join(tmp, "conf")
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(confDir, "meta.yml"), []byte("wrong_root: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(tmp, "pigsty.yml")
+	const original = "do-not-overwrite\n"
+	if err := os.WriteFile(outPath, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result := ConfigureNative(ConfigureOptions{
+		PigstyHome: tmp, Mode: "meta", PrimaryIP: defaultPrimaryIP,
+		OutputFile: outPath, DisablePreflight: true,
+	})
+	if result == nil || result.Success {
+		t.Fatalf("expected validation failure, got %+v", result)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Fatalf("failed configure overwrote output: %q", got)
 	}
 }
 
@@ -800,14 +1181,6 @@ func TestBuildProxyEnv(t *testing.T) {
 	}
 }
 
-func TestUpsertPGVersionAppendsWhenMissing(t *testing.T) {
-	content := "all:\n  vars:\n    region: default\n"
-	got := upsertPGVersion(content, 17)
-	if !strings.Contains(got, "pg_version: 17") {
-		t.Fatalf("expected appended pg_version, got:\n%s", got)
-	}
-}
-
 func TestShouldSetLocale(t *testing.T) {
 	if !shouldSetLocale(0, "meta", false) {
 		t.Fatal("expected locale enabled when pg version is not specified for meta")
@@ -823,19 +1196,29 @@ func TestShouldSetLocale(t *testing.T) {
 	}
 }
 
-func TestInsertLocaleSettingsIdempotent(t *testing.T) {
+func TestMutateTemplateLocaleSettingsIdempotent(t *testing.T) {
+	mutate := func(content string, version int) string {
+		t.Helper()
+		got, _, _, err := mutateTemplate(content, mutationOptions{
+			Mode: "meta", PrimaryIP: defaultPrimaryIP, PGVersion: version, CPUCount: 8,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
 	content := "all:\n  vars:\n    pg_version: 18\n"
-	withLocale := insertLocaleSettings(content)
+	withLocale := mutate(content, 18)
 	if !strings.Contains(withLocale, "pg_locale: C.UTF-8") {
 		t.Fatalf("expected locale block inserted, got:\n%s", withLocale)
 	}
-	again := insertLocaleSettings(withLocale)
+	again := mutate(withLocale, 18)
 	if strings.Count(again, "pg_locale: C.UTF-8") != 1 {
 		t.Fatalf("expected locale block inserted only once, got:\n%s", again)
 	}
 
 	noPgVersion := "all:\n  vars:\n    region: default\n"
-	if got := insertLocaleSettings(noPgVersion); got != noPgVersion {
+	if got := mutate(noPgVersion, 0); got != noPgVersion {
 		t.Fatalf("expected content unchanged without pg_version, got:\n%s", got)
 	}
 }

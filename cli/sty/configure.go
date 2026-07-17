@@ -16,14 +16,13 @@ import (
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
+	"pig/inventory"
 	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -246,7 +245,7 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 	localeAvailable := detectLocaleAvailable(opts.LocaleAvailable)
 	proxy := buildProxyEnv(opts.UseProxy)
 
-	mutated, generated, mutateWarnings, err := mutateTemplate(string(templateBytes), mutationOptions{
+	mutationResult, err := mutateTemplateDocument(string(templateBytes), mutationOptions{
 		Mode:             mode,
 		PrimaryIP:        primaryIP,
 		Region:           region,
@@ -259,14 +258,29 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 	if err != nil {
 		return output.Fail(output.CodeStyConfigureFailed, err.Error())
 	}
-	warnings = append(warnings, mutateWarnings...)
-
-	var yamlCheck interface{}
-	if err := yaml.Unmarshal([]byte(mutated), &yamlCheck); err != nil {
-		return output.Fail(output.CodeStyConfigureFailed, fmt.Sprintf("rendered yaml is invalid: %v", err))
+	warnings = append(warnings, mutationResult.Warnings...)
+	candidate := mutationResult.Document
+	diagnostics := candidate.Validate()
+	if inventory.HasErrors(diagnostics) {
+		return output.Fail(output.CodeStyConfigureFailed, formatInventoryDiagnostics("rendered inventory is invalid", diagnostics))
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Severity == inventory.SeverityWarning {
+			warnings = append(warnings, fmt.Sprintf("%s at %s: %s", diagnostic.Code, diagnostic.Path.String(), diagnostic.Message))
+		}
+	}
+	if ansibleInventory, lookupErr := exec.LookPath("ansible-inventory"); lookupErr == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		externalDiagnostics := inventory.ValidateWithAnsible(ctx, ansibleInventory, candidate)
+		cancel()
+		if inventory.HasErrors(externalDiagnostics) {
+			return output.Fail(output.CodeStyConfigureFailed, formatInventoryDiagnostics("ansible-inventory rejected rendered inventory", externalDiagnostics))
+		}
+	} else if !opts.DisablePreflight {
+		warnings = append(warnings, "ansible-inventory not found, external inventory validation skipped")
 	}
 
-	if err := utils.PutFileMode(outputPath, []byte(mutated), 0600); err != nil {
+	if err := utils.PutFileMode(outputPath, candidate.Bytes(), 0600); err != nil {
 		return output.Fail(output.CodeStyConfigureWriteFailed, fmt.Sprintf("failed to write output: %v", err))
 	}
 
@@ -279,7 +293,7 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 		SSHPort:          strings.TrimSpace(opts.SSHPort),
 		PGVersion:        strings.TrimSpace(opts.PGVersion),
 		Native:           true,
-		GeneratedSecrets: generated,
+		GeneratedSecrets: mutationResult.Generated,
 		Warnings:         warnings,
 	}
 
@@ -806,180 +820,289 @@ type mutationOptions struct {
 	GeneratePassword bool
 }
 
+type templateMutationResult struct {
+	Document  *inventory.Document
+	Changes   inventory.ChangeSet
+	Generated []string
+	Warnings  []string
+}
+
+// mutateTemplate is retained as a string-oriented test helper. Production
+// configure consumes the committed Document directly and never reparses text.
 func mutateTemplate(content string, opts mutationOptions) (string, []string, []string, error) {
+	result, err := mutateTemplateDocument(content, opts)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return string(result.Document.Bytes()), result.Generated, result.Warnings, nil
+}
+
+func mutateTemplateDocument(content string, opts mutationOptions) (*templateMutationResult, error) {
+	doc, err := inventory.Parse(opts.Mode+".yml", []byte(content))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse inventory template: %w", err)
+	}
+	mutation := doc.Mutate()
+	globals := mutation.AllVars()
 	var warnings []string
-	if !strings.HasPrefix(opts.Mode, "build/") {
-		content = strings.ReplaceAll(content, defaultPrimaryIP, opts.PrimaryIP)
+
+	if !strings.HasPrefix(opts.Mode, "build/") && opts.PrimaryIP != "" && opts.PrimaryIP != defaultPrimaryIP {
+		if _, err := mutation.ReplaceAll(defaultPrimaryIP, opts.PrimaryIP,
+			inventory.WithLiteralTargets(inventory.LiteralAll),
+			inventory.WithIdentifier("primary_ip")); err != nil {
+			return nil, err
+		}
 	}
 
 	if opts.CPUCount > 0 && opts.CPUCount < 4 {
-		content = strings.ReplaceAll(content, "pg_conf: oltp.yml", "pg_conf: tiny.yml")
-		content = strings.ReplaceAll(content, "node_tune: oltp", "node_tune: tiny")
+		if scalarEquals(globals, "node_tune", "oltp") {
+			if err := globals.Set("node_tune", "tiny"); err != nil {
+				return nil, err
+			}
+		}
+		if scalarEquals(globals, "pg_conf", "oltp.yml") {
+			if err := globals.Set("pg_conf", "tiny.yml"); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	if opts.Region != "" && opts.Region != "default" {
-		content = strings.ReplaceAll(content, "    region: default", "    region: "+opts.Region)
+		insertOptions := insertAfterExisting(globals, "admin_ip")
+		if err := globals.Set("region", opts.Region, insertOptions...); err != nil {
+			return nil, err
+		}
 	}
 	if opts.Region == "china" {
-		content = strings.ReplaceAll(content, "#docker_registry_mirrors", "docker_registry_mirrors")
-		content = strings.ReplaceAll(content, "#PIP_MIRROR_URL", "PIP_MIRROR_URL")
+		for _, key := range []string{"docker_registry_mirrors", "PIP_MIRROR_URL"} {
+			if err := enableChinaTemplateKey(mutation, key); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	if len(opts.Proxy) > 0 {
-		content = removeProxyBlock(content)
-		content = insertProxyBlock(content, opts.Proxy)
+		if err := upsertProxyEnv(mutation, opts.Proxy); err != nil {
+			return nil, err
+		}
 	}
 
 	pinnedKernelMode := opts.Mode == "mssql" || opts.Mode == "polar"
 	pgMajorTemplate := pgMajorTemplateMode.MatchString(opts.Mode)
 	if opts.PGVersion > 0 && !pinnedKernelMode && !pgMajorTemplate {
-		content = upsertPGVersion(content, opts.PGVersion)
-		content = strings.ReplaceAll(content, "pg18-", fmt.Sprintf("pg%d-", opts.PGVersion))
+		insertOptions := insertAfterExisting(globals, "node_repo_modules")
+		if err := globals.Set("pg_version", opts.PGVersion, insertOptions...); err != nil {
+			return nil, err
+		}
+		if _, err := mutation.ReplaceAll("pg18-", fmt.Sprintf("pg%d-", opts.PGVersion),
+			inventory.WithLiteralTargets(inventory.LiteralScalars|inventory.LiteralComments),
+			inventory.WithIdentifier("pg_package_alias")); err != nil {
+			return nil, err
+		}
+		warnings = append(warnings, pgVersionOverrideWarnings(mutation.Document(), opts.PGVersion)...)
 	} else if opts.PGVersion > 0 && pinnedKernelMode {
 		warnings = append(warnings, fmt.Sprintf(
 			"pg_version %d ignored: %s template pins its own kernel version", opts.PGVersion, opts.Mode))
 	}
 
-	// Beta majors beyond the stable window ship from the PGDG testing repos,
-	// which require the 'beta' repo module on top of the standard modules.
+	// Beta majors beyond the stable window ship from the PGDG testing repos.
+	// Only all.vars module lists are changed; group/host overrides remain intact.
 	if ext.IsBetaPGMajor(opts.PGVersion) && !pinnedKernelMode {
-		var enabled bool
-		content, enabled = enableBetaRepoModule(content)
+		enabled, err := enableBetaRepoModules(mutation)
+		if err != nil {
+			return nil, err
+		}
 		if !enabled {
 			warnings = append(warnings, fmt.Sprintf(
-				"beta repo module not enabled: no repo module list with 'pgsql' in template, add 'beta' to repo modules manually for PG%d packages", opts.PGVersion))
+				"beta repo module not enabled: no all.vars repo module list with 'pgsql' in template, add 'beta' manually for PG%d packages", opts.PGVersion))
 		}
 	}
 
 	if shouldSetLocale(opts.PGVersion, opts.Mode, opts.LocaleAvailable) {
-		content = insertLocaleSettings(content)
-	}
-
-	generated := []string{}
-	if opts.GeneratePassword {
-		var err error
-		content, generated, err = replacePasswords(content)
-		if err != nil {
-			return "", nil, nil, err
+		if err := ensureLocaleSettings(mutation); err != nil {
+			return nil, err
 		}
 	}
 
-	return content, generated, warnings, nil
+	var generated []string
+	if opts.GeneratePassword {
+		generated, err = replacePasswordsInMutation(mutation)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	committed, changes, err := mutation.Commit()
+	if err != nil {
+		if opts.GeneratePassword {
+			return nil, fmt.Errorf("failed to commit inventory edits after secret generation")
+		}
+		return nil, fmt.Errorf("failed to commit inventory edits: %w", err)
+	}
+	return &templateMutationResult{Document: committed, Changes: changes, Generated: generated, Warnings: warnings}, nil
+}
+
+func enableChinaTemplateKey(mutation *inventory.Mutation, key string) error {
+	before := mutation.Document().CommentedKeyCount(key)
+	result, err := mutation.UncommentKey(key)
+	if err != nil {
+		return err
+	}
+	if result.Matched != before || result.Changed != before {
+		return fmt.Errorf("china mirror key %s was not activated completely: matched=%d changed=%d expected=%d", key, result.Matched, result.Changed, before)
+	}
+	if remaining := mutation.Document().CommentedKeyCount(key); remaining != 0 {
+		return fmt.Errorf("china mirror key %s still has %d inactive declaration(s)", key, remaining)
+	}
+	if len(result.Paths) != result.Changed {
+		return fmt.Errorf("china mirror key %s produced %d paths for %d edits", key, len(result.Paths), result.Changed)
+	}
+	for _, path := range result.Paths {
+		if !variableDeclarationPath(path) {
+			return fmt.Errorf("china mirror key %s activated outside vars at %s", key, path.String())
+		}
+	}
+	return nil
+}
+
+func variableDeclarationPath(path inventory.Path) bool {
+	limit := len(path) - 1
+	for index := 0; index < limit; index++ {
+		segment := path[index]
+		if segment.Kind != inventory.KeySegment {
+			continue
+		}
+		if segment.Key == "vars" || (segment.Key == "hosts" && index+2 < len(path)) {
+			return true
+		}
+	}
+	return false
+}
+
+func pgVersionOverrideWarnings(doc *inventory.Document, target int) []string {
+	if doc == nil || target <= 0 {
+		return nil
+	}
+	global := inventory.AllVars("pg_version").String()
+	var warnings []string
+	for _, path := range doc.PathsByKey("pg_version") {
+		if path.String() == global {
+			continue
+		}
+		value, ok := doc.Lookup(path)
+		if !ok || value == nil || value.Scalar == nil || fmt.Sprint(value.Scalar.Value) == strconv.Itoa(target) {
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf("pg_version override at %s remains %v while all.vars requests %d", path.String(), value.Scalar.Value, target))
+	}
+	return warnings
 }
 
 var pgMajorTemplateMode = regexp.MustCompile(`^pg[0-9]+$`)
 
-// betaRepoModulesLine matches an uncommented (node_)repo_modules line and
-// captures: key+separator, opening quote, comma-separated module list,
-// closing quote, trailing whitespace/comment.
-var betaRepoModulesLine = regexp.MustCompile(`^([ \t]*(?:node_)?repo_modules[ \t]*:[ \t]*)(['"]?)([A-Za-z0-9_,\-]+)(['"]?)([ \t]*(?:#.*)?)$`)
+func scalarEquals(mapping *inventory.MappingEditor, key, expected string) bool {
+	value, ok := mapping.Lookup(key)
+	return ok && value != nil && value.Scalar != nil && fmt.Sprint(value.Scalar.Value) == expected
+}
 
-// enableBetaRepoModule inserts the beta module (PGDG testing repos) into every
-// repo module list that contains the pgsql module, right after it, regardless
-// of module order. Lines already listing beta are left untouched, so the
-// rewrite is idempotent (e.g. for dedicated beta templates); commented lines are ignored.
-// It reports whether the resulting content enables the beta module.
-func enableBetaRepoModule(content string) (string, bool) {
-	lines := strings.Split(content, "\n")
-	enabled := false
-	for i, line := range lines {
-		m := betaRepoModulesLine.FindStringSubmatch(line)
-		if m == nil {
+func insertAfterExisting(mapping *inventory.MappingEditor, key string) []inventory.InsertOption {
+	if _, ok := mapping.Lookup(key); ok {
+		return []inventory.InsertOption{inventory.AfterKey(key)}
+	}
+	return nil
+}
+
+func upsertProxyEnv(mutation *inventory.Mutation, proxy map[string]string) error {
+	globals := mutation.AllVars()
+	keys := []string{"http_proxy", "https_proxy", "all_proxy", "no_proxy"}
+	value, exists := globals.Lookup("proxy_env")
+	insertOptions := insertAfterExisting(globals, "region")
+	if len(insertOptions) == 0 {
+		insertOptions = insertAfterExisting(globals, "admin_ip")
+	}
+	proxyVars := globals.Mapping("proxy_env", insertOptions...)
+	if !exists {
+		if err := proxyVars.Ensure(); err != nil {
+			return err
+		}
+		value, _ = globals.Lookup("proxy_env")
+	}
+	if value == nil || (value.Kind != inventory.MappingValue && value.Kind != inventory.NullValue) {
+		return fmt.Errorf("all.vars.proxy_env must be a mapping")
+	}
+	for _, key := range keys {
+		desired := strings.TrimSpace(proxy[key])
+		if desired != "" {
+			if err := proxyVars.Set(key, desired); err != nil {
+				return err
+			}
 			continue
 		}
-		modules := strings.Split(m[3], ",")
+		if _, exists := proxyVars.Lookup(key); exists {
+			if err := proxyVars.Delete(key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func enableBetaRepoModules(mutation *inventory.Mutation) (bool, error) {
+	globals := mutation.AllVars()
+	enabled := false
+	for _, key := range []string{"node_repo_modules", "repo_modules"} {
+		value, ok := globals.Lookup(key)
+		if !ok || value == nil || value.Scalar == nil {
+			continue
+		}
+		modules := strings.Split(fmt.Sprint(value.Scalar.Value), ",")
+		for i := range modules {
+			modules[i] = strings.TrimSpace(modules[i])
+		}
 		if slices.Contains(modules, "beta") {
 			enabled = true
 			continue
 		}
-		if !slices.Contains(modules, "pgsql") {
+		pgsql := slices.Index(modules, "pgsql")
+		if pgsql < 0 {
 			continue
 		}
-		rewritten := make([]string, 0, len(modules)+1)
-		for _, module := range modules {
-			rewritten = append(rewritten, module)
-			if module == "pgsql" {
-				rewritten = append(rewritten, "beta")
-			}
+		if err := globals.Set(key, strings.Join(slices.Insert(modules, pgsql+1, "beta"), ",")); err != nil {
+			return false, err
 		}
-		lines[i] = m[1] + m[2] + strings.Join(rewritten, ",") + m[4] + m[5]
 		enabled = true
 	}
-	return strings.Join(lines, "\n"), enabled
-}
-
-func removeProxyBlock(content string) string {
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?m)^[ \t]*proxy_env:.*\n?`),
-		regexp.MustCompile(`(?m)^[ \t]*https?_proxy:.*\n?`),
-		regexp.MustCompile(`(?m)^[ \t]*all_proxy:.*\n?`),
-		regexp.MustCompile(`(?m)^[ \t]*no_proxy:.*\n?`),
-	}
-	for _, re := range patterns {
-		content = re.ReplaceAllString(content, "")
-	}
-	return content
-}
-
-func insertProxyBlock(content string, proxy map[string]string) string {
-	order := []string{"http_proxy", "https_proxy", "all_proxy", "no_proxy"}
-	lines := []string{"    proxy_env:"}
-	for _, k := range order {
-		if v, ok := proxy[k]; ok && v != "" {
-			lines = append(lines, fmt.Sprintf("      %s: %q", k, v))
-		}
-	}
-	block := strings.Join(lines, "\n")
-
-	regionLine := regexp.MustCompile(`(?m)^    region:.*$`)
-	loc := regionLine.FindStringIndex(content)
-	if loc == nil {
-		if strings.HasSuffix(content, "\n") {
-			return content + block + "\n"
-		}
-		return content + "\n" + block + "\n"
-	}
-	return content[:loc[1]] + "\n" + block + content[loc[1]:]
-}
-
-func upsertPGVersion(content string, version int) string {
-	re := regexp.MustCompile(`(?m)^[ \t]*pg_version:.*$`)
-	line := fmt.Sprintf("    pg_version: %d                      # configured pg major version", version)
-	if re.MatchString(content) {
-		return re.ReplaceAllString(content, line)
-	}
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	return content + line + "\n"
+	return enabled, nil
 }
 
 func shouldSetLocale(pgVersion int, mode string, localeAvailable bool) bool {
-	if (pgVersion == 0 && mode != "mssql" && mode != "polar") || pgVersion >= 17 {
-		return true
-	}
-	return localeAvailable
+	return (pgVersion == 0 && mode != "mssql" && mode != "polar") || pgVersion >= 17 || localeAvailable
 }
 
-func insertLocaleSettings(content string) string {
-	if strings.Contains(content, "pg_locale: C.UTF-8") {
-		return content
+func ensureLocaleSettings(mutation *inventory.Mutation) error {
+	globals := mutation.AllVars()
+	if _, exists := globals.Lookup("pg_version"); !exists {
+		return nil
 	}
-	localeBlock := "    pg_locale: C.UTF-8                  # overwrite default C local\n" +
-		"    pg_lc_collate: C.UTF-8              # overwrite default C lc_collate\n" +
-		"    pg_lc_ctype: C.UTF-8                # overwrite default C lc_ctype\n"
-
-	re := regexp.MustCompile(`(?m)^    pg_version:.*$`)
-	loc := re.FindStringIndex(content)
-	if loc == nil {
-		// Keep parity with legacy sed behavior: locale block is inserted only
-		// when a pg_version line exists.
-		return content
+	locales := []struct {
+		key     string
+		comment string
+	}{
+		{key: "pg_locale", comment: "overwrite default C locale"},
+		{key: "pg_lc_collate", comment: "overwrite default C lc_collate"},
+		{key: "pg_lc_ctype", comment: "overwrite default C lc_ctype"},
 	}
-	return content[:loc[1]] + "\n" + localeBlock + content[loc[1]:]
+	anchor := "pg_version"
+	for _, locale := range locales {
+		if err := globals.Set(locale.key, "C.UTF-8", inventory.AfterKey(anchor), inventory.WithComment(locale.comment)); err != nil {
+			return err
+		}
+		anchor = locale.key
+	}
+	return nil
 }
 
-func replacePasswords(content string) (string, []string, error) {
+func replacePasswordsInMutation(mutation *inventory.Mutation) ([]string, error) {
 	prefixKeys := []string{
 		"grafana_admin_password",
 		"pg_admin_password",
@@ -994,10 +1117,13 @@ func replacePasswords(content string) (string, []string, error) {
 	for _, key := range prefixKeys {
 		pass, err := randomPassword(24)
 		if err != nil {
-			return "", nil, err
+			return nil, err
 		}
-		re := regexp.MustCompile(`(?m)^(\s*` + regexp.QuoteMeta(key) + `:\s*).*$`)
-		content = re.ReplaceAllString(content, "${1}"+pass)
+		for _, path := range mutation.Document().PathsByKey(key) {
+			if err := mutation.Set(path, pass); err != nil {
+				return nil, err
+			}
+		}
 		generated = append(generated, key)
 	}
 
@@ -1013,12 +1139,25 @@ func replacePasswords(content string) (string, []string, error) {
 	for _, token := range globalTokens {
 		pass, err := randomPassword(24)
 		if err != nil {
-			return "", nil, err
+			return nil, err
 		}
-		content = strings.ReplaceAll(content, token, pass)
+		if _, err := mutation.ReplaceAll(token, pass,
+			inventory.WithLiteralTargets(inventory.LiteralScalars),
+			inventory.WithIdentifier(token)); err != nil {
+			return nil, err
+		}
 		generated = append(generated, token)
 	}
-	return content, generated, nil
+	return generated, nil
+}
+
+func formatInventoryDiagnostics(prefix string, diagnostics []inventory.Diagnostic) string {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Severity == inventory.SeverityError {
+			return fmt.Sprintf("%s: %s at %s: %s", prefix, diagnostic.Code, diagnostic.Path.String(), diagnostic.Message)
+		}
+	}
+	return prefix
 }
 
 var passwordAlphabet = []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
