@@ -20,6 +20,7 @@ import (
 const legacyOutputCaptureLimit = 64 * 1024
 
 type legacyCommandData struct {
+	Kind            string                 `json:"kind,omitempty" yaml:"kind,omitempty"`
 	Command         string                 `json:"command" yaml:"command"`
 	Args            []string               `json:"args,omitempty" yaml:"args,omitempty"`
 	Params          map[string]interface{} `json:"params,omitempty" yaml:"params,omitempty"`
@@ -131,10 +132,18 @@ func handlePlanOutput(plan *output.Plan) error {
 }
 
 func runLegacyStructured(module int, command string, args []string, params map[string]interface{}, fn func() error) error {
-	return runLegacyStructuredWithNextActions(module, command, args, params, nil, fn)
+	return runLegacyStructuredContract(module, command, "", args, params, nil, fn)
 }
 
 func runLegacyStructuredWithNextActions(module int, command string, args []string, params map[string]interface{}, nextActions []output.NextAction, fn func() error) error {
+	return runLegacyStructuredContract(module, command, "", args, params, nextActions, fn)
+}
+
+func runLegacyStructuredKind(module int, command, kind string, args []string, params map[string]interface{}, fn func() error) error {
+	return runLegacyStructuredContract(module, command, kind, args, params, nil, fn)
+}
+
+func runLegacyStructuredContract(module int, command, kind string, args []string, params map[string]interface{}, nextActions []output.NextAction, fn func() error) error {
 	if fn == nil {
 		return fmt.Errorf("nil command executor for %s", command)
 	}
@@ -143,6 +152,7 @@ func runLegacyStructuredWithNextActions(module int, command string, args []strin
 	}
 
 	data := &legacyCommandData{
+		Kind:    kind,
 		Command: command,
 		Args:    append([]string(nil), args...),
 		Params:  normalizeParams(params),

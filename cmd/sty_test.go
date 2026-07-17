@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
 	stycli "pig/cli/sty"
 	"pig/internal/config"
+	"pig/internal/output"
 	"strings"
 	"testing"
 )
@@ -73,7 +75,13 @@ func TestStyInventoryCommandsAndFlags(t *testing.T) {
 		args []string
 		want *cobra.Command
 	}{
+		{args: []string{"sty", "inventory"}, want: pigstyInventoryCmd},
+		{args: []string{"sty", "inv"}, want: pigstyInventoryCmd},
+		{args: []string{"sty", "inventory", "list"}, want: pigstyInventoryListCmd},
+		{args: []string{"sty", "inventory", "show"}, want: pigstyInventoryShowCmd},
+		{args: []string{"sty", "inventory", "edit"}, want: pigstyInventoryEditCmd},
 		{args: []string{"sty", "edit"}, want: pigstyEditCmd},
+		{args: []string{"sty", "e"}, want: pigstyEditCmd},
 		{args: []string{"sty", "validate"}, want: pigstyValidateCmd},
 		{args: []string{"sty", "val"}, want: pigstyValidateCmd},
 	} {
@@ -90,6 +98,176 @@ func TestStyInventoryCommandsAndFlags(t *testing.T) {
 	}
 	if pigstyEditCmd.Flags().Lookup("output") != nil {
 		t.Fatal("pig sty edit must not shadow the global output flag")
+	}
+}
+
+func TestStyInventoryCanonicalAndDelegateUseCases(t *testing.T) {
+	originalEdit := pigstyEditExec
+	originalList := pigstyInventoryListExec
+	originalShow := pigstyInventoryShowExec
+	originalPath := config.PigstyConfig
+	originalFormat := config.OutputFormat
+	defer func() {
+		pigstyEditExec = originalEdit
+		pigstyInventoryListExec = originalList
+		pigstyInventoryShowExec = originalShow
+		config.PigstyConfig = originalPath
+		config.OutputFormat = originalFormat
+	}()
+	config.PigstyConfig = "/tmp/selected.yml"
+	config.OutputFormat = config.OUTPUT_TEXT
+
+	var edited []stycli.EditOptions
+	pigstyEditExec = func(opts stycli.EditOptions) *output.Result {
+		edited = append(edited, opts)
+		return output.OK("edited", nil)
+	}
+	_ = captureStdout(t, func() {
+		if err := pigstyEditCmd.RunE(pigstyEditCmd, []string{"vars"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := pigstyInventoryEditCmd.RunE(pigstyInventoryEditCmd, []string{"vars"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if len(edited) != 2 || edited[0] != edited[1] || edited[0].Path != config.PigstyConfig || edited[0].Selector != "vars" {
+		t.Fatalf("edit delegates = %+v", edited)
+	}
+
+	var listed stycli.InventoryOptions
+	pigstyInventoryListExec = func(opts stycli.InventoryOptions) *output.Result {
+		listed = opts
+		return output.OK("listed", nil)
+	}
+	_ = captureStdout(t, func() {
+		if err := pigstyInventoryListCmd.RunE(pigstyInventoryListCmd, []string{"pg-meta"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if listed.Path != config.PigstyConfig || listed.Selector != "pg-meta" {
+		t.Fatalf("list options = %+v", listed)
+	}
+
+	pigstyInventoryShowExec = func(opts stycli.InventoryOptions) ([]byte, *output.Result) {
+		if opts.Path != config.PigstyConfig || opts.Selector != "vars" {
+			t.Fatalf("show options = %+v", opts)
+		}
+		return []byte("secret: exact\n"), nil
+	}
+	var shown bytes.Buffer
+	pigstyInventoryShowCmd.SetOut(&shown)
+	defer pigstyInventoryShowCmd.SetOut(os.Stdout)
+	if err := pigstyInventoryShowCmd.RunE(pigstyInventoryShowCmd, []string{"vars"}); err != nil {
+		t.Fatal(err)
+	}
+	if shown.String() != "secret: exact\n" {
+		t.Fatalf("show output = %q", shown.String())
+	}
+}
+
+func TestStyReleaseNamespaceAndListDeprecation(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want *cobra.Command
+	}{
+		{args: []string{"sty", "release"}, want: pigstyReleaseCmd},
+		{args: []string{"sty", "release", "list"}, want: pigstyReleaseListCmd},
+		{args: []string{"sty", "release", "ls"}, want: pigstyReleaseListCmd},
+		{args: []string{"sty", "release", "get"}, want: pigstyReleaseGetCmd},
+		{args: []string{"sty", "list"}, want: pigstyListcmd},
+		{args: []string{"sty", "ls"}, want: pigstyListcmd},
+		{args: []string{"sty", "get"}, want: pigstyGetcmd},
+	} {
+		found, _, err := rootCmd.Find(test.args)
+		if err != nil {
+			t.Fatalf("Find(%v): %v", test.args, err)
+		}
+		if found != test.want {
+			t.Fatalf("Find(%v) = %v, want %v", test.args, found, test.want)
+		}
+	}
+	for _, command := range []*cobra.Command{pigstyGetcmd, pigstyReleaseGetCmd} {
+		for _, flag := range []string{"version", "dir", "mirror"} {
+			if command.Flags().Lookup(flag) == nil {
+				t.Fatalf("%s missing --%s", command.CommandPath(), flag)
+			}
+		}
+	}
+
+	originalExec := pigstyListExec
+	originalFormat := config.OutputFormat
+	defer func() {
+		pigstyListExec = originalExec
+		config.OutputFormat = originalFormat
+	}()
+	pigstyListExec = func(stycli.ListOptions) error { return nil }
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	var legacyErr bytes.Buffer
+	pigstyListcmd.SetErr(&legacyErr)
+	defer pigstyListcmd.SetErr(os.Stderr)
+	if err := pigstyListcmd.RunE(pigstyListcmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(legacyErr.String(), "Deprecated:"); got != 1 {
+		t.Fatalf("legacy list deprecation count = %d in %q", got, legacyErr.String())
+	}
+
+	var canonicalErr bytes.Buffer
+	pigstyReleaseListCmd.SetErr(&canonicalErr)
+	defer pigstyReleaseListCmd.SetErr(os.Stderr)
+	if err := pigstyReleaseListCmd.RunE(pigstyReleaseListCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if canonicalErr.Len() != 0 {
+		t.Fatalf("canonical list wrote deprecation: %q", canonicalErr.String())
+	}
+
+	config.OutputFormat = config.OUTPUT_JSON
+	legacyErr.Reset()
+	raw := captureStdout(t, func() {
+		if err := pigstyListcmd.RunE(pigstyListcmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if legacyErr.Len() != 0 || strings.Contains(raw, "Deprecated:") || !strings.Contains(raw, `"command":"pig sty list"`) || strings.Contains(raw, `"kind":`) {
+		t.Fatalf("structured legacy list stdout=%q stderr=%q", raw, legacyErr.String())
+	}
+
+	raw = captureStdout(t, func() {
+		if err := pigstyReleaseListCmd.RunE(pigstyReleaseListCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(raw, `"command":"pig sty release list"`) || !strings.Contains(raw, `"kind":"pig.sty.release.list/v1"`) {
+		t.Fatalf("structured canonical list = %q", raw)
+	}
+}
+
+func TestStyReleaseGetDelegateUsesIdenticalOptions(t *testing.T) {
+	originalExec := pigstyGetExec
+	originalFormat := config.OutputFormat
+	originalVersion, originalDir, originalMirror := pigstyVersion, pigstyDownloadDir, pigstyGetMirror
+	defer func() {
+		pigstyGetExec = originalExec
+		config.OutputFormat = originalFormat
+		pigstyVersion, pigstyDownloadDir, pigstyGetMirror = originalVersion, originalDir, originalMirror
+	}()
+	config.OutputFormat = config.OUTPUT_TEXT
+	pigstyVersion, pigstyDownloadDir, pigstyGetMirror = "v4.4.0", "/tmp/releases", true
+	var calls []stycli.DownloadOptions
+	pigstyGetExec = func(opts stycli.DownloadOptions) error {
+		calls = append(calls, opts)
+		return nil
+	}
+	if err := pigstyGetcmd.RunE(pigstyGetcmd, []string{"v4"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pigstyReleaseGetCmd.RunE(pigstyReleaseGetCmd, []string{"v4"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 2 || calls[0].Version != calls[1].Version || calls[0].DownloadDir != calls[1].DownloadDir || calls[0].Mirror != calls[1].Mirror || strings.Join(calls[0].Args, "\x00") != strings.Join(calls[1].Args, "\x00") {
+		t.Fatalf("release get delegate calls = %+v", calls)
 	}
 }
 

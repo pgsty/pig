@@ -5,6 +5,7 @@ import (
 	"pig/cli/ext"
 	stycli "pig/cli/sty"
 	"pig/internal/config"
+	"pig/internal/output"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -52,7 +53,9 @@ var styCmd = &cobra.Command{
   pig sty init    [-mpfvd]        # install pigsty (~/pigsty by default)
   pig sty boot    [-rmpk]         # install ansible and prepare offline pkg
   pig sty conf    [-cvmrsoxnpg --raw] # configure pigsty and generate config
-  pig sty edit    [selector]            # edit inventory or one YAML fragment
+  pig sty inventory list [selector]     # list ordered, redacted inventory metadata
+  pig sty inventory show [selector]     # show verbatim YAML in text mode
+  pig sty inventory edit [selector]     # edit inventory or one YAML fragment
   pig sty validate [file]               # validate a Pigsty inventory
   pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
   pig sty get                     # download pigsty source tarball
@@ -225,23 +228,78 @@ var pigstyConfCmd = &cobra.Command{
 	},
 }
 
+var pigstyInventoryCmd = &cobra.Command{
+	Use:         "inventory",
+	Aliases:     []string{"inv"},
+	Short:       "Inspect and edit the active Pigsty Inventory",
+	Annotations: ancsAnn("pig sty inventory", "query", "stable", "safe", true, "safe", "none", "current", 100),
+}
+
+var pigstyInventoryListCmd = &cobra.Command{
+	Use:         "list [selector]",
+	Short:       "List ordered Inventory topology and value kinds",
+	Annotations: ancsAnn("pig sty inventory list", "query", "stable", "safe", true, "safe", "none", "current", 500),
+	Args:        cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return handleAuxResult(pigstyInventoryListExec(stycli.InventoryOptions{Path: config.PigstyConfig, Selector: styInventorySelector(args)}))
+	},
+}
+
+var pigstyInventoryShowCmd = &cobra.Command{
+	Use:         "show [selector]",
+	Short:       "Show verbatim Inventory YAML (may contain secrets)",
+	Annotations: ancsAnn("pig sty inventory show", "query", "stable", "safe", true, "low", "none", "current", 500),
+	Args:        cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		body, failure := pigstyInventoryShowExec(stycli.InventoryOptions{Path: config.PigstyConfig, Selector: styInventorySelector(args)})
+		if failure != nil {
+			return handleAuxResult(failure)
+		}
+		if _, err := cmd.OutOrStdout().Write(body); err != nil {
+			return handleAuxResult(output.Fail(output.CodeStyInventoryReadFailed, "failed to write inventory output"))
+		}
+		return nil
+	},
+}
+
+const styInventoryEditLong = `Edit the active static Inventory through a private, revision-checked fragment.
+
+The committed file is replaced atomically and is owned by the user running Pig.
+Group/other permissions are removed; stricter owner-only permissions are kept.`
+
 var pigstyEditCmd = &cobra.Command{
 	Use:         "edit [selector]",
 	Short:       "Edit Pigsty inventory or a selected YAML fragment",
 	Annotations: ancsAnn("pig sty edit", "action", "volatile", "unsafe", false, "medium", "none", "current", 30000),
+	Aliases:     []string{"e"},
 	Args:        cobra.MaximumNArgs(1),
+	Long:        styInventoryEditLong,
 	Example: `  pig sty edit
   pig sty edit vars
   pig sty edit pg-meta
   pig sty edit pg-meta.vars.pg_databases
   pig sty edit 'pg-meta.hosts["10.10.10.10"]'`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		selector := ""
-		if len(args) == 1 {
-			selector = args[0]
-		}
-		return handleAuxResult(pigstyEditExec(stycli.EditOptions{Path: config.PigstyConfig, Selector: selector}))
-	},
+	RunE: runPigstyInventoryEdit,
+}
+
+var pigstyInventoryEditCmd = &cobra.Command{
+	Use:         "edit [selector]",
+	Short:       "Edit Pigsty inventory or a selected YAML fragment",
+	Annotations: ancsAnn("pig sty inventory edit", "action", "volatile", "unsafe", false, "medium", "none", "current", 30000),
+	Args:        cobra.MaximumNArgs(1),
+	Long:        styInventoryEditLong,
+	RunE:        runPigstyInventoryEdit,
+}
+
+func runPigstyInventoryEdit(_ *cobra.Command, args []string) error {
+	return handleAuxResult(pigstyEditExec(stycli.EditOptions{Path: config.PigstyConfig, Selector: styInventorySelector(args)}))
+}
+
+func styInventorySelector(args []string) string {
+	if len(args) == 1 {
+		return args[0]
+	}
+	return ""
 }
 
 var pigstyValidateCmd = &cobra.Command{
@@ -342,14 +400,7 @@ var pigstyListcmd = &cobra.Command{
   pig sty list all       # list all available versions
 	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModuleSty, "pig sty list", args, map[string]interface{}{
-			"mirror": pigstyListMirror,
-		}, func() error {
-			return pigstyListExec(stycli.ListOptions{
-				Mirror: pigstyListMirror,
-				Args:   args,
-			})
-		})
+		return runPigstyReleaseList(cmd, args, true)
 	},
 }
 
@@ -360,26 +411,76 @@ var pigstyGetcmd = &cobra.Command{
 	Aliases:     []string{"g", "download"},
 	Args:        cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModuleSty, "pig sty get", args, map[string]interface{}{
-			"version": pigstyVersion,
-			"dir":     pigstyDownloadDir,
-			"mirror":  pigstyGetMirror,
-		}, func() error {
-			return pigstyGetExec(stycli.DownloadOptions{
-				Version:     pigstyVersion,
-				DownloadDir: pigstyDownloadDir,
-				Mirror:      pigstyGetMirror,
-				Args:        args,
-			})
-		})
+		return runPigstyReleaseGet(args)
 	},
 }
 
+var pigstyReleaseCmd = &cobra.Command{
+	Use:         "release",
+	Short:       "List and download Pigsty releases",
+	Annotations: ancsAnn("pig sty release", "query", "volatile", "safe", true, "safe", "none", "current", 100),
+}
+
+var pigstyReleaseListCmd = &cobra.Command{
+	Use:         "list [version]",
+	Aliases:     []string{"ls"},
+	Short:       "List available Pigsty releases",
+	Annotations: ancsAnn("pig sty release list", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
+	Args:        cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPigstyReleaseList(cmd, args, false)
+	},
+}
+
+var pigstyReleaseGetCmd = &cobra.Command{
+	Use:         "get [version]",
+	Short:       "Download a Pigsty release",
+	Annotations: ancsAnn("pig sty release get", "action", "volatile", "safe", true, "low", "none", "current", 30000),
+	Args:        cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPigstyReleaseGet(args)
+	},
+}
+
+func runPigstyReleaseList(cmd *cobra.Command, args []string, deprecated bool) error {
+	command := "pig sty release list"
+	kind := "pig.sty.release.list/v1"
+	if deprecated && !config.IsStructuredOutput() {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Deprecated: 'pig sty list' keeps its 1.x release meaning; use 'pig sty release list'.")
+	}
+	if deprecated {
+		// Preserve the existing 1.x structured payload while the text path emits
+		// its stderr-only migration notice.
+		command, kind = "pig sty list", ""
+	}
+	return runLegacyStructuredKind(legacyModuleSty, command, kind, args, map[string]interface{}{
+		"mirror": pigstyListMirror,
+	}, func() error {
+		return pigstyListExec(stycli.ListOptions{Mirror: pigstyListMirror, Args: args})
+	})
+}
+
+func runPigstyReleaseGet(args []string) error {
+	// The compatibility spelling and canonical spelling intentionally return
+	// the same result, including the historical command identifier.
+	return runLegacyStructuredKind(legacyModuleSty, "pig sty get", "pig.sty.release.get/v1", args, map[string]interface{}{
+		"version": pigstyVersion,
+		"dir":     pigstyDownloadDir,
+		"mirror":  pigstyGetMirror,
+	}, func() error {
+		return pigstyGetExec(stycli.DownloadOptions{
+			Version: pigstyVersion, DownloadDir: pigstyDownloadDir, Mirror: pigstyGetMirror, Args: args,
+		})
+	})
+}
+
 var (
-	pigstyGetExec      = stycli.Download
-	pigstyListExec     = stycli.ListVersionsWithOptions
-	pigstyEditExec     = stycli.Edit
-	pigstyValidateExec = stycli.ValidateInventory
+	pigstyGetExec           = stycli.Download
+	pigstyListExec          = stycli.ListVersionsWithOptions
+	pigstyEditExec          = stycli.Edit
+	pigstyValidateExec      = stycli.ValidateInventory
+	pigstyInventoryListExec = stycli.ListInventory
+	pigstyInventoryShowExec = stycli.ShowInventory
 )
 
 var pigstyDeployCmd = &cobra.Command{
@@ -434,6 +535,12 @@ func init() {
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
 	pigstyGetcmd.Flags().BoolVarP(&pigstyGetMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 	pigstyListcmd.Flags().BoolVarP(&pigstyListMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
+	pigstyReleaseGetCmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
+	pigstyReleaseGetCmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
+	pigstyReleaseGetCmd.Flags().BoolVarP(&pigstyGetMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
+	pigstyReleaseListCmd.Flags().BoolVarP(&pigstyListMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
-	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyEditCmd, pigstyValidateCmd, pigstyDeployCmd, pigstyListcmd, pigstyGetcmd)
+	pigstyInventoryCmd.AddCommand(pigstyInventoryListCmd, pigstyInventoryShowCmd, pigstyInventoryEditCmd)
+	pigstyReleaseCmd.AddCommand(pigstyReleaseListCmd, pigstyReleaseGetCmd)
+	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyInventoryCmd, pigstyEditCmd, pigstyValidateCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
 }
