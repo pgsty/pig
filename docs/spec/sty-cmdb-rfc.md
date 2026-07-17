@@ -9,7 +9,7 @@ categories: [RFC]
 
 # `pig sty cmdb` Native Control Plane RFC
 
-Status: **PROPOSED — owner approval required before implementation**
+Status: **APPROVED — P2.1 implementation authorized by owner**
 
 RFC version: **1**
 
@@ -918,21 +918,25 @@ changes are never included incidentally.
 
 ## 18. Owner approval checklist
 
+Owner approval recorded: **2026-07-17 — “批准 P2 CMDB RFC v1，按文档进入
+P2.1”**. This approval unlocks P2.1 only; the ordered gates in section 17
+remain binding.
+
 Approval should explicitly accept or amend these choices:
 
-- [ ] separate `pigsty_cmdb` schema and no legacy-schema compatibility writes;
-- [ ] singleton append-only Snapshot store and exact revision-token format;
-- [ ] declaration-order-preserving Snapshot digest and atomic reorder merge;
-- [ ] CMDB v1 representability and size limits for tags/vault/anchors/aliases;
-- [ ] hidden native Ansible adapter and private per-home runtime directory;
-- [ ] connection-file/environment/`service=meta` resolver with no DSN flag;
-- [ ] PostgreSQL 14 minimum with pinned 14/18 compatibility coverage;
-- [ ] reset bundle plus `init --reset --restore` recovery contract;
-- [ ] `load --revision` as rollback without a new public verb;
-- [ ] mandatory private `--output` for secret-bearing dump and merge bodies;
-- [ ] exact three-way merge and base-mismatch rules;
-- [ ] strict source-switch grammar, parity requirement, and backup behavior;
-- [ ] container guard and destructive/conflict test matrix.
+- [x] separate `pigsty_cmdb` schema and no legacy-schema compatibility writes;
+- [x] singleton append-only Snapshot store and exact revision-token format;
+- [x] declaration-order-preserving Snapshot digest and atomic reorder merge;
+- [x] CMDB v1 representability and size limits for tags/vault/anchors/aliases;
+- [x] hidden native Ansible adapter and private per-home runtime directory;
+- [x] connection-file/environment/`service=meta` resolver with no DSN flag;
+- [x] PostgreSQL 14 minimum with pinned 14/18 compatibility coverage;
+- [x] reset bundle plus `init --reset --restore` recovery contract;
+- [x] `load --revision` as rollback without a new public verb;
+- [x] mandatory private `--output` for secret-bearing dump and merge bodies;
+- [x] exact three-way merge and base-mismatch rules;
+- [x] strict source-switch grammar, parity requirement, and backup behavior;
+- [x] container guard and destructive/conflict test matrix.
 
 An approval such as **“批准 P2 CMDB RFC v1，按文档进入 P2.1”** is sufficient
 to begin implementation. Until then, the implementation gate remains closed.
