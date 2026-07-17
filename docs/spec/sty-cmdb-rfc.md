@@ -40,9 +40,10 @@ The proposed P2 implementation has these fixed boundaries:
 4. Static `load` records both the exact source-byte digest and an immutable
    semantic merge base. `dump --merge` is a real three-way merge over that
    base; absence or mismatch of the base is a conflict.
-5. Plain `dump` emits canonical generated YAML with a machine-readable marker.
-   It never claims to restore comments, alignment, scalar lexemes, anchors, or
-   other source presentation that was not stored.
+5. Plain `dump` writes canonical generated YAML with a machine-readable marker
+   to a new private file. Public stdout remains value-free. Dump never claims
+   to restore comments, alignment, scalar lexemes, anchors, or other source
+   presentation that was not stored.
 6. Ansible source switching edits only one unambiguous literal `inventory =`
    value inside one `[defaults]` section. It uses an exact-byte backup,
    revision check, sibling temporary file, flush, atomic rename, and parent
@@ -102,9 +103,15 @@ P2 does not:
   plaintext to synthesize effective variables;
 - expose arbitrary SQL, accept arbitrary executable Inventory sources, or
   populate legacy operational/job/default-variable tables;
-- promise comment, whitespace, ordering, style, or scalar-lexeme recovery from
-  a plain CMDB dump;
+- promise comment, whitespace, style, or scalar-lexeme recovery from a plain
+  CMDB dump; declaration order is semantic and is preserved;
 - perform an in-place `dump --merge` in v1.
+
+Code ownership follows the parent contract and repository `AGENTS.md`:
+canonical Snapshot/diff/fragment primitives belong in `inventory`; CMDB use
+cases and stable DTOs belong in `cli/sty`; one focused `internal/cmdb` adapter
+may own PostgreSQL and private runtime details; and all Cobra wiring remains in
+the flat `cmd/sty.go`. No universal environment-driver framework is introduced.
 
 
 ## 4. Vocabulary and source identity
@@ -124,7 +131,7 @@ complete declaration Inventory. It preserves:
 - nested `children` relationships;
 - group declarations and group variables;
 - string host names and host declaration variables;
-- mapping keys and scalar types;
+- mapping declaration order, keys, and scalar types;
 - sequence order.
 
 It does not contain comments, byte ranges, alignment, quote style, flow/block
@@ -146,6 +153,12 @@ never persists a switch. A verified native adapter is the only executable that
 classifies as `cmdb`; directories, comma-separated source lists, inventory
 plugins, and arbitrary executables classify as `unsupported` and fail with a
 manual diagnostic.
+
+Descriptor construction keeps the exact parent-contract precedence:
+`-i` first, then `PIGSTY_INVENTORY`, `~/.pig/config.yml`, `ansible.cfg`, and the
+resolved-home `pigsty.yml` fallback. It never probes PostgreSQL to choose a
+source and never falls through after selecting an invalid higher-precedence
+source.
 
 
 ## 5. Canonical Snapshot v1
@@ -172,16 +185,29 @@ float:  {"t":"float","v":<canonical finite decimal string>}
 null:   {"t":"null"}
 ```
 
-Mapping entries are sorted by UTF-8 key bytes. Sequence order is preserved.
-Canonical JSON uses no insignificant whitespace, a fixed object-field order,
-and standard JSON string escaping. The semantic digest is:
+Mapping entries retain declaration order exactly; sequence order is also
+preserved. Canonical JSON uses no insignificant whitespace, a fixed
+object-field order, and standard JSON string escaping. The semantic digest is:
 
 ```text
 SHA-256(canonical Snapshot v1 JSON bytes)
 ```
 
-This means presentation-only mapping reordering does not create semantic
-drift. Sequence reordering does.
+V1 scalar canonicalization is exact:
+
+- integers must decode losslessly to signed or unsigned 64-bit values and use
+  base-10 digits with no leading zero;
+- floats must be finite IEEE-754 binary64 values and use Go
+  `FormatFloat(value, 'g', -1, 64)` spelling, including distinct `-0` for
+  negative zero;
+- booleans are `true` or `false`, and null has no value member;
+- strings retain their UTF-8 code points without Unicode normalization;
+- JSON escaping does not HTML-escape characters, and digest input has no final
+  newline.
+
+This follows the parent contract's ordered semantic model: mapping or sequence
+reordering changes the Snapshot digest. Comments, whitespace, quote style, and
+other source-only presentation do not.
 
 ### 5.2 Representability gate
 
@@ -193,9 +219,11 @@ validation and the CMDB v1 representability gate. V1 rejects:
 - a non-string mapping key;
 - a duplicate mapping key;
 - an unknown scalar kind or non-finite float;
-- nesting or byte size beyond the existing bounded Inventory limits;
+- nesting deeper than the existing Inventory limit of 128, a static source over
+  16 MiB, more than 250,000 value nodes, or canonical Snapshot/generated output
+  over 64 MiB;
 - duplicate declarations of one host name whose host-variable maps are not
-  semantically identical.
+  identical in typed value and declaration order.
 
 The stable diagnostic is `CMDB_SNAPSHOT_UNREPRESENTABLE` with a source path and
 reason only. It never includes the rejected value. The database remains
@@ -215,8 +243,32 @@ The internal adapter projects a Snapshot to ordinary Ansible inventory JSON:
 - repeated identical host declarations collapse to one hostvars entry;
 - no group/global value is merged into hostvars by Pig.
 
-The projection and reverse test fixture must have the same semantic digest as
-the Snapshot. Pig never invokes Ansible to calculate an effective result.
+The emitter writes JSON object members deterministically in Snapshot declaration
+order. JSON object order is not an Ansible semantic guarantee, however, so
+adapter JSON is never reverse-decoded to define a Snapshot revision. Projection
+parity compares declared groups, relationships, host membership, typed values,
+and sequence order; the ordered Snapshot remains the revision authority. Public
+commands compute this projection in-process and never capture its secret-bearing
+protocol body in a Result or log. Integration fixtures execute the hidden
+adapter only inside a private harness and discard the body after comparison.
+Pig never invokes Ansible to calculate an effective result.
+
+### 5.4 Canonical generated YAML
+
+Plain dump traverses the ordered Snapshot directly; it does not marshal a
+`Document` or generic YAML tree. The v1 serializer uses two-space block
+indentation, retains mapping declaration order, renders empty maps/sequences as
+`{}`/`[]`, double-quotes every string key and value with JSON-compatible
+escapes, and emits lowercase booleans and `null`. Integers use the spelling from
+section 5.1. Floats use that canonical spelling but append `.0` when it contains
+no decimal point or exponent, so a value such as float `1.0` cannot reparse as
+an integer. The generated YAML has no YAML directive or document marker and has
+exactly one final LF.
+
+Before a dump destination is committed, Pig reparses the generated YAML,
+rebuilds a Snapshot, and requires its semantic digest to equal the selected
+revision. This round-trip check is separate from the output-file digest and
+fails without leaving a destination file.
 
 
 ## 6. PostgreSQL schema and migrations
@@ -228,11 +280,12 @@ The native schema name is exactly `pigsty_cmdb`. Migration v1 owns only:
 - `pigsty_cmdb.schema_migration`;
 - `pigsty_cmdb.snapshot`;
 - `pigsty_cmdb.state`;
-- immutable-snapshot enforcement functions/triggers inside that schema.
+- append-only ledger/Snapshot enforcement functions and triggers inside that
+  schema.
 
 It revokes access from `PUBLIC`. It creates no login role and stores no
-credential. Role grants are explicit migration inputs and are never inferred
-from the legacy schema.
+credential. V1 grants no role beyond the schema owner; later grant management
+requires a contract extension and is never inferred from the legacy schema.
 
 ### 6.2 Migration ledger
 
@@ -241,6 +294,19 @@ Migrations are embedded, ordered application assets with:
 ```text
 version, name, SHA-256(sql bytes), minimum PostgreSQL version, SQL
 ```
+
+Migration v1 supports PostgreSQL 14 through 18 with one schema and no
+major-version conditionals. PostgreSQL 14 is the minimum accepted server; an
+older server fails before DDL. The complete destructive/conflict gate runs on
+the pinned PostgreSQL 18 image in section 15, and P2.2 also pins an official
+`postgres:14.23-alpine` manifest for migration, load/dump, and reset/restore
+compatibility cases.
+
+The stable lock is `pg_advisory_xact_lock(bigint)` with the signed two's-
+complement value of the first eight big-endian bytes of
+`SHA-256("pig.sty.cmdb/v1")`: `5644146564720209289`. A fixture freezes the
+derivation and integer. SQL uses only fixed, schema-qualified identifiers.
+Values are parameters, never SQL string interpolation.
 
 `schema_migration` stores the version, name, checksum, tool version, and apply
 timestamp. `init`:
@@ -254,8 +320,10 @@ timestamp. `init`:
 7. commits only after the final shape check.
 
 Repeated `init` at the current version is a no-op. There are no automatic down
-migrations. A schema with objects but no valid native ledger is foreign and is
-refused unless the explicitly destructive reset flow is approved.
+migrations. Any pre-existing schema without a valid native ledger, even an
+empty schema, is foreign and is always refused with manual DBA backup/removal
+instructions. V1 does not claim it can create a trustworthy native backup of
+unknown objects.
 
 ### 6.3 Snapshot tables
 
@@ -268,8 +336,8 @@ snapshot
   merge_base_revision   bigint not null references snapshot, deferred
   semantic_sha256       bytea not null, exactly 32 bytes
   payload               jsonb not null
-  origin                static_load | rollback | restore | future_native_change
-  source_kind           static | revision | backup | native
+  origin                static_load | rollback
+  source_kind           static | revision
   source_locator        text null
   source_bytes_sha256   bytea null, exactly 32 bytes
   tool_version          text not null
@@ -281,14 +349,28 @@ state
   updated_at            timestamptz not null
 ```
 
-The payload is re-canonicalized and its digest verified on every read. Snapshot
-rows are append-only: update/delete triggers reject mutation. Reset drops only
-`pigsty_cmdb` after a verified private backup.
+The payload is re-canonicalized and its digest verified on every read. Exact
+shape invariants are: `state` has one row; an empty head has no Snapshot rows;
+otherwise revisions are contiguous from 1 through `head_revision`, the first
+parent is null, every later parent is the preceding revision, and the head is
+the maximum revision. Every merge base is an ancestor no newer than its row and
+resolves to a static-load row with a non-null canonical locator and exact
+source-byte digest. Shape checking also rejects missing/orphan rows, invalid
+origin/source combinations, and semantic digest mismatch.
+
+Snapshot rows are append-only: update/delete triggers reject mutation. Reset
+drops only `pigsty_cmdb` after a verified private backup.
 
 A static load creates revision `head + 1`, with `parent_revision = old head`
-and `merge_base_revision = its own revision`. A future native change inherits
-the parent's merge base. Rollback creates a new head; it never moves the head
-pointer backward or edits history.
+and `merge_base_revision = its own revision`; its source locator is the
+canonical absolute static path and its byte digest is required. Rollback stores
+the exact target revision token as its source locator, has no source-byte
+digest, inherits the current head's merge base rather than the target's older
+base, and creates a new child revision. It never moves the head pointer backward
+or edits history. The revision allocator requires `head_revision` to equal the
+maximum stored revision; shape validation fails closed if that invariant is
+broken. Restore reinstates an already verified chain exactly and does not
+synthesize a restore revision.
 
 ### 6.4 Exact revision token
 
@@ -311,7 +393,8 @@ The implementation uses one focused native PostgreSQL adapter (proposed driver:
 
 Connection resolution is:
 
-1. `--connection-file`, an owner-only bounded regular file containing one
+1. `--connection-file`, a symlink-free regular file owned by the effective user,
+   with no group/other permission bits, at most 64 KiB, and containing one
    PostgreSQL conninfo/URI line;
 2. `PIGSTY_CMDB_DSN`;
 3. `service=meta`.
@@ -320,7 +403,9 @@ There is no password-bearing `--dsn` flag. A connection value never enters a
 Result, Plan, log, generated adapter, error detail, process argument, or backup
 name. Safe output identifies only `connection-file`, `environment`, or
 `service:meta` as the source. The adapter applies connect, statement, lock, and
-transaction timeouts and refuses redirects or fallback to another database.
+transaction timeouts. It records the connected database name and server
+identity after the first connection, verifies them on later pooled connections,
+and refuses a redirect or fallback to a different target.
 
 The generated Ansible adapter uses the same protected resolver. If it requires
 a connection file, its runtime record contains only that file path and verifies
@@ -341,8 +426,13 @@ The directory is `0700`. It contains:
   `pig-sty-cmdb-adapter/v1`;
 - `runtime.json`, non-secret adapter identity and connection-source metadata,
   mode `0600`;
-- `switch.json`, the source-switch record when enabled, mode `0600`;
+- `switch.json`, the latest source-switch intent, retained until superseded and
+  mode `0600`;
 - `backups/`, private source-switch and reset bundles.
+
+`runtime.json` records the complete canonical home identity as well as the
+short directory key. A short-key collision or home mismatch fails closed; it
+never reuses another home's adapter directory.
 
 The wrapper executes the absolute Pig binary recorded by `init` and only the
 hidden `sty cmdb _inventory` adapter. It forwards only Ansible's exact
@@ -368,21 +458,29 @@ an Inventory and never changes `ansible.cfg`.
 
 `init --reset`:
 
-1. validates that the target is exactly the native schema;
-2. renders a plan with migration/head/history counts and a future private
-   backup path;
+1. proves that the target schema is absent or is a fully readable native schema
+   with a valid migration ledger and revision chain;
+2. renders a plan with migration/head/history counts and, for an existing
+   native schema, a future private backup path;
 3. requires interactive confirmation or `--yes`;
-4. streams a checksummed `0600` native backup bundle and fsyncs it;
-5. in one transaction, drops only `pigsty_cmdb`, reapplies migrations, and
-   optionally restores a validated bundle;
-6. leaves the backup in place whether reset succeeds or rolls back.
+4. opens a serializable transaction, takes the advisory lock, and rechecks the
+   exact planned schema/head state;
+5. for an existing native schema, streams its ledger, state, and Snapshot rows
+   from that transaction into a checksummed `0600` bundle and fsyncs it;
+6. in the same transaction, drops only an existing `pigsty_cmdb`, reapplies
+   migrations, and optionally restores a validated bundle;
+7. leaves any completed backup in place whether reset succeeds or rolls back.
 
 `--reset` without confirmation performs no DDL. A foreign or malformed schema
-requires the same reset flow; it is never silently adopted.
+is not reset even with `--reset`; it remains untouched with manual DBA
+instructions and is never silently adopted.
 
 `init --restore <bundle>` is permitted only with `--reset`. It verifies the
 bundle kind, format version, checksum, migration compatibility, revision chain,
-and every Snapshot digest before the destructive confirmation. Restore is one
+and every Snapshot digest before the destructive confirmation, then rechecks
+the exact bundle bytes after taking the lock and before DDL. Restore into an
+absent schema is supported and has no pre-reset backup; restore into a verified
+native schema follows the mandatory backup flow above. Restore is one
 transaction.
 
 ### 9.2 `cmdb load [static-file]`
@@ -394,10 +492,23 @@ pig sty cmdb load [static-file]
 pig sty cmdb load --revision <exact-token>
 ```
 
-The flow is:
+`--revision` is mutually exclusive with a positional file and the global
+`-i/--inventory` override; ambiguity is a parameter error before any database
+connection.
 
-1. resolve, parse, and natively validate the complete source;
-2. pass the v1 representability gate;
+With no positional file, static load uses the normal source resolver but
+requires the result to be static. If CMDB or an unsupported source resolves, it
+fails with a safe instruction to name a static file; it never reads its own head
+as a new static load. A relative explicit file is canonicalized from the
+caller's working directory and records that absolute locator.
+
+The candidate is either the parsed static Document or the payload of the exact
+historical revision after its digest and lineage are verified. The common flow
+is:
+
+1. obtain the candidate through exactly one of those two paths;
+2. natively validate a static source and pass the v1 representability gate, or
+   fully verify a historical Snapshot before using it;
 3. read and verify the current CMDB head and migration version;
 4. compute a value-free semantic plan from head to candidate;
 5. classify declaration removals;
@@ -406,7 +517,8 @@ The flow is:
 7. historical rollback always requires confirmation; if it removes
    declarations it also requires `--prune`;
 8. open a serializable transaction, take the advisory lock, lock the singleton,
-   and compare the exact planned head token;
+   and compare the exact planned head token (or require SQL `NULL` for the
+   planned empty-head state);
 9. insert one immutable Snapshot and update the singleton in that transaction;
 10. re-read and verify the committed token.
 
@@ -421,27 +533,31 @@ can discard sequence members is conservatively classified as deletion.
 ### 9.3 `cmdb dump`
 
 Plain dump reads head, or an explicit historical `--revision`, verifies its
-digest, and emits canonical generated YAML. The first line is an exact marker:
+digest inside one read-only repeatable-read transaction, and emits canonical
+generated YAML. The first line is an exact marker:
 
 ```text
 # pig-sty-cmdb: kind=pig.inventory.generated/v1 revision=<token>
 ```
 
-The serializer has a versioned fixture and fixed indentation, scalar spelling,
-key ordering, and final newline. It does not emit comments or source styles.
+The serializer follows section 5.4 and has a versioned fixture. In particular,
+key order is stored declaration order. It does not emit comments or source
+styles.
 
 Inventory bodies may contain credentials. Therefore:
 
-- raw stdout is allowed only in text mode and is never wrapped in a Result;
-- JSON/YAML output without `--output` is refused;
-- `--output <new-file>` writes an owner-only file through private atomic
-  staging and returns only safe metadata;
+- `--output <new-file>` is mandatory in every public output mode;
+- the new owner-only file is written through private atomic staging;
+- stdout returns only safe Result metadata such as revision, counts, output
+  path, and digest;
 - the body never enters logs, error details, diagnostics, or structured data;
 - an existing output is not overwritten in v1.
 
 `dump --merge` follows section 10. It emits the lossless current static source
 with non-conflicting CMDB changes patched into it and a merge marker. It never
-writes in place; stdout or a distinct new `--output` is required.
+writes in place; a distinct new `--output` is required. Merge always uses the
+current head and recorded static locator, so `--merge` is mutually exclusive
+with historical `--revision` and the global `-i/--inventory` override.
 
 ### 9.4 `cmdb enable`
 
@@ -451,26 +567,33 @@ Enable requires:
 - a current, verified runtime adapter;
 - semantic parity between head and the adapter projection;
 - exactly one supported static `inventory =` directive in `[defaults]`;
-- a parseable source file at that directive.
+- a parseable and representable source file at that directive whose ordered
+  semantic digest equals the current head.
 
-It creates an exact-byte backup and `switch.json`, then replaces only the value
-span with the absolute verified adapter path. It re-reads `ansible.cfg`
-immediately before commit and uses sibling-temp/fsync/rename/parent-sync. An
-already enabled, verified state is a no-op.
+It creates an exact-byte backup and writes/fsyncs `switch.json` containing the
+before/after file revisions, prior literal and canonical static locator,
+verified head token, adapter identity, operation kind, and backup path; no
+Inventory values are recorded. It then replaces only the value span with the
+absolute verified adapter path. It re-reads
+`ansible.cfg` immediately before commit and uses
+sibling-temp/fsync/rename/parent-sync. An already enabled, verified state is a
+no-op.
 
 It does not execute the adapter, Ansible, or a legacy source-switch script as a
 mutation step. Read-only compatibility checks occur before the patch.
 
 ### 9.5 `cmdb disable`
 
-Disable restores the literal source recorded by `switch.json`. It first parses
-and validates that static file and requires semantic parity with the current
-head; presentation-only changes are allowed. It backs up current `ansible.cfg`
-and patches only the verified adapter value span.
+Disable restores the literal source recorded by `switch.json`, unless an
+explicit `--static <literal-file>` selects a new fallback. It first parses,
+validates, and passes the representability gate for that static file, then
+requires ordered semantic parity with the current head; source-only changes
+such as comments or scalar quote style are allowed. It backs up current
+`ansible.cfg` and patches only the verified adapter value span.
 
 If no valid switch record exists, `--static <literal-file>` is required. This
-is the safe migration path from a legacy `inventory.sh`; no legacy helper is
-run. The static source must parse, validate, and match head before switching.
+is also the safe migration path from a legacy `inventory.sh`; no legacy helper
+is run. The same validation, representability, and head-parity checks apply.
 
 An already disabled state matching the record is a no-op. Drift, a missing
 fallback, or an ambiguous directive fails without changing any file.
@@ -495,8 +618,10 @@ It emits redacted findings and never repairs state.
 
 ## 10. Provenance-sensitive three-way merge
 
-For head `C`, `dump --merge` obtains `B = C.merge_base_revision` and parses the
-current recorded static source as `W`:
+For head `C`, `dump --merge` holds the shared form of the stable advisory lock
+inside one read-only repeatable-read transaction, obtains
+`B = C.merge_base_revision`, and parses the current recorded static source as
+`W`:
 
 ```text
 B: immutable semantic Snapshot loaded from the recorded static source
@@ -508,32 +633,50 @@ Before diffing, all of the following must hold:
 
 1. `B` exists and its stored payload rehashes to its recorded digest;
 2. `C` is a descendant of `B` through the parent chain;
-3. the head's recorded base token exactly names `B`;
+3. `C.merge_base_revision` exactly equals `B.revision`, and `B`'s verified
+   digest derives the exact base token;
 4. `B` records a static source locator and exact source-byte digest;
 5. the current source canonical path equals that recorded locator;
-6. an optional `--expect-base` token, when supplied, exactly equals `B`.
+6. the current source parses, validates, and passes the v1 representability
+   gate without exposing values;
+7. an optional `--expect-base` token, when supplied, exactly equals `B`.
 
-Failure of any item is `CMDB_BASE_MISMATCH`. No two-way fallback is attempted.
-A changed current byte digest is not itself a base mismatch: those changes are
-the `B -> W` side of the three-way merge.
+Failure of provenance item 1–5 or 7 is `CMDB_BASE_MISMATCH`. Item 6 returns its
+value-free validation or `CMDB_SNAPSHOT_UNREPRESENTABLE` diagnostic. Neither
+case attempts a two-way fallback. A changed current byte digest is not itself a
+base mismatch: those changes are the `B -> W` side of the three-way merge.
 
-The merge computes declaration-path changes `B -> W` and `B -> C`. Mappings are
-compared by key; sequences are atomic at their containing path in v1. Two
-changes conflict when their paths are equal or ancestor/descendant-related,
-unless both yield the same semantic value. Remove-vs-change always conflicts.
+The merge computes declaration-path changes `B -> W` and `B -> C`. Mapping
+values are compared by key. A changed relative order among keys that survive
+from `B` is a separate atomic `reorder` at the containing path. An added key
+carries its exact gap between surviving base-key anchors, so addition does not
+implicitly reorder the whole mapping; two sides adding into the same gap, or
+one side removing an anchor used by the other, conflict. Sequences and explicit
+mapping reorders are atomic at their containing path in v1. Two changes also
+conflict when their paths are equal or ancestor/descendant-related, unless both
+yield the same semantic value and order. Remove-vs-change always conflicts.
 
 Only non-conflicting `B -> C` changes are applied to the current lossless
 Document through existing source-patch primitives. A new CMDB subtree may be
 rendered canonically as a fragment, but the whole file is never marshaled. The
-candidate is reparsed and validated before output.
+candidate is reparsed and validated before output. An ordered move must use
+exact non-overlapping entry spans; if comment attachment or source shape makes
+that unsafe, merge fails rather than normalizing the containing document.
 
 Conflict output contains paths and operation kinds only, never old/new values.
-Any conflict produces no stdout body and no destination file. A successful
-merge begins with:
+Any conflict produces no destination file. A successful merge file begins
+with:
 
 ```text
-# pig-sty-cmdb: kind=pig.inventory.merge/v1 base=<B-token> head=<C-token>
+# pig-sty-cmdb: kind=pig.inventory.merge/v1 base=<B-token> head=<C-token> source-sha256=<W-bytes-sha256>
 ```
+
+The output has exactly one leading Pig CMDB marker. An existing recognized
+generated/merge marker is replaced by a narrow comment-span patch; unrelated
+leading comments remain byte-identical. Pig re-reads the source immediately
+before committing the distinct destination and rejects an exact-byte revision
+mismatch. The shared database lock remains held through destination commit, so
+native writers cannot change `C` mid-dump.
 
 Dump is read-only. A later `load` of the merged file creates a new static merge
 base and exact source-byte provenance.
@@ -542,7 +685,10 @@ base and exact source-byte provenance.
 ## 11. Strict `ansible.cfg` patch contract
 
 The patcher accepts one bounded regular UTF-8 file and refuses symlinks. It
-preserves LF/CRLF and all bytes outside one value span.
+preserves LF/CRLF, the existing permission bits, and all bytes outside one
+value span. The exact backup keeps the original mode. Atomic replacement
+ownership follows the writing process, is reported when it differs from the
+pre-patch owner, and is never silently presented as preserved ownership.
 
 Supported shape:
 
@@ -550,6 +696,14 @@ Supported shape:
 - exactly one active `inventory` assignment in that section;
 - one single-line literal relative or absolute file path;
 - optional ordinary whitespace, simple matching quotes, and an inline comment.
+
+Relative Inventory literals resolve against the directory containing
+`ansible.cfg`, never the process working directory. The patch span includes any
+existing quotes around the value. Pig chooses an unambiguous quoted or unquoted
+literal for the replacement and reparses it to the same canonical path before
+commit; a path that cannot be represented by this grammar is refused. The
+switch record retains both the exact prior literal and its resolved canonical
+path.
 
 It rejects:
 
@@ -571,10 +725,23 @@ edit <home>/ansible.cfg manually so [defaults] contains exactly one literal inve
 Each successful switch keeps an exact backup under the private runtime backup
 directory. Backups are never uploaded, logged, or deleted automatically.
 
+The backup and a complete before/after intent are written and directory-synced
+before the `ansible.cfg` rename. Cross-file atomicity is not claimed. After an
+interruption, current config bytes must match exactly either the intent's
+`before` revision (pending/not applied) or `after` revision (applied); any third
+state is drift and fails closed. Repeating the same explicitly requested
+operation may finish a matching pending intent. `check` only reports pending,
+applied, or drift and never repairs it. A superseded intent is retained beside
+its exact backup, so disable does not destroy the evidence required to recover
+an earlier switch.
+
 The one migration exception is `disable --static <literal-file>`: it may replace
-one otherwise unsupported legacy executable literal after locating the same
-strict single directive. It never opens or executes that legacy target, and the
-new static source must pass validation and head-parity checks first.
+one otherwise unsupported literal only when that literal resolves exactly to
+`<resolved-Pigsty-home>/inventory.sh`, the path written by the reviewed legacy
+helper, after locating the same strict single directive. Classification uses
+the resolved literal only; Pig never stats, opens, or executes that legacy
+target. Any other executable source requires the manual instruction. The new
+static source must pass validation and head-parity checks first.
 
 
 ## 12. Split-brain detection
@@ -597,8 +764,8 @@ The notice is emitted in text and structured modes and never enters structured
 stdout. Repeated internal reads during one command do not repeat it.
 
 Lossless `show` and `edit` require a static descriptor. When CMDB is effective
-they fail with a safe next action to `cmdb dump`; they never edit a generated
-cache or infer a fallback static file.
+they fail with a safe next action to `cmdb dump --output <new-file>`; they never
+edit a generated cache or infer a fallback static file.
 
 
 ## 13. Backup and rollback
@@ -611,10 +778,11 @@ Three recovery layers are distinct:
 2. **Source-switch backup.** Every `ansible.cfg` patch has an exact local backup
    and a private switch record. Disable restores the recorded literal source by
    narrow patch, not by replacing unrelated file bytes.
-3. **Reset bundle.** Before `init --reset`, all native migrations, state, and
-   Snapshot rows stream into a versioned, checksummed `0600` bundle. A failed
-   backup aborts reset. `init --reset --restore <bundle>` verifies the entire
-   bundle before confirmation and restores it in one transaction.
+3. **Reset bundle.** Before resetting an existing verified native schema, its
+   migration ledger, state, and Snapshot rows stream into a versioned,
+   checksummed `0600` bundle. A failed backup aborts reset. An absent-schema
+   restore has nothing to back up. `init --reset --restore <bundle>` verifies
+   the entire bundle before confirmation and restores it in one transaction.
 
 Backup payloads can contain Inventory secrets. Paths may be reported, but
 contents and scalar values never appear in Result data or logs. The tool does
@@ -648,6 +816,11 @@ They never contain Inventory scalar values, DSNs, SQL text, adapter JSON, dump
 bodies, or backup bodies. Database errors are classified and sanitized before
 they reach output.
 
+The implementation reuses one tested secret-key classifier for password,
+secret, token, API-key, private-key, and credential names. It does not create a
+CMDB-only redaction vocabulary. Value-free DTOs remain the primary defense;
+classification is a second boundary for diagnostics and external errors.
+
 Required stable failure families are parameter, permission, dependency,
 network, resource, configuration, state/conflict, operation/partial, and
 confirmation. Exact MMCCNN leaf numbers are assigned with implementation and
@@ -658,14 +831,19 @@ locked by fixtures; no second envelope or exit-code system is introduced.
 
 ### 15.1 Container guard
 
-Database tests use a disposable, pinned PostgreSQL container. The harness
-generates a random database named with prefix `pig_sty_cmdb_test_`, binds only
+Database tests use a disposable PostgreSQL 18 container pinned to the reviewed
+official multi-platform reference
+`postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15`.
+Changing that manifest digest is an explicit review change. The harness also
+records the selected platform digest. It generates a random database named with
+prefix `pig_sty_cmdb_test_`, binds only
 to loopback, and passes the resulting DSN explicitly. Destructive tests refuse
 to run unless both the host is loopback and the database has that prefix. They
 never use ambient `service=meta`.
 
-The container is removed in test cleanup. A sentinel schema/table outside
-`pigsty_cmdb` proves every reset and migration remains in scope.
+The container is removed in test cleanup. Sentinel rows in pre-created
+`pigsty`, `pglog`, and an unrelated third schema prove every reset and migration
+remains in scope and never treats the legacy names as native state.
 
 ### 15.2 Required cases
 
@@ -673,29 +851,53 @@ The container is removed in test cleanup. A sentinel schema/table outside
 |:---|:---|
 | Migration idempotence | first `init` applies ordered checksummed migrations; second is byte/state no-op; concurrent init serializes |
 | Migration fail closed | checksum drift, foreign bootstrap objects, and newer schema version do not mutate state |
-| Reset confirmation | `--reset` without confirmation performs no DDL; confirmed reset creates/verifies backup first; outside sentinel survives |
-| Backup restore | reset bundle round-trips every revision/digest; tampered or incompatible bundle is rejected before reset |
+| Reset confirmation | `--reset` without confirmation performs no DDL; confirmed reset of a verified native schema creates/verifies backup first; outside sentinel survives |
+| Backup restore | reset bundle round-trips every revision/digest into both fresh and verified-native targets; tampered or incompatible bundles and foreign/malformed targets are untouched |
 | Transaction rollback | an injected failure after Snapshot insert and before head update leaves neither row nor head change |
 | Revision conflict | two clients plan one head; first commits; second fails exact CAS with no partial row |
 | Prune confirmation | deletion requires both `--prune` and confirmation; plan/no leaves the head unchanged |
 | Historical rollback | rollback creates a new child revision and retains the prior head/history |
-| Snapshot fidelity | nested groups, string/non-IP hosts, scalars, maps, and sequences round-trip semantically without effective-var synthesis |
+| Snapshot fidelity | nested groups, string/non-IP hosts, typed scalars, ordered maps, and sequences round-trip semantically without effective-var synthesis; reordering changes the digest |
+| Canonical YAML | ambiguous strings remain strings; integral floats remain floats; generated output reparses to the exact selected Snapshot digest |
 | Representability | vault/tag/anchor/alias/non-string-key/conflicting-host fixtures fail before SQL and redact values |
 | Three-way merge | disjoint changes merge through source patches; equal/ancestor/remove conflicts emit paths only and no body |
 | Base mismatch | missing, corrupt, non-ancestor, wrong-locator, and wrong expected base all fail without two-way fallback |
-| Plain dump | canonical fixture and marker are stable; comments/styles are absent by contract; secret-bearing body never enters Result/logs |
-| Source switch | valid enable/disable patches only one value span, preserves modes/CRLF/unrelated edits, and keeps exact backups |
+| Plain dump | canonical fixture and marker are stable; comments/styles are absent by contract; `--output` is mandatory, mode is `0600`, existing/symlink destinations are refused, and the body never enters Result/logs |
+| Source switch | enable rejects static/head drift; valid enable/disable patches only one value span, preserves modes/CRLF/unrelated edits, and keeps exact backups |
 | Switch fail closed | missing/duplicate/templated/list/directory/symlink/changed-revision fixtures remain byte-identical with manual instructions |
-| Active parity | adapter JSON and Snapshot digest agree; disable rejects a semantically stale static fallback |
+| Source resolution | each precedence tier is covered; an invalid selected tier never falls through; relative `ansible.cfg` literals resolve from its directory |
+| Active parity | projected declarations agree with the verified head while the ordered Snapshot digest remains authoritative; disable rejects a semantically stale static fallback |
 | Split brain | each direction emits the exact one-line notice once and keeps structured stdout valid |
-| Secret hygiene | DSN, password, vault body, Inventory scalar values, adapter body, and backup body are absent from errors and structured output |
+| Secret hygiene | DSN, password, vault body, Inventory scalar values, adapter body, dump body, and backup body are absent from errors and structured output; hidden-adapter stdout is confined to its private protocol harness |
 
 The implementation also runs proportional package tests, relevant race tests,
 `go test ./...`, `go test -race ./...`, `go vet ./...`, and
 `git diff --check` before P2 can close.
 
 
-## 16. Post-approval implementation gates
+## 16. Parent-contract traceability
+
+This table is the review index from the sole normative parent into the proposed
+design and its falsifiable proof. It adds detail but does not weaken a parent
+requirement.
+
+| `sty.md` P2 obligation | RFC decision | Required proof |
+|:---|:---|:---|
+| RFC before implementation | status header; sections 1–17 remain proposal-only until section 18 approval | no mutation code before recorded owner approval |
+| Flat command and focused ownership | section 3 and section 17 | `cmd/sty.go` glue-only review and package-boundary tests |
+| Versioned idempotent migrations | sections 6.1–6.2 and 9.1 | migration idempotence/fail-closed rows in section 15 |
+| Semantic Snapshot and exact revision | sections 4–6 | Snapshot fidelity, canonical YAML, rollback, and revision-conflict rows |
+| Source provenance and optimistic concurrency | sections 6.3–6.4, 9.2, and 10 | revision conflict, base mismatch, and transaction rollback rows |
+| Load/dump diff and merge semantics | sections 5.4 and 9.2–10 | prune, plain dump, three-way merge, and base-mismatch rows |
+| Rollback and backups | sections 9.1–9.2 and 13 | reset confirmation, backup restore, and historical rollback rows |
+| Narrow fail-closed source switching | sections 4.3, 8, 9.4–9.6, and 11 | source-switch, switch-failure, source-resolution, and active-parity rows |
+| Split-brain detection | section 12 | both exact notices and structured-output isolation |
+| No legacy destructive helpers | section 2 | forbidden-executable guards and legacy-schema sentinels |
+| Counts/identifiers/revision/plan only | sections 7, 9.3, and 14 | plain-dump and secret-hygiene rows |
+| Containerized destructive/conflict proof | section 15 | digest-pinned PostgreSQL run plus the complete required-case matrix |
+
+
+## 17. Post-approval implementation gates
 
 Owner approval unlocks code in this order only:
 
@@ -714,17 +916,20 @@ No later subgate starts before the previous one passes. `go.sum` or other user
 changes are never included incidentally.
 
 
-## 17. Owner approval checklist
+## 18. Owner approval checklist
 
 Approval should explicitly accept or amend these choices:
 
 - [ ] separate `pigsty_cmdb` schema and no legacy-schema compatibility writes;
 - [ ] singleton append-only Snapshot store and exact revision-token format;
-- [ ] CMDB v1 representability limits for tags/vault/anchors/aliases;
+- [ ] declaration-order-preserving Snapshot digest and atomic reorder merge;
+- [ ] CMDB v1 representability and size limits for tags/vault/anchors/aliases;
 - [ ] hidden native Ansible adapter and private per-home runtime directory;
 - [ ] connection-file/environment/`service=meta` resolver with no DSN flag;
+- [ ] PostgreSQL 14 minimum with pinned 14/18 compatibility coverage;
 - [ ] reset bundle plus `init --reset --restore` recovery contract;
 - [ ] `load --revision` as rollback without a new public verb;
+- [ ] mandatory private `--output` for secret-bearing dump and merge bodies;
 - [ ] exact three-way merge and base-mismatch rules;
 - [ ] strict source-switch grammar, parity requirement, and backup behavior;
 - [ ] container guard and destructive/conflict test matrix.
