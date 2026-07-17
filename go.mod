@@ -3,6 +3,7 @@ module pig
 go 1.26.5
 
 require (
+	github.com/goccy/go-yaml v1.19.2
 	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/sirupsen/logrus v1.9.4

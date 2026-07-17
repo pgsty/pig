@@ -1,0 +1,26 @@
+---
+# 保真 fixture: comments, alignment, flow style, ambiguous scalars and tags
+all:
+  vars:
+    padded_key   : value                 # keep padding and inline comment
+    mode         : 0755
+    flag_y       : y
+    flag_off     : off
+    quoted       : "hello # world"
+    single       : 'it''s stable'
+    中文键       : 原值
+    flow_map     : {a: 1,b: [x, y]}      # compact delimiter spacing
+    flow_seq     : [ one,two, three ]
+    folded       : >-
+      line one
+      line two
+    literal      : |+
+      hello
+      世界
+    anchor_value : &base keep
+    alias_value  : *base
+    tagged       : !vault |
+      encrypted-placeholder
+    #docker_registry_mirrors: ["https://example.invalid"]
+  children: {}
+...
