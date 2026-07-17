@@ -9,15 +9,15 @@ categories: [RFC]
 
 # `pig sty cmdb` Native Control Plane RFC
 
-Status: **APPROVED — P2.1 implementation authorized by owner**
+Status: **APPROVED — P2 implementation accepted**
 
 RFC version: **1**
 
 Last updated: **2026-07-17**
 
-Gate: **P2 RFC only**. This document authorizes no CMDB mutation code by
-itself. The owner must explicitly approve the decisions and destructive test
-plan in this RFC before implementation starts.
+Gate: **P2 — PASSED 2026-07-17**. The owner approval in section 18 authorized
+the ordered implementation gates; section 17 records their completed
+acceptance evidence.
 
 The sole normative parent contract is [`sty.md`](sty.md). If this RFC conflicts
 with that contract, `sty.md` wins and this RFC must be amended before code is
@@ -949,8 +949,25 @@ Owner approval unlocks code in this order only:
    `linux/arm64@sha256:f838127495dec165fa388f047a8908a0464eb1aa3995a53e0bb12798baac528e`).
    The final full tests, full race tests, `go vet ./...`, and
    `git diff --check` passed with the pre-existing `go.sum` change excluded.
-5. **P2.5 Cobra exposure:** flat `cmd/sty.go` wiring, experimental annotations,
-   structured contracts, complete container acceptance, and functional commits.
+5. **P2.5 Cobra exposure — PASSED 2026-07-17:** flat `cmd/sty.go` wiring for
+   the six public verbs and hidden raw adapter, experimental annotations,
+   parameter-before-connection guards, exact sealed-plan confirmation,
+   non-TTY and structured fail-closed behavior, stderr-only split-brain
+   notices, and the command-local dump destination/structured-format contract.
+   Functional commits: `cfd64e6`, `9384933`, `2ccc5ca`, and `df01082`. A
+   disposable end-to-end CLI run on the pinned PostgreSQL 18 reference passed
+   `init`, static and historical `load`, private `dump`, `enable`, hidden
+   `--list`/`--host`, `check`, unconfirmed-reset no-op, `disable`, confirmed
+   reset backup, and full-history restore. The complete PostgreSQL 18 container
+   race gate passed (selected
+   `linux/arm64@sha256:122c9942437efcbbb8d595fc578dee7d26ee1543c2a8634d183adfa4a1e55b4d`),
+   and the complete PostgreSQL 14 compatibility suite passed (selected
+   `linux/arm64@sha256:f838127495dec165fa388f047a8908a0464eb1aa3995a53e0bb12798baac528e`).
+   The final full tests, full race tests, `go vet ./...`, and
+   `git diff --check` passed with the pre-existing `go.sum` change excluded.
+
+The complete P2 implementation gate is **PASSED 2026-07-17**. P3 remains
+unopened and still requires explicit owner reprioritization.
 
 No later subgate starts before the previous one passes. `go.sum` or other user
 changes are never included incidentally.
