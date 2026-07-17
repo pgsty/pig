@@ -937,8 +937,18 @@ Owner approval unlocks code in this order only:
    `linux/arm64@sha256:f838127495dec165fa388f047a8908a0464eb1aa3995a53e0bb12798baac528e`).
    The final full tests, full race tests, `go vet ./...`, and
    `git diff --check` passed with the pre-existing `go.sum` change excluded.
-4. **P2.4 Source switch:** runtime adapter, strict parser, backups, atomic narrow
-   patch, enable/disable, and fail-closed fixtures.
+4. **P2.4 Source switch — PASSED 2026-07-17:** private per-home runtime and
+   exact hidden adapter protocol, strict source precedence and `ansible.cfg`
+   value-span parsing, verified head/static/projection parity, retained exact
+   backups and canonical intents, shared-lock atomic enable/disable, pending
+   recovery, read-only full check, and fail-closed legacy migration. Functional
+   commits: `d2b6b72`, `da8b7d8`, `cee238b`, and `7b21230`. The complete
+   PostgreSQL 18 suite passed on the pinned reference (selected
+   `linux/arm64@sha256:122c9942437efcbbb8d595fc578dee7d26ee1543c2a8634d183adfa4a1e55b4d`),
+   and the complete PostgreSQL 14 compatibility suite passed (selected
+   `linux/arm64@sha256:f838127495dec165fa388f047a8908a0464eb1aa3995a53e0bb12798baac528e`).
+   The final full tests, full race tests, `go vet ./...`, and
+   `git diff --check` passed with the pre-existing `go.sum` change excluded.
 5. **P2.5 Cobra exposure:** flat `cmd/sty.go` wiring, experimental annotations,
    structured contracts, complete container acceptance, and functional commits.
 
