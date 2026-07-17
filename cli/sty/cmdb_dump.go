@@ -88,6 +88,16 @@ func ValidateCMDBDumpOptions(options CMDBDumpOptions) *output.Result {
 		return output.Fail(output.CodeStyCMDBInvalidArgs, "CMDB expected base is valid only for merge dump").
 			WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: "CMDB_PARAMETER_INVALID"})
 	}
+	if options.Revision != "" {
+		if _, err := cmdb.ParseRevisionToken(options.Revision); err != nil {
+			return cmdbFailureResult("CMDB dump revision token is invalid", err)
+		}
+	}
+	if options.ExpectBase != "" {
+		if _, err := cmdb.ParseRevisionToken(options.ExpectBase); err != nil {
+			return cmdbFailureResult("CMDB merge base token is invalid", err)
+		}
+	}
 	return nil
 }
 

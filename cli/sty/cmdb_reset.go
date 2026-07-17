@@ -144,10 +144,14 @@ func ApplyCMDBReset(ctx context.Context, operation *CMDBResetOperation, yes bool
 	}
 	data := operation.Data()
 	if !yes {
+		command := "pig sty cmdb init --reset --yes"
+		if data.RestorePath != "" {
+			command = "pig sty cmdb init --reset --restore <bundle> --yes"
+		}
 		return output.Fail(output.CodeStyCMDBConfirmationRequired, "CMDB reset requires explicit confirmation").
 			WithData(data).
 			WithNextActions(output.NextAction{
-				Command: "pig sty cmdb init --reset --yes", Reason: "apply the exact displayed reset plan", Required: true,
+				Command: command, Reason: "apply the exact displayed reset plan", Required: true,
 			})
 	}
 

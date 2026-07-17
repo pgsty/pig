@@ -104,6 +104,11 @@ func ValidateCMDBLoadOptions(options CMDBLoadOptions) *output.Result {
 		return output.Fail(output.CodeStyCMDBInvalidArgs, "CMDB revision load is mutually exclusive with a static file and invocation Inventory").
 			WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: "CMDB_PARAMETER_INVALID"})
 	}
+	if options.Revision != "" {
+		if _, err := cmdb.ParseRevisionToken(options.Revision); err != nil {
+			return cmdbFailureResult("CMDB revision token is invalid", err)
+		}
+	}
 	return nil
 }
 
