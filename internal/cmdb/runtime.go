@@ -48,6 +48,31 @@ type RuntimeOptions struct {
 	ConnectionFile   string
 }
 
+// RuntimeRecordPath resolves the deterministic, read-only record location for
+// one canonical Pigsty home. It never creates runtime directories.
+func RuntimeRecordPath(pigstyHome, configuredRoot string) (string, error) {
+	home, err := canonicalRuntimeHome(pigstyHome)
+	if err != nil {
+		return "", err
+	}
+	root, err := runtimeRoot(configuredRoot)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256([]byte(home))
+	key := hex.EncodeToString(digest[:])[:16]
+	return filepath.Join(root, key, "runtime.json"), nil
+}
+
+// RuntimeAdapterIdentity is the stable non-secret locator used by source
+// descriptors for a verified native adapter.
+func RuntimeAdapterIdentity(record RuntimeRecord) string {
+	if record.Kind != RuntimeRecordKind || record.AdapterPath == "" || record.AdapterSHA256 == "" {
+		return ""
+	}
+	return RuntimeMarker + ":sha256:" + record.AdapterSHA256 + ":" + record.AdapterPath
+}
+
 // PrepareRuntime creates or refreshes one private native adapter. An existing
 // keyed directory must contain a valid record for the same complete home
 // identity; otherwise it fails closed rather than adopting the directory.

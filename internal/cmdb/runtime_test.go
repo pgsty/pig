@@ -28,6 +28,13 @@ func TestPrepareRuntimeCreatesPrivateVerifiedAdapter(t *testing.T) {
 		t.Fatalf("unexpected runtime record: %+v", record)
 	}
 	runtimePath := filepath.Join(root, wantKey, "runtime.json")
+	resolvedRuntimePath, err := RuntimeRecordPath(home, root)
+	if err != nil || resolvedRuntimePath != runtimePath {
+		t.Fatalf("runtime record path = %q, %v; want %q", resolvedRuntimePath, err, runtimePath)
+	}
+	if got := RuntimeAdapterIdentity(record); got != RuntimeMarker+":sha256:"+record.AdapterSHA256+":"+record.AdapterPath {
+		t.Fatalf("adapter identity = %q", got)
+	}
 	if got := filepath.Dir(record.AdapterPath); got != filepath.Dir(runtimePath) {
 		t.Fatalf("adapter directory = %q, want %q", got, filepath.Dir(runtimePath))
 	}
