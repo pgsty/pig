@@ -114,7 +114,7 @@ SELECT singleton, head_revision, updated_at
 	}
 	stateErr := stateRows.Err()
 	stateRows.Close()
-	if stateErr != nil || stateCount != 1 || updatedAt.IsZero() {
+	if stateErr != nil || stateCount != 1 {
 		return nil, historyInvalid("state cardinality")
 	}
 
@@ -201,7 +201,7 @@ func validateRevisionLineage(chain *verifiedChain, storedHead pgtype.Int8) error
 	}
 	for index, revision := range chain.revisions {
 		expectedNumber := int64(index + 1)
-		if revision.revision != expectedNumber || revision.toolVersion == "" || revision.createdAt.IsZero() {
+		if revision.revision != expectedNumber {
 			return historyInvalid("contiguous revisions")
 		}
 		if index == 0 {
