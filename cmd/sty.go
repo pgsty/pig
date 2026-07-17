@@ -35,6 +35,10 @@ var (
 	pigstyConfMirror         bool
 	pigstyValidateStrict     bool
 	pigstyValidateAnsible    bool
+	pigstyCheckProfiles      []string
+	pigstyCheckSudo          bool
+	pigstyCheckPort          int
+	pigstyCheckUser          string
 
 	pigstyDownloadDir string
 	pigstyVersion     string
@@ -58,6 +62,7 @@ var styCmd = &cobra.Command{
   pig sty inventory edit [selector]     # edit inventory or one YAML fragment
   pig sty inventory validate [file]     # validate a Pigsty inventory
   pig sty validate [file]               # delegate to inventory validate
+  pig sty check                         # local readiness; remote profiles are opt-in
   pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
   pig sty get                     # download pigsty source tarball
   pig sty list                    # list available pigsty versions
@@ -350,6 +355,44 @@ func addStyValidateFlags(command *cobra.Command) {
 	command.Flags().BoolVar(&pigstyValidateAnsible, "ansible", false, "also parse with a bounded ansible-inventory adapter")
 }
 
+const styCheckLong = `Check whether the active Inventory and controller appear ready.
+
+The default is deterministic and local: it validates the Inventory, checks the
+Pigsty project layout, and inspects required local tools. Remote observations
+are explicit with --profile network or --profile ssh. SSH runs only the exact
+remote command "true"; --sudo separately permits only "sudo -n true".
+
+External command allowlist:
+  ansible-playbook --version
+  ssh -V
+  ansible-inventory -i <private-candidate> --list   (--profile ansible)
+  ssh <fixed noninteractive options> <target> true (--profile ssh)
+  ssh <fixed noninteractive options> <target> sudo -n true (--sudo)
+
+Remote probes are observational rather than side-effect-free: authentication
+logs, alerts, and lockout counters may change. Every probe has its own timeout.`
+
+var pigstyCheckCmd = &cobra.Command{
+	Use:         "check",
+	Short:       "Check controller and opt-in target readiness",
+	Annotations: ancsAnn("pig sty check", "query", "stable", "safe", true, "low", "none", "current", 10000),
+	Aliases:     []string{"ck"},
+	Args:        cobra.NoArgs,
+	Long:        styCheckLong,
+	Example: `  pig sty check
+  pig sty check --profile ansible
+  pig sty check --profile network
+  pig sty check --profile ssh --user admin
+  pig sty check --profile ssh --sudo`,
+	RunE: func(_ *cobra.Command, _ []string) error {
+		return handleAuxResult(pigstyCheckExec(stycli.CheckOptions{
+			Path: config.PigstyConfig, Home: config.PigstyHome,
+			Profiles: pigstyCheckProfiles, Sudo: pigstyCheckSudo,
+			Port: pigstyCheckPort, User: pigstyCheckUser,
+		}))
+	},
+}
+
 func styConfigureParams(region string) map[string]interface{} {
 	return map[string]interface{}{
 		"conf":            pigstyConfName,
@@ -506,6 +549,7 @@ var (
 	pigstyListExec          = stycli.ListVersionsWithOptions
 	pigstyEditExec          = stycli.Edit
 	pigstyValidateExec      = stycli.ValidateInventory
+	pigstyCheckExec         = stycli.Check
 	pigstyInventoryListExec = stycli.ListInventory
 	pigstyInventoryShowExec = stycli.ShowInventory
 )
@@ -557,6 +601,10 @@ func init() {
 	pigstyConfCmd.Flags().BoolVar(&pigstyConfRaw, "raw", false, "use raw shell configure implementation")
 	addStyValidateFlags(pigstyInventoryValidateCmd)
 	addStyValidateFlags(pigstyValidateCmd)
+	pigstyCheckCmd.Flags().StringSliceVarP(&pigstyCheckProfiles, "profile", "p", nil, "additional profile: ansible, network, or ssh")
+	pigstyCheckCmd.Flags().BoolVar(&pigstyCheckSudo, "sudo", false, "with the ssh profile, also observe sudo -n true")
+	pigstyCheckCmd.Flags().IntVar(&pigstyCheckPort, "port", 22, "TCP/SSH target port (no Inventory effective-var inference)")
+	pigstyCheckCmd.Flags().StringVar(&pigstyCheckUser, "user", "", "explicit SSH user (defaults to the controller user)")
 
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
@@ -569,5 +617,5 @@ func init() {
 
 	pigstyInventoryCmd.AddCommand(pigstyInventoryListCmd, pigstyInventoryShowCmd, pigstyInventoryEditCmd, pigstyInventoryValidateCmd)
 	pigstyReleaseCmd.AddCommand(pigstyReleaseListCmd, pigstyReleaseGetCmd)
-	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyInventoryCmd, pigstyEditCmd, pigstyValidateCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
+	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyInventoryCmd, pigstyEditCmd, pigstyValidateCmd, pigstyCheckCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
 }

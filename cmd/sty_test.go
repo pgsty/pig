@@ -86,6 +86,8 @@ func TestStyInventoryCommandsAndFlags(t *testing.T) {
 		{args: []string{"sty", "validate"}, want: pigstyValidateCmd},
 		{args: []string{"sty", "val"}, want: pigstyValidateCmd},
 		{args: []string{"sty", "v"}, want: pigstyValidateCmd},
+		{args: []string{"sty", "check"}, want: pigstyCheckCmd},
+		{args: []string{"sty", "ck"}, want: pigstyCheckCmd},
 	} {
 		found, _, err := rootCmd.Find(test.args)
 		if err != nil {
@@ -102,6 +104,48 @@ func TestStyInventoryCommandsAndFlags(t *testing.T) {
 	}
 	if pigstyEditCmd.Flags().Lookup("output") != nil {
 		t.Fatal("pig sty edit must not shadow the global output flag")
+	}
+}
+
+func TestStyCheckFlagsAndOptionMapping(t *testing.T) {
+	for _, flag := range []string{"profile", "sudo", "port", "user"} {
+		if pigstyCheckCmd.Flags().Lookup(flag) == nil {
+			t.Fatalf("pig sty check is missing --%s", flag)
+		}
+	}
+	if shorthand := pigstyCheckCmd.Flags().Lookup("profile").Shorthand; shorthand != "p" {
+		t.Fatalf("--profile shorthand = %q, want p", shorthand)
+	}
+
+	originalExec := pigstyCheckExec
+	originalPath, originalHome := config.PigstyConfig, config.PigstyHome
+	originalFormat := config.OutputFormat
+	originalProfiles := append([]string(nil), pigstyCheckProfiles...)
+	originalSudo, originalPort, originalUser := pigstyCheckSudo, pigstyCheckPort, pigstyCheckUser
+	defer func() {
+		pigstyCheckExec = originalExec
+		config.PigstyConfig, config.PigstyHome = originalPath, originalHome
+		config.OutputFormat = originalFormat
+		pigstyCheckProfiles = originalProfiles
+		pigstyCheckSudo, pigstyCheckPort, pigstyCheckUser = originalSudo, originalPort, originalUser
+	}()
+
+	config.PigstyConfig, config.PigstyHome = "/tmp/active.yml", "/tmp/pigsty"
+	config.OutputFormat = config.OUTPUT_TEXT
+	pigstyCheckProfiles = []string{"ansible", "ssh"}
+	pigstyCheckSudo, pigstyCheckPort, pigstyCheckUser = true, 2222, "admin"
+	var got stycli.CheckOptions
+	pigstyCheckExec = func(opts stycli.CheckOptions) *output.Result {
+		got = opts
+		return output.OK("checked", &stycli.CheckData{Kind: stycli.CheckKind, Ready: true})
+	}
+	_ = captureStdout(t, func() {
+		if err := pigstyCheckCmd.RunE(pigstyCheckCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if got.Path != config.PigstyConfig || got.Home != config.PigstyHome || strings.Join(got.Profiles, ",") != "ansible,ssh" || !got.Sudo || got.Port != 2222 || got.User != "admin" {
+		t.Fatalf("Check options = %+v", got)
 	}
 }
 
