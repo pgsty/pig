@@ -73,6 +73,11 @@ func (m *Mutation) Delete(path Path) error {
 	return m.Apply(func(editor *Editor) error { return editor.Delete(path) })
 }
 
+// Rename changes only the final mapping-key lexeme at path.
+func (m *Mutation) Rename(path Path, newName string) error {
+	return m.Apply(func(editor *Editor) error { return editor.RenameKey(path, newName) })
+}
+
 // ReplaceAll replaces a placeholder in selected YAML key, scalar, and comment
 // token regions. It never scans YAML whitespace or delimiters.
 func (m *Mutation) ReplaceAll(old, replacement string, options ...ReplaceOption) (int, error) {
@@ -125,7 +130,7 @@ func (m *Mutation) Commit() (*Document, ChangeSet, error) {
 }
 
 // MappingEditor edits one mapping in a Mutation. Existing comments are
-// preserved; WithComment applies only when a key is inserted.
+// preserved; comment options apply only when a key is inserted.
 type MappingEditor struct {
 	mutation      *Mutation
 	path          Path
@@ -214,6 +219,18 @@ func (m *MappingEditor) Delete(key string) error {
 		return m.fail(m.err)
 	}
 	return m.mutation.Delete(m.path.ChildKey(key))
+}
+
+// Rename replaces only one existing mapping-key lexeme and leaves its value,
+// whitespace, and surrounding comments untouched.
+func (m *MappingEditor) Rename(key, newName string) error {
+	if m == nil {
+		return errors.New("inventory mapping editor is nil")
+	}
+	if m.err != nil {
+		return m.fail(m.err)
+	}
+	return m.mutation.Rename(m.path.ChildKey(key), newName)
 }
 
 func (m *Mutation) fail(err error) error {

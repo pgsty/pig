@@ -64,9 +64,18 @@ func ParseSelector(doc *Document, selector string) (Path, error) {
 	}
 
 	for _, part := range parts[1:] {
+		current, ok := doc.Lookup(path)
+		if !ok {
+			return nil, selectorFailure(SelectorNotFound, selector, "path %s does not exist", path.String())
+		}
 		if part.Kind == IndexSegment {
+			if current.Kind != SequenceValue {
+				return nil, selectorFailure(SelectorType, selector, "cannot use sequence index at %s (%s)", path.String(), current.Kind)
+			}
 			path = path.ChildIndex(part.Index)
 			group, children = false, false
+		} else if current.Kind != MappingValue {
+			return nil, selectorFailure(SelectorType, selector, "cannot descend through %s at %s", current.Kind, path.String())
 		} else if children {
 			path = path.ChildKey(part.Key)
 			group, children = true, false
@@ -102,7 +111,10 @@ func resolvePointer(doc *Document, selector string) (Path, error) {
 	}
 	var path Path
 	for _, encoded := range strings.Split(strings.TrimPrefix(selector, "/"), "/") {
-		segment := strings.ReplaceAll(strings.ReplaceAll(encoded, "~1", "/"), "~0", "~")
+		segment, err := unescapePointerSegment(encoded)
+		if err != nil {
+			return nil, selectorFailure(SelectorSyntax, selector, "%v", err)
+		}
 		current, ok := doc.Lookup(path)
 		if !ok {
 			return nil, selectorFailure(SelectorNotFound, selector, "path %s does not exist", path.String())
@@ -124,6 +136,29 @@ func resolvePointer(doc *Document, selector string) (Path, error) {
 		}
 	}
 	return path, nil
+}
+
+func unescapePointerSegment(encoded string) (string, error) {
+	var decoded strings.Builder
+	for index := 0; index < len(encoded); index++ {
+		if encoded[index] != '~' {
+			decoded.WriteByte(encoded[index])
+			continue
+		}
+		if index+1 >= len(encoded) {
+			return "", fmt.Errorf("trailing ~ in pointer segment %q", encoded)
+		}
+		index++
+		switch encoded[index] {
+		case '0':
+			decoded.WriteByte('~')
+		case '1':
+			decoded.WriteByte('/')
+		default:
+			return "", fmt.Errorf("invalid ~%c escape in pointer segment %q", encoded[index], encoded)
+		}
+	}
+	return decoded.String(), nil
 }
 
 func requireSelectorPath(doc *Document, selector string, path Path) error {

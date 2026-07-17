@@ -125,8 +125,9 @@ func (e *Editor) Upsert(path Path, value any, options ...InsertOption) (err erro
 }
 
 type insertOptions struct {
-	after   string
-	comment string
+	after          string
+	inlineComment  string
+	leadingComment string
 }
 
 // InsertOption customizes a mapping insertion.
@@ -146,12 +147,26 @@ func AfterKey(key string) InsertOption {
 	return func(options *insertOptions) { options.after = key }
 }
 
-// WithComment appends a new inline comment. Existing edits never rewrite
-// comments; this option is only for newly generated entries.
+// WithComment is the compatibility spelling for WithInlineComment.
 func WithComment(comment string) InsertOption {
+	return WithInlineComment(comment)
+}
+
+// WithInlineComment appends one inline comment to a newly inserted entry.
+// Existing entries and their comments are never rewritten by this option.
+func WithInlineComment(comment string) InsertOption {
 	return func(options *insertOptions) {
-		options.comment = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(comment), "#"))
+		options.inlineComment = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(comment), "#"))
 	}
+}
+
+// WithLeadingComment adds standalone comment lines immediately before a newly
+// inserted block-mapping entry. Flow mappings reject this option because they
+// cannot represent an entry-owned standalone comment without restructuring.
+// After commit these lines are ordinary presentation data, so later deletion
+// preserves them rather than guessing whether a user still wants the comment.
+func WithLeadingComment(comment string) InsertOption {
+	return func(options *insertOptions) { options.leadingComment = strings.TrimSpace(comment) }
 }
 
 // Insert adds a new mapping entry while inheriting local flow/block style,
@@ -182,6 +197,12 @@ func (e *Editor) Insert(parent Path, key string, value any, options ...InsertOpt
 			option(&config)
 		}
 	}
+	if strings.ContainsAny(config.inlineComment, "\r\n") {
+		return fmt.Errorf("insert %s: inline comment must contain exactly one line", childPath.String())
+	}
+	if parentRef.node.Kind == yaml.MappingNode && parentRef.node.Style&yaml.FlowStyle != 0 && config.leadingComment != "" {
+		return fmt.Errorf("insert %s: leading comments in flow mappings: %w", childPath.String(), ErrFragmentUnsupported)
+	}
 	keyText := renderKey(key)
 	valueText, err := renderNewValue(value, parentRef.node.Style&yaml.FlowStyle != 0)
 	if err != nil {
@@ -193,11 +214,11 @@ func (e *Editor) Insert(parent Path, key string, value any, options ...InsertOpt
 	var commentFragment string
 	if parentRef.node.Kind == yaml.MappingNode && parentRef.node.Style&yaml.FlowStyle != 0 {
 		span, fragment, err = e.flowInsertion(parent, parentRef, config.after, keyText+": "+valueText)
-		if err == nil && config.comment != "" {
-			commentSpan, commentFragment, err = e.base.flowCommentInsertion(parentRef.node, config.comment)
+		if err == nil && config.inlineComment != "" {
+			commentSpan, commentFragment, err = e.base.flowCommentInsertion(parentRef.node, config.inlineComment)
 		}
 	} else {
-		span, fragment, err = e.blockInsertion(parent, parentRef, config.after, keyText, valueText, config.comment)
+		span, fragment, err = e.blockInsertion(parent, parentRef, config.after, keyText, valueText, config.leadingComment, config.inlineComment)
 	}
 	if err != nil {
 		return fmt.Errorf("insert %s: %w", childPath.String(), err)
@@ -292,7 +313,7 @@ type blockEntryStyle struct {
 	commentColumn int
 }
 
-func (e *Editor) blockInsertion(parent Path, parentRef *nodeRef, after, key, value, comment string) (byteSpan, string, error) {
+func (e *Editor) blockInsertion(parent Path, parentRef *nodeRef, after, key, value, leadingComment, inlineComment string) (byteSpan, string, error) {
 	indent := 0
 	insertAt := 0
 	prefixNewline := false
@@ -340,9 +361,36 @@ func (e *Editor) blockInsertion(parent Path, parentRef *nodeRef, after, key, val
 	if prefixNewline {
 		prefix = e.base.newline
 	}
-	entry := e.base.renderBlockEntry(node, reference, indent, key, value, comment)
-	fragment := prefix + entry + e.base.newline
+	entry := e.base.renderBlockEntry(node, reference, indent, key, value, inlineComment)
+	leading, err := renderLeadingComment(leadingComment, indent, e.base.newline)
+	if err != nil {
+		return byteSpan{}, "", err
+	}
+	fragment := prefix + leading + entry + e.base.newline
 	return byteSpan{start: insertAt, end: insertAt}, fragment, nil
+}
+
+func renderLeadingComment(comment string, indent int, newline string) (string, error) {
+	if strings.TrimSpace(comment) == "" {
+		return "", nil
+	}
+	comment = strings.ReplaceAll(comment, "\r\n", "\n")
+	if strings.ContainsRune(comment, '\r') {
+		return "", errors.New("leading comment contains an unsupported carriage return")
+	}
+	prefix := strings.Repeat(" ", indent) + "#"
+	var rendered strings.Builder
+	for _, line := range strings.Split(comment, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
+		rendered.WriteString(prefix)
+		if line != "" {
+			rendered.WriteByte(' ')
+			rendered.WriteString(line)
+		}
+		rendered.WriteString(newline)
+	}
+	return rendered.String(), nil
 }
 
 func (d *Document) renderBlockEntry(mapping *yaml.Node, reference *nodeRef, indent int, key, value, comment string) string {

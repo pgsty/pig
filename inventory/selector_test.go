@@ -24,6 +24,8 @@ const selectorFixture = `all:
     region: default            # keep inline comment
     infra_portal:
       i.pigsty: { port: 80 }
+    slash/key:
+      tilde~key: escaped
     note: |-
       first
       second
@@ -47,6 +49,7 @@ func TestParseSelectorShorthandAndCanonicalPointer(t *testing.T) {
 		"pg-meta.pg-test.hosts":                 "/all/children/pg-meta/children/pg-test/hosts",
 		"pg-meta.children.pg-test.hosts":        "/all/children/pg-meta/children/pg-test/hosts",
 		"/all/children/pg-meta/hosts/10.10.10.10": "/all/children/pg-meta/hosts/10.10.10.10",
+		"/all/vars/slash~1key/tilde~0key":         "/all/vars/slash~1key/tilde~0key",
 	} {
 		path, err := ParseSelector(doc, selector)
 		if err != nil {
@@ -56,9 +59,19 @@ func TestParseSelectorShorthandAndCanonicalPointer(t *testing.T) {
 			t.Fatalf("ParseSelector(%q) = %s, want %s", selector, got, want)
 		}
 	}
-	for _, selector := range []string{"vars..region", "vars.missing", "pg-meta.vars.pg_databases[name]", "pg-meta.hosts.10.10.10.10"} {
-		if _, err := ParseSelector(doc, selector); err == nil {
-			t.Fatalf("ParseSelector(%q) unexpectedly succeeded", selector)
+	for _, test := range []struct{ selector, code string }{
+		{"vars..region", SelectorSyntax},
+		{"vars.missing", SelectorNotFound},
+		{"pg-meta.vars.pg_databases[name]", SelectorSyntax},
+		{"pg-meta.hosts.10.10.10.10", SelectorNotFound},
+		{"vars.region.child", SelectorType},
+		{"/all/vars/region/child", SelectorType},
+		{"/all/vars/slash~2key", SelectorSyntax},
+	} {
+		_, err := ParseSelector(doc, test.selector)
+		var selectorErr *SelectorError
+		if !errors.As(err, &selectorErr) || selectorErr.Code != test.code {
+			t.Fatalf("ParseSelector(%q) error = %v, want %s", test.selector, err, test.code)
 		}
 	}
 }

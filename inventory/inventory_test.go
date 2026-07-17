@@ -553,6 +553,75 @@ func TestMutationHostVarsKeepDuplicateDeclarationsSeparate(t *testing.T) {
 	}
 }
 
+func TestTypedMappingMutationCommentsRenameAndDeleteAreLossless(t *testing.T) {
+	source := []byte("all:\n  vars:\n    region: default\n")
+	doc, err := Parse("typed-mutation.yml", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mutation := doc.Mutate()
+	vars := mutation.AllVars()
+	if err := vars.Set("region", "china", WithLeadingComment("ignored for existing entries")); err != nil {
+		t.Fatal(err)
+	}
+	if err := vars.Set(
+		"generated_region",
+		"enabled",
+		AfterKey("region"),
+		WithLeadingComment("generated setting\n# remove it to use defaults"),
+		WithInlineComment("controller-only"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := vars.Rename("generated_region", "region_mode"); err != nil {
+		t.Fatal(err)
+	}
+	if err := vars.Set("temporary", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := vars.Delete("temporary"); err != nil {
+		t.Fatal(err)
+	}
+
+	committed, changes, err := mutation.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("all:\n  vars:\n    region: china\n    # generated setting\n    # remove it to use defaults\n    region_mode: enabled # controller-only\n")
+	if !bytes.Equal(committed.Bytes(), want) {
+		t.Fatalf("typed mutation changed unexpected bytes:\n%s", committed.Bytes())
+	}
+	wantOperations := []string{"set", "insert", "rename-key", "insert", "delete"}
+	if len(changes.Changes) != len(wantOperations) {
+		t.Fatalf("changes = %+v", changes.Changes)
+	}
+	for index, operation := range wantOperations {
+		if changes.Changes[index].Operation != operation {
+			t.Fatalf("change %d operation = %q, want %q", index, changes.Changes[index].Operation, operation)
+		}
+	}
+}
+
+func TestLeadingCommentRefusesFlowMappingWithoutRestructuring(t *testing.T) {
+	source := []byte("all: { vars: { region: default } }\n")
+	doc, err := Parse("flow-comment.yml", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutation := doc.Mutate()
+	err = mutation.AllVars().Set("new_region", "china", WithLeadingComment("standalone"))
+	if !errors.Is(err, ErrFragmentUnsupported) {
+		t.Fatalf("flow leading comment error = %v", err)
+	}
+	if _, _, err := mutation.Commit(); err == nil {
+		t.Fatal("aborted flow mutation unexpectedly committed")
+	}
+	if !bytes.Equal(doc.Bytes(), source) {
+		t.Fatal("failed flow mutation changed the base document")
+	}
+}
+
 func TestParseRejectsMultipleDocumentsAndDuplicateKeys(t *testing.T) {
 	for name, source := range map[string]string{
 		"multiple":  "all: {}\n---\nall: {}\n",
