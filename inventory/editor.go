@@ -126,8 +126,12 @@ func (e *Editor) Upsert(path Path, value any, options ...InsertOption) (err erro
 
 type insertOptions struct {
 	after          string
+	hasAfter       bool
+	before         string
+	hasBefore      bool
 	inlineComment  string
 	leadingComment string
+	snapshotKey    bool
 }
 
 // InsertOption customizes a mapping insertion.
@@ -144,7 +148,24 @@ type OrderedMapping []Pair
 
 // AfterKey inserts immediately after an existing sibling when possible.
 func AfterKey(key string) InsertOption {
-	return func(options *insertOptions) { options.after = key }
+	return func(options *insertOptions) {
+		options.after = key
+		options.hasAfter = true
+	}
+}
+
+// beforeKey is reserved for provenance-sensitive merge patches that must
+// preserve an exact base-key gap. The public editing surface remains
+// intentionally after-anchor oriented.
+func beforeKey(key string) InsertOption {
+	return func(options *insertOptions) {
+		options.before = key
+		options.hasBefore = true
+	}
+}
+
+func permitSnapshotKey() InsertOption {
+	return func(options *insertOptions) { options.snapshotKey = true }
 }
 
 // WithComment is the compatibility spelling for WithInlineComment.
@@ -174,9 +195,6 @@ func WithLeadingComment(comment string) InsertOption {
 // delimiter spacing.
 func (e *Editor) Insert(parent Path, key string, value any, options ...InsertOption) (err error) {
 	defer e.captureFailure(&err)
-	if strings.TrimSpace(key) == "" {
-		return errors.New("insert key must not be empty")
-	}
 	if e == nil || e.base == nil {
 		return errors.New("inventory editor is nil")
 	}
@@ -197,6 +215,12 @@ func (e *Editor) Insert(parent Path, key string, value any, options ...InsertOpt
 			option(&config)
 		}
 	}
+	if strings.TrimSpace(key) == "" && !config.snapshotKey {
+		return errors.New("insert key must not be empty")
+	}
+	if config.hasAfter && config.hasBefore {
+		return fmt.Errorf("insert %s: before and after anchors are mutually exclusive", childPath.String())
+	}
 	if strings.ContainsAny(config.inlineComment, "\r\n") {
 		return fmt.Errorf("insert %s: inline comment must contain exactly one line", childPath.String())
 	}
@@ -213,12 +237,12 @@ func (e *Editor) Insert(parent Path, key string, value any, options ...InsertOpt
 	var commentSpan byteSpan
 	var commentFragment string
 	if parentRef.node.Kind == yaml.MappingNode && parentRef.node.Style&yaml.FlowStyle != 0 {
-		span, fragment, err = e.flowInsertion(parent, parentRef, config.after, keyText+": "+valueText)
+		span, fragment, err = e.flowInsertion(parent, parentRef, config.after, config.hasAfter, config.before, config.hasBefore, keyText+": "+valueText)
 		if err == nil && config.inlineComment != "" {
 			commentSpan, commentFragment, err = e.base.flowCommentInsertion(parentRef.node, config.inlineComment)
 		}
 	} else {
-		span, fragment, err = e.blockInsertion(parent, parentRef, config.after, keyText, valueText, config.leadingComment, config.inlineComment)
+		span, fragment, err = e.blockInsertion(parent, parentRef, config.after, config.hasAfter, config.before, config.hasBefore, keyText, valueText, config.leadingComment, config.inlineComment)
 	}
 	if err != nil {
 		return fmt.Errorf("insert %s: %w", childPath.String(), err)
@@ -234,7 +258,7 @@ func (e *Editor) Insert(parent Path, key string, value any, options ...InsertOpt
 	return nil
 }
 
-func (e *Editor) flowInsertion(parent Path, parentRef *nodeRef, after, entry string) (byteSpan, string, error) {
+func (e *Editor) flowInsertion(parent Path, parentRef *nodeRef, after string, hasAfter bool, before string, hasBefore bool, entry string) (byteSpan, string, error) {
 	span := e.base.nodeSpan(parentRef.node)
 	if !span.valid(len(e.base.source)) || span.end <= span.start || e.base.source[span.end-1] != '}' {
 		return byteSpan{}, "", errors.New("unable to locate flow mapping delimiter")
@@ -253,7 +277,7 @@ func (e *Editor) flowInsertion(parent Path, parentRef *nodeRef, after, entry str
 		prefix = " "
 		entry += " "
 	}
-	if after != "" {
+	if hasAfter {
 		anchorPath := parent.ChildKey(after)
 		anchor, ok := e.base.refs[pathKey(anchorPath)]
 		if !ok || anchor.parent != parentRef.node {
@@ -261,6 +285,15 @@ func (e *Editor) flowInsertion(parent Path, parentRef *nodeRef, after, entry str
 		}
 		insertAt = e.base.nodeSpan(anchor.node).end
 		prefix = e.base.flowSeparator(parentRef.node)
+	}
+	if hasBefore {
+		anchorPath := parent.ChildKey(before)
+		anchor, ok := e.base.refs[pathKey(anchorPath)]
+		if !ok || anchor.parent != parentRef.node {
+			return byteSpan{}, "", fmt.Errorf("before key %q: %w", before, ErrPathNotFound)
+		}
+		insertAt = anchor.keySpan.start
+		return byteSpan{start: insertAt, end: insertAt}, entry + e.base.flowSeparator(parentRef.node), nil
 	}
 	return byteSpan{start: insertAt, end: insertAt}, prefix + entry, nil
 }
@@ -313,7 +346,7 @@ type blockEntryStyle struct {
 	commentColumn int
 }
 
-func (e *Editor) blockInsertion(parent Path, parentRef *nodeRef, after, key, value, leadingComment, inlineComment string) (byteSpan, string, error) {
+func (e *Editor) blockInsertion(parent Path, parentRef *nodeRef, after string, hasAfter bool, before string, hasBefore bool, key, value, leadingComment, inlineComment string) (byteSpan, string, error) {
 	indent := 0
 	insertAt := 0
 	prefixNewline := false
@@ -345,13 +378,22 @@ func (e *Editor) blockInsertion(parent Path, parentRef *nodeRef, after, key, val
 	} else {
 		return byteSpan{}, "", errors.New("target is not a mapping")
 	}
-	if after != "" {
+	if hasAfter {
 		anchorPath := parent.ChildKey(after)
 		anchor, ok := e.base.refs[pathKey(anchorPath)]
 		if !ok || anchor.parent != node {
 			return byteSpan{}, "", fmt.Errorf("after key %q: %w", after, ErrPathNotFound)
 		}
 		insertAt = anchor.entrySpan.end
+		reference = anchor
+	}
+	if hasBefore {
+		anchorPath := parent.ChildKey(before)
+		anchor, ok := e.base.refs[pathKey(anchorPath)]
+		if !ok || anchor.parent != node {
+			return byteSpan{}, "", fmt.Errorf("before key %q: %w", before, ErrPathNotFound)
+		}
+		insertAt = anchor.entrySpan.start
 		reference = anchor
 	}
 	if insertAt > 0 && insertAt <= len(e.base.source) && e.base.source[insertAt-1] != '\n' {
@@ -1029,6 +1071,11 @@ func renderNewValue(value any, flow bool) (string, error) {
 			return "{}", nil
 		}
 		return "", nil
+	case snapshotFragmentValue:
+		if typed == "" || strings.ContainsAny(string(typed), "\r\n") {
+			return "", errors.New("invalid canonical Snapshot fragment")
+		}
+		return string(typed), nil
 	case string:
 		if conservativePlainStringSafe(typed, flow) {
 			return typed, nil
