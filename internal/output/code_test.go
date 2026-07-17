@@ -225,3 +225,30 @@ func TestGenericFallbackCodes(t *testing.T) {
 		t.Errorf("operation fallback should map to exit 1, got %d", got)
 	}
 }
+
+func TestStyCMDBCodeCategories(t *testing.T) {
+	tests := []struct {
+		code int
+		exit int
+	}{
+		{CodeStyCMDBInvalidArgs, 2},
+		{CodeStyCMDBPermissionDenied, 3},
+		{CodeStyCMDBConnectionFailed, 5},
+		{CodeStyCMDBResourceMissing, 6},
+		{CodeStyCMDBRevisionConflict, 9},
+		{CodeStyCMDBSnapshotUnrepresentable, 8},
+		{CodeStyCMDBOperationFailed, 1},
+		{CodeStyCMDBConfirmationRequired, 7},
+		{CodeStyCMDBPruneRequired, 7},
+	}
+	seen := make(map[int]struct{}, len(tests))
+	for _, test := range tests {
+		if _, duplicate := seen[test.code]; duplicate {
+			t.Fatalf("duplicate CMDB status code: %d", test.code)
+		}
+		seen[test.code] = struct{}{}
+		if got := ExitCode(test.code); got != test.exit {
+			t.Fatalf("ExitCode(%d) = %d, want %d", test.code, got, test.exit)
+		}
+	}
+}
