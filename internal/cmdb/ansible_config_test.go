@@ -76,6 +76,25 @@ func TestPlanAnsibleConfigPatchChangesOnlyValueSpanAndReparses(t *testing.T) {
 	}
 }
 
+func TestPlanAnsibleConfigLiteralPatchRestoresExactRelativeLiteral(t *testing.T) {
+	directory := symlinkFreeTempDir(t)
+	path := filepath.Join(directory, "ansible.cfg")
+	body := []byte("[defaults]\ninventory = /runtime/inventory # keep\n")
+	document, err := parseAnsibleConfig(path, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(directory, "static source.yml")
+	patch, err := planAnsibleConfigLiteralPatch(document, "'static source.yml'", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("[defaults]\ninventory = 'static source.yml' # keep\n")
+	if !bytes.Equal(patch.candidate, want) || patch.nextLiteral != "'static source.yml'" || patch.nextLocator != target {
+		t.Fatalf("exact literal patch = %q, %+v", patch.candidate, patch)
+	}
+}
+
 func TestAnsibleConfigRejectsAmbiguousAndDynamicGrammarWithoutMutation(t *testing.T) {
 	tests := map[string][]byte{
 		"missing defaults":     []byte("[other]\ninventory = static.yml\n"),

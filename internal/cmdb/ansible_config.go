@@ -273,12 +273,20 @@ func planAnsibleConfigPatch(document *ansibleConfigDocument, target string) (*an
 	if err != nil {
 		return nil, ansibleConfigFailure(document.source.ConfigPath)
 	}
+	return planAnsibleConfigLiteralPatch(document, literal, target)
+}
+
+func planAnsibleConfigLiteralPatch(document *ansibleConfigDocument, literal, target string) (*ansibleConfigPatch, error) {
+	if document == nil || document.valueStart < 0 || document.valueEnd > len(document.body) || document.valueStart >= document.valueEnd ||
+		!filepath.IsAbs(target) || filepath.Clean(target) != target || literal == "" || strings.ContainsAny(literal, "\r\n\x00") {
+		return nil, ansibleConfigFailure("ansible.cfg")
+	}
 	candidate := make([]byte, 0, len(document.body)-(document.valueEnd-document.valueStart)+len(literal))
 	candidate = append(candidate, document.body[:document.valueStart]...)
 	candidate = append(candidate, literal...)
 	candidate = append(candidate, document.body[document.valueEnd:]...)
 	reparsed, err := parseAnsibleConfig(document.source.ConfigPath, candidate)
-	if err != nil || reparsed.source.Locator != filepath.Clean(target) || reparsed.source.Literal != literal {
+	if err != nil || reparsed.source.Locator != target || reparsed.source.Literal != literal {
 		return nil, ansibleConfigFailure(document.source.ConfigPath)
 	}
 	digest := sha256.Sum256(candidate)
