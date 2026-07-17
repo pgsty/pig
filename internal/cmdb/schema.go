@@ -276,7 +276,7 @@ SELECT p.proname, p.pronargs, p.prorettype = 'pg_catalog.trigger'::pg_catalog.re
 
 func validateSchemaTriggers(ctx context.Context, tx pgx.Tx) error {
 	rows, err := tx.Query(ctx, `
-SELECT c.relname, t.tgname, t.tgtype::integer, p.proname
+SELECT c.relname, t.tgname, t.tgtype::integer, t.tgenabled::text, p.proname
   FROM pg_catalog.pg_trigger AS t
   JOIN pg_catalog.pg_class AS c ON c.oid = t.tgrelid
   JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
@@ -292,19 +292,20 @@ SELECT c.relname, t.tgname, t.tgtype::integer, p.proname
 	type trigger struct {
 		table, name string
 		kind        int
+		enabled     string
 		function    string
 	}
 	var got []trigger
 	for rows.Next() {
 		var item trigger
-		if err := rows.Scan(&item.table, &item.name, &item.kind, &item.function); err != nil {
+		if err := rows.Scan(&item.table, &item.name, &item.kind, &item.enabled, &item.function); err != nil {
 			return schemaInvalid("trigger catalog")
 		}
 		got = append(got, item)
 	}
 	expected := []trigger{
-		{table: "schema_migration", name: "schema_migration_append_only", kind: 27, function: "reject_append_only"},
-		{table: "snapshot", name: "snapshot_append_only", kind: 27, function: "reject_append_only"},
+		{table: "schema_migration", name: "schema_migration_append_only", kind: 27, enabled: "O", function: "reject_append_only"},
+		{table: "snapshot", name: "snapshot_append_only", kind: 27, enabled: "O", function: "reject_append_only"},
 	}
 	if rows.Err() != nil || !slices.Equal(got, expected) {
 		return schemaInvalid("trigger shape")
