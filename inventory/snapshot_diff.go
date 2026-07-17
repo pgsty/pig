@@ -37,6 +37,76 @@ func DiffSnapshots(base, current *Snapshot) ([]SnapshotChange, error) {
 	return changes, nil
 }
 
+// SnapshotRemovals returns the value-free subset of a diff that requires the
+// CMDB prune scope. Mapping declarations removed from the candidate are
+// explicit removals. Sequence replacement is destructive only when an exact
+// typed element is lost; replacement of a mapping or sequence by another kind
+// is conservatively destructive because it can discard nested declarations.
+func SnapshotRemovals(base, current *Snapshot) ([]SnapshotChange, error) {
+	deltas, err := diffSnapshotValues(base, current)
+	if err != nil {
+		return nil, err
+	}
+	removals := make([]SnapshotChange, 0)
+	for i := range deltas {
+		delta := deltas[i]
+		destructive := delta.operation == SnapshotRemove
+		if delta.operation == SnapshotReplace && delta.hasBefore {
+			switch delta.before.kind {
+			case SnapshotMap:
+				destructive = true
+			case SnapshotSeq:
+				if !delta.hasAfter || delta.after.kind != SnapshotSeq {
+					destructive = true
+				} else {
+					var err error
+					destructive, err = sequenceRemovesSnapshotElements(delta.before, delta.after)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+		if destructive {
+			removals = append(removals, SnapshotChange{
+				Operation: delta.operation,
+				Path:      clonePath(delta.path),
+			})
+		}
+	}
+	return removals, nil
+}
+
+func sequenceRemovesSnapshotElements(before, after SnapshotValue) (bool, error) {
+	counts := make(map[string]int, len(after.items))
+	for i := range after.items {
+		key, err := snapshotValueIdentity(after.items[i])
+		if err != nil {
+			return false, err
+		}
+		counts[key]++
+	}
+	for i := range before.items {
+		key, err := snapshotValueIdentity(before.items[i])
+		if err != nil {
+			return false, err
+		}
+		if counts[key] == 0 {
+			return true, nil
+		}
+		counts[key]--
+	}
+	return false, nil
+}
+
+func snapshotValueIdentity(value SnapshotValue) (string, error) {
+	writer := newSnapshotByteWriter(maxSnapshotOutputBytes)
+	if err := writeCanonicalSnapshotValue(writer, value); err != nil {
+		return "", err
+	}
+	return string(writer.bytes()), nil
+}
+
 type snapshotGap struct {
 	previous    string
 	hasPrevious bool

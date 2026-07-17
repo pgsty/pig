@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -121,5 +122,90 @@ func TestDiffSnapshotAdditionCarriesExactBaseGap(t *testing.T) {
 			!delta.gap.hasNext || delta.gap.next != "b" || delta.gap.ordinal != index {
 			t.Fatalf("delta[%d] gap = %+v", index, delta.gap)
 		}
+	}
+}
+
+func TestSnapshotRemovalsClassifiesExactPruneScope(t *testing.T) {
+	tests := []struct {
+		name      string
+		base      string
+		candidate string
+		want      []SnapshotChange
+	}{
+		{
+			name:      "mapping declaration removed",
+			base:      "all:\n  vars:\n    keep: 1\n    password: secret\n",
+			candidate: "all:\n  vars:\n    keep: 1\n",
+			want:      []SnapshotChange{{Operation: SnapshotRemove, Path: Keys("all", "vars", "password")}},
+		},
+		{
+			name:      "scalar replacement is not prune",
+			base:      "all:\n  vars:\n    value: 1\n",
+			candidate: "all:\n  vars:\n    value: 2\n",
+		},
+		{
+			name:      "sequence append preserves every element",
+			base:      "all:\n  vars:\n    values: [one]\n",
+			candidate: "all:\n  vars:\n    values: [one, two]\n",
+		},
+		{
+			name:      "sequence reorder preserves every element",
+			base:      "all:\n  vars:\n    values: [one, two]\n",
+			candidate: "all:\n  vars:\n    values: [two, one]\n",
+		},
+		{
+			name:      "sequence element removal is prune",
+			base:      "all:\n  vars:\n    values: [one, two]\n",
+			candidate: "all:\n  vars:\n    values: [one]\n",
+			want:      []SnapshotChange{{Operation: SnapshotReplace, Path: Keys("all", "vars", "values")}},
+		},
+		{
+			name:      "sequence duplicate removal is prune",
+			base:      "all:\n  vars:\n    values: [one, one]\n",
+			candidate: "all:\n  vars:\n    values: [one]\n",
+			want:      []SnapshotChange{{Operation: SnapshotReplace, Path: Keys("all", "vars", "values")}},
+		},
+		{
+			name:      "sequence kind replacement can discard elements",
+			base:      "all:\n  vars:\n    values: [one]\n",
+			candidate: "all:\n  vars:\n    values: replacement\n",
+			want:      []SnapshotChange{{Operation: SnapshotReplace, Path: Keys("all", "vars", "values")}},
+		},
+		{
+			name:      "mapping replacement can discard declarations",
+			base:      "all:\n  vars:\n    nested:\n      key: value\n",
+			candidate: "all:\n  vars:\n    nested: replacement\n",
+			want:      []SnapshotChange{{Operation: SnapshotReplace, Path: Keys("all", "vars", "nested")}},
+		},
+		{
+			name:      "ordered mapping move is not prune",
+			base:      "all:\n  vars:\n    one: 1\n    two: 2\n",
+			candidate: "all:\n  vars:\n    two: 2\n    one: 1\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			base := mustSnapshot(t, "base.yml", test.base)
+			candidate := mustSnapshot(t, "candidate.yml", test.candidate)
+			got, err := SnapshotRemovals(base, candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("removals = %+v, want %+v", got, test.want)
+			}
+			for i := range got {
+				if got[i].Operation != test.want[i].Operation || got[i].Path.String() != test.want[i].Path.String() {
+					t.Fatalf("removals = %+v, want %+v", got, test.want)
+				}
+			}
+			encoded, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(encoded, []byte("secret")) || bytes.Contains(encoded, []byte("replacement")) {
+				t.Fatalf("prune plan leaked values: %s", encoded)
+			}
+		})
 	}
 }
