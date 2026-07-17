@@ -97,12 +97,39 @@ func (o *CMDBLoadOperation) Data() *CMDBLoadData {
 	return &copy
 }
 
-func PlanCMDBLoad(ctx context.Context, store *cmdb.Store, options CMDBLoadOptions) (*CMDBLoadOperation, *output.Result) {
-	revisionText := options.Revision
-	if revisionText != "" && (options.StaticFile != "" || options.InvocationSource != "") {
-		return nil, output.Fail(output.CodeStyCMDBInvalidArgs, "CMDB revision load is mutually exclusive with a static file and invocation Inventory").
+// ValidateCMDBLoadOptions performs the ambiguity checks that must fail before
+// the command opens PostgreSQL. Scope and consent remain separate.
+func ValidateCMDBLoadOptions(options CMDBLoadOptions) *output.Result {
+	if options.Revision != "" && (options.StaticFile != "" || options.InvocationSource != "") {
+		return output.Fail(output.CodeStyCMDBInvalidArgs, "CMDB revision load is mutually exclusive with a static file and invocation Inventory").
 			WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: "CMDB_PARAMETER_INVALID"})
 	}
+	return nil
+}
+
+// ResolveCMDBLoadSource selects exactly one static source without touching
+// PostgreSQL. A valid native adapter or unsupported selected tier never falls
+// through to a later static default.
+func ResolveCMDBLoadSource(options CMDBSourceResolveOptions) (CMDBSourceResolution, string, *output.Result) {
+	resolution, failure := ResolveCMDBSource(options)
+	if failure != nil {
+		return resolution, "", failure
+	}
+	if resolution.Effective.Kind != CMDBSourceStatic || resolution.Effective.Locator == "" {
+		return resolution, "", output.Fail(output.CodeStyCMDBInvalidArgs, "CMDB load requires one static Inventory source").
+			WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: "CMDB_STATIC_REQUIRED"}).
+			WithNextActions(output.NextAction{
+				Command: "pig sty cmdb load <static-file>", Reason: "name one static Inventory file explicitly", Required: true,
+			})
+	}
+	return resolution, resolution.Effective.Locator, nil
+}
+
+func PlanCMDBLoad(ctx context.Context, store *cmdb.Store, options CMDBLoadOptions) (*CMDBLoadOperation, *output.Result) {
+	if failure := ValidateCMDBLoadOptions(options); failure != nil {
+		return nil, failure
+	}
+	revisionText := options.Revision
 	toolVersion := strings.TrimSpace(options.ToolVersion)
 	if toolVersion == "" {
 		toolVersion = config.PigVersion

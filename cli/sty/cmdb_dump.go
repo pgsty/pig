@@ -69,15 +69,14 @@ func (d *CMDBDumpData) Text() string {
 	return strings.Join(lines, "\n")
 }
 
-func CMDBDump(ctx context.Context, store *cmdb.Store, options CMDBDumpOptions) *output.Result {
-	outputPath := options.OutputPath
-	if strings.TrimSpace(outputPath) == "" {
+// ValidateCMDBDumpOptions rejects destination and mode ambiguity before a
+// command opens PostgreSQL or creates any private output staging file.
+func ValidateCMDBDumpOptions(options CMDBDumpOptions) *output.Result {
+	if strings.TrimSpace(options.OutputPath) == "" {
 		return output.Fail(output.CodeStyCMDBInvalidArgs, "CMDB dump requires a new output path").
 			WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: "CMDB_PARAMETER_INVALID"})
 	}
-	revisionText := options.Revision
-	expectBaseText := options.ExpectBase
-	if options.Merge && revisionText != "" {
+	if options.Merge && options.Revision != "" {
 		return output.Fail(output.CodeStyCMDBInvalidArgs, "CMDB merge dump cannot select a historical revision").
 			WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: "CMDB_PARAMETER_INVALID"})
 	}
@@ -85,10 +84,20 @@ func CMDBDump(ctx context.Context, store *cmdb.Store, options CMDBDumpOptions) *
 		return output.Fail(output.CodeStyCMDBInvalidArgs, "CMDB merge dump is mutually exclusive with an invocation Inventory source").
 			WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: "CMDB_PARAMETER_INVALID"})
 	}
-	if !options.Merge && expectBaseText != "" {
+	if !options.Merge && options.ExpectBase != "" {
 		return output.Fail(output.CodeStyCMDBInvalidArgs, "CMDB expected base is valid only for merge dump").
 			WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: "CMDB_PARAMETER_INVALID"})
 	}
+	return nil
+}
+
+func CMDBDump(ctx context.Context, store *cmdb.Store, options CMDBDumpOptions) *output.Result {
+	if failure := ValidateCMDBDumpOptions(options); failure != nil {
+		return failure
+	}
+	outputPath := options.OutputPath
+	revisionText := options.Revision
+	expectBaseText := options.ExpectBase
 	var revision, expectBase *cmdb.RevisionToken
 	if revisionText != "" {
 		parsed, err := cmdb.ParseRevisionToken(revisionText)

@@ -261,3 +261,29 @@ func TestCMDBSourceResolutionDoesNotEmbedInventoryValues(t *testing.T) {
 		t.Fatalf("source resolution leaked user-config value: %s", text)
 	}
 }
+
+func TestResolveCMDBLoadSourceRequiresStaticAndNeverReadsNativeHead(t *testing.T) {
+	fixture := newCMDBSourceFixture(t)
+	record, err := cmdb.PrepareRuntime(cmdb.RuntimeOptions{
+		PigstyHome: fixture.home, RuntimeRoot: fixture.runtimeRoot, PigBinary: fixture.pigBinary,
+		ConnectionSource: cmdb.ConnectionMetaSource,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCMDBSourceFile(t, fixture.ansibleConfig, "[defaults]\ninventory = "+record.AdapterPath+"\n", 0o600)
+	resolution, path, failure := ResolveCMDBLoadSource(fixture.options())
+	if path != "" || failure == nil || failure.Code != output.CodeStyCMDBInvalidArgs ||
+		resolution.Effective.Kind != CMDBSourceNative || len(failure.NextActions) != 1 ||
+		failure.NextActions[0].Command != "pig sty cmdb load <static-file>" {
+		t.Fatalf("native load source path=%q resolution=%+v failure=%+v", path, resolution, failure)
+	}
+
+	staticPath := fixture.writeInventory("override.yml", "all: {}\n")
+	options := fixture.options()
+	options.InvocationInventory = staticPath
+	resolution, path, failure = ResolveCMDBLoadSource(options)
+	if failure != nil || path != staticPath || resolution.Effective.Kind != CMDBSourceStatic {
+		t.Fatalf("static load source path=%q resolution=%+v failure=%+v", path, resolution, failure)
+	}
+}
