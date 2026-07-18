@@ -11,17 +11,24 @@ categories: [Reference]
 
 Status: **normative, phased implementation**
 
-Contract version: **1.0**
+Contract version: **1.2**
 
-Last updated: **2026-07-17**
+Last updated: **2026-07-18**
 
-This document is the design contract for the complete `pig sty` command family.
-It separates implemented behavior from planned behavior and is the authority for
-subsequent implementation. A planned command is not a promise that the command
-already exists; its phase gate must pass before it is advertised as stable.
+This document is the design contract for the `pig sty` installation and
+controller command family. It also retains the shared lossless Inventory model,
+selector, validation, status, and redaction contracts used by Sty operations.
 
-The companion [implementation goal prompt](sty-implementation-goal.md) turns
-this contract into a phase-gated execution objective.
+The top-level [`pig inventory` contract](inventory.md) is the authority for the
+public Inventory command tree, the thin adapter to Pigsty's existing CMDB, and
+migration from older Sty paths. A planned command is not a promise that the
+command already exists; its migration gate must pass before it is advertised
+as stable.
+
+The former [implementation goal prompt](sty-implementation-goal.md) records the
+historical P0–P2 execution objective and is archival; its greenfield CMDB phase
+is explicitly superseded. New root-command work MUST follow the migration gates
+in [`inventory.md`](inventory.md#10-migration-plan).
 
 Normative words such as **MUST**, **MUST NOT**, **SHOULD**, and **MAY** have their
 usual RFC 2119 meaning.
@@ -29,18 +36,21 @@ usual RFC 2119 meaning.
 
 ## 1. Product boundary and priority
 
-`pig sty` manages the local Pigsty installation, its active Inventory, and a
-small number of directly related controller-side services. It is not a generic
-replacement for Ansible, Grafana, PostgreSQL, Terraform, or Vagrant.
+`pig sty` manages the local Pigsty installation and a small number of directly
+related controller-side services. Configure, Check, and Dashboard consume the
+active Inventory, but generic Inventory operations belong to the root
+`pig inventory|inv` domain. Sty is not a generic replacement for Ansible,
+Grafana, PostgreSQL, Terraform, or Vagrant.
 
 Implementation priority is fixed as follows:
 
-1. **P0 — Inventory first.** Complete the Inventory query/edit contract, then
-   complete Validate, then Check.
-2. **P1 — Dashboard.** Replace the local Grafana helper with a safe native HTTP
-   client after P0 is closed.
-3. **P2 — CMDB, experimental.** Design and prove schema, revision, rollback,
-   and source-switch behavior before exposing stable mutation commands.
+1. **P0 — Inventory first.** The lossless Inventory, Validate, and Check gates
+   passed; promotion to the root command now follows `inventory.md`.
+2. **P1 — Dashboard.** The safe native HTTP implementation passed its gate and
+   remains under `sty`.
+3. **P2 — CMDB adapter.** The former revision-store direction is withdrawn;
+   the next implementation is a thin adapter to existing `cmdb.sql` and the
+   Inventory scripts.
 4. **P3 — Vagrant and Terraform.** Thin adapters only, after explicit
    reprioritization or completion of the earlier gates.
 
@@ -56,25 +66,28 @@ The following are outside this roadmap:
 
 ## 2. Implementation status
 
-| Surface | Status at contract v1.0 |
+| Surface | Status at contract v1.2 |
 |:---|:---|
 | Lossless `inventory.Document`, ordered semantic model, selectors, editor, mutations, diagnostics | Implemented baseline |
 | `sty conf/configure` through Inventory API, with `--raw` fallback | Implemented |
-| `sty edit [selector]` | Implemented baseline |
-| `sty validate [file]` | Implemented baseline; rule parity incomplete |
-| `sty inventory list/show/edit/validate` namespace | Planned P0.1/P0.2 |
-| `sty check` | Planned P0.3 |
-| `sty dashboard` | Planned P1 |
-| `sty cmdb` | Planned P2, experimental until all gates pass |
+| `sty edit [selector]` | Implemented |
+| `sty validate [file]` | Implemented |
+| `sty inventory list/show/edit/validate` namespace | Implemented; future compatibility delegate |
+| `sty check` | Implemented |
+| `sty dashboard` | Implemented |
+| `sty cmdb` revision-store surface | Implemented experiment; superseded, not canonical |
+| existing Pigsty `cmdb.sql` and Inventory scripts | Current CMDB authority |
+| root `inventory|inv` namespace | Planned migration; see `inventory.md` |
 | `sty vagrant`, `sty terraform` | Deferred P3 |
 | `sty doctor` | Name reserved; implementation deferred |
 
 
 ## 3. Command taxonomy and compatibility
 
-### 3.1 Pig 1.x transition contract
+### 3.1 Sty stable and compatibility surface
 
-Existing 1.x meanings remain compatible while explicit namespaces are added:
+Sty retains installation/controller commands and compatibility delegates while
+Inventory becomes a root domain:
 
 ```text
 pig sty
@@ -89,49 +102,55 @@ pig sty
     get                               # canonical release download
   get | g | download                  # delegate to `release get`
 
-  inventory | inv
-    list [selector]                   # ordered, redacted topology/metadata
-    show [selector]                   # verbatim YAML; text mode only
-    edit [selector]                   # canonical full/fragment editor
-    validate [file]                   # canonical Inventory validator
+  inventory | inv                     # deprecated compatibility namespace
+    list [selector]                   # delegate to `pig inventory list`
+    show [selector]                   # delegate to `pig inventory show`
+    edit [selector]                   # delegate to `pig inventory edit`
+    validate [file]                   # delegate to `pig inventory validate`
 
-  edit | e [selector]                 # delegate to `inventory edit`
-  validate | val | v [file]           # delegate to `inventory validate`
+  edit | e [selector]                 # compatibility Inventory delegate
+  validate | val | v [file]           # compatibility Inventory delegate
   check | ck
 
   dashboard | ds
     list | check | diff | init | dump | clean
 
-  cmdb
-    init | load | dump | enable | disable | check
+  cmdb                                  # corrected compatibility namespace
+    init | load | dump | enable | disable
 
   doctor | dc                         # reserved, not implemented in P0-P2
   vagrant | vg                        # deferred P3
   terraform | tf                      # deferred P3
 ```
 
-When `sty release list` lands, the 1.x `sty list/l/ls` release path MUST emit one
-deprecation notice on stderr in text mode. It MUST preserve stdout and MUST NOT
-emit that notice into JSON/YAML structured output. `release get` and the
-top-level `get/g/download` delegate MUST accept the same flags and produce the
-same result.
+The `sty list/l/ls` release path emits at most one deprecation notice on stderr
+in text mode. It preserves stdout and never emits that notice into JSON/YAML
+structured output. `release get` and the top-level `get/g/download` delegate
+accept the same flags and produce the same result.
 
 Canonical and convenience spellings MUST share one business implementation.
 They MUST NOT drift into duplicate code paths.
 
-### 3.2 Pig 2.0 command promise
+### 3.2 Root Inventory migration promise
 
-Pig 2.0 will make the high-frequency Inventory meaning canonical:
+The canonical Inventory spelling is now outside Sty:
 
 ```text
-pig sty list | l | ls [selector]      # delegate to `inventory list`
-pig sty release list | ls             # only release-list spelling
-pig sty release get                   # canonical release download
-pig sty get | g | download            # compatibility delegate
+pig inventory | inv list | ls [selector]
+pig inventory | inv edit | e [selector]
+pig inventory | inv validate | v [file]
+pig inventory | inv cmdb init | load | dump | enable | disable
 ```
 
-No 1.x release may silently repurpose `sty list`. The 2.0 change requires the
-full 1.x deprecation window described above.
+`sty inventory`, `sty edit/validate`, and `sty cmdb` become compatibility
+delegates only after their canonical root paths ship. The exact mapping,
+payload-kind freeze, deprecation behavior, and phased removal are defined by
+[`inventory.md`](inventory.md#8-compatibility-contract).
+
+`sty list/l/ls` MUST NEVER be repurposed to mean Inventory list, including in
+Pig 2.0. It remains a release-list delegate until it is hidden and eventually
+removed in a reviewed major-version change. `pig inv ls` provides the short
+Inventory spelling without changing an existing command's meaning.
 
 ### 3.3 Reserved names
 
@@ -145,7 +164,10 @@ code.
 Repository layout MUST follow `AGENTS.md`:
 
 - `cmd/sty.go` contains only Cobra commands, aliases, annotations, flags,
-  argument validation, and option mapping. The command package stays flat.
+  argument validation, and option mapping for Sty and its compatibility
+  delegates. The command package stays flat.
+- `cmd/inventory.go` owns the canonical root Inventory command glue; root
+  registration remains in `cmd/root.go`.
 - `cli/sty` owns use cases and stable command DTOs.
 - the top-level `inventory` package owns static Inventory parsing, the lossless
   document, semantic values, selectors, mutations, and validation primitives.
@@ -214,13 +236,13 @@ Comments are presentation data owned by `Document`, not semantic values. An API
 that accepts a comment MUST define whether it is a leading standalone comment
 or an inline comment and MUST preserve surrounding user comments.
 
-### 5.4 `inventory list` and `inventory show`
+### 5.4 `pig inventory list` and `pig inventory show`
 
-`inventory list [selector]` is safe for automation. It emits ordered paths,
+`pig inventory list [selector]` is safe for automation. It emits ordered paths,
 object kinds, group/host topology, variable keys, and value kinds; it does not
 emit arbitrary variable values. JSON/YAML output uses a versioned DTO.
 
-`inventory show [selector]` is a `cat`-equivalent view:
+For a static source, `pig inventory show [selector]` is a `cat`-equivalent view:
 
 - no selector prints the original complete document;
 - a selector prints the exact/dedented YAML fragment defined by fragment-edit
@@ -230,7 +252,9 @@ emit arbitrary variable values. JSON/YAML output uses a versioned DTO.
   parameter-class error;
 - the body MUST NOT be copied to logs, diagnostics, or a structured Result.
 
-A future `show --redact` MAY be additive, but redacted output MUST NOT be called
+A CMDB source has no original presentation bytes; its canonical-show behavior
+and explicit non-lossless notice are defined by `inventory.md`. A future
+`show --redact` MAY be additive, but redacted output MUST NOT be called
 lossless.
 
 
@@ -286,15 +310,16 @@ When `-i` is absent, the target resolution order is:
    `<resolved-pigsty-home>/ansible.cfg`;
 4. `<resolved-pigsty-home>/pigsty.yml`.
 
-Until CMDB support lands, the existing static resolution remains valid. Once
-CMDB exists, the `ansible.cfg` Inventory directive is the authoritative
-persistent Ansible source. Pig reads it deliberately; it never infers CMDB mode
-from database reachability or incidental files. Unsupported dynamic/directory
-sources fail with an explicit diagnostic instead of silently falling back.
+The `ansible.cfg` Inventory directive is the authoritative persistent Ansible
+source. Pig reads it deliberately; it never infers CMDB mode from database
+reachability or incidental files. Unsupported dynamic/directory sources fail
+with an explicit diagnostic instead of silently falling back. The value-free
+source descriptor and root source-control API are frozen in `inventory.md`.
 
-Lossless commands (`show`, static fragment `edit`) require a static `Document`.
-Semantic commands (`list`, `validate`, `check`) consume a `Snapshot` and may
-later use a CMDB adapter.
+Lossless operations require a static `Document`. Semantic commands consume a
+`Snapshot` and may use the verified native CMDB adapter. CMDB canonical show
+and future fragment edit MUST state explicitly that source presentation data is
+unavailable; they never claim losslessness.
 
 
 ## 8. Mutation, revision, and file safety
@@ -339,7 +364,7 @@ fails with the confirmation-required status class.
 
 ### 9.1 Structured output
 
-New Sty DTOs reuse the repository-wide Result envelope with `api: 1`. Every new
+Pig IaC DTOs reuse the repository-wide Result envelope with `api: 1`. Every new
 structured data payload MUST also carry a stable `kind`, for example:
 
 ```text
@@ -350,10 +375,10 @@ pig.sty.check/v1
 pig.sty.dashboard.diff/v1
 ```
 
-The envelope API versions envelope shape. Payload `kind` prevents a consumer
-from interpreting 2.0 Inventory-list data as the old release-list payload.
-Breaking DTO changes require a new payload kind/version and, where the envelope
-itself changes, a new envelope API version.
+The envelope API versions envelope shape. A command-path move does not rename
+an existing v1 payload kind; the root migration mapping is frozen by
+`inventory.md`. Breaking DTO changes require a new payload kind/version and,
+where the envelope itself changes, a new envelope API version.
 
 ### 9.2 Status and shell exit contract
 
@@ -391,7 +416,7 @@ warning into an error diagnostic.
 | `validate`, `check` | redacted diagnostics | redacted diagnostics | redacted diagnostics |
 | `configure` | identifiers and output path | identifiers/change kinds | no generated passwords |
 | Dashboard | UID/title/status, no credentials | same | sanitized HTTP errors |
-| CMDB | counts, identifiers, revision, plan | same | no variable payloads |
+| CMDB | operation, row/object counts, output path | same safe metadata | no variable, SQL, or DSN payloads |
 
 Redaction uses a central, tested secret classifier for known password, secret,
 token, API key, private-key, and credential fields. Safer surfaces avoid emitting
@@ -400,6 +425,10 @@ Inventory secrets and sanitize stderr before creating diagnostics.
 
 
 ## 10. Validate contract (P0.2)
+
+`pig inventory validate|v` is the canonical public path after its migration
+gate. `pig sty inventory validate` and `pig sty validate|val|v` remain delegates
+to the same use case during their compatibility window.
 
 `validate` is deterministic source-configuration analysis. Its default engine
 is native Go. `--ansible` is an optional compatibility adapter; absence of
@@ -513,48 +542,34 @@ and a disposable real Grafana container.
 
 ## 13. CMDB contract (P2, experimental)
 
-CMDB does not start with code. Its entry artifact is a separate RFC covering:
-
-- versioned, idempotent schema migrations;
-- semantic Snapshot and revision representation;
-- source provenance and optimistic concurrency;
-- load/dump diff semantics;
-- rollback and backups;
-- active-source split-brain detection;
-- containerized destructive/conflict tests.
-
-The native implementation MUST NEVER execute these legacy destructive helpers:
+Pigsty CMDB is an existing product surface, not a new database design. Its fact
+sources are the adjacent Pigsty checkout's:
 
 - `files/cmdb.sql`;
 - `bin/inventory_load`;
 - `bin/inventory_cmdb`;
 - `bin/inventory_conf`.
 
-Target verbs have these minimum semantics:
+The canonical public namespace is `pig inventory cmdb`; temporary
+`pig sty cmdb` commands may delegate to it. The corrected verbs are:
 
-- `init`: apply idempotent migrations; drop/reset requires `--reset` and
-  confirmation;
-- `load`: validate, plan, lock, revision-check, snapshot, and apply one database
-  transaction; deletion additionally requires `--prune` and confirmation;
-- `dump`: emit canonical generated YAML with a machine-readable marker;
-- `dump --merge`: perform a provenance-sensitive three-way merge using the
-  recorded base, current static Document, and CMDB change; base mismatch is a
-  conflict, never a silent two-way overwrite;
-- `enable/disable`: back up and atomically patch only one unambiguous
-  `inventory =` directive in `[defaults]` of `ansible.cfg`;
-- `check`: verify schema version, connectivity, active-source shape, revision,
-  and semantic parity.
+- `init`: apply the exact version-matched `cmdb.sql` baseline to the target
+  database;
+- `load`: replace the existing Inventory declaration tables using the mapping
+  and OS-default behavior of `inventory_load`;
+- `dump`: query `pigsty.raw_config` and generate canonical YAML;
+- `enable`: activate an `inventory.sh` querying `pigsty.inventory`;
+- `disable`: set the Ansible Inventory back to `pigsty.yml`.
 
-Missing, duplicated, templated, or ambiguous `ansible.cfg` directives fail
-closed with manual instructions. This is a narrow patch contract, not a general
-lossless INI library.
+The baseline owns the existing `pigsty` and `pglog` schemas. CMDB storage uses
+`global_var`, `group`, `group_var`, `host`, and `host_var`; it stores JSONB
+declarations and cannot preserve YAML comments or source style.
 
-If an invocation-specific static source shadows a persistent CMDB source (or
-vice versa), semantic commands emit a one-line stderr split-brain notice. The P2
-RFC defines exact revision storage and three-way merge algorithms before code.
-
-Plain CMDB dump has canonical generated style only. It MUST NOT claim to
-reconstruct comments, alignment, or scalar lexemes that were never stored.
+The withdrawn `pigsty_cmdb` revision-store implementation, migrations,
+Snapshot history, CAS, rollback, three-way merge, backup bundle, and source
+state machine are not part of the corrected contract. The supersession record
+is [`sty-cmdb-rfc.md`](sty-cmdb-rfc.md); exact command behavior is defined by
+[`inventory.md`](inventory.md#6-cmdb-commands).
 
 
 ## 14. Vagrant and Terraform contract (P3)
@@ -579,11 +594,15 @@ Migration uses compatibility wrappers rather than an immediate deletion:
 | Existing surface | Target command | Earliest phase |
 |:---|:---|:---|
 | `configure` / configure-related Make target | `pig sty conf` | already available |
-| `make validate`, `bin/validate` | `pig sty validate` | P0.2 parity gate |
+| `make validate`, `bin/validate` | `pig inventory validate` (`pig sty validate` delegate) | root migration |
 | `dashboard-init` | `pig sty dashboard init` | P1 |
 | `dashboard-dump` | `pig sty dashboard dump` | P1 |
 | `dashboard-clean` | `pig sty dashboard clean` | P1 |
-| `make cmdb` and Inventory CMDB helpers | explicit `sty cmdb` sequence | P2 only |
+| `files/cmdb.sql` | `pig inventory cmdb init` | corrected CMDB adapter |
+| `bin/inventory_load` | `pig inventory cmdb load` | corrected CMDB adapter |
+| `bin/inventory_cmdb` | `pig inventory cmdb enable` | corrected CMDB adapter |
+| `bin/inventory_conf` | `pig inventory cmdb disable` | corrected CMDB adapter |
+| query `pigsty.raw_config` | `pig inventory cmdb dump` | corrected CMDB adapter |
 | Vagrant/Terraform Make targets | thin P3 commands | P3 only |
 
 An old wrapper remains for at least one released deprecation window and until
@@ -597,6 +616,11 @@ reviewed change.
 
 This document freezes taxonomy, aliases, selectors, output/exit behavior,
 redaction, source resolution, mutation safety, priorities, and non-goals.
+
+The original P0, Validate, Check, and Dashboard acceptance criteria remain
+regression requirements. The former P2 revision-store result is superseded and
+is not a passed product gate. Promotion to the root command and corrected CMDB
+adapter follows M0–M3 in [`inventory.md`](inventory.md#10-migration-plan).
 
 ### P0.1 — Inventory completion
 
@@ -612,8 +636,6 @@ Acceptance:
 - conflict tests write nothing and retain a private recovery fragment;
 - symlink refusal, 0600 mode, tighten-notice, and structured-show refusal pass;
 - canonical/delegate commands call the same use case.
-
-P0.2 MUST NOT begin before this gate closes.
 
 ### P0.2 — Validate completion
 
@@ -649,10 +671,11 @@ run.
 
 ### P2 — CMDB
 
-The RFC is mandatory before implementation. PostgreSQL-container tests must
-prove migration idempotence, transaction rollback, destructive confirmation,
-revision conflict, three-way base mismatch, and fail-closed source switching.
-CMDB remains experimental until every gate passes.
+P2 is reopened with the corrected, deliberately small scope. PostgreSQL tests
+must prove exact `cmdb.sql` application, table parity with `inventory_load`,
+transaction rollback, canonical `raw_config` dump, dynamic Inventory query
+parity, and enable/disable behavior. No revision/history/merge system is an
+acceptance requirement.
 
 ### P3 — Vagrant/Terraform
 
@@ -685,6 +708,14 @@ accepted the explicit 1.x-to-2.0 `list` migration, added Dashboard removed-UID
 tombstones and structured payload kinds, and returned the verdict
 **CONVERGED**.
 
+The owner decision of 2026-07-18 to promote Inventory to the root command
+supersedes that review's `sty list` repurposing conclusion. A second owner
+correction on the same date also rejects its greenfield CMDB premise: the
+existing `cmdb.sql` and Inventory scripts are authoritative. The lossless
+model, selector, validation, and Dashboard conclusions remain; the
+revision-store CMDB conclusion does not. `sty list` keeps release semantics
+until removal.
+
 
 ## 18. Current stable workflow
 
@@ -706,3 +737,7 @@ pig sty get [version]            # download a Pigsty release
 explicit PostgreSQL version/region/proxy/locale/password options through the
 Inventory mutation API; version-pinned templates retain their pinned kernel
 semantics. `--raw` remains the rollback path during native stabilization.
+
+The future canonical Inventory workflow and exact compatibility timeline are
+defined by [`inventory.md`](inventory.md); until its M1 gate ships, the existing
+Sty Inventory paths above remain the available public surface.
