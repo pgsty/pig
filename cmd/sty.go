@@ -22,33 +22,34 @@ var (
 	pigstyBootKeep    bool
 	pigstyBootMirror  bool
 
-	pigstyConfName           string
-	pigstyConfIP             string
-	pigstyConfVer            string
-	pigstyConfRegion         string
-	pigstyConfOutput         string
-	pigstyConfSkip           bool
-	pigstyConfProxy          bool
-	pigstyConfNonInteractive bool
-	pigstyConfPort           string
-	pigstyConfGenerate       bool
-	pigstyConfRaw            bool
-	pigstyConfMirror         bool
-	pigstyValidateStrict     bool
-	pigstyValidateAnsible    bool
-	pigstyCheckProfiles      []string
-	pigstyCheckSudo          bool
-	pigstyCheckPort          int
-	pigstyCheckUser          string
-	pigstyDashboardEndpoint  string
-	pigstyDashboardUsername  string
-	pigstyDashboardPassword  string
-	pigstyDashboardManifest  string
-	pigstyDashboardDumpDir   string
-	pigstyDashboardPrune     bool
-	pigstyDashboardYes       bool
-	pigstyCMDBDatabase       string
-	pigstyCMDBInitYes        bool
+	pigstyConfName            string
+	pigstyConfIP              string
+	pigstyConfVer             string
+	pigstyConfRegion          string
+	pigstyConfOutput          string
+	pigstyConfSkip            bool
+	pigstyConfProxy           bool
+	pigstyConfNonInteractive  bool
+	pigstyConfPort            string
+	pigstyConfGenerate        bool
+	pigstyConfRaw             bool
+	pigstyConfMirror          bool
+	pigstyValidateStrict      bool
+	pigstyValidateAnsible     bool
+	pigstyCheckProfiles       []string
+	pigstyCheckSudo           bool
+	pigstyCheckPort           int
+	pigstyCheckUser           string
+	pigstyGrafanaEndpoint     string
+	pigstyGrafanaUsername     string
+	pigstyGrafanaPassword     string
+	pigstyGrafanaPasswordFile string
+	pigstyGrafanaDumpDir      string
+	pigstyGrafanaAll          bool
+	pigstyGrafanaYes          bool
+	pigstyGrafanaDryRun       bool
+	pigstyCMDBDatabase        string
+	pigstyCMDBInitYes         bool
 
 	pigstyDownloadDir string
 	pigstyVersion     string
@@ -73,8 +74,9 @@ var styCmd = &cobra.Command{
   pig sty inventory validate [file]     # validate a Pigsty inventory
   pig sty validate [file]               # delegate to inventory validate
   pig sty check                         # local readiness; remote profiles are opt-in
-  pig sty dashboard list|check|diff     # inspect repository-managed Grafana state
-  pig sty dashboard init|dump|clean     # reconcile, export, or remove managed UIDs
+  pig sty grafana info|list|boot          # inspect or bootstrap Grafana
+  pig sty grafana load|init|dump|clean    # manage Grafana dashboards
+  pig sty grafana lang|style              # set language or visual style
   pig sty cmdb init|load|dump             # compatibility: existing Pigsty CMDB
   pig sty cmdb enable|disable             # compatibility: switch Inventory source
   pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
@@ -491,122 +493,182 @@ func cmdbTextInputIsTerminal() bool {
 
 var styCMDBTextInputIsTerminal = cmdbTextInputIsTerminal
 
-var pigstyDashboardCmd = &cobra.Command{
-	Use:         "dashboard",
-	Aliases:     []string{"ds"},
-	Short:       "Manage manifest-owned Grafana dashboards and datasources",
-	Annotations: ancsAnn("pig sty dashboard", "query", "volatile", "safe", true, "safe", "none", "current", 100),
-	Long: `Manage Grafana through the native HTTP API and a versioned repository manifest.
+var pigstyGrafanaCmd = &cobra.Command{
+	Use:         "grafana",
+	Aliases:     []string{"gf"},
+	Short:       "Manage Grafana dashboards by local JSON path",
+	Annotations: ancsAnn("pig sty grafana", "query", "volatile", "safe", true, "safe", "none", "current", 100),
+	Long: `Manage Grafana dashboards through the native HTTP API.
 
-UID membership in the active manifest defines ownership. Folder placement does
-not confer ownership, copied dashboards are left untouched, and removed UIDs
-can be deleted only through tombstone-aware init --prune.`,
+PATH may select the grafana root, one direct folder, or one dashboard JSON.
+Without PATH, Pig resolves <PIGSTY_HOME>/files/grafana and never falls back to
+the current directory.`,
 }
 
-var pigstyDashboardListCmd = &cobra.Command{
+var pigstyGrafanaListCmd = &cobra.Command{
 	Use:         "list",
-	Short:       "List managed, tombstoned, and unmanaged Grafana resources",
-	Annotations: ancsAnn("pig sty dashboard list", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
+	Short:       "List all dashboards in the active Grafana organization",
+	Annotations: ancsAnn("pig sty grafana list", "query", "volatile", "safe", true, "safe", "none", "current", 10000),
 	Args:        cobra.NoArgs,
-	RunE: func(_ *cobra.Command, _ []string) error {
-		return handleAuxResult(pigstyDashboardListExec(styDashboardOptions()))
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return handleAuxResult(pigstyGrafanaListExec(styGrafanaCommandOptions(cmd, nil)))
 	},
 }
 
-var pigstyDashboardCheckCmd = &cobra.Command{
-	Use:         "check",
-	Short:       "Check manifest integrity and Grafana API compatibility",
-	Annotations: ancsAnn("pig sty dashboard check", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
+var pigstyGrafanaInfoCmd = &cobra.Command{
+	Use:         "info",
+	Short:       "Check Grafana health, authentication, and basic information",
+	Annotations: ancsAnn("pig sty grafana info", "query", "volatile", "safe", true, "safe", "none", "current", 10000),
 	Args:        cobra.NoArgs,
-	RunE: func(_ *cobra.Command, _ []string) error {
-		return handleAuxResult(pigstyDashboardCheckExec(styDashboardOptions()))
+	Long: `Check the public Grafana health endpoint before authentication.
+
+Without a configured password, info returns a successful health-only result.
+With credentials, it also reports the active organization, dashboard/folder
+counts, and organization/current-user preferences.`,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return handleAuxResult(pigstyGrafanaInfoExec(styGrafanaCommandOptions(cmd, nil)))
 	},
 }
 
-var pigstyDashboardDiffCmd = &cobra.Command{
-	Use:         "diff",
-	Short:       "Show normalized repository-versus-live Grafana drift",
-	Annotations: ancsAnn("pig sty dashboard diff", "query", "volatile", "safe", true, "safe", "none", "current", 10000),
+var pigstyGrafanaBootCmd = &cobra.Command{
+	Use:         "boot",
+	Short:       "Bootstrap Grafana around the existing pigsty dashboard",
+	Annotations: ancsAnn("pig sty grafana boot", "action", "volatile", "restricted", true, "medium", "recommended", "current", 30000),
 	Args:        cobra.NoArgs,
-	RunE: func(_ *cobra.Command, _ []string) error {
-		return handleAuxResult(pigstyDashboardDiffExec(styDashboardOptions()))
+	Long: `Verify dashboard UID pigsty, rename the current organization to Pigsty,
+star that dashboard, and set it as the organization/current-user home.
+
+Boot does not load local JSON and does not change language, theme, timezone, or
+other preferences.`,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return handleAuxResult(pigstyGrafanaBootExec(styGrafanaCommandOptions(cmd, nil)))
 	},
 }
 
-var pigstyDashboardInitCmd = &cobra.Command{
-	Use:         "init",
-	Short:       "Idempotently upsert active manifest resources",
-	Annotations: ancsAnn("pig sty dashboard init", "action", "volatile", "restricted", true, "medium", "recommended", "current", 30000),
-	Args:        cobra.NoArgs,
-	Long: `Idempotently upsert active manifest resources without a global clean.
-
---prune additionally selects only live UIDs in removed-UID tombstone lineage.
-That deletion plan requires an interactive confirmation or --yes.`,
-	RunE: func(_ *cobra.Command, _ []string) error {
-		return runPigstyDashboardConfirmed(
-			styDashboardOptions(), pigstyDashboardInitExec,
-			"dashboard tombstone deletion plan",
-			"This will delete only live Grafana UIDs in the manifest tombstone lineage.",
-			"pig sty dashboard init --prune",
-		)
+var pigstyGrafanaLoadCmd = &cobra.Command{
+	Use:         "load [path]",
+	Short:       "Load dashboards selected by a local path",
+	Annotations: ancsAnn("pig sty grafana load", "action", "volatile", "restricted", true, "medium", "recommended", "current", 30000),
+	Args:        cobra.MaximumNArgs(1),
+	Long: `Validate and load one dashboard JSON, one direct folder, or the complete
+dashboard corpus. Load only upserts folders and dashboards: it never bootstraps
+the organization, changes preferences, or prunes live resources.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return handleAuxResult(pigstyGrafanaLoadExec(styGrafanaCommandOptions(cmd, args)))
 	},
 }
 
-var pigstyDashboardDumpCmd = &cobra.Command{
-	Use:         "dump",
-	Short:       "Atomically export managed dashboards to a new directory",
-	Annotations: ancsAnn("pig sty dashboard dump", "action", "volatile", "safe", false, "low", "none", "current", 30000),
-	Args:        cobra.NoArgs,
-	Long: `Export active manifest dashboards through private atomic staging.
+var pigstyGrafanaInitCmd = &cobra.Command{
+	Use:         "init [path]",
+	Short:       "Load the complete dashboard corpus, then bootstrap Grafana",
+	Annotations: ancsAnn("pig sty grafana init", "action", "volatile", "restricted", true, "medium", "recommended", "current", 30000),
+	Args:        cobra.MaximumNArgs(1),
+	Long: `Validate and load a complete grafana root, then bootstrap the instance.
 
-Datasource credentials are never exported; dump is not a datasource backup or
-restore mechanism. The destination supplied by --dir must not already exist.`,
-	RunE: func(_ *cobra.Command, _ []string) error {
-		return handleAuxResult(pigstyDashboardDumpExec(styDashboardOptions()))
+Init is exactly load followed by boot. It refuses folder and single-dashboard
+paths; use load for those. Boot is skipped unless every load operation succeeds.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return handleAuxResult(pigstyGrafanaInitExec(styGrafanaCommandOptions(cmd, args)))
 	},
 }
 
-var pigstyDashboardCleanCmd = &cobra.Command{
-	Use:         "clean",
-	Short:       "Delete active manifest-owned Grafana resources",
-	Annotations: ancsAnn("pig sty dashboard clean", "action", "volatile", "unsafe", true, "high", "required", "current", 30000),
-	Args:        cobra.NoArgs,
-	Long: `Delete only active dashboard and datasource UIDs in the manifest.
+var pigstyGrafanaDumpCmd = &cobra.Command{
+	Use:         "dump [path]",
+	Short:       "Export remote dashboards into a local path",
+	Annotations: ancsAnn("pig sty grafana dump", "action", "volatile", "safe", false, "low", "none", "current", 30000),
+	Args:        cobra.MaximumNArgs(1),
+	Long: `Export one dashboard, one Grafana folder, or the complete instance.
 
-Unmanaged copies and tombstoned resources are outside this command's scope.
-Placement folders are deleted only after they are empty.`,
-	RunE: func(_ *cobra.Command, _ []string) error {
-		return runPigstyDashboardConfirmed(
-			styDashboardOptions(), pigstyDashboardCleanExec,
-			"dashboard managed-resource deletion plan",
-			"This will delete active manifest-owned Grafana dashboards and datasources.",
-			"pig sty dashboard clean",
-		)
+Dump writes canonical compact JSON atomically and never deletes local files.
+Use -d/--dir to select an arbitrary full-corpus output directory instead of
+<PIGSTY_HOME>/files/grafana. --dir and PATH are mutually exclusive. Remote
+folderUid values map directly to first-level local directories.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return handleAuxResult(pigstyGrafanaDumpExec(styGrafanaCommandOptions(cmd, args)))
 	},
 }
 
-func styDashboardOptions() stycli.DashboardOptions {
-	return stycli.DashboardOptions{
-		Home: config.PigstyHome, Inventory: config.PigstyConfig,
-		Manifest: pigstyDashboardManifest, Endpoint: pigstyDashboardEndpoint,
-		Username: pigstyDashboardUsername, PasswordFile: pigstyDashboardPassword,
-		DumpDir: pigstyDashboardDumpDir, Prune: pigstyDashboardPrune, Yes: pigstyDashboardYes,
+var pigstyGrafanaCleanCmd = &cobra.Command{
+	Use:         "clean [path]",
+	Short:       "Delete dashboards selected by a local path",
+	Annotations: ancsAnn("pig sty grafana clean", "action", "volatile", "unsafe", true, "high", "required", "current", 30000),
+	Args:        cobra.MaximumNArgs(1),
+	Long: `Delete only dashboard UIDs declared by the selected local path.
+
+Folders are removed only after they are verified empty. --all is mutually
+exclusive with PATH and is the only mode that removes every live dashboard and
+folder. Clean prints a plan and requires interactive confirmation or --yes.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPigstyGrafanaClean(styGrafanaCommandOptions(cmd, args))
+	},
+}
+
+var pigstyGrafanaLangCmd = &cobra.Command{
+	Use:         "lang <language-code>",
+	Short:       "Set the Grafana organization and current-user language",
+	Annotations: ancsAnn("pig sty grafana lang", "action", "volatile", "restricted", true, "low", "none", "current", 10000),
+	Args:        cobra.ExactArgs(1),
+	Example: `  pig sty gf lang en
+  pig sty gf lang zh-cn
+  pig sty gf lang zh-Hant`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return handleAuxResult(pigstyGrafanaLangExec(styGrafanaCommandOptions(cmd, nil), args[0]))
+	},
+}
+
+var pigstyGrafanaStyleCmd = &cobra.Command{
+	Use:         "style <dark|light|auto>",
+	Short:       "Set the Grafana organization and current-user visual style",
+	Annotations: ancsAnn("pig sty grafana style", "action", "volatile", "restricted", true, "low", "none", "current", 10000),
+	Args:        cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return handleAuxResult(pigstyGrafanaStyleExec(styGrafanaCommandOptions(cmd, nil), args[0]))
+	},
+}
+
+func styGrafanaOptions(args []string) stycli.GrafanaOptions {
+	path := ""
+	if len(args) > 0 {
+		path = args[0]
+	}
+	return stycli.GrafanaOptions{
+		Home: config.PigstyHome, Inventory: config.PigstyConfig, Path: path, DumpDir: pigstyGrafanaDumpDir,
+		Endpoint: pigstyGrafanaEndpoint, Username: pigstyGrafanaUsername,
+		Password: pigstyGrafanaPassword, PasswordFile: pigstyGrafanaPasswordFile, All: pigstyGrafanaAll,
+		Yes: pigstyGrafanaYes, DryRun: pigstyGrafanaDryRun,
 	}
 }
 
-func runPigstyDashboardConfirmed(options stycli.DashboardOptions, execute func(stycli.DashboardOptions) *output.Result, planMessage, warning, action string) error {
-	result := execute(options)
-	if result == nil || result.Code != output.CodeStyDashboardConfirmationRequired || config.IsStructuredOutput() {
+func styGrafanaCommandOptions(cmd *cobra.Command, args []string) stycli.GrafanaOptions {
+	options := styGrafanaOptions(args)
+	if cmd != nil {
+		options.Context = cmd.Context()
+	}
+	return options
+}
+
+func runPigstyGrafanaClean(options stycli.GrafanaOptions) error {
+	result := pigstyGrafanaCleanExec(options)
+	if result == nil || result.Code != output.CodeStyGrafanaConfirmationRequired || config.IsStructuredOutput() {
 		return handleAuxResult(result)
 	}
-	if err := output.Print(output.OK(planMessage, result.Data)); err != nil {
+	if err := output.Print(output.OK("Grafana deletion plan", result.Data)); err != nil {
 		return err
+	}
+	warning := "This will delete only Grafana dashboard UIDs declared by the selected local path."
+	action := "the displayed Grafana clean plan"
+	if options.All {
+		warning = "This will delete every Grafana dashboard and folder in the selected organization."
+		action = "the displayed all-instance Grafana clean plan"
 	}
 	if err := highRiskTextConfirm(warning, action); err != nil {
 		return err
 	}
+	if data, ok := result.Data.(*stycli.GrafanaActionData); ok {
+		options.PlanDigest = data.PlanDigest
+	}
 	options.Yes = true
-	return handleAuxResult(execute(options))
+	return handleAuxResult(pigstyGrafanaCleanExec(options))
 }
 
 func styConfigureParams(region string) map[string]interface{} {
@@ -761,19 +823,22 @@ func runPigstyReleaseGet(args []string) error {
 }
 
 var (
-	pigstyGetExec            = stycli.Download
-	pigstyListExec           = stycli.ListVersionsWithOptions
-	pigstyEditExec           = stycli.Edit
-	pigstyValidateExec       = stycli.ValidateInventory
-	pigstyCheckExec          = stycli.Check
-	pigstyInventoryListExec  = stycli.ListInventory
-	pigstyInventoryShowExec  = stycli.ShowInventory
-	pigstyDashboardListExec  = stycli.DashboardList
-	pigstyDashboardCheckExec = stycli.DashboardCheck
-	pigstyDashboardDiffExec  = stycli.DashboardDiff
-	pigstyDashboardInitExec  = stycli.DashboardInit
-	pigstyDashboardDumpExec  = stycli.DashboardDump
-	pigstyDashboardCleanExec = stycli.DashboardClean
+	pigstyGetExec           = stycli.Download
+	pigstyListExec          = stycli.ListVersionsWithOptions
+	pigstyEditExec          = stycli.Edit
+	pigstyValidateExec      = stycli.ValidateInventory
+	pigstyCheckExec         = stycli.Check
+	pigstyInventoryListExec = stycli.ListInventory
+	pigstyInventoryShowExec = stycli.ShowInventory
+	pigstyGrafanaInfoExec   = stycli.GrafanaInfo
+	pigstyGrafanaListExec   = stycli.GrafanaList
+	pigstyGrafanaBootExec   = stycli.GrafanaBoot
+	pigstyGrafanaLoadExec   = stycli.GrafanaLoad
+	pigstyGrafanaInitExec   = stycli.GrafanaInit
+	pigstyGrafanaDumpExec   = stycli.GrafanaDump
+	pigstyGrafanaCleanExec  = stycli.GrafanaClean
+	pigstyGrafanaLangExec   = stycli.GrafanaLang
+	pigstyGrafanaStyleExec  = stycli.GrafanaStyle
 )
 
 var pigstyDeployCmd = &cobra.Command{
@@ -827,17 +892,17 @@ func init() {
 	pigstyCheckCmd.Flags().BoolVar(&pigstyCheckSudo, "sudo", false, "with the ssh profile, also observe sudo -n true")
 	pigstyCheckCmd.Flags().IntVar(&pigstyCheckPort, "port", 22, "TCP/SSH target port (no Inventory effective-var inference)")
 	pigstyCheckCmd.Flags().StringVar(&pigstyCheckUser, "user", "", "explicit SSH user (defaults to the controller user)")
-	pigstyDashboardCmd.PersistentFlags().StringVar(&pigstyDashboardEndpoint, "endpoint", "", "Grafana origin and optional path prefix")
-	pigstyDashboardCmd.PersistentFlags().StringVar(&pigstyDashboardUsername, "username", "", "Grafana API username")
-	pigstyDashboardCmd.PersistentFlags().StringVar(&pigstyDashboardPassword, "password-file", "", "owner-only file containing the Grafana API password")
-	pigstyDashboardCmd.PersistentFlags().StringVar(&pigstyDashboardManifest, "manifest", "", "explicit versioned Grafana manifest path")
-	pigstyDashboardInitCmd.Flags().BoolVar(&pigstyDashboardPrune, "prune", false, "delete only live UIDs in removed-UID tombstone lineage")
-	pigstyDashboardInitCmd.Flags().BoolVarP(&pigstyDashboardYes, "yes", "y", false, "confirm the tombstone deletion plan")
-	pigstyDashboardDumpCmd.Flags().StringVar(&pigstyDashboardDumpDir, "dir", "", "new destination directory for the atomic export")
-	pigstyDashboardCleanCmd.Flags().BoolVarP(&pigstyDashboardYes, "yes", "y", false, "confirm deletion of active manifest-owned resources")
+	pigstyGrafanaCmd.PersistentFlags().StringVar(&pigstyGrafanaEndpoint, "endpoint", "", "Grafana origin and optional path prefix (default http://i.pigsty/ui)")
+	pigstyGrafanaCmd.PersistentFlags().StringVar(&pigstyGrafanaUsername, "username", "", "Grafana API username")
+	pigstyGrafanaCmd.PersistentFlags().StringVar(&pigstyGrafanaPassword, "password", "", "Grafana API password (insecure: visible in process arguments and shell history)")
+	pigstyGrafanaCmd.PersistentFlags().StringVar(&pigstyGrafanaPasswordFile, "password-file", "", "owner-only file containing the Grafana API password")
+	pigstyGrafanaCmd.MarkFlagsMutuallyExclusive("password", "password-file")
+	pigstyGrafanaDumpCmd.Flags().StringVarP(&pigstyGrafanaDumpDir, "dir", "d", "", "dump the complete dashboard corpus into this directory")
+	pigstyGrafanaCleanCmd.Flags().BoolVar(&pigstyGrafanaAll, "all", false, "delete every live dashboard and folder; mutually exclusive with PATH")
+	pigstyGrafanaCleanCmd.Flags().BoolVarP(&pigstyGrafanaYes, "yes", "y", false, "confirm the displayed deletion scope")
+	pigstyGrafanaCleanCmd.Flags().BoolVar(&pigstyGrafanaDryRun, "dry-run", false, "print the deletion plan without applying it")
 	addCMDBDatabaseFlags(&pigstyCMDBDatabase, pigstyCMDBInitCmd, pigstyCMDBLoadCmd, pigstyCMDBDumpCmd, pigstyCMDBEnableCmd)
 	pigstyCMDBInitCmd.Flags().BoolVarP(&pigstyCMDBInitYes, "yes", "y", false, "confirm replacement of existing pigsty and pglog schemas")
-
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
 	pigstyGetcmd.Flags().BoolVarP(&pigstyGetMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
@@ -848,8 +913,12 @@ func init() {
 	pigstyReleaseListCmd.Flags().BoolVarP(&pigstyListMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
 	pigstyInventoryCmd.AddCommand(pigstyInventoryListCmd, pigstyInventoryShowCmd, pigstyInventoryEditCmd, pigstyInventoryValidateCmd)
-	pigstyDashboardCmd.AddCommand(pigstyDashboardListCmd, pigstyDashboardCheckCmd, pigstyDashboardDiffCmd, pigstyDashboardInitCmd, pigstyDashboardDumpCmd, pigstyDashboardCleanCmd)
+	pigstyGrafanaCmd.AddCommand(
+		pigstyGrafanaInfoCmd, pigstyGrafanaListCmd, pigstyGrafanaBootCmd,
+		pigstyGrafanaLoadCmd, pigstyGrafanaInitCmd, pigstyGrafanaDumpCmd, pigstyGrafanaCleanCmd,
+		pigstyGrafanaLangCmd, pigstyGrafanaStyleCmd,
+	)
 	pigstyCMDBCmd.AddCommand(pigstyCMDBInitCmd, pigstyCMDBLoadCmd, pigstyCMDBDumpCmd, pigstyCMDBEnableCmd, pigstyCMDBDisableCmd)
 	pigstyReleaseCmd.AddCommand(pigstyReleaseListCmd, pigstyReleaseGetCmd)
-	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyInventoryCmd, pigstyEditCmd, pigstyValidateCmd, pigstyCheckCmd, pigstyDashboardCmd, pigstyCMDBCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
+	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyInventoryCmd, pigstyEditCmd, pigstyValidateCmd, pigstyCheckCmd, pigstyGrafanaCmd, pigstyCMDBCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
 }

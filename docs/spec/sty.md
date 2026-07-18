@@ -9,9 +9,9 @@ categories: [Reference]
 
 # `pig sty` Design Contract
 
-Status: **normative; Inventory/CMDB migration implemented**
+Status: **normative; Inventory/CMDB migration and native Grafana management implemented**
 
-Contract version: **1.3**
+Contract version: **1.4**
 
 Last updated: **2026-07-18**
 
@@ -37,17 +37,17 @@ usual RFC 2119 meaning.
 ## 1. Product boundary and priority
 
 `pig sty` manages the local Pigsty installation and a small number of directly
-related controller-side services. Configure, Check, and Dashboard consume the
-active Inventory, but generic Inventory operations belong to the root
-`pig inventory|inv` domain. Sty is not a generic replacement for Ansible,
+related controller-side services. Configure, Check, and Grafana management
+consume the active Inventory, while generic Inventory operations belong to the
+root `pig inventory|inv` domain. Sty is not a generic replacement for Ansible,
 Grafana, PostgreSQL, Terraform, or Vagrant.
 
 Implementation priority is fixed as follows:
 
 1. **P0 — Inventory first.** The lossless Inventory, root command, Validate,
    and Check gates passed.
-2. **P1 — Dashboard.** The safe native HTTP implementation passed its gate and
-   remains under `sty`.
+2. **P1 — Grafana dashboards.** The native HTTP implementation remains under
+   `sty`.
 3. **P2 — CMDB adapter.** The former revision-store direction was withdrawn;
    the implemented surface is a thin adapter to existing `cmdb.sql` and the
    Inventory scripts.
@@ -66,7 +66,7 @@ The following are outside this roadmap:
 
 ## 2. Implementation status
 
-| Surface | Status at contract v1.3 |
+| Surface | Status at contract v1.4 |
 |:---|:---|
 | Lossless `inventory.Document`, ordered semantic model, selectors, editor, mutations, diagnostics | Implemented baseline |
 | `sty conf/configure` through Inventory API, with `--raw` fallback | Implemented |
@@ -74,7 +74,7 @@ The following are outside this roadmap:
 | `sty validate [file]` | Implemented |
 | root `inventory|inv` and `sty inventory` compatibility namespace | Implemented |
 | `sty check` | Implemented |
-| `sty dashboard` | Implemented |
+| `sty grafana|gf info/list/boot/load/init/dump/clean/lang/style` | Implemented |
 | root `inventory cmdb` thin adapter | Implemented |
 | `sty cmdb` | Implemented compatibility delegate |
 | existing Pigsty `cmdb.sql` and Inventory scripts | Current CMDB authority |
@@ -113,8 +113,11 @@ pig sty
   validate | val | v [file]           # compatibility Inventory delegate
   check | ck
 
-  dashboard | ds
-    list | check | diff | init | dump | clean
+  grafana | gf
+    info | list | boot
+    init [path] | load [path] | dump [path] | clean [path]
+    lang <language-code>
+    style <dark|light|auto>
 
   cmdb                                  # corrected compatibility namespace
     init | load | dump | enable | disable
@@ -155,9 +158,9 @@ Inventory spelling without changing an existing command's meaning.
 
 ### 3.3 Reserved names
 
-`inventory diff`, `doctor`, and broad Dashboard deletion are reserved but not
-implemented by this contract. Reserving a name does not authorize speculative
-code.
+`inventory diff` and `doctor` are reserved but not implemented by this contract.
+Instance-wide Grafana deletion is available only through the explicit
+`pig sty grafana clean --all` mode.
 
 
 ## 4. Layering and code ownership
@@ -373,7 +376,15 @@ pig.sty.release.list/v1
 pig.sty.inventory.list/v1
 pig.sty.inventory.validate/v1
 pig.sty.check/v1
-pig.sty.dashboard.diff/v1
+pig.sty.grafana.info/v1
+pig.sty.grafana.list/v1
+pig.sty.grafana.boot/v1
+pig.sty.grafana.load/v1
+pig.sty.grafana.init/v1
+pig.sty.grafana.dump/v1
+pig.sty.grafana.clean/v1
+pig.sty.grafana.lang/v1
+pig.sty.grafana.style/v1
 ```
 
 The envelope API versions envelope shape. A command-path move does not rename
@@ -416,7 +427,7 @@ warning into an error diagnostic.
 | `inventory edit` | selected private fragment | refused | identifiers only |
 | `validate`, `check` | redacted diagnostics | redacted diagnostics | redacted diagnostics |
 | `configure` | identifiers and output path | identifiers/change kinds | no generated passwords |
-| Dashboard | UID/title/status, no credentials | same | sanitized HTTP errors |
+| Grafana | UID/folder/action/status, no credentials | same | sanitized HTTP errors |
 | CMDB | operation, row/object counts, output path | same safe metadata | no variable, SQL, or DSN payloads |
 
 Redaction uses a central, tested secret classifier for known password, secret,
@@ -488,57 +499,191 @@ diagnostics and a redacted support bundle; it does not become a second Check
 engine and receives no repair authority from this contract.
 
 
-## 12. Dashboard contract (P1)
+## 12. Grafana dashboard contract (P1)
 
-Dashboard management uses a native Grafana HTTP adapter. It MUST NOT shell out
-to `files/grafana/grafana.py`.
+Dashboard management uses a small native Grafana HTTP adapter. It MUST NOT shell
+out to `files/grafana/grafana.py` and MUST NOT manage data sources. The public
+surface is deliberately limited to:
 
-Initial verbs are:
+```text
+pig sty grafana info
+pig sty grafana list
+pig sty grafana boot
+pig sty grafana load  [PATH]
+pig sty grafana init  [PATH]
+pig sty grafana dump  [PATH]
+pig sty grafana dump  -d|--dir DIR
+pig sty grafana clean [PATH] [--yes] [--dry-run]
+pig sty grafana clean --all [--yes] [--dry-run]
+pig sty grafana lang  <LANGUAGE_CODE>
+pig sty grafana style <dark|light|auto>
+```
 
-- `list`: list repository-managed and live status;
-- `check`: credentials/API compatibility and manifest integrity;
-- `diff`: normalized repository-versus-live differences;
-- `init`: idempotent upsert of active managed dashboards/data sources;
-- `dump`: export dashboards through atomic staging;
-- `clean`: remove repository-managed resources only.
+`gf` is the command alias for `grafana`. `list` is a read-only remote inventory:
+it has no positional path, lists every dashboard visible in the active
+organization, and orders results by folder UID, title, then dashboard UID. Its
+structured payload includes endpoint, organization, count, UID, title, folder
+identity/title, and Grafana URL.
 
-### 12.1 Ownership
+`info` performs the public health request before any authenticated request. It
+reports endpoint, database health, Grafana version/commit, authentication
+status, active organization, dashboard/folder counts, and organization/user
+preferences when those authenticated reads are available. No configured
+credential is a successful health-only result with authentication status
+`not_configured`. A configured credential rejected by Grafana preserves the
+health data but returns the permission-class failure code with status
+`unauthorized` or `forbidden`. An unhealthy database or unreachable endpoint is
+never reported as success.
 
-A versioned repository manifest is authoritative:
+When an endpoint is selected explicitly by flag or environment, `info` checks
+its public health before loading Inventory credentials. A missing or malformed
+Inventory remains a configuration failure, but the structured result preserves
+the observed endpoint health and reports authentication status `error`.
 
-- a live dashboard is currently managed iff its UID is in the active UID set;
-- folder is placement, never ownership;
-- a copied dashboard with a new UID is unmanaged and untouched;
-- a moved dashboard with the same UID remains managed;
-- a folder is deleted only after it contains no unmanaged resources.
+The experimental `pig sty dashboard|ds` command, manifest, tombstones, and its
+incompatible `check/diff` behaviors are removed rather than retained as
+aliases.
 
-The manifest also carries removed-UID tombstones. UIDs MUST NOT be reused.
-`init --prune` may delete only live UIDs in that tombstone lineage. Without
-tombstones, a resource removed from the current manifest would become
-indistinguishable from user content and could never be pruned safely.
+### 12.1 Path and scope
 
-Initial P1 does not support broad deletion of unmanaged Grafana resources.
+Without `PATH`, Pig resolves `<PigstyHome>/files/grafana`. Pigsty home follows
+the existing global `-H`, `PIGSTY_HOME`/configuration, and valid `~/pigsty`
+resolution. Failure to resolve home is an error; Grafana commands MUST NOT fall
+back to the current working directory.
 
-### 12.2 Apply, dump, and diff
+For a complete root dump, `-d/--dir DIR` replaces that default output root and
+may use any safe directory name; it does not need to be named `grafana`. The
+directory may already exist or may be created when its parent exists. `--dir`
+and positional `PATH` are mutually exclusive.
 
-`init` applies active manifest resources without a global clean. `--prune`
-shows a deletion plan and requires confirmation/`--yes`.
+An explicit path uses the resolved root when it is contained by that root.
+Otherwise the nearest ancestor named exactly `grafana` becomes the root. The
+only valid relative shapes are:
 
-Grafana does not return datasource secure fields. Therefore:
+```text
+.                              complete corpus
+<folder>                       one direct Grafana folder
+<uid>.json                     one General dashboard
+<folder>/<uid>.json            one dashboard in a folder
+```
 
-- `dump` is not a datasource backup/restore mechanism;
-- datasource credentials are never dumped;
-- `init` reinjects secrets from Inventory, environment, or explicit protected
-  input;
-- empty/redacted dump fields MUST NOT overwrite live credentials.
+Deeper paths, unsafe UIDs, filename/JSON UID mismatches, duplicate UIDs,
+oversized JSON, and symlink scopes fail before network mutation. Directory
+scans are one level deep, select non-hidden `*.json`, and execute in bytewise
+name order. A directory name is the stable `folderUid`; its uppercase form is
+only the display title.
 
-Grafana mutates volatile fields such as IDs, versions, iteration values, and
-defaults. `diff` uses a versioned normalization fixture; naive raw JSON diff is
-not supported.
+### 12.2 Load, boot, and init composition
 
-Provisioned/read-only resources receive explicit per-object results. A batch
-MUST NOT report silent success after partial failure. Tests use both an HTTP fake
-and a disposable real Grafana container.
+`load` validates the complete selected local scope before contacting Grafana.
+It upserts folders and dashboards with overwrite enabled and never prunes live
+resources. Root JSON is placed in General; each direct subdirectory maps to the
+equal `folderUid`. It has no authority to rename organizations, star dashboards,
+or change preferences, including when the selected root contains `pigsty.json`.
+
+`boot` has no local path. Before mutation it verifies that dashboard UID
+`pigsty` exists in the active organization. It idempotently renames the current
+organization to `Pigsty`, stars that dashboard for the authenticated identity,
+and PATCHes only `homeDashboardUID: pigsty` into the organization and current
+user preferences. It MUST NOT set or reset language, theme, timezone, week
+start, or any unrelated preference.
+
+`init` is the root-only composition `load` then `boot`. An explicit `PATH` must
+resolve to a complete grafana root; folder and single-file callers use `load`.
+Init performs all local validation before its first network mutation, executes
+the complete load phase, and runs boot only when load has zero failed or skipped
+objects. It never renames or changes preferences before dashboard loading. Its
+structured result retains kind `pig.sty.grafana.init/v1`, identifies load and
+boot phases, and reports a boot failure after a successful load as partial
+initialization rather than silent success.
+
+### 12.3 Language and style preferences
+
+`lang <LANGUAGE_CODE>` PATCHes only the `language` field for both the active
+organization and current user. Codes are matched case-insensitively against the
+versioned language set supported by Pigsty's target Grafana version and are
+canonicalized before the first request. Convenience aliases include `en` to
+`en-US`, `zh`/`zh-CN` to `zh-Hans`, and `zh-TW` to `zh-Hant`. Unsupported codes
+fail locally; Pig MUST NOT store arbitrary strings that Grafana would accept but
+cannot render.
+
+`style` accepts exactly `dark`, `light`, or `auto`. The first two map directly
+to Grafana themes and `auto` maps to Grafana's `system` value. It PATCHes only
+the `theme` field for both the active organization and current user. The empty
+Grafana theme means inheritance/default and MUST NOT be used to represent the
+explicit CLI value `auto`.
+
+### 12.4 Clean ownership and confirmation
+
+Normal clean ownership is the UID set declared by the selected local JSON:
+
+- JSON scope deletes one UID;
+- folder scope deletes UIDs in that directory;
+- root scope deletes UIDs in the complete local corpus;
+- folders are deleted only after a refreshed remote search proves them empty.
+
+Remote dashboards with other UIDs remain untouched even when they share a
+selected folder. `--all` is the sole instance-wide reset, is mutually exclusive
+with `PATH`, and deletes all dashboards before folders.
+
+Every clean first returns a deterministic endpoint/organization/object plan.
+`--dry-run` succeeds without mutation. Text mode without `--yes` prints the
+plan and prompts with default No; structured or non-interactive callers must
+provide `--yes`. Interactive execution pins the plan digest and fails if live
+state changes before application. A confirmation-required result MUST NOT
+synthesize a replay command: callers add `--yes` to their original invocation
+so its path, endpoint, and credential context cannot be dropped or rewritten.
+
+### 12.5 Dump direction and local-write safety
+
+`dump` treats Grafana as the export source: file scope exports one UID, folder
+scope exports every dashboard with that `folderUid`, and root scope exports the
+complete organization. Empty `folderUid` maps to root and non-empty
+`folderUid` maps directly to a first-level directory; folder title is never
+used as path identity.
+
+Dump never deletes local files. Local-only JSON remains in place and is
+reported. Unsafe remote UIDs, target collisions, folder movement during the
+operation, and path escapes fail before writes. Exported bytes are canonical:
+object keys are sorted, containers up to 400 bytes and nesting depth 10 are
+inlined without padding, and larger containers use deterministic two-space
+layout. Only a byte-identical canonical file is `unchanged`; a semantically
+equal file with non-canonical formatting is rewritten once. Repeating a dump
+against unchanged remote state therefore produces byte-identical files and no
+second-write churn. Changed files use a same-directory temporary file plus
+rename. Atomicity is per file, not a multi-file transaction.
+
+Export normalization sets `id` to null and `version` to 1, records the Pigsty
+author/license fields, and clears template-variable current selections. Dump
+does not expose or modify datasource credentials because datasources are out of
+scope.
+
+### 12.6 Connection and API compatibility
+
+Endpoint resolution is `--endpoint`, `GRAFANA_ENDPOINT`,
+`all.vars.grafana_endpoint`, then the controller-facing Pigsty default
+`http://i.pigsty/ui`. It MUST NOT infer a controller endpoint from
+`grafana_port` or loopback. Username resolution is `--username`,
+`GRAFANA_USERNAME`, `all.vars.grafana_admin_username`, then `admin`. Password
+resolution is explicit `--password`, owner-only `--password-file`,
+`GRAFANA_PASSWORD`, then `all.vars.grafana_admin_password`; no default password
+is embedded. `--password` is the emergency escape hatch and is mutually
+exclusive with `--password-file`. Help MUST warn that it can be exposed through
+argv and shell history. A complete explicit endpoint, username, and password or
+password file bypasses Inventory parsing so a missing or malformed Inventory
+cannot block recovery. Logs, errors, next actions, structured output, and test
+diagnostics never contain credentials or response bodies.
+
+Preference updates use PATCH and `homeDashboardUID`; they MUST NOT use PUT or
+the deprecated numeric `homeDashboardId`, because omitted PUT fields reset
+unrelated preferences. The health request is sent without authentication even
+when credentials were configured. All other API requests use the resolved
+credential.
+
+The adapter stays in `internal/grafana`, uses the bounded standard-library HTTP
+client, refuses redirects, and encapsulates all legacy `/api` paths. No Grafana
+SDK is added. The narrow business interface permits a future `/apis` adapter
+without changing command semantics.
 
 
 ## 13. CMDB contract (P2)
@@ -590,15 +735,17 @@ No P3 code lands merely because a Make target exists.
 
 ## 15. Script and Makefile migration
 
-Migration uses compatibility wrappers rather than an immediate deletion:
+Released migration surfaces use compatibility wrappers rather than immediate
+deletion. The unreleased experimental `sty dashboard` surface is the explicit
+exception and is replaced directly by `sty grafana`:
 
 | Existing surface | Target command | Earliest phase |
 |:---|:---|:---|
 | `configure` / configure-related Make target | `pig sty conf` | already available |
 | `make validate`, `bin/validate` | `pig inventory validate` (`pig sty validate` delegate) | root migration |
-| `dashboard-init` | `pig sty dashboard init` | P1 |
-| `dashboard-dump` | `pig sty dashboard dump` | P1 |
-| `dashboard-clean` | `pig sty dashboard clean` | P1 |
+| `dashboard-init` | future `pig sty grafana init` | deferred Pigsty call-site migration |
+| `dashboard-dump` | future `pig sty grafana dump` | deferred Pigsty call-site migration |
+| `dashboard-clean` | future `pig sty grafana clean --all --yes` | deferred Pigsty call-site migration |
 | `files/cmdb.sql` | `pig inventory cmdb init` | corrected CMDB adapter |
 | `bin/inventory_load` | `pig inventory cmdb load` | corrected CMDB adapter |
 | `bin/inventory_cmdb` | `pig inventory cmdb enable` | corrected CMDB adapter |
@@ -618,10 +765,11 @@ reviewed change.
 This document freezes taxonomy, aliases, selectors, output/exit behavior,
 redaction, source resolution, mutation safety, priorities, and non-goals.
 
-The original P0, Validate, Check, and Dashboard acceptance criteria remain
-regression requirements. The former P2 revision-store result is superseded and
-is not a passed product gate. Promotion to the root command and corrected CMDB
-adapter follows M0–M3 in [`inventory.md`](inventory.md#10-migration-plan).
+The original P0, Validate, and Check acceptance criteria remain regression
+requirements. The Grafana criteria below replace the experimental Dashboard
+gate. The former P2 revision-store result is superseded and is not a passed
+product gate. Promotion to the root command and corrected CMDB adapter follows
+M0–M3 in [`inventory.md`](inventory.md#10-migration-plan).
 
 ### P0.1 — Inventory completion
 
@@ -663,12 +811,17 @@ Acceptance:
 - mixed-result status selection follows section 9.2;
 - disposable targets cover network/SSH behavior without persistent mutation.
 
-### P1 — Dashboard
+### P1 — Grafana dashboards
 
-Acceptance includes manifest/tombstone validation, copied-dashboard immunity,
-folder-empty rules, normalized diff fixtures, dump secret absence, per-object
-partial-failure reporting, an HTTP fake, and a disposable Grafana compatibility
-run.
+Acceptance includes exact scope classification, symlink/path-escape rejection,
+filename/UID validation, pure-load authority, load-before-boot ordering,
+boot suppression after any load failure, unauthenticated health, missing versus
+rejected credentials, exact preference PATCH bodies, language alias/allowlist
+validation, `auto` to `system`, emergency-password Inventory bypass/redaction,
+local-ownership clean, explicit all-instance clean, folder-empty protection,
+pinned interactive plans, per-object partial-failure reporting, and an HTTP
+fake. Live validation may exercise info, load, boot, init, preferences, and clean
+independently from dump so a test run cannot overwrite the repository corpus.
 
 ### P2 — CMDB
 
@@ -713,9 +866,26 @@ The owner decision of 2026-07-18 to promote Inventory to the root command
 supersedes that review's `sty list` repurposing conclusion. A second owner
 correction on the same date also rejects its greenfield CMDB premise: the
 existing `cmdb.sql` and Inventory scripts are authoritative. The lossless
-model, selector, validation, and Dashboard conclusions remain; the
+model, selector, and validation conclusions remain; the Dashboard and
 revision-store CMDB conclusion does not. `sty list` keeps release semantics
 until removal.
+
+The owner decision of 2026-07-18 replaces that experimental Dashboard surface
+with the path-scoped `pig sty grafana` contract in section 12. A separate
+adversarial review first rejected ambiguous path, dump, and clean semantics,
+then converged after local-declaration clean, explicit `clean --all`, stable
+`folderUid` path identity, and remote-as-source dump rules were fixed. The exact
+requested historical Claude 3.5 Sonnet snapshot was unavailable; the installed
+Claude Code `sonnet` alias reported `claude-sonnet-5` for the replacement review.
+
+The v1.4 `info`/`boot`/`load`/preferences extension received a further
+adversarial review. It converged on anonymous health before authentication,
+root-only `init = load + boot`, boot suppression after any incomplete load,
+current-organization rename through `/api/org`, UID-based home preference
+PATCHes, fixed language aliases, and `auto` to `system`. Claude Opus was not
+exposed in the active agent runtime, so the strongest available
+`gpt-5.6-sol` adversarial reviewer was used and that substitution is recorded
+rather than represented as a Claude result.
 
 
 ## 18. Current stable workflow
@@ -732,6 +902,9 @@ pig sty validate [file]          # native baseline validation
 pig sty deploy                   # run deploy.yml/install.yml
 pig sty list                     # list Pigsty releases in 1.x
 pig sty get [version]            # download a Pigsty release
+pig sty gf info                  # health and authentication status
+pig sty gf load [path]           # pure dashboard/folder loading
+pig sty gf init [root]           # complete load followed by boot
 ```
 
 `sty configure` remains an alias of `sty conf`. Generic templates may apply
