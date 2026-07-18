@@ -386,6 +386,7 @@ func init() {
 		peCmd,
 		doCmd,
 		styCmd,
+		inventoryCmd,
 
 		statusCmd,
 		licenseCmd,
