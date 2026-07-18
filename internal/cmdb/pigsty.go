@@ -385,7 +385,7 @@ func switchInventoryLiteral(configPath, literal, target string) (bool, error) {
 	if bytes.Equal(document.body, patch.candidate) {
 		return false, nil
 	}
-	if _, err := commitAnsibleConfigPatch(patch, nil); err != nil {
+	if err := commitAnsibleConfigPatch(patch); err != nil {
 		return false, err
 	}
 	return true, nil

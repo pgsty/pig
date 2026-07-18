@@ -234,12 +234,9 @@ func TestStyCMDBCodeCategories(t *testing.T) {
 		{CodeStyCMDBInvalidArgs, 2},
 		{CodeStyCMDBPermissionDenied, 3},
 		{CodeStyCMDBConnectionFailed, 5},
-		{CodeStyCMDBResourceMissing, 6},
-		{CodeStyCMDBRevisionConflict, 9},
-		{CodeStyCMDBSnapshotUnrepresentable, 8},
+		{CodeStyCMDBUnrepresentable, 8},
 		{CodeStyCMDBOperationFailed, 1},
 		{CodeStyCMDBConfirmationRequired, 7},
-		{CodeStyCMDBPruneRequired, 7},
 	}
 	seen := make(map[int]struct{}, len(tests))
 	for _, test := range tests {

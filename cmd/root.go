@@ -308,52 +308,21 @@ func isStructuredOutputRequested(args []string) bool {
 
 func outputFormatFromArgs(args []string) string {
 	format := config.OUTPUT_TEXT
-	cmdbDumpIndex := styCMDBDumpCommandIndex(args)
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == "-o" || arg == "--output":
 			if i+1 < len(args) {
-				if arg == "--output" && cmdbDumpIndex >= 0 && i > cmdbDumpIndex {
-					i++
-					continue
-				}
 				format = validateOutputFormat(args[i+1])
 				i++
 			}
 		case strings.HasPrefix(arg, "--output="):
-			if cmdbDumpIndex >= 0 && i > cmdbDumpIndex {
-				continue
-			}
 			format = validateOutputFormat(strings.TrimPrefix(arg, "--output="))
 		case strings.HasPrefix(arg, "-o="):
 			format = validateOutputFormat(strings.TrimPrefix(arg, "-o="))
-		case cmdbDumpIndex >= 0 && i > cmdbDumpIndex && arg == "--format":
-			if i+1 < len(args) {
-				format = validateOutputFormat(args[i+1])
-				i++
-			}
-		case cmdbDumpIndex >= 0 && i > cmdbDumpIndex && strings.HasPrefix(arg, "--format="):
-			format = validateOutputFormat(strings.TrimPrefix(arg, "--format="))
 		}
 	}
 	return format
-}
-
-// styCMDBDumpCommandIndex identifies the command-local --output destination
-// so early structured-output detection does not mistake a private file path
-// for the global result format. The dump command restores -o through its
-// local --format alias because Cobra cannot inherit another --output flag.
-func styCMDBDumpCommandIndex(args []string) int {
-	for index := 2; index < len(args); index++ {
-		if args[index-1] == "cmdb" && args[index] == "dump" {
-			switch args[index-2] {
-			case "sty", "s", "pigsty":
-				return index
-			}
-		}
-	}
-	return -1
 }
 
 func init() {

@@ -2,10 +2,7 @@ package cmdb
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,18 +13,10 @@ import (
 
 const maxAnsibleConfigSize = 1 << 20
 
-// AnsibleConfigSource is the value-free public view of the one supported
-// persistent Inventory directive. Literal is the exact prior value span,
-// including simple quotes when present.
-type AnsibleConfigSource struct {
-	ConfigPath     string `json:"config_path"`
-	Literal        string `json:"literal"`
-	Locator        string `json:"locator"`
-	RevisionSHA256 string `json:"revision_sha256"`
-}
-
 type ansibleConfigDocument struct {
-	source     AnsibleConfigSource
+	path       string
+	literal    string
+	locator    string
 	body       []byte
 	valueStart int
 	valueEnd   int
@@ -37,39 +26,17 @@ type ansibleConfigDocument struct {
 }
 
 type ansibleConfigPatch struct {
-	document    *ansibleConfigDocument
-	candidate   []byte
-	nextLiteral string
-	nextLocator string
-	afterDigest [sha256.Size]byte
-}
-
-// InspectAnsibleConfig reads one bounded, symlink-free regular file and
-// returns only the strict persistent source descriptor metadata.
-func InspectAnsibleConfig(name string) (AnsibleConfigSource, error) {
-	document, err := readAnsibleConfig(name)
-	if err != nil {
-		return AnsibleConfigSource{}, err
-	}
-	return document.source, nil
-}
-
-// AnsibleConfigManualInstruction returns the RFC's single repair instruction.
-func AnsibleConfigManualInstruction(name string) string {
-	path := name
-	if absolute, err := filepath.Abs(name); err == nil {
-		path = filepath.Clean(absolute)
-	}
-	return fmt.Sprintf("edit %s manually so [defaults] contains exactly one literal inventory = <path> directive", path)
+	document  *ansibleConfigDocument
+	candidate []byte
 }
 
 func ansibleConfigFailure(path string) error {
-	return failure("CMDB_ANSIBLE_CONFIG_INVALID", AnsibleConfigManualInstruction(path))
+	return failure("CMDB_ANSIBLE_CONFIG_INVALID", "edit "+path+" manually so [defaults] contains exactly one literal inventory = <path> directive")
 }
 
 func readAnsibleConfig(name string) (*ansibleConfigDocument, error) {
 	absolute, err := filepath.Abs(name)
-	if err != nil || !safeRuntimePath(absolute) {
+	if err != nil || !validLocalPath(absolute) {
 		return nil, ansibleConfigFailure(name)
 	}
 	absolute = filepath.Clean(absolute)
@@ -110,7 +77,7 @@ func parseAnsibleConfig(path string, body []byte) (*ansibleConfigDocument, error
 	if len(body) > maxAnsibleConfigSize || !utf8.Valid(body) || bytes.IndexByte(body, 0) >= 0 {
 		return nil, errors.New("invalid ansible config encoding")
 	}
-	document := &ansibleConfigDocument{body: bytes.Clone(body)}
+	document := &ansibleConfigDocument{path: path, body: bytes.Clone(body)}
 	defaultsSections := 0
 	inDefaults := false
 	inventoryAssignments := 0
@@ -162,15 +129,11 @@ func parseAnsibleConfig(path string, body []byte) (*ansibleConfigDocument, error
 		inventoryAssignments++
 		document.valueStart = lineStart + leading + relativeStart
 		document.valueEnd = lineStart + leading + relativeEnd
-		document.source = AnsibleConfigSource{
-			ConfigPath: path, Literal: literal, Locator: locator,
-		}
+		document.literal, document.locator = literal, locator
 	}
 	if defaultsSections != 1 || inventoryAssignments != 1 || document.valueStart >= document.valueEnd {
 		return nil, errors.New("ambiguous inventory directive")
 	}
-	digest := sha256.Sum256(body)
-	document.source.RevisionSHA256 = hex.EncodeToString(digest[:])
 	return document, nil
 }
 
@@ -259,21 +222,10 @@ func resolveAnsibleLiteral(configPath, literal string) (string, error) {
 		path = filepath.Join(filepath.Dir(configPath), path)
 	}
 	absolute, err := filepath.Abs(path)
-	if err != nil || !safeRuntimePath(absolute) {
+	if err != nil || !validLocalPath(absolute) {
 		return "", errors.New("invalid inventory path")
 	}
 	return filepath.Clean(absolute), nil
-}
-
-func planAnsibleConfigPatch(document *ansibleConfigDocument, target string) (*ansibleConfigPatch, error) {
-	if document == nil || document.valueStart < 0 || document.valueEnd > len(document.body) || document.valueStart >= document.valueEnd {
-		return nil, ansibleConfigFailure("ansible.cfg")
-	}
-	literal, err := renderAnsibleInventoryLiteral(document.source.ConfigPath, target)
-	if err != nil {
-		return nil, ansibleConfigFailure(document.source.ConfigPath)
-	}
-	return planAnsibleConfigLiteralPatch(document, literal, target)
 }
 
 func planAnsibleConfigLiteralPatch(document *ansibleConfigDocument, literal, target string) (*ansibleConfigPatch, error) {
@@ -285,38 +237,11 @@ func planAnsibleConfigLiteralPatch(document *ansibleConfigDocument, literal, tar
 	candidate = append(candidate, document.body[:document.valueStart]...)
 	candidate = append(candidate, literal...)
 	candidate = append(candidate, document.body[document.valueEnd:]...)
-	reparsed, err := parseAnsibleConfig(document.source.ConfigPath, candidate)
-	if err != nil || reparsed.source.Locator != target || reparsed.source.Literal != literal {
-		return nil, ansibleConfigFailure(document.source.ConfigPath)
+	reparsed, err := parseAnsibleConfig(document.path, candidate)
+	if err != nil || reparsed.locator != target || reparsed.literal != literal {
+		return nil, ansibleConfigFailure(document.path)
 	}
-	digest := sha256.Sum256(candidate)
-	return &ansibleConfigPatch{
-		document: document, candidate: candidate, nextLiteral: literal,
-		nextLocator: reparsed.source.Locator, afterDigest: digest,
-	}, nil
-}
-
-func renderAnsibleInventoryLiteral(configPath, target string) (string, error) {
-	if !filepath.IsAbs(target) || filepath.Clean(target) != target || !safeRuntimePath(target) || !validAnsibleLiteral([]byte(target)) {
-		return "", errors.New("unrepresentable inventory target")
-	}
-	literal := target
-	if bytes.IndexAny([]byte(target), " \t#;'\"") >= 0 {
-		switch {
-		case !strings.ContainsRune(target, '\''):
-			literal = "'" + target + "'"
-		case !strings.ContainsRune(target, '"'):
-			literal = `"` + target + `"`
-		default:
-			return "", errors.New("unrepresentable inventory quotes")
-		}
-	}
-	synthetic := []byte("[defaults]\ninventory = " + literal + "\n")
-	parsed, err := parseAnsibleConfig(configPath, synthetic)
-	if err != nil || parsed.source.Locator != target {
-		return "", errors.New("inventory target did not reparse exactly")
-	}
-	return literal, nil
+	return &ansibleConfigPatch{document: document, candidate: candidate}, nil
 }
 
 func trimOrdinarySpace(line []byte) ([]byte, int) {
@@ -353,4 +278,91 @@ func fileOwner(info os.FileInfo) (uint32, uint32, bool) {
 		return 0, 0, false
 	}
 	return stat.Uid, stat.Gid, true
+}
+
+// commitAnsibleConfigPatch atomically replaces only the planned literal span.
+// It fails closed if the file changed between planning and commit.
+func commitAnsibleConfigPatch(patch *ansibleConfigPatch) error {
+	if patch == nil || patch.document == nil {
+		return failure("CMDB_SWITCH_INVALID", "ansible.cfg patch is incomplete")
+	}
+	document := patch.document
+	path := document.path
+	parent := filepath.Dir(path)
+	if document.ownerUID != uint32(os.Geteuid()) || document.ownerGID != uint32(os.Getegid()) || !pathIsSymlinkFree(parent) {
+		return failure("CMDB_SWITCH_PERMISSION", "ansible.cfg is not owner-controlled")
+	}
+	temporary, err := os.CreateTemp(parent, ".pig-ansible-cfg-*")
+	if err != nil {
+		return failure("CMDB_SWITCH_FAILED", "ansible.cfg staging failed")
+	}
+	temporaryName := temporary.Name()
+	defer func() { _ = os.Remove(temporaryName) }()
+	if err := temporary.Chmod(document.mode); err != nil {
+		_ = temporary.Close()
+		return failure("CMDB_SWITCH_PERMISSION", "ansible.cfg mode cannot be preserved")
+	}
+	if _, err := temporary.Write(patch.candidate); err != nil {
+		_ = temporary.Close()
+		return failure("CMDB_SWITCH_FAILED", "ansible.cfg staging write failed")
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return failure("CMDB_SWITCH_FAILED", "ansible.cfg staging fsync failed")
+	}
+	if err := temporary.Close(); err != nil {
+		return failure("CMDB_SWITCH_FAILED", "ansible.cfg staging close failed")
+	}
+	current, err := readAnsibleConfig(path)
+	if err != nil || !bytes.Equal(current.body, document.body) || current.mode != document.mode ||
+		current.ownerUID != document.ownerUID || current.ownerGID != document.ownerGID {
+		return failure("CMDB_SOURCE_CHANGED", "ansible.cfg changed after planning")
+	}
+	if err := os.Rename(temporaryName, path); err != nil {
+		return failure("CMDB_SWITCH_FAILED", "ansible.cfg atomic replacement failed")
+	}
+	if err := syncDirectory(parent); err != nil {
+		return failure("CMDB_SWITCH_PARTIAL", "ansible.cfg was replaced but parent fsync failed")
+	}
+	committed, err := readAnsibleConfig(path)
+	if err != nil || !bytes.Equal(committed.body, patch.candidate) || committed.mode != document.mode ||
+		committed.ownerUID != document.ownerUID || committed.ownerGID != document.ownerGID {
+		return failure("CMDB_SWITCH_PARTIAL", "ansible.cfg replacement could not be verified")
+	}
+	return nil
+}
+
+func validLocalPath(path string) bool {
+	return path != "" && utf8.ValidString(path) && !strings.ContainsAny(path, "\x00\r\n")
+}
+
+func pathIsSymlinkFree(absolute string) bool {
+	volume := filepath.VolumeName(absolute)
+	remainder := strings.TrimPrefix(absolute, volume)
+	current := volume + string(filepath.Separator)
+	for _, component := range strings.Split(strings.TrimPrefix(remainder, string(filepath.Separator)), string(filepath.Separator)) {
+		if component == "" {
+			continue
+		}
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func sameSourceRevision(left, right os.FileInfo) bool {
+	return left != nil && right != nil && os.SameFile(left, right) && left.Mode() == right.Mode() &&
+		left.Size() == right.Size() && left.ModTime().Equal(right.ModTime())
+}
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }

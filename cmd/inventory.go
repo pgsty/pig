@@ -118,16 +118,7 @@ var inventoryCMDBInitCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		options := inventoryCMDBOptions("")
 		options.Yes = inventoryCMDBInitYes
-		result := inventoryCMDBInitExec(cmd.Context(), options)
-		if result != nil && result.Code == output.CodeStyCMDBConfirmationRequired && !options.Yes &&
-			!config.IsStructuredOutput() && styCMDBTextInputIsTerminal() {
-			if err := highRiskTextConfirm("This replaces the existing pigsty and pglog schemas.", "pig inventory cmdb init --yes"); err != nil {
-				return err
-			}
-			options.Yes = true
-			result = inventoryCMDBInitExec(cmd.Context(), options)
-		}
-		return handleAuxResult(result)
+		return runInventoryCMDBInit(cmd, options, "pig inventory cmdb init --yes")
 	},
 }
 
@@ -155,17 +146,7 @@ var inventoryCMDBDumpCmd = &cobra.Command{
 		if len(args) == 1 {
 			path = args[0]
 		}
-		body, result := inventoryCMDBDumpExec(cmd.Context(), inventoryCMDBOptions(path))
-		if result == nil || !result.Success {
-			return handleAuxResult(result)
-		}
-		if body == nil {
-			return handleAuxResult(result)
-		}
-		if _, err := cmd.OutOrStdout().Write(body); err != nil {
-			return handleAuxResult(output.Fail(output.CodeStyCMDBOutputFailed, "CMDB dump stdout write failed"))
-		}
-		return nil
+		return runInventoryCMDBDump(cmd, inventoryCMDBOptions(path))
 	},
 }
 
@@ -196,6 +177,30 @@ func inventoryCMDBOptions(path string) stycli.InventoryCMDBOptions {
 	}
 }
 
+func runInventoryCMDBInit(cmd *cobra.Command, options stycli.InventoryCMDBOptions, confirmationCommand string) error {
+	result := inventoryCMDBInitExec(cmd.Context(), options)
+	if result != nil && result.Code == output.CodeStyCMDBConfirmationRequired && !options.Yes &&
+		!config.IsStructuredOutput() && styCMDBTextInputIsTerminal() {
+		if err := highRiskTextConfirm("This replaces the existing pigsty and pglog schemas.", confirmationCommand); err != nil {
+			return err
+		}
+		options.Yes = true
+		result = inventoryCMDBInitExec(cmd.Context(), options)
+	}
+	return handleAuxResult(result)
+}
+
+func runInventoryCMDBDump(cmd *cobra.Command, options stycli.InventoryCMDBOptions) error {
+	body, result := inventoryCMDBDumpExec(cmd.Context(), options)
+	if result == nil || !result.Success || body == nil {
+		return handleAuxResult(result)
+	}
+	if _, err := cmd.OutOrStdout().Write(body); err != nil {
+		return handleAuxResult(output.Fail(output.CodeStyCMDBOutputFailed, "CMDB dump stdout write failed"))
+	}
+	return nil
+}
+
 func inventorySelector(args []string) string {
 	if len(args) == 1 {
 		return args[0]
@@ -203,12 +208,18 @@ func inventorySelector(args []string) string {
 	return ""
 }
 
+func addCMDBDatabaseFlags(target *string, commands ...*cobra.Command) {
+	for _, command := range commands {
+		command.Flags().StringVarP(target, "database", "d", "", "target database name, URI, or libpq conninfo (default: METADB_URL, then service=meta)")
+		command.Flags().StringVar(target, "data", "", "compatibility alias for --database")
+		_ = command.Flags().MarkDeprecated("data", "use --database")
+	}
+}
+
 func init() {
 	inventoryValidateCmd.Flags().BoolVar(&inventoryValidateStrict, "strict", false, "treat warnings as validation failures")
 	inventoryValidateCmd.Flags().BoolVar(&inventoryValidateAnsible, "ansible", false, "also parse with a bounded ansible-inventory adapter")
-	inventoryCMDBCmd.PersistentFlags().StringVarP(&inventoryCMDBDatabase, "database", "d", "", "target database name, URI, or libpq conninfo (default: METADB_URL, then service=meta)")
-	inventoryCMDBCmd.PersistentFlags().StringVar(&inventoryCMDBDatabase, "data", "", "compatibility alias for --database")
-	_ = inventoryCMDBCmd.PersistentFlags().MarkDeprecated("data", "use --database")
+	addCMDBDatabaseFlags(&inventoryCMDBDatabase, inventoryCMDBInitCmd, inventoryCMDBLoadCmd, inventoryCMDBDumpCmd, inventoryCMDBEnableCmd)
 	inventoryCMDBInitCmd.Flags().BoolVar(&inventoryCMDBInitYes, "yes", false, "confirm replacement of existing pigsty and pglog schemas")
 	inventoryCMDBCmd.AddCommand(inventoryCMDBInitCmd, inventoryCMDBLoadCmd, inventoryCMDBDumpCmd, inventoryCMDBEnableCmd, inventoryCMDBDisableCmd)
 	inventoryCmd.AddCommand(inventoryListCmd, inventoryShowCmd, inventoryEditCmd, inventoryValidateCmd, inventoryCMDBCmd)

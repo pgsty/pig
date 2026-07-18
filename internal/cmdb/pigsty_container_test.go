@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestContainerExistingPigstyBaselineLoadDumpAndRollback(t *testing.T) {
+func TestContainerExistingPigstyBaselineLoadDumpAndTransactionRollback(t *testing.T) {
 	store := openContainerStore(t)
 	if cmdbContainer == nil || cmdbContainer.guard() != nil {
 		t.Fatal("destructive test guard failed")

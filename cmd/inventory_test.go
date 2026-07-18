@@ -53,13 +53,18 @@ func TestInventoryRootCommandTree(t *testing.T) {
 }
 
 func TestInventoryCMDBCommandOptions(t *testing.T) {
-	for _, flag := range []string{"database", "data"} {
-		if inventoryCMDBCmd.PersistentFlags().Lookup(flag) == nil {
-			t.Fatalf("inventory cmdb missing --%s", flag)
+	for _, command := range []*cobra.Command{inventoryCMDBInitCmd, inventoryCMDBLoadCmd, inventoryCMDBDumpCmd, inventoryCMDBEnableCmd} {
+		for _, flag := range []string{"database", "data"} {
+			if command.Flags().Lookup(flag) == nil {
+				t.Fatalf("%s missing --%s", command.CommandPath(), flag)
+			}
 		}
 	}
-	if inventoryCMDBCmd.PersistentFlags().Lookup("database").Shorthand != "d" {
+	if inventoryCMDBInitCmd.Flags().Lookup("database").Shorthand != "d" {
 		t.Fatal("inventory cmdb --database must use -d")
+	}
+	if inventoryCMDBDisableCmd.Flags().Lookup("database") != nil {
+		t.Fatal("inventory cmdb disable must not expose an unused database flag")
 	}
 	if inventoryCMDBInitCmd.Flags().Lookup("yes") == nil {
 		t.Fatal("inventory cmdb init missing --yes")

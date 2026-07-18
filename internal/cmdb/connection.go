@@ -1,33 +1,20 @@
 package cmdb
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const (
-	connectionFileLimit = 64 << 10
-	connectionEnv       = "PIGSTY_CMDB_DSN"
-)
-
 // ConnectionSource is the only connection metadata safe for public results.
 type ConnectionSource string
 
 const (
-	ConnectionFileSource ConnectionSource = "connection-file"
-	ConnectionEnvSource  ConnectionSource = "environment"
 	ConnectionMetaSource ConnectionSource = "service:meta"
 	ConnectionArgSource  ConnectionSource = "argument"
 	ConnectionURLSource  ConnectionSource = "environment:METADB_URL"
@@ -41,107 +28,6 @@ type ResolvedConnection struct {
 }
 
 func (c ResolvedConnection) Source() ConnectionSource { return c.source }
-
-// ResolveOptions controls the strict connection precedence. LookupEnv exists
-// to make the precedence deterministic in tests; nil means os.LookupEnv.
-type ResolveOptions struct {
-	ConnectionFile string
-	LookupEnv      func(string) (string, bool)
-}
-
-// ResolveConnection applies connection-file, environment, service:meta order.
-func ResolveConnection(options ResolveOptions) (ResolvedConnection, error) {
-	if options.ConnectionFile != "" {
-		value, err := readConnectionFile(options.ConnectionFile)
-		if err != nil {
-			return ResolvedConnection{}, err
-		}
-		return ResolvedConnection{source: ConnectionFileSource, value: value}, nil
-	}
-	lookup := options.LookupEnv
-	if lookup == nil {
-		lookup = os.LookupEnv
-	}
-	if value, ok := lookup(connectionEnv); ok {
-		if strings.TrimSpace(value) == "" {
-			return ResolvedConnection{}, failure("CMDB_CONNECTION_INVALID", "connection environment value is empty")
-		}
-		return ResolvedConnection{source: ConnectionEnvSource, value: value}, nil
-	}
-	return ResolvedConnection{source: ConnectionMetaSource, value: "service=meta"}, nil
-}
-
-func readConnectionFile(name string) (string, error) {
-	absolute, err := filepath.Abs(name)
-	if err != nil {
-		return "", failure("CMDB_CONNECTION_FILE_INVALID", "connection file path is invalid")
-	}
-	if err := rejectPathSymlinks(absolute); err != nil {
-		return "", err
-	}
-	before, err := os.Lstat(absolute)
-	if err != nil || !before.Mode().IsRegular() {
-		return "", failure("CMDB_CONNECTION_FILE_INVALID", "connection file must be a regular file")
-	}
-	if before.Mode().Perm()&0o077 != 0 {
-		return "", failure("CMDB_CONNECTION_FILE_PERMISSION", "connection file must have owner-only permissions")
-	}
-	stat, ok := before.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != uint32(os.Geteuid()) {
-		return "", failure("CMDB_CONNECTION_FILE_PERMISSION", "connection file must be owned by the effective user")
-	}
-	if before.Size() > connectionFileLimit {
-		return "", failure("CMDB_CONNECTION_FILE_INVALID", "connection file exceeds 64 KiB")
-	}
-
-	file, err := os.Open(absolute)
-	if err != nil {
-		return "", failure("CMDB_CONNECTION_FILE_INVALID", "connection file cannot be opened")
-	}
-	defer file.Close()
-	after, err := file.Stat()
-	if err != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) {
-		return "", failure("CMDB_CONNECTION_FILE_INVALID", "connection file changed during validation")
-	}
-	pathAfter, err := os.Lstat(absolute)
-	if err != nil || pathAfter.Mode()&os.ModeSymlink != 0 || !os.SameFile(after, pathAfter) {
-		return "", failure("CMDB_CONNECTION_FILE_INVALID", "connection file changed during validation")
-	}
-
-	content, err := io.ReadAll(io.LimitReader(file, connectionFileLimit+1))
-	if err != nil || len(content) > connectionFileLimit {
-		return "", failure("CMDB_CONNECTION_FILE_INVALID", "connection file cannot be read within 64 KiB")
-	}
-	if bytes.HasSuffix(content, []byte("\r\n")) {
-		content = content[:len(content)-2]
-	} else if bytes.HasSuffix(content, []byte("\n")) {
-		content = content[:len(content)-1]
-	}
-	if len(content) == 0 || bytes.IndexAny(content, "\r\n\x00") >= 0 {
-		return "", failure("CMDB_CONNECTION_FILE_INVALID", "connection file must contain exactly one non-empty line")
-	}
-	return string(content), nil
-}
-
-func rejectPathSymlinks(absolute string) error {
-	volume := filepath.VolumeName(absolute)
-	remainder := strings.TrimPrefix(absolute, volume)
-	current := volume + string(filepath.Separator)
-	for _, component := range strings.Split(strings.TrimPrefix(remainder, string(filepath.Separator)), string(filepath.Separator)) {
-		if component == "" {
-			continue
-		}
-		current = filepath.Join(current, component)
-		info, err := os.Lstat(current)
-		if err != nil {
-			return failure("CMDB_CONNECTION_FILE_INVALID", "connection file path cannot be inspected")
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return failure("CMDB_CONNECTION_FILE_INVALID", "connection file path must be symlink-free")
-		}
-	}
-	return nil
-}
 
 // Timeouts are bounded again by normalizeTimeouts before driver use.
 type Timeouts struct {
@@ -211,7 +97,7 @@ func Open(ctx context.Context, resolved ResolvedConnection, options OpenOptions)
 	if config.ConnConfig.RuntimeParams == nil {
 		config.ConnConfig.RuntimeParams = make(map[string]string)
 	}
-	config.ConnConfig.RuntimeParams["application_name"] = "pig-sty-cmdb"
+	config.ConnConfig.RuntimeParams["application_name"] = "pig-inventory-cmdb"
 	config.ConnConfig.RuntimeParams["statement_timeout"] = durationMilliseconds(timeouts.Statement)
 	config.ConnConfig.RuntimeParams["lock_timeout"] = durationMilliseconds(timeouts.Lock)
 	config.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = durationMilliseconds(timeouts.Transaction)

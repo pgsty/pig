@@ -1,5 +1,9 @@
 # `pig inventory` implementation goal prompt
 
+Execution status: **completed through M3 on 2026-07-18**. This prompt remains
+as the auditable migration brief; the normative current state is
+[`docs/spec/inventory.md`](inventory.md).
+
 This prompt implements the normative contract in
 [`docs/spec/inventory.md`](inventory.md). It does not override that contract.
 

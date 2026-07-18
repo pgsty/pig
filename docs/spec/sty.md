@@ -9,9 +9,9 @@ categories: [Reference]
 
 # `pig sty` Design Contract
 
-Status: **normative, phased implementation**
+Status: **normative; Inventory/CMDB migration implemented**
 
-Contract version: **1.2**
+Contract version: **1.3**
 
 Last updated: **2026-07-18**
 
@@ -44,12 +44,12 @@ Grafana, PostgreSQL, Terraform, or Vagrant.
 
 Implementation priority is fixed as follows:
 
-1. **P0 — Inventory first.** The lossless Inventory, Validate, and Check gates
-   passed; promotion to the root command now follows `inventory.md`.
+1. **P0 — Inventory first.** The lossless Inventory, root command, Validate,
+   and Check gates passed.
 2. **P1 — Dashboard.** The safe native HTTP implementation passed its gate and
    remains under `sty`.
-3. **P2 — CMDB adapter.** The former revision-store direction is withdrawn;
-   the next implementation is a thin adapter to existing `cmdb.sql` and the
+3. **P2 — CMDB adapter.** The former revision-store direction was withdrawn;
+   the implemented surface is a thin adapter to existing `cmdb.sql` and the
    Inventory scripts.
 4. **P3 — Vagrant and Terraform.** Thin adapters only, after explicit
    reprioritization or completion of the earlier gates.
@@ -66,18 +66,19 @@ The following are outside this roadmap:
 
 ## 2. Implementation status
 
-| Surface | Status at contract v1.2 |
+| Surface | Status at contract v1.3 |
 |:---|:---|
 | Lossless `inventory.Document`, ordered semantic model, selectors, editor, mutations, diagnostics | Implemented baseline |
 | `sty conf/configure` through Inventory API, with `--raw` fallback | Implemented |
 | `sty edit [selector]` | Implemented |
 | `sty validate [file]` | Implemented |
-| `sty inventory list/show/edit/validate` namespace | Implemented; future compatibility delegate |
+| root `inventory|inv` and `sty inventory` compatibility namespace | Implemented |
 | `sty check` | Implemented |
 | `sty dashboard` | Implemented |
-| `sty cmdb` revision-store surface | Implemented experiment; superseded, not canonical |
+| root `inventory cmdb` thin adapter | Implemented |
+| `sty cmdb` | Implemented compatibility delegate |
 | existing Pigsty `cmdb.sql` and Inventory scripts | Current CMDB authority |
-| root `inventory|inv` namespace | Planned migration; see `inventory.md` |
+| former `pigsty_cmdb` revision-store surface | Removed |
 | `sty vagrant`, `sty terraform` | Deferred P3 |
 | `sty doctor` | Name reserved; implementation deferred |
 
@@ -540,7 +541,7 @@ MUST NOT report silent success after partial failure. Tests use both an HTTP fak
 and a disposable real Grafana container.
 
 
-## 13. CMDB contract (P2, experimental)
+## 13. CMDB contract (P2)
 
 Pigsty CMDB is an existing product surface, not a new database design. Its fact
 sources are the adjacent Pigsty checkout's:
@@ -671,7 +672,7 @@ run.
 
 ### P2 — CMDB
 
-P2 is reopened with the corrected, deliberately small scope. PostgreSQL tests
+P2 uses the corrected, deliberately small scope. PostgreSQL tests
 must prove exact `cmdb.sql` application, table parity with `inventory_load`,
 transaction rollback, canonical `raw_config` dump, dynamic Inventory query
 parity, and enable/disable behavior. No revision/history/merge system is an
@@ -738,6 +739,6 @@ explicit PostgreSQL version/region/proxy/locale/password options through the
 Inventory mutation API; version-pinned templates retain their pinned kernel
 semantics. `--raw` remains the rollback path during native stabilization.
 
-The future canonical Inventory workflow and exact compatibility timeline are
-defined by [`inventory.md`](inventory.md); until its M1 gate ships, the existing
-Sty Inventory paths above remain the available public surface.
+The canonical Inventory workflow and compatibility delegates are defined by
+[`inventory.md`](inventory.md). New automation should use `pig inventory|inv`;
+the existing Sty Inventory paths remain available as compatibility surfaces.

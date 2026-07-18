@@ -9,9 +9,9 @@ categories: [Reference]
 
 # `pig inventory` Design Contract
 
-Status: **normative command contract; phased migration**
+Status: **normative command contract; M0-M3 implemented**
 
-Contract version: **1.1**
+Contract version: **1.2**
 
 Last updated: **2026-07-18**
 
@@ -79,18 +79,18 @@ The CMDB data contract has only three primitives: `init`, `load`, and `dump`.
 `inventory_cmdb` and `inventory_conf`; they switch Ansible's configured
 Inventory source and do not extend the database model.
 
-The implementation state at contract v1.1 is explicit:
+The implementation state at contract v1.2 is explicit:
 
 | Surface | State |
 |:---|:---|
 | Lossless Document, ordered semantic model, selectors, editor, validation | implemented |
-| `sty inventory list/show/edit/validate` and `sty edit/validate` | implemented compatibility source |
+| `sty inventory list/show/edit/validate` and `sty edit/validate` | implemented compatibility delegates |
 | existing Pigsty `cmdb.sql` and Inventory scripts | implemented in adjacent Pigsty checkout |
-| root `inventory|inv` command | migration target; not yet implemented |
-| current experimental `pigsty_cmdb` revision-store code in Pig | outside this corrected contract |
+| root `inventory|inv` command and five thin CMDB operations | implemented |
+| corrected `sty cmdb` compatibility namespace | delegates to the root use cases |
+| former `pigsty_cmdb` revision-store code in Pig | removed |
 
-A specification entry is not evidence that its migration phase has shipped.
-Current help and command tests determine availability.
+Current help and command tests remain the executable evidence of availability.
 
 
 ## 3. Static Inventory commands
@@ -377,21 +377,25 @@ external Go API is promised.
 
 ## 10. Migration plan
 
-### M0 — Correct the contract
+M0 through M3 were completed on 2026-07-18. The adjacent Pigsty scripts remain
+supported operational entry points and parity references; removing or changing
+those wrappers is a separate Pigsty-repository decision.
+
+### M0 — Correct the contract (completed)
 
 - make this document authoritative;
 - mark the former native revision-store RFC superseded;
 - remove revision/history/rollback/source-state promises from Sty specs;
 - record the four existing Pigsty assets as the fact source.
 
-### M1 — Root static Inventory surface
+### M1 — Root static Inventory surface (completed)
 
 - add flat `cmd/inventory.go` and root `inventory|inv` registration;
 - expose list/show/edit/validate and specified aliases;
 - reuse current use cases and DTOs;
 - keep Sty delegates until root parity is proven.
 
-### M2 — Thin existing-CMDB adapter
+### M2 — Thin existing-CMDB adapter (completed)
 
 - implement `init` from the exact version-matched `files/cmdb.sql`;
 - implement `load` with the exact table mapping and OS-default behavior of
@@ -402,16 +406,16 @@ external Go API is promised.
 - compare Go output/database rows against the existing scripts in a disposable
   PostgreSQL environment.
 
-### M3 — Remove the abandoned implementation
+### M3 — Remove the abandoned implementation (completed)
 
 - stop exposing the experimental `pigsty_cmdb` revision-store commands;
 - remove its migrations, history/CAS/merge/runtime-record code and tests only
   after the thin adapter passes parity;
 - retain no compatibility database writes to the abandoned schema;
-- update Make/Bash wrappers and docs to canonical commands after parity.
+- keep `pig sty cmdb` only as a compatibility delegate to the same use cases.
 
-Each phase is independently reviewable. The existing scripts remain the
-rollback path until M2 is accepted.
+Each phase is independently reviewable. The existing scripts remain valid
+parity references and operational rollback paths.
 
 
 ## 11. Acceptance

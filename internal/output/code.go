@@ -260,7 +260,7 @@ const (
 	CodeStyInventoryShowInvalidArgs      = MODULE_STY + CAT_PARAM + 5      // Invalid inventory show arguments
 	CodeStyCheckInvalidArgs              = MODULE_STY + CAT_PARAM + 6      // Invalid Check profile or probe arguments
 	CodeStyDashboardInvalidArgs          = MODULE_STY + CAT_PARAM + 7      // Invalid Dashboard connection, scope, or dump arguments
-	CodeStyCMDBInvalidArgs               = MODULE_STY + CAT_PARAM + 8      // Invalid CMDB source, revision, or operation arguments
+	CodeStyCMDBInvalidArgs               = MODULE_STY + CAT_PARAM + 8      // Invalid CMDB source or operation arguments
 	CodeStyCheckPermissionDenied         = MODULE_STY + CAT_PERM + 1       // Check observed a permission or privilege failure
 	CodeStyDashboardPermissionDenied     = MODULE_STY + CAT_PERM + 2       // Grafana rejected Dashboard credentials or authorization
 	CodeStyCMDBPermissionDenied          = MODULE_STY + CAT_PERM + 3       // CMDB connection or private file permissions are insufficient
@@ -272,21 +272,16 @@ const (
 	CodeStyInventoryNotFound             = MODULE_STY + CAT_RESOURCE + 2   // Inventory file not found
 	CodeStyCheckResourceMissing          = MODULE_STY + CAT_RESOURCE + 3   // Pigsty home or required project layout is unavailable
 	CodeStyDashboardResourceMissing      = MODULE_STY + CAT_RESOURCE + 4   // Dashboard manifest, asset, or dump destination is unavailable
-	CodeStyCMDBResourceMissing           = MODULE_STY + CAT_RESOURCE + 5   // CMDB revision, static source, or destination is unavailable
 	CodeStyInventoryInvalid              = MODULE_STY + CAT_CONFIG + 1     // Inventory YAML or semantics are invalid
 	CodeStyValidationFailed              = MODULE_STY + CAT_CONFIG + 2     // Inventory validation reported diagnostics
 	CodeStyCheckValidationFailed         = MODULE_STY + CAT_CONFIG + 3     // Check found an invalid active Inventory
 	CodeStyDashboardConfigInvalid        = MODULE_STY + CAT_CONFIG + 4     // Dashboard manifest or connection configuration is invalid
-	CodeStyCMDBConfigInvalid             = MODULE_STY + CAT_CONFIG + 5     // CMDB source, connection, or provenance configuration is invalid
-	CodeStyCMDBSnapshotUnrepresentable   = MODULE_STY + CAT_CONFIG + 6     // Inventory cannot be represented by CMDB Snapshot v1
-	CodeStyCMDBSchemaInvalid             = MODULE_STY + CAT_CONFIG + 7     // Native migration, schema, or immutable history is invalid
+	CodeStyCMDBConfigInvalid             = MODULE_STY + CAT_CONFIG + 5     // CMDB source or connection configuration is invalid
+	CodeStyCMDBUnrepresentable           = MODULE_STY + CAT_CONFIG + 6     // Inventory cannot be represented by the existing CMDB
+	CodeStyCMDBSchemaInvalid             = MODULE_STY + CAT_CONFIG + 7     // Existing Pigsty CMDB baseline is invalid
 	CodeStyEditConflict                  = MODULE_STY + CAT_STATE + 1      // Inventory changed during an edit session
 	CodeStyDashboardDrift                = MODULE_STY + CAT_STATE + 2      // Managed Grafana resources differ from the repository
-	CodeStyCMDBRevisionConflict          = MODULE_STY + CAT_STATE + 3      // Planned exact CMDB head changed before commit
-	CodeStyCMDBBaseMismatch              = MODULE_STY + CAT_STATE + 4      // Three-way merge base provenance does not match
-	CodeStyCMDBMergeConflict             = MODULE_STY + CAT_STATE + 5      // Three-way declaration changes conflict
 	CodeStyCMDBSourceChanged             = MODULE_STY + CAT_STATE + 6      // Static source bytes changed during a planned operation
-	CodeStyCMDBDrift                     = MODULE_STY + CAT_STATE + 7      // Active source and verified CMDB state disagree
 	CodeStyConfigureFailed               = MODULE_STY + CAT_OPERATION + 1  // Configure generation failed
 	CodeStyConfigureWriteFailed          = MODULE_STY + CAT_OPERATION + 2  // Configure output write failed
 	CodeStyEditFailed                    = MODULE_STY + CAT_OPERATION + 3  // Editor or fragment replacement failed
@@ -300,7 +295,6 @@ const (
 	CodeStyCMDBOutputFailed              = MODULE_STY + CAT_OPERATION + 11 // Private CMDB output could not be committed
 	CodeStyDashboardConfirmationRequired = MODULE_STY + CAT_CONFIRM + 1    // Dashboard deletion requires explicit confirmation
 	CodeStyCMDBConfirmationRequired      = MODULE_STY + CAT_CONFIRM + 2    // CMDB mutation requires explicit consent
-	CodeStyCMDBPruneRequired             = MODULE_STY + CAT_CONFIRM + 3    // CMDB declaration removal requires explicit prune scope
 )
 
 // System module specific codes (MODULE_SYSTEM = 990000)

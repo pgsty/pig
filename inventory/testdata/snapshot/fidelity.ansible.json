@@ -1,1 +1,0 @@
-{"_meta":{"hostvars":{"node.example":{"port":5432,"enabled":true}}},"all":{"children":["blue","green"],"vars":{"region":"china"}},"blue":{"hosts":["node.example"],"vars":{"ordered":{"z":1,"a":2},"ratio":1.0,"negative_zero":-0.0,"max_uint":18446744073709551615,"ambiguous":"true","absent":null,"values":["01",false]}},"green":{"hosts":["node.example"]}}

@@ -25,7 +25,40 @@ const (
 	InventoryCMDBDumpKind    = "pig.inventory.cmdb.dump/v1"
 	InventoryCMDBEnableKind  = "pig.inventory.cmdb.enable/v1"
 	InventoryCMDBDisableKind = "pig.inventory.cmdb.disable/v1"
+	CMDBFailureKind          = "pig.inventory.cmdb.failure/v1"
+	CMDBValidationKind       = "pig.inventory.cmdb.validation/v1"
 )
+
+// CMDBFailureData exposes one stable redacted finding code, never a driver
+// error, DSN, SQL statement, Inventory value, or body.
+type CMDBFailureData struct {
+	Kind     string `json:"kind" yaml:"kind"`
+	CMDBCode string `json:"cmdb_code" yaml:"cmdb_code"`
+}
+
+func (d *CMDBFailureData) Text() string {
+	if d == nil || d.CMDBCode == "" {
+		return ""
+	}
+	return "  finding: " + d.CMDBCode
+}
+
+type CMDBValidationData struct {
+	Kind        string                 `json:"kind" yaml:"kind"`
+	Path        string                 `json:"path" yaml:"path"`
+	Diagnostics []inventory.Diagnostic `json:"diagnostics,omitempty" yaml:"diagnostics,omitempty"`
+}
+
+func (d *CMDBValidationData) Text() string {
+	if d == nil || len(d.Diagnostics) == 0 {
+		return ""
+	}
+	rows := make([][]string, 0, len(d.Diagnostics))
+	for _, diagnostic := range d.Diagnostics {
+		rows = append(rows, []string{diagnostic.Code, diagnostic.Path.String(), string(diagnostic.Severity)})
+	}
+	return strings.TrimSuffix(output.RenderTable([]string{"CODE", "PATH", "STATUS"}, rows), "\n")
+}
 
 // InventoryCMDBData is the shared value-free result metadata for the five
 // thin operations. It never contains SQL, a DSN, or Inventory values.
@@ -239,6 +272,40 @@ func inventoryCMDBFailure(message string, err error, data *InventoryCMDBData) *o
 	return result
 }
 
+func cmdbFailureResult(message string, err error) *output.Result {
+	code, status := cmdbFailureCode(err)
+	return output.Fail(status, message).WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: code})
+}
+
+func cmdbFailureCode(err error) (string, int) {
+	var failure *cmdb.Error
+	if !errors.As(err, &failure) || failure == nil || failure.Code == "" {
+		return "CMDB_INTERNAL", output.CodeStyCMDBOperationFailed
+	}
+	switch failure.Code {
+	case "CMDB_PARAMETER_INVALID", "CMDB_DECLARATION_INVALID":
+		return failure.Code, output.CodeStyCMDBInvalidArgs
+	case "CMDB_SWITCH_PERMISSION":
+		return failure.Code, output.CodeStyCMDBPermissionDenied
+	case "CMDB_CONNECTION_FAILED":
+		return failure.Code, output.CodeStyCMDBConnectionFailed
+	case "CMDB_CONNECTION_INVALID", "CMDB_SOURCE_INVALID", "CMDB_CONNECTION_SECRET", "CMDB_ANSIBLE_CONFIG_INVALID", "CMDB_SWITCH_INVALID":
+		return failure.Code, output.CodeStyCMDBConfigInvalid
+	case "CMDB_NESTED_GROUP_UNSUPPORTED", "CMDB_HOSTS_REQUIRED", "CMDB_HOST_VARS_REQUIRED":
+		return failure.Code, output.CodeStyCMDBUnrepresentable
+	case "CMDB_BASELINE_INVALID", "CMDB_BASELINE_VERIFY_FAILED":
+		return failure.Code, output.CodeStyCMDBSchemaInvalid
+	case "CMDB_OUTPUT_INVALID", "CMDB_OUTPUT_FAILED", "CMDB_SWITCH_PARTIAL":
+		return failure.Code, output.CodeStyCMDBOutputFailed
+	case "CMDB_SOURCE_CHANGED":
+		return failure.Code, output.CodeStyCMDBSourceChanged
+	case "CMDB_CONFIRMATION_REQUIRED":
+		return failure.Code, output.CodeStyCMDBConfirmationRequired
+	default:
+		return failure.Code, output.CodeStyCMDBOperationFailed
+	}
+}
+
 func preparePigstyDeclarations(path string) (cmdb.Declarations, *output.Result) {
 	doc, failure := loadStaticInventory(path, output.CodeStyCMDBInvalidArgs)
 	if failure != nil {
@@ -293,7 +360,7 @@ func preparePigstyDeclarations(path string) (cmdb.Declarations, *output.Result) 
 }
 
 func cmdbRepresentabilityFailure(path, code string) *output.Result {
-	return output.Fail(output.CodeStyCMDBSnapshotUnrepresentable, "Inventory cannot be represented by the existing Pigsty CMDB").
+	return output.Fail(output.CodeStyCMDBUnrepresentable, "Inventory cannot be represented by the existing Pigsty CMDB").
 		WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: code}).
 		WithDetail("source: " + path)
 }

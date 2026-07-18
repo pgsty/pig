@@ -90,10 +90,12 @@ quotes, tags, or ordering. CMDB dump is canonical generated YAML by contract.
 
 ## Existing Pig implementation status
 
-The current experimental Pig code under `internal/cmdb`, `cli/sty/cmdb_*`, and
-`pig sty cmdb` was built from the superseded RFC. It is not the desired CMDB
-contract and MUST NOT be promoted to the root Inventory command.
+The experimental revision-store implementation was removed on 2026-07-18 after
+the thin adapter passed corpus, local PostgreSQL, and pinned-container parity
+gates. `internal/cmdb` now contains only the existing-schema adapter and the
+narrow `ansible.cfg` source switch. `pig sty cmdb` delegates to the same five
+use cases exposed by `pig inventory cmdb`; it does not preserve the withdrawn
+flags or private runtime adapter.
 
-Replacement should proceed only after parity tests compare the thin adapter
-against the existing schema and scripts. Until then, the existing Pigsty
-scripts are the operational rollback path.
+The existing Pigsty scripts remain operational entry points and the reference
+behavior for future parity checks.

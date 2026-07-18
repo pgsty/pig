@@ -66,8 +66,8 @@ func startContainerDatabase(image string) (*containerDatabase, error) {
 	if err != nil {
 		return nil, err
 	}
-	database := "pig_sty_cmdb_test_" + suffix
-	name := "pig-sty-cmdb-test-" + suffix
+	database := "pig_inventory_cmdb_test_" + suffix
+	name := "pig-inventory-cmdb-test-" + suffix
 	password := "test-" + suffix
 
 	inspect := exec.Command("docker", "image", "inspect", image,
@@ -209,7 +209,7 @@ func (c *containerDatabase) guard() error {
 		return fmt.Errorf("test DSN is invalid")
 	}
 	host := parsed.Hostname()
-	if !isLoopbackHost(host) || !strings.HasPrefix(strings.TrimPrefix(parsed.Path, "/"), "pig_sty_cmdb_test_") ||
+	if !isLoopbackHost(host) || !strings.HasPrefix(strings.TrimPrefix(parsed.Path, "/"), "pig_inventory_cmdb_test_") ||
 		strings.TrimPrefix(parsed.Path, "/") != c.database {
 		return fmt.Errorf("destructive test guard rejected database target")
 	}
@@ -239,7 +239,7 @@ func openContainerStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	store, err := Open(t.Context(), ResolvedConnection{
-		source: ConnectionEnvSource,
+		source: ConnectionURLSource,
 		value:  cmdbContainer.dsn,
 	}, OpenOptions{Timeouts: Timeouts{Transaction: 15 * time.Second}})
 	if err != nil {
@@ -259,7 +259,7 @@ func openContainerStore(t *testing.T) *Store {
 		var boot time.Time
 		scanErr := connection.QueryRow(t.Context(), `
 SELECT current_database(), d.oid, COALESCE(inet_server_addr()::text, 'local'),
-       inet_server_port(), current_setting('server_version_num')::integer,
+	   COALESCE(inet_server_port(), 0), current_setting('server_version_num')::integer,
        pg_postmaster_start_time()
   FROM pg_database AS d
  WHERE d.datname = current_database()`).Scan(&database, &oid, &address, &port, &version, &boot)
@@ -267,16 +267,6 @@ SELECT current_database(), d.oid, COALESCE(inet_server_addr()::text, 'local'),
 	}
 	t.Cleanup(store.Close)
 	return store
-}
-
-func resetContainerSchema(t *testing.T, store *Store) {
-	t.Helper()
-	if cmdbContainer == nil || cmdbContainer.guard() != nil {
-		t.Fatal("destructive test guard failed")
-	}
-	if _, err := store.pool.Exec(t.Context(), `DROP SCHEMA IF EXISTS pigsty_cmdb CASCADE`); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func randomHex(bytes int) (string, error) {
