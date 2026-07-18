@@ -23,6 +23,37 @@ const validEditInventory = `all:
     region: default               # keep
 `
 
+func TestInventoryStatusIsValueFreeAndObservable(t *testing.T) {
+	static := config.InventorySourceDescriptor{
+		Home: "/srv/pigsty", Tier: config.InventorySourceAnsibleConfig,
+		Type: config.InventorySourceStaticYAML, Path: "/srv/pigsty/pigsty.yml",
+		Exists: true, Readable: true, StaticCommands: []string{"list", "show", "validate", "diff", "edit"},
+	}
+	result := InventoryStatus(static)
+	if result == nil || !result.Success || len(result.NextActions) != 0 {
+		t.Fatalf("static status = %+v", result)
+	}
+	data, ok := result.Data.(*InventoryStatusData)
+	if !ok || data.Kind != InventoryStatusKind || data.Source.Type != config.InventorySourceStaticYAML {
+		t.Fatalf("status data = %#v", result.Data)
+	}
+	if text := data.Text(); !strings.Contains(text, "static_yaml") || strings.Contains(text, "secret") {
+		t.Fatalf("status text = %q", text)
+	}
+
+	missing := config.InventorySourceDescriptor{
+		Tier: config.InventorySourceFlag, Type: config.InventorySourceMissing,
+		Path: "/tmp/missing.yml", Findings: []string{"SOURCE_NOT_FOUND"},
+	}
+	result = InventoryStatus(missing)
+	if result == nil || !result.Success || len(result.NextActions) != 1 || !result.NextActions[0].Required {
+		t.Fatalf("missing status = %+v", result)
+	}
+	if got := result.Data.(*InventoryStatusData).Source.Findings; !reflect.DeepEqual(got, []string{"SOURCE_NOT_FOUND"}) {
+		t.Fatalf("status findings = %v", got)
+	}
+}
+
 func TestEditScopedFragmentPreservesOutsideBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pigsty.yml")
 	if err := os.WriteFile(path, []byte(validEditInventory), 0644); err != nil {
@@ -225,6 +256,136 @@ func TestEditRefusesSymlinkInventory(t *testing.T) {
 	}
 }
 
+func TestEditAllowsTargetedRepairButBlocksSelectedErrors(t *testing.T) {
+	const invalid = `all:
+  children:
+    pgsql:
+      hosts:
+        10.0.0.1: { pg_seq: 1, pg_role: leader }
+        10.0.0.2: { pg_seq: 2, pg_role: leader }
+      vars: { pg_cluster: pgsql }
+  vars:
+    version: v4.4.0
+    admin_ip: 10.0.0.1
+    region: default
+`
+	path := filepath.Join(t.TempDir(), "pigsty.yml")
+	if err := os.WriteFile(path, []byte(invalid), 0600); err != nil {
+		t.Fatal(err)
+	}
+	originalRunner, originalFormat := runInventoryEditorFn, config.OutputFormat
+	defer func() { runInventoryEditorFn, config.OutputFormat = originalRunner, originalFormat }()
+	config.OutputFormat = config.OUTPUT_TEXT
+
+	runInventoryEditorFn = func(_ string, fragment string) error {
+		content, err := os.ReadFile(fragment)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(fragment, bytes.Replace(content, []byte("leader"), []byte("primary"), 1), 0600)
+	}
+	result := Edit(EditOptions{
+		Path: path, Selector: "/all/children/pgsql/hosts/10.0.0.1/pg_role", Editor: "test-editor",
+	})
+	if result == nil || !result.Success {
+		t.Fatalf("targeted repair failed: %+v", result)
+	}
+	repaired, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(repaired), "pg_role: leader") != 1 || strings.Count(string(repaired), "pg_role: primary") != 1 {
+		t.Fatalf("targeted repair bytes = %s", repaired)
+	}
+
+	// Editing the whole first host while leaving its pre-existing bad role must
+	// fail even though the same error is allowed to remain on the other host.
+	runInventoryEditorFn = func(_ string, fragment string) error {
+		content, err := os.ReadFile(fragment)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(fragment, bytes.Replace(content, []byte("pg_seq: 2"), []byte("pg_seq: 3"), 1), 0600)
+	}
+	result = Edit(EditOptions{
+		Path: path, Selector: "/all/children/pgsql/hosts/10.0.0.2", Editor: "test-editor",
+	})
+	if result == nil || result.Success || result.Code != output.CodeStyInventoryInvalid {
+		t.Fatalf("selected error was not blocked: %+v", result)
+	}
+	retained := strings.TrimPrefix(result.Detail, "edited fragment retained at ")
+	if retained != result.Detail {
+		defer os.RemoveAll(filepath.Dir(retained))
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, repaired) {
+		t.Fatal("blocked targeted edit changed the Inventory")
+	}
+}
+
+func TestEditFromStdinIsNonInteractiveAndStructuredSafe(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pigsty.yml")
+	if err := os.WriteFile(path, []byte(validEditInventory), 0644); err != nil {
+		t.Fatal(err)
+	}
+	originalRunner, originalFormat := runInventoryEditorFn, config.OutputFormat
+	defer func() { runInventoryEditorFn, config.OutputFormat = originalRunner, originalFormat }()
+	config.OutputFormat = config.OUTPUT_JSON
+	runInventoryEditorFn = func(string, string) error {
+		return errors.New("editor must not run for --from")
+	}
+	result := Edit(EditOptions{
+		Path: path, Selector: "vars.region", From: "-", Stdin: strings.NewReader("china\n"), ResultKind: InventoryEditKind,
+	})
+	if result == nil || !result.Success {
+		t.Fatalf("Edit --from - failed: %+v", result)
+	}
+	data, ok := result.Data.(*EditData)
+	if !ok || data.Kind != InventoryEditKind || !data.Changed || len(data.Changes.Changes) == 0 || data.Changes.Changes[0].Path != "/all/vars/region" {
+		t.Fatalf("Edit --from data = %#v", result.Data)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte("region: china")) {
+		t.Fatalf("Edit --from bytes = %s", body)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("Edit --from mode info=%v err=%v", info, err)
+	}
+}
+
+func TestEditFromRejectsReplacementSymlink(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pigsty.yml")
+	replacement := filepath.Join(dir, "replacement.yml")
+	link := filepath.Join(dir, "replacement-link.yml")
+	if err := os.WriteFile(path, []byte(validEditInventory), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(replacement, []byte("china\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(replacement, link); err != nil {
+		t.Fatal(err)
+	}
+	result := Edit(EditOptions{Path: path, Selector: "vars.region", From: link})
+	if result == nil || result.Success || result.Code != output.CodeStyEditInvalidArgs {
+		t.Fatalf("replacement symlink result = %+v", result)
+	}
+}
+
+func TestEditFromExplicitEmptyValueIsInvalid(t *testing.T) {
+	result := Edit(EditOptions{Path: "unused.yml", FromSet: true})
+	if result == nil || result.Success || result.Code != output.CodeStyEditInvalidArgs {
+		t.Fatalf("explicit empty --from result = %+v", result)
+	}
+}
+
 func TestEditRejectsStructuredOutput(t *testing.T) {
 	original := config.OutputFormat
 	defer func() { config.OutputFormat = original }()
@@ -365,7 +526,7 @@ func TestValidatePigstyConfCorpus(t *testing.T) {
 }
 
 func TestEditChangeSetDoesNotContainValues(t *testing.T) {
-	data := (&EditData{Changes: inventory.ChangeSet{Changes: []inventory.Change{{Operation: "set", Identifier: "region"}}}}).Text()
+	data := (&EditData{Changes: InventoryChangeSet{Changes: []InventoryChange{{Operation: "set", Identifier: "region"}}}}).Text()
 	if strings.Contains(data, "secret") {
 		t.Fatal("EditData text unexpectedly contains values")
 	}
@@ -428,6 +589,52 @@ func TestListInventoryOrderedMetadataNeverContainsValues(t *testing.T) {
 	selectedData := selected.Data.(*InventoryListData)
 	if selectedData.Root != "/all/vars/ports" || len(selectedData.Items) != 3 {
 		t.Fatalf("selected list = %+v", selectedData)
+	}
+	depth := 2
+	bounded := ListInventory(InventoryOptions{Path: path, Depth: &depth})
+	boundedData := bounded.Data.(*InventoryListData)
+	for _, item := range boundedData.Items {
+		if strings.HasPrefix(item.Path, "/all/children/") || strings.HasPrefix(item.Path, "/all/vars/") {
+			t.Fatalf("depth=2 traversed too deeply: %+v", boundedData.Items)
+		}
+	}
+	negative := -1
+	if result := ListInventory(InventoryOptions{Path: path, Depth: &negative}); result.Success || result.Code != output.CodeStyInventoryListInvalidArgs {
+		t.Fatalf("negative depth result = %+v", result)
+	}
+}
+
+func TestDiffInventoryEmitsPathsAndKindsWithoutValues(t *testing.T) {
+	dir := t.TempDir()
+	left := filepath.Join(dir, "left.yml")
+	right := filepath.Join(dir, "right.yml")
+	if err := os.WriteFile(left, []byte("all:\n  children: {}\n  vars: { password: old-secret, ports: [1, 2] }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(right, []byte("all:\n  vars: { ports: [2, 1], password: new-secret }\n  children: {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result := DiffInventory(DiffOptions{Path: left, OtherPath: right})
+	if result == nil || !result.Success {
+		t.Fatalf("DiffInventory failed: %+v", result)
+	}
+	data, ok := result.Data.(*InventoryDiffData)
+	if !ok || data.Kind != InventoryDiffKind || len(data.Changes) != 2 {
+		t.Fatalf("diff data = %#v", result.Data)
+	}
+	for _, change := range data.Changes {
+		if change.Path != "/all/vars/password" && change.Path != "/all/vars/ports" {
+			t.Fatalf("unexpected diff item = %+v", change)
+		}
+	}
+	for _, format := range []string{config.OUTPUT_TEXT, config.OUTPUT_JSON, config.OUTPUT_YAML} {
+		rendered, err := result.Render(format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(rendered, []byte("old-secret")) || bytes.Contains(rendered, []byte("new-secret")) || bytes.Contains(rendered, []byte("[1, 2]")) {
+			t.Fatalf("%s diff leaked values: %s", format, rendered)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,22 +17,29 @@ import (
 
 // EditOptions controls one interactive, revision-checked inventory edit.
 type EditOptions struct {
-	Path     string
-	Selector string
-	Editor   string // optional test/embedding override
+	Path       string
+	Selector   string
+	Editor     string // optional test/embedding override
+	ResultKind string
+	From       string
+	FromSet    bool
+	Stdin      io.Reader
 }
+
+const InventoryEditKind = "pig.inventory.edit/v1"
 
 // EditData is safe structured metadata; it never contains inventory values.
 type EditData struct {
-	Path          string                 `json:"path" yaml:"path"`
-	Selector      string                 `json:"selector,omitempty" yaml:"selector,omitempty"`
-	Resolved      string                 `json:"resolved" yaml:"resolved"`
-	Changed       bool                   `json:"changed" yaml:"changed"`
-	ModeBefore    string                 `json:"mode_before,omitempty" yaml:"mode_before,omitempty"`
-	ModeAfter     string                 `json:"mode_after,omitempty" yaml:"mode_after,omitempty"`
-	ModeTightened bool                   `json:"mode_tightened,omitempty" yaml:"mode_tightened,omitempty"`
-	Changes       inventory.ChangeSet    `json:"changes,omitempty" yaml:"changes,omitempty"`
-	Diagnostics   []inventory.Diagnostic `json:"diagnostics,omitempty" yaml:"diagnostics,omitempty"`
+	Kind          string                `json:"kind,omitempty" yaml:"kind,omitempty"`
+	Path          string                `json:"path" yaml:"path"`
+	Selector      string                `json:"selector,omitempty" yaml:"selector,omitempty"`
+	Resolved      string                `json:"resolved" yaml:"resolved"`
+	Changed       bool                  `json:"changed" yaml:"changed"`
+	ModeBefore    string                `json:"mode_before,omitempty" yaml:"mode_before,omitempty"`
+	ModeAfter     string                `json:"mode_after,omitempty" yaml:"mode_after,omitempty"`
+	ModeTightened bool                  `json:"mode_tightened,omitempty" yaml:"mode_tightened,omitempty"`
+	Changes       InventoryChangeSet    `json:"changes,omitempty" yaml:"changes,omitempty"`
+	Diagnostics   []InventoryDiagnostic `json:"diagnostics,omitempty" yaml:"diagnostics,omitempty"`
 }
 
 func (d *EditData) Text() string {
@@ -57,11 +65,15 @@ var (
 // Edit opens a complete inventory or a dedented selector fragment in the
 // user's editor and atomically writes a validated candidate when it changed.
 func Edit(opts EditOptions) *output.Result {
+	if opts.FromSet && strings.TrimSpace(opts.From) == "" {
+		return output.Fail(output.CodeStyEditInvalidArgs, "--from requires one regular file path or -")
+	}
 	path := strings.TrimSpace(opts.Path)
 	if path == "" {
 		return output.Fail(output.CodeStyInventoryNotFound, "inventory path is not configured")
 	}
-	if config.IsStructuredOutput() {
+	nonInteractive := opts.FromSet || strings.TrimSpace(opts.From) != ""
+	if config.IsStructuredOutput() && !nonInteractive {
 		return output.Fail(output.CodeStyEditInvalidArgs, "interactive inventory edit requires text output")
 	}
 	info, err := os.Lstat(path)
@@ -94,18 +106,21 @@ func Edit(opts EditOptions) *output.Result {
 		return output.Fail(output.CodeStyEditFailed, err.Error())
 	}
 
-	editorCommand := strings.TrimSpace(opts.Editor)
-	if editorCommand == "" {
-		editorCommand = strings.TrimSpace(os.Getenv("VISUAL"))
-	}
-	if editorCommand == "" {
-		editorCommand = strings.TrimSpace(os.Getenv("EDITOR"))
-	}
-	if editorCommand == "" {
-		if !stdinIsTerminalFn() {
-			return output.Fail(output.CodeStyEditInvalidArgs, "VISUAL or EDITOR is required when stdin is not a terminal")
+	editorCommand := ""
+	if !nonInteractive {
+		editorCommand = strings.TrimSpace(opts.Editor)
+		if editorCommand == "" {
+			editorCommand = strings.TrimSpace(os.Getenv("VISUAL"))
 		}
-		editorCommand = "vi"
+		if editorCommand == "" {
+			editorCommand = strings.TrimSpace(os.Getenv("EDITOR"))
+		}
+		if editorCommand == "" {
+			if !stdinIsTerminalFn() {
+				return output.Fail(output.CodeStyEditInvalidArgs, "VISUAL or EDITOR is required when stdin is not a terminal")
+			}
+			editorCommand = "vi"
+		}
 	}
 
 	tempDir, err := os.MkdirTemp("", "pig-sty-edit-*")
@@ -125,17 +140,33 @@ func Edit(opts EditOptions) *output.Result {
 	if err := os.WriteFile(tempPath, fragment.Bytes, 0600); err != nil {
 		return output.Fail(output.CodeStyEditFailed, "failed to write private edit fragment")
 	}
-	if err := runInventoryEditorFn(editorCommand, tempPath); err != nil {
-		removeTemp = false
-		return retainedEditFailure(output.CodeStyEditFailed, "inventory editor exited unsuccessfully", tempPath)
+	if nonInteractive {
+		replacement, failure := readEditReplacement(opts)
+		if failure != nil {
+			return failure
+		}
+		if err := os.WriteFile(tempPath, replacement, 0600); err != nil {
+			return output.Fail(output.CodeStyEditFailed, "failed to stage replacement fragment")
+		}
+	} else {
+		if err := runInventoryEditorFn(editorCommand, tempPath); err != nil {
+			removeTemp = false
+			return retainedEditFailure(output.CodeStyEditFailed, "inventory editor exited unsuccessfully", tempPath)
+		}
 	}
 	edited, err := os.ReadFile(tempPath)
 	if err != nil {
 		removeTemp = false
 		return retainedEditFailure(output.CodeStyEditFailed, "failed to read edited fragment", tempPath)
 	}
-	data := &EditData{Path: path, Selector: strings.TrimSpace(opts.Selector), Resolved: selected.String()}
+	data := &EditData{Kind: strings.TrimSpace(opts.ResultKind), Path: path, Selector: strings.TrimSpace(opts.Selector), Resolved: selected.String()}
+	originalDiagnostics := editRuleDiagnostics(doc)
 	if bytes.Equal(edited, fragment.Bytes) {
+		if blocking := editBlockingDiagnostics(originalDiagnostics, originalDiagnostics, selected); len(blocking) > 0 {
+			removeTemp = false
+			return retainedEditFailure(output.CodeStyInventoryInvalid, firstDiagnosticMessage(blocking), tempPath).
+				WithData(&EditData{Kind: data.Kind, Path: path, Selector: data.Selector, Resolved: data.Resolved, Diagnostics: inventoryDiagnostics(originalDiagnostics)})
+		}
 		return output.OK("inventory unchanged", data)
 	}
 
@@ -144,16 +175,17 @@ func Edit(opts EditOptions) *output.Result {
 		removeTemp = false
 		return retainedEditFailure(output.CodeStyInventoryInvalid, fragmentEditMessage(err), tempPath)
 	}
-	candidate, changes, err := editor.Commit()
+	candidate, changes, err := editor.CommitCandidate()
 	if err != nil {
 		removeTemp = false
 		return retainedEditFailure(output.CodeStyInventoryInvalid, editValidationMessage(err), tempPath)
 	}
-	diagnostics := candidate.Validate()
-	if inventory.HasErrors(diagnostics) {
+	diagnostics := editRuleDiagnostics(candidate)
+	blocking := editBlockingDiagnostics(originalDiagnostics, diagnostics, selected)
+	if len(blocking) > 0 {
 		removeTemp = false
-		return retainedEditFailure(output.CodeStyInventoryInvalid, firstDiagnosticMessage(diagnostics), tempPath).
-			WithData(&EditData{Path: path, Selector: data.Selector, Resolved: data.Resolved, Diagnostics: diagnostics})
+		return retainedEditFailure(output.CodeStyInventoryInvalid, firstDiagnosticMessage(blocking), tempPath).
+			WithData(&EditData{Kind: data.Kind, Path: path, Selector: data.Selector, Resolved: data.Resolved, Diagnostics: inventoryDiagnostics(diagnostics)})
 	}
 	latestInfo, err := os.Lstat(path)
 	if err != nil || latestInfo.Mode()&os.ModeSymlink != 0 || !latestInfo.Mode().IsRegular() {
@@ -175,9 +207,78 @@ func Edit(opts EditOptions) *output.Result {
 	data.ModeBefore = fmt.Sprintf("%04o", modeBefore)
 	data.ModeAfter = fmt.Sprintf("%04o", modeAfter)
 	data.ModeTightened = modeBefore != modeAfter
-	data.Changes = changes
-	data.Diagnostics = diagnostics
+	data.Changes = inventoryChanges(changes)
+	data.Diagnostics = inventoryDiagnostics(diagnostics)
 	return output.OK("inventory updated", data)
+}
+
+func readEditReplacement(opts EditOptions) ([]byte, *output.Result) {
+	from := strings.TrimSpace(opts.From)
+	if from == "-" {
+		reader := opts.Stdin
+		if reader == nil {
+			reader = os.Stdin
+		}
+		body, err := io.ReadAll(reader)
+		if err != nil {
+			return nil, output.Fail(output.CodeStyEditFailed, "failed to read replacement fragment from stdin")
+		}
+		return body, nil
+	}
+	if from == "" {
+		return nil, output.Fail(output.CodeStyEditInvalidArgs, "replacement source is not configured")
+	}
+	info, err := os.Lstat(from)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, output.Fail(output.CodeStyInventoryNotFound, "replacement fragment file was not found")
+	}
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, output.Fail(output.CodeStyEditInvalidArgs, "replacement source must be one regular, non-symlink file")
+	}
+	body, err := os.ReadFile(from)
+	if err != nil {
+		return nil, output.Fail(output.CodeStyEditFailed, "failed to read replacement fragment file")
+	}
+	return body, nil
+}
+
+func editRuleDiagnostics(doc *inventory.Document) []inventory.Diagnostic {
+	if doc == nil {
+		return nil
+	}
+	return doc.Validate(inventory.YAMLRules, inventory.AnsibleRules, inventory.PigstyRules, inventory.CompleteInventoryRules)
+}
+
+func editBlockingDiagnostics(original, candidate []inventory.Diagnostic, selected inventory.Path) []inventory.Diagnostic {
+	originalErrors := make(map[string]struct{})
+	for _, diagnostic := range original {
+		if diagnostic.Severity == inventory.SeverityError {
+			originalErrors[diagnostic.Code+"\x00"+diagnostic.Path.String()] = struct{}{}
+		}
+	}
+	blocking := make([]inventory.Diagnostic, 0)
+	for _, diagnostic := range candidate {
+		if diagnostic.Severity != inventory.SeverityError {
+			continue
+		}
+		_, existed := originalErrors[diagnostic.Code+"\x00"+diagnostic.Path.String()]
+		if !existed || inventoryPathWithin(diagnostic.Path, selected) {
+			blocking = append(blocking, diagnostic)
+		}
+	}
+	return blocking
+}
+
+func inventoryPathWithin(path, root inventory.Path) bool {
+	if len(root) > len(path) {
+		return false
+	}
+	for index := range root {
+		if root[index] != path[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func retainedEditFailure(code int, message, tempPath string) *output.Result {

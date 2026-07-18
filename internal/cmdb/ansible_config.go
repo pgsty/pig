@@ -2,13 +2,14 @@ package cmdb
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"unicode/utf8"
+
+	"pig/internal/config"
 )
 
 const maxAnsibleConfigSize = 1 << 20
@@ -16,6 +17,7 @@ const maxAnsibleConfigSize = 1 << 20
 type ansibleConfigDocument struct {
 	path       string
 	literal    string
+	value      string
 	locator    string
 	body       []byte
 	valueStart int
@@ -74,158 +76,14 @@ func readAnsibleConfig(name string) (*ansibleConfigDocument, error) {
 }
 
 func parseAnsibleConfig(path string, body []byte) (*ansibleConfigDocument, error) {
-	if len(body) > maxAnsibleConfigSize || !utf8.Valid(body) || bytes.IndexByte(body, 0) >= 0 {
-		return nil, errors.New("invalid ansible config encoding")
-	}
-	document := &ansibleConfigDocument{path: path, body: bytes.Clone(body)}
-	defaultsSections := 0
-	inDefaults := false
-	inventoryAssignments := 0
-	for offset := 0; offset < len(body); {
-		lineStart := offset
-		newline := bytes.IndexByte(body[offset:], '\n')
-		lineEnd := len(body)
-		if newline >= 0 {
-			lineEnd = offset + newline
-			offset = lineEnd + 1
-		} else {
-			offset = len(body)
-		}
-		contentEnd := lineEnd
-		if contentEnd > lineStart && body[contentEnd-1] == '\r' {
-			contentEnd--
-		}
-		line := body[lineStart:contentEnd]
-		if bytes.IndexByte(line, '\r') >= 0 {
-			return nil, errors.New("unsupported line ending")
-		}
-		trimmed, leading := trimOrdinarySpace(line)
-		if len(trimmed) == 0 || trimmed[0] == '#' || trimmed[0] == ';' {
-			continue
-		}
-		if trimmed[0] == '[' {
-			section, ok := parseAnsibleSection(trimmed)
-			if !ok {
-				return nil, errors.New("malformed section")
-			}
-			inDefaults = strings.EqualFold(section, "defaults")
-			if inDefaults {
-				defaultsSections++
-			}
-			continue
-		}
-		equal := bytes.IndexByte(trimmed, '=')
-		if equal < 0 {
-			continue
-		}
-		key := strings.TrimSpace(string(trimmed[:equal]))
-		if !inDefaults || !strings.EqualFold(key, "inventory") {
-			continue
-		}
-		literal, locator, relativeStart, relativeEnd, err := parseAnsibleInventoryValue(path, trimmed, equal+1)
-		if err != nil {
-			return nil, err
-		}
-		inventoryAssignments++
-		document.valueStart = lineStart + leading + relativeStart
-		document.valueEnd = lineStart + leading + relativeEnd
-		document.literal, document.locator = literal, locator
-	}
-	if defaultsSections != 1 || inventoryAssignments != 1 || document.valueStart >= document.valueEnd {
-		return nil, errors.New("ambiguous inventory directive")
-	}
-	return document, nil
-}
-
-func parseAnsibleSection(line []byte) (string, bool) {
-	close := bytes.IndexByte(line, ']')
-	if close <= 1 {
-		return "", false
-	}
-	name := strings.TrimSpace(string(line[1:close]))
-	if name == "" || strings.ContainsAny(name, "[]\r\n\x00") {
-		return "", false
-	}
-	rest := trimOrdinarySpaceOnly(line[close+1:])
-	if len(rest) > 0 && rest[0] != '#' && rest[0] != ';' {
-		return "", false
-	}
-	return name, true
-}
-
-func parseAnsibleInventoryValue(configPath string, line []byte, valueOffset int) (string, string, int, int, error) {
-	if valueOffset < 0 || valueOffset > len(line) {
-		return "", "", 0, 0, errors.New("invalid value offset")
-	}
-	leading := 0
-	for valueOffset+leading < len(line) && ordinarySpace(line[valueOffset+leading]) {
-		leading++
-	}
-	start := valueOffset + leading
-	if start >= len(line) || line[start] == '#' || line[start] == ';' {
-		return "", "", 0, 0, errors.New("missing inventory literal")
-	}
-	end := start
-	valueStart := start
-	valueEnd := start
-	var value []byte
-	if line[start] == '\'' || line[start] == '"' {
-		quote := line[start]
-		end = start + 1
-		for end < len(line) && line[end] != quote {
-			end++
-		}
-		if end >= len(line) {
-			return "", "", 0, 0, errors.New("unterminated inventory quote")
-		}
-		value = line[start+1 : end]
-		valueEnd = end + 1
-		end++
-	} else {
-		for end < len(line) && !ordinarySpace(line[end]) {
-			end++
-		}
-		value = line[start:end]
-		valueEnd = end
-		if bytes.IndexAny(value, "'\"") >= 0 {
-			return "", "", 0, 0, errors.New("unsupported inventory quote")
-		}
-	}
-	rest := trimOrdinarySpaceOnly(line[end:])
-	if len(rest) > 0 && rest[0] != '#' && rest[0] != ';' {
-		return "", "", 0, 0, errors.New("unsupported inventory suffix")
-	}
-	if !validAnsibleLiteral(value) {
-		return "", "", 0, 0, errors.New("unsupported inventory literal")
-	}
-	locator, err := resolveAnsibleLiteral(configPath, string(value))
+	directive, err := config.ParseAnsibleInventoryDirective(path, body)
 	if err != nil {
-		return "", "", 0, 0, err
+		return nil, err
 	}
-	return string(line[valueStart:valueEnd]), locator, valueStart, valueEnd, nil
-}
-
-func validAnsibleLiteral(value []byte) bool {
-	if len(value) == 0 || !utf8.Valid(value) || bytes.IndexAny(value, "\x00\r\n\\,$") >= 0 {
-		return false
-	}
-	text := string(value)
-	return !strings.Contains(text, "{{") && !strings.Contains(text, "}}") &&
-		!strings.Contains(text, "{%") && !strings.Contains(text, "%}") &&
-		!strings.Contains(text, "{#") && !strings.Contains(text, "#}") &&
-		!strings.Contains(text, "%(")
-}
-
-func resolveAnsibleLiteral(configPath, literal string) (string, error) {
-	path := literal
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(filepath.Dir(configPath), path)
-	}
-	absolute, err := filepath.Abs(path)
-	if err != nil || !validLocalPath(absolute) {
-		return "", errors.New("invalid inventory path")
-	}
-	return filepath.Clean(absolute), nil
+	return &ansibleConfigDocument{
+		path: path, literal: directive.Literal, value: directive.Value, locator: directive.Path,
+		body: bytes.Clone(body), valueStart: directive.ValueStart, valueEnd: directive.ValueEnd,
+	}, nil
 }
 
 func planAnsibleConfigLiteralPatch(document *ansibleConfigDocument, literal, target string) (*ansibleConfigPatch, error) {
@@ -242,34 +100,6 @@ func planAnsibleConfigLiteralPatch(document *ansibleConfigDocument, literal, tar
 		return nil, ansibleConfigFailure(document.path)
 	}
 	return &ansibleConfigPatch{document: document, candidate: candidate}, nil
-}
-
-func trimOrdinarySpace(line []byte) ([]byte, int) {
-	start := 0
-	for start < len(line) && ordinarySpace(line[start]) {
-		start++
-	}
-	end := len(line)
-	for end > start && ordinarySpace(line[end-1]) {
-		end--
-	}
-	return line[start:end], start
-}
-
-func trimOrdinarySpaceOnly(value []byte) []byte {
-	start := 0
-	for start < len(value) && ordinarySpace(value[start]) {
-		start++
-	}
-	end := len(value)
-	for end > start && ordinarySpace(value[end-1]) {
-		end--
-	}
-	return value[start:end]
-}
-
-func ordinarySpace(value byte) bool {
-	return value == ' ' || value == '\t'
 }
 
 func fileOwner(info os.FileInfo) (uint32, uint32, bool) {

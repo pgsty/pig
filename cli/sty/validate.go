@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const InventoryValidateKind = "pig.sty.inventory.validate/v1"
+const (
+	InventoryValidateKind     = "pig.sty.inventory.validate/v1"
+	RootInventoryValidateKind = "pig.inventory.validate/v1"
+)
 
 // ValidateOptions controls static and optional external inventory validation.
 type ValidateOptions struct {
@@ -19,15 +22,18 @@ type ValidateOptions struct {
 	Strict  bool
 	Ansible bool
 	Timeout time.Duration
+	// ResultKind selects the compatibility or canonical payload kind. Empty
+	// retains the released Sty delegate kind.
+	ResultKind string
 }
 
 // ValidateData is the stable structured validation payload.
 type ValidateData struct {
-	Kind        string                 `json:"kind" yaml:"kind"`
-	Path        string                 `json:"path" yaml:"path"`
-	Valid       bool                   `json:"valid" yaml:"valid"`
-	Strict      bool                   `json:"strict" yaml:"strict"`
-	Diagnostics []inventory.Diagnostic `json:"diagnostics,omitempty" yaml:"diagnostics,omitempty"`
+	Kind        string                `json:"kind" yaml:"kind"`
+	Path        string                `json:"path" yaml:"path"`
+	Valid       bool                  `json:"valid" yaml:"valid"`
+	Strict      bool                  `json:"strict" yaml:"strict"`
+	Diagnostics []InventoryDiagnostic `json:"diagnostics,omitempty" yaml:"diagnostics,omitempty"`
 }
 
 func (d *ValidateData) Text() string {
@@ -36,7 +42,7 @@ func (d *ValidateData) Text() string {
 	}
 	var lines []string
 	for _, diagnostic := range d.Diagnostics {
-		location := diagnostic.Path.String()
+		location := diagnostic.Path
 		if diagnostic.Range.Start.Line > 0 {
 			location = fmt.Sprintf("%s:%d:%d", d.Path, diagnostic.Range.Start.Line, diagnostic.Range.Start.Column)
 		}
@@ -47,6 +53,16 @@ func (d *ValidateData) Text() string {
 
 // ValidateInventory parses and validates one static YAML inventory.
 func ValidateInventory(opts ValidateOptions) *output.Result {
+	if opts.Timeout < 0 {
+		return output.Fail(output.CodeStyValidateInvalidArgs, "ansible validation timeout must be positive")
+	}
+	if !opts.Ansible && opts.Timeout > 0 {
+		return output.Fail(output.CodeStyValidateInvalidArgs, "ansible validation timeout requires --ansible")
+	}
+	kind := strings.TrimSpace(opts.ResultKind)
+	if kind == "" {
+		kind = InventoryValidateKind
+	}
 	path, source, failure := readStaticInventorySource(opts.Path, output.CodeStyValidateInvalidArgs)
 	if failure != nil {
 		return failure
@@ -54,13 +70,13 @@ func ValidateInventory(opts ValidateOptions) *output.Result {
 	doc, err := inventory.Parse(path, source)
 	if err != nil {
 		diagnostic := parseDiagnostic(err)
-		data := &ValidateData{Kind: InventoryValidateKind, Path: path, Strict: opts.Strict, Diagnostics: []inventory.Diagnostic{diagnostic}}
+		data := &ValidateData{Kind: kind, Path: path, Strict: opts.Strict, Diagnostics: inventoryDiagnostics([]inventory.Diagnostic{diagnostic})}
 		return output.Fail(output.CodeStyValidationFailed, "inventory is invalid").WithData(data)
 	}
 	diagnostics := doc.Validate(inventory.YAMLRules, inventory.AnsibleRules, inventory.PigstyRules, inventory.CompleteInventoryRules)
 	if opts.Ansible {
 		timeout := opts.Timeout
-		if timeout <= 0 {
+		if timeout == 0 {
 			timeout = 10 * time.Second
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -69,7 +85,7 @@ func ValidateInventory(opts ValidateOptions) *output.Result {
 	}
 	inventory.SortDiagnostics(diagnostics)
 	failed := inventory.HasErrors(diagnostics) || opts.Strict && hasWarnings(diagnostics)
-	data := &ValidateData{Kind: InventoryValidateKind, Path: path, Valid: !failed, Strict: opts.Strict, Diagnostics: diagnostics}
+	data := &ValidateData{Kind: kind, Path: path, Valid: !failed, Strict: opts.Strict, Diagnostics: inventoryDiagnostics(diagnostics)}
 	if failed {
 		return output.Fail(output.CodeStyValidationFailed, "inventory validation failed").WithData(data)
 	}

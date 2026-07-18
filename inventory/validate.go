@@ -163,7 +163,7 @@ func validateYAML(doc *Document) []Diagnostic {
 	return diagnostics
 }
 
-var validGroupName = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+var validGroupName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 func validateAnsible(doc *Document) []Diagnostic {
 	if doc.root == nil || doc.root.Kind != yaml.MappingNode {

@@ -2,6 +2,7 @@ package cmdb
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strconv"
 	"sync"
@@ -184,6 +185,26 @@ func (s *Store) Source() ConnectionSource {
 		return ""
 	}
 	return s.source
+}
+
+// TargetFingerprint returns a one-way identifier for the pinned database
+// identity. It is safe for plans and confirmation pinning and reveals no DSN,
+// hostname, address, database name, or credential.
+func (s *Store) TargetFingerprint() string {
+	if s == nil {
+		return ""
+	}
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
+	if s.identity == nil {
+		return ""
+	}
+	identity := s.identity
+	material := fmt.Sprintf("%s\x00%d\x00%s\x00%d\x00%d\x00%d",
+		identity.Database, identity.DatabaseOID, identity.ServerAddress, identity.ServerPort,
+		identity.ServerVersion, identity.PostmasterBoot.UnixNano())
+	sum := sha256.Sum256([]byte(material))
+	return fmt.Sprintf("sha256:%x", sum)
 }
 
 func (s *Store) Close() {

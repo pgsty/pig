@@ -65,6 +65,23 @@ func TestAnsibleConfigPatchChangesOnlyLiteralAndRejectsStaleCommit(t *testing.T)
 	}
 }
 
+func TestGuardedSourcePlanPreservesAlreadySelectedQuotedLiteral(t *testing.T) {
+	directory := symlinkFreeTempDir(t)
+	path := filepath.Join(directory, "ansible.cfg")
+	body := []byte("[defaults]\n  inventory = \"pigsty.yml\"  # preserve\n")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	document, err := readAnsibleConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch, changed, err := planGuardedInventoryLiteral(document, directory, "pigsty.yml")
+	if err != nil || changed || patch == nil || !bytes.Equal(patch.candidate, body) {
+		t.Fatalf("quoted no-op plan = %+v changed=%v err=%v", patch, changed, err)
+	}
+}
+
 func TestAnsibleConfigRejectsAmbiguousOrDynamicGrammar(t *testing.T) {
 	tests := map[string][]byte{
 		"missing defaults":    []byte("[other]\ninventory = static.yml\n"),

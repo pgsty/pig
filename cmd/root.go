@@ -55,7 +55,7 @@ var rootCmd = &cobra.Command{
 		"flags.output.choices": "text,yaml,json,json-pretty",
 	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if err := initAll(); err != nil {
+		if err := initAllForCommand(cmd); err != nil {
 			return err
 		}
 		applyStructuredOutputSilence(cmd)
@@ -64,7 +64,7 @@ var rootCmd = &cobra.Command{
 }
 
 func commandModulePreRun(cmd *cobra.Command, args []string) error {
-	if err := initAll(); err != nil {
+	if err := initAllForCommand(cmd); err != nil {
 		return err
 	}
 	applyStructuredOutputSilence(cmd)
@@ -72,15 +72,43 @@ func commandModulePreRun(cmd *cobra.Command, args []string) error {
 }
 
 func initAll() error {
+	return initAllForCommand(nil)
+}
+
+func initAllForCommand(cmd *cobra.Command) error {
 	if debug {
 		logLevel = "debug"
 	}
 	if err := initLogger(logLevel, logPath); err != nil {
 		return err
 	}
-	config.InitConfig(inventory, pigstyHome)
+	config.InitConfigWithOptions(inventory, pigstyHome, config.InitOptions{
+		CreateConfig: !inventoryCommandOwnsSource(cmd), SkipEnvironment: inventoryCommandSkipsEnvironment(cmd),
+	})
 	initOutputFormat()
 	return nil
+}
+
+func inventoryCommandSkipsEnvironment(cmd *cobra.Command) bool {
+	if !inventoryCommandOwnsSource(cmd) || cmd == nil {
+		return false
+	}
+	// Load alone mirrors the legacy OS-default/package-map phase and therefore
+	// needs controller OS detection. Other Inventory operations require only
+	// source/config discovery and must not spawn environment probes.
+	return cmd.CommandPath() != "pig inventory cmdb load"
+}
+
+// Inventory source selection is invocation-local. It must not manufacture a
+// persistent Pig config merely because an Inventory command was inspected or
+// executed. Released Sty delegates share that corrected behavior.
+func inventoryCommandOwnsSource(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	path := cmd.CommandPath()
+	return path == "pig inventory" || strings.HasPrefix(path, "pig inventory ") ||
+		path == "pig sty edit" || path == "pig sty validate"
 }
 
 // validateOutputFormat validates and normalizes the output format.

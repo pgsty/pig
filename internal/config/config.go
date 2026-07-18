@@ -19,22 +19,25 @@ import (
 )
 
 var (
-	ConfigDir     string
-	ConfigFile    string
-	HomeDir       string
-	PigstyHome    string
-	PigstyConfig  string
-	OSArch        string // CPU architecture (amd64, arm64)
-	OSCode        string // Distribution version (el8, el9, d12, u22)
-	OSType        string // rpm / deb
-	OSVendor      string // rocky/debian/ubuntu from ID
-	OSVersion     string // 7/8/9/10/11/12/13/20/22/24
-	OSMajor       int    // 7/8/9/10/11/12/13/20/22/24 (int format)
-	OSVersionFull string // 9.6 / 22.04 / 12 from VERSION_ID
-	OSVersionCode string // OS full version string
-	CurrentUser   string // current user
-	NodeHostname  string // hostname from /etc/hostname
-	NodeCPUCount  int    // cpu count from /proc/cpuinfo
+	ConfigDir    string
+	ConfigFile   string
+	HomeDir      string
+	PigstyHome   string
+	PigstyConfig string
+	// PigstyInventorySource records how PigstyConfig was selected without
+	// retaining Inventory values or executing dynamic sources.
+	PigstyInventorySource InventorySourceDescriptor
+	OSArch                string // CPU architecture (amd64, arm64)
+	OSCode                string // Distribution version (el8, el9, d12, u22)
+	OSType                string // rpm / deb
+	OSVendor              string // rocky/debian/ubuntu from ID
+	OSVersion             string // 7/8/9/10/11/12/13/20/22/24
+	OSMajor               int    // 7/8/9/10/11/12/13/20/22/24 (int format)
+	OSVersionFull         string // 9.6 / 22.04 / 12 from VERSION_ID
+	OSVersionCode         string // OS full version string
+	CurrentUser           string // current user
+	NodeHostname          string // hostname from /etc/hostname
+	NodeCPUCount          int    // cpu count from /proc/cpuinfo
 )
 
 const (
@@ -85,10 +88,25 @@ var (
 	GOARCH        = runtime.GOARCH
 )
 
-// InitConfig initializes the configuration, if inventory and pigstyHome is given as cli args,
-// if not, it will use the environment variables / config file / default values
+// InitOptions controls configuration initialization side effects.
+type InitOptions struct {
+	CreateConfig    bool
+	SkipEnvironment bool
+}
+
+// InitConfig preserves the historical initialization behavior for commands
+// that may persist Pig configuration.
 func InitConfig(inventory, pigstyHome string) {
-	DetectEnvironment()
+	InitConfigWithOptions(inventory, pigstyHome, InitOptions{CreateConfig: true})
+}
+
+// InitConfigWithOptions initializes source selection. Read-only Inventory
+// commands pass CreateConfig=false so discovery never creates ~/.pig or its
+// config file.
+func InitConfigWithOptions(inventory, pigstyHome string, options InitOptions) {
+	if !options.SkipEnvironment {
+		DetectEnvironment()
+	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		logrus.Debugf("failed to get user home directory, trying user.Current()")
@@ -105,19 +123,21 @@ func InitConfig(inventory, pigstyHome string) {
 	HomeDir = homeDir
 	ConfigDir = filepath.Join(HomeDir, ".pig")
 	ConfigFile = filepath.Join(ConfigDir, "config.yml")
-	// create that directory if not exists
-	if _, err := os.Stat(ConfigDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(ConfigDir, 0750); err != nil {
-			logrus.Warnf("failed to create config directory %s: %v", ConfigDir, err)
+	if options.CreateConfig {
+		// create that directory if not exists
+		if _, err := os.Stat(ConfigDir); os.IsNotExist(err) {
+			if err := os.MkdirAll(ConfigDir, 0750); err != nil {
+				logrus.Warnf("failed to create config directory %s: %v", ConfigDir, err)
+			}
 		}
-	}
-	// touch config file if not exists
-	if _, err := os.Stat(ConfigFile); os.IsNotExist(err) {
-		f, err := os.Create(ConfigFile)
-		if err != nil {
-			logrus.Warnf("failed to create config file %s: %v", ConfigFile, err)
-		} else {
-			_ = f.Close()
+		// touch config file if not exists
+		if _, err := os.Stat(ConfigFile); os.IsNotExist(err) {
+			f, err := os.Create(ConfigFile)
+			if err != nil {
+				logrus.Warnf("failed to create config file %s: %v", ConfigFile, err)
+			} else {
+				_ = f.Close()
+			}
 		}
 	}
 
@@ -150,16 +170,9 @@ func InitConfig(inventory, pigstyHome string) {
 	// setup pigsty home
 	PigstyHome = findPigstyHome(pigstyHome)
 
-	// setup inventory
-	PigstyConfig = findInventoryPath(inventory, PigstyHome)
-
-	// fill missing pigsty.yml if pigsty home is set
-	if PigstyHome != "" && PigstyConfig == "" {
-		candidatePath := filepath.Join(PigstyHome, "pigsty.yml")
-		if _, err := os.Stat(candidatePath); err == nil {
-			PigstyConfig = candidatePath
-		}
-	}
+	// setup inventory and retain its value-free provenance/status descriptor
+	PigstyInventorySource = resolveInventorySource(inventory, PigstyHome)
+	PigstyConfig = PigstyInventorySource.Path
 
 	// setup license with HomeDir
 	license.HomeDir = HomeDir
@@ -221,44 +234,13 @@ func validatePigstyHome(pigstyHomePath string) bool {
 }
 
 func findInventoryPath(inventory, pigstyHome string) string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "."
+	descriptor := resolveInventorySource(inventory, pigstyHome)
+	if descriptor.Path != "" {
+		logrus.Debugf("inventory selected (%s): %s", descriptor.Tier, descriptor.Path)
+	} else {
+		logrus.Debugf("inventory source is not configured: %v", descriptor.Findings)
 	}
-	choose := func(value, source, base string) string {
-		path := resolveInventoryCandidate(value, base)
-		if path != "" {
-			logrus.Debugf("inventory selected (%s): %s", source, path)
-		}
-		return path
-	}
-
-	// An invocation-specific source is authoritative even when it does not yet
-	// exist. Callers must report that concrete source instead of silently
-	// falling through to an unrelated Inventory.
-	if path := choose(inventory, "cli arg", cwd); path != "" {
-		return path
-	}
-	if path := choose(os.Getenv("PIGSTY_INVENTORY"), "environment", cwd); path != "" {
-		return path
-	}
-	if path := choose(viper.GetString("inventory"), "config", cwd); path != "" {
-		return path
-	}
-
-	if pigstyHome != "" {
-		if value, err := readAnsibleInventoryDirective(filepath.Join(pigstyHome, "ansible.cfg")); err == nil {
-			if path := choose(value, "ansible.cfg", pigstyHome); path != "" {
-				return path
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
-			logrus.Debugf("failed to read ansible.cfg inventory directive: %v", err)
-		}
-		return choose("pigsty.yml", "pigsty home default", pigstyHome)
-	}
-
-	logrus.Debugf("inventory source is not configured")
-	return ""
+	return descriptor.Path
 }
 
 func resolveInventoryCandidate(value, base string) string {
@@ -281,50 +263,14 @@ func resolveInventoryCandidate(value, base string) string {
 // in the [defaults] section. It is not a general INI parser and does not infer
 // an Inventory source from database reachability or adjacent files.
 func readAnsibleInventoryDirective(path string) (string, error) {
-	file, err := os.Open(path)
+	directive, err := ReadAnsibleInventoryDirective(path)
+	if errors.Is(err, ErrAnsibleInventoryDirectiveMissing) {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
-
-	inDefaults := false
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
-		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			inDefaults = strings.EqualFold(strings.TrimSpace(line[1:len(line)-1]), "defaults")
-			continue
-		}
-		if !inDefaults {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok || !strings.EqualFold(strings.TrimSpace(key), "inventory") {
-			continue
-		}
-		return cleanAnsibleInventoryValue(value), nil
-	}
-	if err := scanner.Err(); err != nil {
-		return "", err
-	}
-	return "", nil
-}
-
-func cleanAnsibleInventoryValue(value string) string {
-	value = strings.TrimSpace(value)
-	for index := 0; index < len(value); index++ {
-		if (value[index] == '#' || value[index] == ';') && index > 0 && (value[index-1] == ' ' || value[index-1] == '\t') {
-			value = strings.TrimSpace(value[:index])
-			break
-		}
-	}
-	if len(value) >= 2 && (value[0] == '\'' && value[len(value)-1] == '\'' || value[0] == '"' && value[len(value)-1] == '"') {
-		value = value[1 : len(value)-1]
-	}
-	return strings.TrimSpace(value)
+	return directive.Value, nil
 }
 
 // InitConfigFile will init the config file with provided path

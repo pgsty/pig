@@ -54,6 +54,7 @@ The existing projections are:
 Pig provides a thin native adapter:
 
 ```text
+pig inventory cmdb check      # verify schema, projections, and optional drift
 pig inventory cmdb init       # apply version-matched files/cmdb.sql
 pig inventory cmdb load       # fill existing tables like inventory_load
 pig inventory cmdb dump       # raw_config JSONB -> canonical YAML
@@ -61,9 +62,9 @@ pig inventory cmdb enable     # activate inventory.sh like inventory_cmdb
 pig inventory cmdb disable    # restore pigsty.yml like inventory_conf
 ```
 
-Only `init`, `load`, and `dump` are CMDB data primitives. `enable` and
-`disable` merely expose the two existing source-switch scripts; they add no
-storage semantics.
+`check` is read-only. Only `init`, `load`, and `dump` are CMDB data primitives.
+`enable` and `disable` merely expose the two existing source-switch scripts;
+they add no storage semantics.
 
 It may improve argument validation, transaction boundaries, atomic local-file
 writes, error reporting, and tests. Those improvements do not authorize a new
@@ -93,9 +94,9 @@ quotes, tags, or ordering. CMDB dump is canonical generated YAML by contract.
 The experimental revision-store implementation was removed on 2026-07-18 after
 the thin adapter passed corpus, local PostgreSQL, and pinned-container parity
 gates. `internal/cmdb` now contains only the existing-schema adapter and the
-narrow `ansible.cfg` source switch. `pig sty cmdb` delegates to the same five
-use cases exposed by `pig inventory cmdb`; it does not preserve the withdrawn
-flags or private runtime adapter.
+narrow `ansible.cfg` source switch. The unreleased `pig sty cmdb` namespace was
+removed; the six corrected operations exist only under `pig inventory cmdb`.
+No withdrawn flag or private runtime adapter is preserved.
 
 The existing Pigsty scripts remain operational entry points and the reference
 behavior for future parity checks.

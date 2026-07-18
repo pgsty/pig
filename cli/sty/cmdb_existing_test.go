@@ -66,6 +66,16 @@ func TestPreparePigstyDeclarationsRejectsNestedGroups(t *testing.T) {
 	}
 }
 
+func TestPlainInventoryValueRejectsJSONKeyCoercionCollision(t *testing.T) {
+	value := &inventory.Value{Kind: inventory.MappingValue, Mapping: []inventory.Entry{
+		{Key: inventory.Scalar{Kind: inventory.BoolScalar, Value: true}, Value: inventory.Value{Kind: inventory.NullValue}},
+		{Key: inventory.Scalar{Kind: inventory.StringScalar, Value: "true"}, Value: inventory.Value{Kind: inventory.NullValue}},
+	}}
+	if _, err := plainInventoryValue(value); err == nil || !strings.Contains(err.Error(), "collide") {
+		t.Fatalf("coercion collision error = %v", err)
+	}
+}
+
 func TestCanonicalCMDBYAMLIsBlockAndSemanticallyStable(t *testing.T) {
 	raw := []byte(`{"all":{"children":{"demo":{"hosts":{"10.10.10.10":{"note":"yes","seq":1}},"vars":{}},"empty":{"hosts":null,"vars":null}},"vars":{"region":"china","enabled":true}}}`)
 	body, err := canonicalCMDBYAML(raw)
@@ -109,6 +119,21 @@ package_map:
 	}
 	if !keys["repo_packages"] || !keys["node_packages"] {
 		t.Fatalf("mapped keys = %v", keys)
+	}
+}
+
+func TestCMDBLoadDefaultsPreflightWarnsOnlyForChangedPlan(t *testing.T) {
+	data := &InventoryCMDBData{Changed: true}
+	preflightPigstyOSDefaults(data, t.TempDir(), "el9", "amd64")
+	preflightPigstyOSDefaults(data, t.TempDir(), "el9", "amd64")
+	if !reflect.DeepEqual(data.Warnings, []string{"CMDB_DEFAULTS_UNAVAILABLE"}) {
+		t.Fatalf("warnings = %v", data.Warnings)
+	}
+
+	noop := &InventoryCMDBData{Noop: true}
+	preflightPigstyOSDefaults(noop, t.TempDir(), "el9", "amd64")
+	if len(noop.Warnings) != 0 {
+		t.Fatalf("no-op warnings = %v", noop.Warnings)
 	}
 }
 

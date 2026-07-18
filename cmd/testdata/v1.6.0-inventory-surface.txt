@@ -1,0 +1,8 @@
+# Source: git tag v1.6.0
+# Commit: 2c824971d85b0c6b9d9030832cac360948899c33
+# Inspected files: cmd/root.go cmd/sty.go
+present pig sty edit
+present pig sty validate
+absent pig inventory
+absent pig sty inventory
+absent pig sty cmdb

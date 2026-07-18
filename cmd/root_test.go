@@ -78,7 +78,6 @@ func TestRiskyCommandsRejectUndeclaredPositionals(t *testing.T) {
 		"pig postgres fork init":  "fork name",
 		"pig postgres fork rm":    "fork name",
 		"pig postgres fork stop":  "fork name",
-		"pig sty cmdb load":       "optional static Inventory file",
 		"pig sty grafana clean":   "optional local dashboard path",
 	}
 
@@ -101,6 +100,24 @@ func TestRiskyCommandsRejectUndeclaredPositionals(t *testing.T) {
 	sort.Strings(unsafe)
 	if len(unsafe) != 0 {
 		t.Fatalf("risky commands accepting undocumented positionals:\n%s", strings.Join(unsafe, "\n"))
+	}
+}
+
+func TestInventoryEnvironmentDetectionIsScopedToCMDBLoad(t *testing.T) {
+	for _, command := range []*cobra.Command{
+		inventoryStatusCmd, inventoryListCmd, inventoryShowCmd, inventoryEditCmd,
+		inventoryValidateCmd, inventoryDiffCmd, inventoryCMDBCheckCmd,
+		inventoryCMDBInitCmd, inventoryCMDBDumpCmd, inventoryCMDBEnableCmd, inventoryCMDBDisableCmd,
+	} {
+		if !inventoryCommandSkipsEnvironment(command) {
+			t.Fatalf("%s unexpectedly enables external environment probes", command.CommandPath())
+		}
+	}
+	if inventoryCommandSkipsEnvironment(inventoryCMDBLoadCmd) {
+		t.Fatal("CMDB load skipped OS detection required by OS-default parity")
+	}
+	if inventoryCommandSkipsEnvironment(installCmd) {
+		t.Fatal("non-Inventory command inherited Inventory initialization policy")
 	}
 }
 

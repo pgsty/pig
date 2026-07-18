@@ -884,6 +884,18 @@ func (d *Document) subtreeSpan(path Path) (byteSpan, error) {
 // reparses the complete candidate, and runs YAML plus Ansible structural rules.
 // Any error leaves the base Document untouched.
 func (e *Editor) Commit() (*Document, ChangeSet, error) {
+	return e.commit(true)
+}
+
+// CommitCandidate applies and reparses staged patches without enforcing the
+// default semantic rule set. It exists for targeted-repair workflows that
+// compare original and candidate diagnostics before any write. The base
+// Document remains immutable and no bytes are persisted by this method.
+func (e *Editor) CommitCandidate() (*Document, ChangeSet, error) {
+	return e.commit(false)
+}
+
+func (e *Editor) commit(validate bool) (*Document, ChangeSet, error) {
 	if e == nil || e.base == nil {
 		return nil, ChangeSet{}, errors.New("inventory editor is nil")
 	}
@@ -914,9 +926,11 @@ func (e *Editor) Commit() (*Document, ChangeSet, error) {
 	if err != nil {
 		return nil, ChangeSet{}, err
 	}
-	diagnostics := doc.Validate(YAMLRules, AnsibleRules)
-	if HasErrors(diagnostics) {
-		return nil, ChangeSet{}, &ValidationError{Diagnostics: diagnostics}
+	if validate {
+		diagnostics := doc.Validate(YAMLRules, AnsibleRules)
+		if HasErrors(diagnostics) {
+			return nil, ChangeSet{}, &ValidationError{Diagnostics: diagnostics}
+		}
 	}
 	return doc, ChangeSet{Changes: slices.Clone(e.changes)}, nil
 }

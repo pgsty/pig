@@ -50,7 +50,8 @@ M1 — Root static Inventory
   `inventory|inv`；不得创建 cmd 子目录。
 - 暴露 `list|ls`、`show`、`edit|e`、`validate|v`。
 - 复用现有 Inventory/Edit/Validate use case，不复制业务逻辑。
-- `sty inventory`、`sty edit/validate` 暂时保留为 delegate。
+- 只保留已发布的 `sty edit/validate` delegate；未发布的 `sty inventory`
+  namespace 在发布前移除。
 - `sty list/l/ls` 永远保持 Pigsty release list 语义。
 
 M2 — Thin CMDB adapter
@@ -75,7 +76,7 @@ M3 — Retire abandoned implementation
 - 只有 M2 parity 完整通过后，才移除 internal/cmdb 与 cli/sty/cmdb_* 中基于
   pigsty_cmdb revision store 的实现和测试。
 - 现有 Pigsty shell/python 脚本在 parity gate 通过前保持为 rollback path。
-- corrected `sty cmdb` 若保留，只能 delegate 到新薄适配器，不能兼容写入
+- 未发布的 `sty cmdb` namespace 在发布前移除；不得借兼容路径继续写入
   pigsty_cmdb。
 
 必须提供的验证：

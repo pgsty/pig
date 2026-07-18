@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"os"
 	stycli "pig/cli/sty"
 	"pig/internal/config"
 	"pig/internal/output"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -11,8 +13,18 @@ import (
 var (
 	inventoryValidateStrict  bool
 	inventoryValidateAnsible bool
+	inventoryValidateTimeout time.Duration
+	inventoryListDepth       int
+	inventoryEditFrom        string
 	inventoryCMDBDatabase    string
 	inventoryCMDBInitYes     bool
+	inventoryCMDBInitPlan    bool
+	inventoryCMDBLoadYes     bool
+	inventoryCMDBLoadPlan    bool
+	inventoryCMDBLoadStrict  bool
+	inventoryCMDBDumpForce   bool
+	inventoryCMDBEnablePlan  bool
+	inventoryCMDBDisablePlan bool
 )
 
 var inventoryCmd = &cobra.Command{
@@ -23,15 +35,33 @@ var inventoryCmd = &cobra.Command{
 	GroupID:     "pigsty",
 }
 
+var inventoryStatusCmd = &cobra.Command{
+	Use:         "status",
+	Short:       "Inspect the active Inventory source without executing it",
+	Annotations: ancsAnn("pig inventory status", "query", "stable", "safe", true, "safe", "none", "current", 100),
+	Args:        cobra.NoArgs,
+	RunE: func(_ *cobra.Command, _ []string) error {
+		return handleAuxResult(inventoryStatusExec(config.PigstyInventorySource))
+	},
+}
+
 var inventoryListCmd = &cobra.Command{
 	Use:         "list [selector]",
 	Aliases:     []string{"ls"},
 	Short:       "List ordered Inventory topology and value kinds",
 	Annotations: ancsAnn("pig inventory list", "query", "stable", "safe", true, "safe", "none", "current", 500),
 	Args:        cobra.MaximumNArgs(1),
-	RunE: func(_ *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		var depth *int
+		if cmd.Flags().Changed("depth") {
+			if inventoryListDepth < 0 {
+				return handleAuxResult(output.Fail(output.CodeStyInventoryListInvalidArgs, "inventory list depth must be non-negative"))
+			}
+			value := inventoryListDepth
+			depth = &value
+		}
 		return handleAuxResult(pigstyInventoryListExec(stycli.InventoryOptions{
-			Path: config.PigstyConfig, Selector: inventorySelector(args),
+			Path: config.PigstyConfig, Selector: inventorySelector(args), Depth: depth,
 		}))
 	},
 }
@@ -67,9 +97,10 @@ var inventoryEditCmd = &cobra.Command{
   pig inv e pg-meta
   pig inv e pg-meta.vars.pg_databases
   pig inv e 'pg-meta.hosts["10.10.10.10"]'`,
-	RunE: func(_ *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		return handleAuxResult(pigstyEditExec(stycli.EditOptions{
-			Path: config.PigstyConfig, Selector: inventorySelector(args),
+			Path: config.PigstyConfig, Selector: inventorySelector(args), ResultKind: stycli.InventoryEditKind,
+			From: inventoryEditFrom, FromSet: cmd.Flags().Changed("from"), Stdin: cmd.InOrStdin(),
 		}))
 	},
 }
@@ -85,14 +116,35 @@ var inventoryValidateCmd = &cobra.Command{
   pig inv v ./pigsty.yml
   pig inv v --ansible
   pig inv v --strict -o json`,
-	RunE: func(_ *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if cmd.Flags().Changed("timeout") && !inventoryValidateAnsible {
+			return handleAuxResult(output.Fail(output.CodeStyValidateInvalidArgs, "--timeout requires --ansible"))
+		}
+		if inventoryValidateTimeout <= 0 {
+			return handleAuxResult(output.Fail(output.CodeStyValidateInvalidArgs, "--timeout must be positive"))
+		}
 		path := config.PigstyConfig
 		if len(args) == 1 {
 			path = args[0]
 		}
+		timeout := time.Duration(0)
+		if inventoryValidateAnsible {
+			timeout = inventoryValidateTimeout
+		}
 		return handleAuxResult(pigstyValidateExec(stycli.ValidateOptions{
 			Path: path, Strict: inventoryValidateStrict, Ansible: inventoryValidateAnsible,
+			Timeout: timeout, ResultKind: stycli.RootInventoryValidateKind,
 		}))
+	},
+}
+
+var inventoryDiffCmd = &cobra.Command{
+	Use:         "diff <other-file>",
+	Short:       "Compare declarations without emitting Inventory values",
+	Annotations: ancsAnn("pig inventory diff", "query", "stable", "safe", true, "safe", "none", "current", 1000),
+	Args:        cobra.ExactArgs(1),
+	RunE: func(_ *cobra.Command, args []string) error {
+		return handleAuxResult(inventoryDiffExec(stycli.DiffOptions{Path: config.PigstyConfig, OtherPath: args[0]}))
 	},
 }
 
@@ -106,8 +158,23 @@ var inventoryCMDBCmd = &cobra.Command{
 	Annotations: inventoryCMDBAnnotations("pig inventory cmdb", "query", "volatile", "restricted", true, "low", "none", 100),
 	Long: `Use the existing files/cmdb.sql schema and Inventory projections.
 
-The data primitives are init, load, and dump. Enable and disable only switch
-the [defaults] inventory directive between inventory.sh and pigsty.yml.`,
+Check is read-only. Init, load, and dump are the data primitives. Enable and
+disable only guard and switch the [defaults] inventory directive between
+inventory.sh and pigsty.yml.`,
+}
+
+var inventoryCMDBCheckCmd = &cobra.Command{
+	Use:         "check [file]",
+	Short:       "Verify CMDB projections and optional Inventory equivalence",
+	Annotations: inventoryCMDBAnnotations("pig inventory cmdb check", "query", "stable", "restricted", true, "low", "none", 10000),
+	Args:        cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		options := inventoryCMDBOptions("")
+		if len(args) == 1 {
+			options.Path, options.ExplicitPath = args[0], true
+		}
+		return handleAuxResult(inventoryCMDBCheckExec(cmd.Context(), options))
+	},
 }
 
 var inventoryCMDBInitCmd = &cobra.Command{
@@ -117,7 +184,7 @@ var inventoryCMDBInitCmd = &cobra.Command{
 	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		options := inventoryCMDBOptions("")
-		options.Yes = inventoryCMDBInitYes
+		options.Yes, options.Plan = inventoryCMDBInitYes, inventoryCMDBInitPlan
 		return runInventoryCMDBInit(cmd, options, "pig inventory cmdb init --yes")
 	},
 }
@@ -125,14 +192,18 @@ var inventoryCMDBInitCmd = &cobra.Command{
 var inventoryCMDBLoadCmd = &cobra.Command{
 	Use:         "load [file]",
 	Short:       "Replace existing CMDB declaration rows from static Inventory",
-	Annotations: inventoryCMDBAnnotations("pig inventory cmdb load", "action", "volatile", "unsafe", false, "high", "recommended", 30000),
+	Annotations: inventoryCMDBAnnotations("pig inventory cmdb load", "action", "volatile", "unsafe", false, "high", "required", 30000),
 	Args:        cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := config.PigstyConfig
+		explicit := false
 		if len(args) == 1 {
-			path = args[0]
+			path, explicit = args[0], true
 		}
-		return handleAuxResult(inventoryCMDBLoadExec(cmd.Context(), inventoryCMDBOptions(path)))
+		options := inventoryCMDBOptions(path)
+		options.ExplicitPath = explicit
+		options.Yes, options.Plan, options.Strict = inventoryCMDBLoadYes, inventoryCMDBLoadPlan, inventoryCMDBLoadStrict
+		return runInventoryCMDBLoad(cmd, options, "pig inventory cmdb load --yes")
 	},
 }
 
@@ -146,7 +217,9 @@ var inventoryCMDBDumpCmd = &cobra.Command{
 		if len(args) == 1 {
 			path = args[0]
 		}
-		return runInventoryCMDBDump(cmd, inventoryCMDBOptions(path))
+		options := inventoryCMDBOptions(path)
+		options.Force = inventoryCMDBDumpForce
+		return runInventoryCMDBDump(cmd, options)
 	},
 }
 
@@ -156,7 +229,9 @@ var inventoryCMDBEnableCmd = &cobra.Command{
 	Annotations: inventoryCMDBAnnotations("pig inventory cmdb enable", "action", "volatile", "unsafe", true, "medium", "none", 10000),
 	Args:        cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		return handleAuxResult(inventoryCMDBEnableExec(cmd.Context(), inventoryCMDBOptions("")))
+		options := inventoryCMDBOptions("")
+		options.Plan = inventoryCMDBEnablePlan
+		return handleAuxResult(inventoryCMDBEnableExec(cmd.Context(), options))
 	},
 }
 
@@ -166,21 +241,42 @@ var inventoryCMDBDisableCmd = &cobra.Command{
 	Annotations: inventoryCMDBAnnotations("pig inventory cmdb disable", "action", "volatile", "unsafe", true, "medium", "none", 10000),
 	Args:        cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		return handleAuxResult(inventoryCMDBDisableExec(inventoryCMDBOptions("")))
+		options := inventoryCMDBOptions("")
+		options.Plan = inventoryCMDBDisablePlan
+		return handleAuxResult(inventoryCMDBDisableExec(options))
 	},
 }
 
 func inventoryCMDBOptions(path string) stycli.InventoryCMDBOptions {
 	return stycli.InventoryCMDBOptions{
 		Home: config.PigstyHome, Database: inventoryCMDBDatabase, Path: path,
-		OSCode: config.OSCode, OSArch: config.OSArch,
+		OSCode: config.OSCode, OSArch: config.OSArch, Source: config.PigstyInventorySource,
 	}
+}
+
+func runInventoryCMDBLoad(cmd *cobra.Command, options stycli.InventoryCMDBOptions, confirmationCommand string) error {
+	result := inventoryCMDBLoadExec(cmd.Context(), options)
+	if result != nil && result.Code == output.CodeStyCMDBConfirmationRequired && !options.Yes && !options.Plan &&
+		!config.IsStructuredOutput() && styCMDBTextInputIsTerminal() {
+		if !pinInventoryCMDBConfirmation(result, &options) {
+			return handleAuxResult(result)
+		}
+		if err := highRiskTextConfirm("This replaces all five Pigsty CMDB declaration tables.", confirmationCommand); err != nil {
+			return err
+		}
+		options.Yes = true
+		result = inventoryCMDBLoadExec(cmd.Context(), options)
+	}
+	return handleAuxResult(result)
 }
 
 func runInventoryCMDBInit(cmd *cobra.Command, options stycli.InventoryCMDBOptions, confirmationCommand string) error {
 	result := inventoryCMDBInitExec(cmd.Context(), options)
-	if result != nil && result.Code == output.CodeStyCMDBConfirmationRequired && !options.Yes &&
+	if result != nil && result.Code == output.CodeStyCMDBConfirmationRequired && !options.Yes && !options.Plan &&
 		!config.IsStructuredOutput() && styCMDBTextInputIsTerminal() {
+		if !pinInventoryCMDBConfirmation(result, &options) {
+			return handleAuxResult(result)
+		}
 		if err := highRiskTextConfirm("This replaces the existing pigsty and pglog schemas.", confirmationCommand); err != nil {
 			return err
 		}
@@ -188,6 +284,29 @@ func runInventoryCMDBInit(cmd *cobra.Command, options stycli.InventoryCMDBOption
 		result = inventoryCMDBInitExec(cmd.Context(), options)
 	}
 	return handleAuxResult(result)
+}
+
+func pinInventoryCMDBConfirmation(result *output.Result, target *stycli.InventoryCMDBOptions) bool {
+	if result == nil || target == nil {
+		return false
+	}
+	data, ok := result.Data.(*stycli.InventoryCMDBData)
+	if !ok || data == nil {
+		return false
+	}
+	target.ExpectedSourceRevision = data.SourceRevision
+	target.ExpectedTargetDigest = data.TargetDigest
+	target.ExpectedDatabaseTarget = data.DatabaseTargetDigest
+	switch data.Operation {
+	case "init":
+		value := data.ExistingSchemas
+		target.ExpectedSchemas = &value
+	case "load":
+	default:
+		return false
+	}
+	return data.SourceRevision != "" && data.DatabaseTargetDigest != "" && (data.Operation != "load" || data.TargetDigest != "") &&
+		(data.Operation != "init" || target.ExpectedSchemas != nil)
 }
 
 func runInventoryCMDBDump(cmd *cobra.Command, options stycli.InventoryCMDBOptions) error {
@@ -208,24 +327,44 @@ func inventorySelector(args []string) string {
 	return ""
 }
 
+func cmdbTextInputIsTerminal() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+var styCMDBTextInputIsTerminal = cmdbTextInputIsTerminal
+
 func addCMDBDatabaseFlags(target *string, commands ...*cobra.Command) {
 	for _, command := range commands {
 		command.Flags().StringVarP(target, "database", "d", "", "target database name, URI, or libpq conninfo (default: METADB_URL, then service=meta)")
-		command.Flags().StringVar(target, "data", "", "compatibility alias for --database")
-		_ = command.Flags().MarkDeprecated("data", "use --database")
 	}
 }
 
 func init() {
+	inventoryListCmd.Flags().IntVar(&inventoryListDepth, "depth", 0, "limit traversal depth from the selected node (non-negative)")
+	inventoryEditCmd.Flags().StringVar(&inventoryEditFrom, "from", "", "replace the selected fragment from a regular file or stdin (-)")
 	inventoryValidateCmd.Flags().BoolVar(&inventoryValidateStrict, "strict", false, "treat warnings as validation failures")
 	inventoryValidateCmd.Flags().BoolVar(&inventoryValidateAnsible, "ansible", false, "also parse with a bounded ansible-inventory adapter")
-	addCMDBDatabaseFlags(&inventoryCMDBDatabase, inventoryCMDBInitCmd, inventoryCMDBLoadCmd, inventoryCMDBDumpCmd, inventoryCMDBEnableCmd)
-	inventoryCMDBInitCmd.Flags().BoolVar(&inventoryCMDBInitYes, "yes", false, "confirm replacement of existing pigsty and pglog schemas")
-	inventoryCMDBCmd.AddCommand(inventoryCMDBInitCmd, inventoryCMDBLoadCmd, inventoryCMDBDumpCmd, inventoryCMDBEnableCmd, inventoryCMDBDisableCmd)
-	inventoryCmd.AddCommand(inventoryListCmd, inventoryShowCmd, inventoryEditCmd, inventoryValidateCmd, inventoryCMDBCmd)
+	inventoryValidateCmd.Flags().DurationVar(&inventoryValidateTimeout, "timeout", 10*time.Second, "timeout for --ansible compatibility validation")
+	addCMDBDatabaseFlags(&inventoryCMDBDatabase, inventoryCMDBCheckCmd, inventoryCMDBInitCmd, inventoryCMDBLoadCmd, inventoryCMDBDumpCmd, inventoryCMDBEnableCmd)
+	inventoryCMDBInitCmd.Flags().BoolVarP(&inventoryCMDBInitYes, "yes", "y", false, "confirm replacement of existing pigsty and pglog schemas")
+	inventoryCMDBInitCmd.Flags().BoolVar(&inventoryCMDBInitPlan, "plan", false, "inspect and report the init plan without mutation")
+	inventoryCMDBInitCmd.MarkFlagsMutuallyExclusive("plan", "yes")
+	inventoryCMDBLoadCmd.Flags().BoolVarP(&inventoryCMDBLoadYes, "yes", "y", false, "confirm replacement of all CMDB declaration rows")
+	inventoryCMDBLoadCmd.Flags().BoolVar(&inventoryCMDBLoadPlan, "plan", false, "validate and report the load plan without mutation")
+	inventoryCMDBLoadCmd.Flags().BoolVar(&inventoryCMDBLoadStrict, "strict", false, "treat Inventory validation warnings as failures")
+	inventoryCMDBLoadCmd.MarkFlagsMutuallyExclusive("plan", "yes")
+	inventoryCMDBDumpCmd.Flags().BoolVarP(&inventoryCMDBDumpForce, "force", "f", false, "replace a differing regular destination")
+	inventoryCMDBEnableCmd.Flags().BoolVar(&inventoryCMDBEnablePlan, "plan", false, "inspect the guarded source switch without writing files")
+	inventoryCMDBDisableCmd.Flags().BoolVar(&inventoryCMDBDisablePlan, "plan", false, "inspect the guarded source switch without writing files")
+	inventoryCMDBCmd.AddCommand(inventoryCMDBCheckCmd, inventoryCMDBInitCmd, inventoryCMDBLoadCmd, inventoryCMDBDumpCmd, inventoryCMDBEnableCmd, inventoryCMDBDisableCmd)
+	inventoryCmd.AddCommand(inventoryStatusCmd, inventoryListCmd, inventoryShowCmd, inventoryEditCmd, inventoryValidateCmd, inventoryDiffCmd, inventoryCMDBCmd)
 }
 
 var (
+	inventoryStatusExec      = stycli.InventoryStatus
+	inventoryDiffExec        = stycli.DiffInventory
+	inventoryCMDBCheckExec   = stycli.InventoryCMDBCheck
 	inventoryCMDBInitExec    = stycli.InventoryCMDBInit
 	inventoryCMDBLoadExec    = stycli.InventoryCMDBLoad
 	inventoryCMDBDumpExec    = stycli.InventoryCMDBDump

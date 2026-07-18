@@ -369,7 +369,7 @@ func TestCRLFAndNoTrailingNewline(t *testing.T) {
 func TestValidationDetectsStructureAndCriticalIdentity(t *testing.T) {
 	source := []byte(`all:
   children:
-    bad-group:
+    bad.group:
       hosts:
         db1: { pg_seq: one, pg_role: leader }
       vars: {}

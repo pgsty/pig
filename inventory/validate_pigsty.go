@@ -8,8 +8,9 @@ import (
 )
 
 var (
-	pigstyClusterName = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
-	pigstyDate        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	pigstyClusterName      = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+	pigstyKafkaClusterName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+	pigstyDate             = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 	userFields = map[string]string{
 		"name": "string", "password": "string", "login": "bool", "superuser": "bool",
@@ -70,6 +71,36 @@ var pigstyModuleSpecs = []moduleSpec{
 	{module: "redis", seq: "redis_node", cluster: "redis_cluster"},
 }
 
+type scopedModuleSpec struct {
+	module      string
+	cluster     string
+	sequence    string
+	extra       string
+	extraNeeded bool
+}
+
+var scopedModuleSpecs = []scopedModuleSpec{
+	{module: "kafka", cluster: "kafka_cluster", sequence: "kafka_seq", extra: "kafka_role"},
+	{module: "mongo", cluster: "mongo_cluster", sequence: "mongo_seq", extra: "mongo_pgurl", extraNeeded: true},
+}
+
+type scopedIdentityResolution struct {
+	value    *Value
+	blocked  *Value
+	path     Path
+	rangeAt  SourceRange
+	declared bool
+}
+
+type scopedModuleRecord struct {
+	spec     scopedModuleSpec
+	group    *Group
+	host     *Host
+	cluster  scopedIdentityResolution
+	sequence scopedIdentityResolution
+	extra    scopedIdentityResolution
+}
+
 func validatePigsty(doc *Document) []Diagnostic {
 	if doc.inventory == nil || doc.inventory.All == nil {
 		return nil
@@ -83,6 +114,7 @@ func validatePigsty(doc *Document) []Diagnostic {
 	}
 	v.validateGlobal(doc.inventory.All)
 	v.visitGroup(doc.inventory.All)
+	v.validateScopedModuleIdentities(doc.inventory.All)
 	return v.diagnostics
 }
 
@@ -231,6 +263,257 @@ func (v *pigstyValidator) validateRequiredModules(all *Group) {
 	name, ok := stringValue(method)
 	if ok && name == "minio" {
 		v.add("PIG_MINIO_GROUP_MISSING", SeverityWarning, Keys("all", "children", "minio"), nil, all.Range, "minio group is not declared for the selected pgBackRest method")
+	}
+}
+
+// validateScopedModuleIdentities covers only the small identity surface used
+// by Kafka and Ferret/Mongo roles. It applies declared host, then group, then
+// global values for these named keys; it is not a general Ansible effective-
+// vars resolver.
+func (v *pigstyValidator) validateScopedModuleIdentities(all *Group) {
+	if all == nil {
+		return
+	}
+	globalVars := mappingValues(all.Vars)
+	records := make(map[string]map[string][]scopedModuleRecord)
+	orders := make(map[string][]string)
+	for _, spec := range scopedModuleSpecs {
+		records[spec.module] = make(map[string][]scopedModuleRecord)
+	}
+	var visit func(*Group)
+	visit = func(group *Group) {
+		if group == nil {
+			return
+		}
+		if group.Name == "all" {
+			for _, child := range group.Children {
+				visit(child)
+			}
+			return
+		}
+		if value, exists := v.doc.Lookup(group.Path); exists && isOpaqueValue(value) {
+			return
+		}
+		groupVars := mappingValues(group.Vars)
+		for _, host := range group.Hosts {
+			if host == nil || isOpaqueValue(&host.Vars) {
+				continue
+			}
+			hostVars := mappingValues(&host.Vars)
+			for _, spec := range scopedModuleSpecs {
+				if !scopedModuleTriggered(spec, globalVars, groupVars, hostVars) {
+					continue
+				}
+				record := scopedModuleRecord{spec: spec, group: group, host: host}
+				record.cluster = resolveScopedIdentity(all.Vars, globalVars, group.Vars, groupVars, host, hostVars, spec.cluster)
+				record.sequence = resolveScopedIdentity(all.Vars, globalVars, group.Vars, groupVars, host, hostVars, spec.sequence)
+				record.extra = resolveScopedIdentity(all.Vars, globalVars, group.Vars, groupVars, host, hostVars, spec.extra)
+				if _, exists := records[spec.module][host.Name]; !exists {
+					orders[spec.module] = append(orders[spec.module], host.Name)
+				}
+				records[spec.module][host.Name] = append(records[spec.module][host.Name], record)
+			}
+		}
+		for _, child := range group.Children {
+			visit(child)
+		}
+	}
+	visit(all)
+
+	for _, spec := range scopedModuleSpecs {
+		for _, hostName := range orders[spec.module] {
+			declarations := records[spec.module][hostName]
+			if len(declarations) == 0 {
+				continue
+			}
+			candidate := declarations[0]
+			conflict := false
+			for _, declaration := range declarations[1:] {
+				if !scopedModuleRecordsEquivalent(candidate, declaration) {
+					conflict = true
+					break
+				}
+			}
+			if conflict {
+				v.add("UNVERIFIABLE", SeverityInfo, candidate.host.Path, nil, candidate.host.Range,
+					"conflicting declaration scopes prevent "+spec.module+" identity association")
+				continue
+			}
+			v.validateScopedModuleRecord(candidate)
+		}
+	}
+}
+
+func scopedModuleTriggered(spec scopedModuleSpec, scopes ...map[string]*Value) bool {
+	for _, scope := range scopes {
+		if _, exists := scope[spec.cluster]; exists {
+			return true
+		}
+		if _, exists := scope[spec.sequence]; exists {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveScopedIdentity(global *Value, globalVars map[string]*Value, group *Value, groupVars map[string]*Value, host *Host, hostVars map[string]*Value, key string) scopedIdentityResolution {
+	fallback := scopedIdentityResolution{path: host.Path.ChildKey(key), rangeAt: host.Range}
+	if value, exists := hostVars[key]; exists {
+		fallback.value, fallback.declared = value, true
+		return fallback
+	}
+	if value, exists := groupVars[key]; exists {
+		fallback.value, fallback.declared = value, true
+		return fallback
+	}
+	if isOpaqueValue(group) {
+		fallback.blocked = group
+		return fallback
+	}
+	if value, exists := globalVars[key]; exists {
+		fallback.value, fallback.declared = value, true
+		return fallback
+	}
+	if isOpaqueValue(global) {
+		fallback.blocked = global
+	}
+	return fallback
+}
+
+func scopedModuleRecordsEquivalent(left, right scopedModuleRecord) bool {
+	return scopedIdentityKey(left.cluster, false) == scopedIdentityKey(right.cluster, false) &&
+		scopedIdentityKey(left.sequence, true) == scopedIdentityKey(right.sequence, true) &&
+		scopedIdentityKey(left.extra, false) == scopedIdentityKey(right.extra, false)
+}
+
+// scopedIdentityKey is internal comparison material only. It is never emitted,
+// logged, or retained in a Result; this matters for mongo_pgurl.
+func scopedIdentityKey(resolution scopedIdentityResolution, numeric bool) string {
+	if resolution.blocked != nil {
+		return "blocked"
+	}
+	if !resolution.declared || resolution.value == nil {
+		return "missing"
+	}
+	if isOpaqueValue(resolution.value) {
+		return "opaque"
+	}
+	if numeric {
+		if number, ok := nonNegativeInteger(resolution.value); ok {
+			return fmt.Sprintf("number:%d", number)
+		}
+		return "invalid-number"
+	}
+	if text, ok := stringValue(resolution.value); ok {
+		return "string:" + text
+	}
+	return "invalid-string"
+}
+
+func (v *pigstyValidator) validateScopedModuleRecord(record scopedModuleRecord) {
+	cluster, clusterOK := v.validateScopedCluster(record)
+	sequence, sequenceOK := v.validateScopedSequence(record)
+	v.validateScopedExtra(record)
+	if !clusterOK || !sequenceOK {
+		return
+	}
+	scope := record.spec.sequence + "\x00" + cluster
+	if v.seenSeq[scope] == nil {
+		v.seenSeq[scope] = make(map[uint64]string)
+	}
+	if previous, exists := v.seenSeq[scope][sequence]; exists && previous != record.host.Name {
+		code := "PIG_" + strings.ToUpper(record.spec.module) + "_SEQ_DUPLICATE"
+		v.add(code, SeverityError, record.sequence.path, record.sequence.value, record.sequence.rangeAt,
+			fmt.Sprintf("%s is duplicated by hosts %q and %q for one declared cluster", record.spec.sequence, previous, record.host.Name))
+		return
+	}
+	v.seenSeq[scope][sequence] = record.host.Name
+}
+
+func (v *pigstyValidator) validateScopedCluster(record scopedModuleRecord) (string, bool) {
+	resolution := record.cluster
+	prefix := "PIG_" + strings.ToUpper(record.spec.module) + "_CLUSTER"
+	if resolution.blocked != nil {
+		v.unverifiable(resolution.blocked, record.spec.cluster+" association")
+		return "", false
+	}
+	if !resolution.declared || resolution.value == nil {
+		v.add(prefix+"_REQUIRED", SeverityError, resolution.path, nil, resolution.rangeAt,
+			fmt.Sprintf("host %q requires %s", record.host.Name, record.spec.cluster))
+		return "", false
+	}
+	if v.unverifiable(resolution.value, record.spec.cluster) {
+		return "", false
+	}
+	name, ok := stringValue(resolution.value)
+	valid := ok && name != "" && strings.TrimSpace(name) == name
+	if record.spec.module == "kafka" {
+		valid = valid && pigstyKafkaClusterName.MatchString(name)
+	}
+	if !valid {
+		v.add(prefix, SeverityError, resolution.path, resolution.value, resolution.rangeAt,
+			record.spec.cluster+" must be a non-empty cluster identifier")
+		return "", false
+	}
+	return name, true
+}
+
+func (v *pigstyValidator) validateScopedSequence(record scopedModuleRecord) (uint64, bool) {
+	resolution := record.sequence
+	prefix := "PIG_" + strings.ToUpper(record.spec.module) + "_SEQ"
+	if resolution.blocked != nil {
+		v.unverifiable(resolution.blocked, record.spec.sequence+" association")
+		return 0, false
+	}
+	if !resolution.declared || resolution.value == nil {
+		v.add(prefix+"_REQUIRED", SeverityError, resolution.path, nil, resolution.rangeAt,
+			fmt.Sprintf("host %q requires %s", record.host.Name, record.spec.sequence))
+		return 0, false
+	}
+	if v.unverifiable(resolution.value, record.spec.sequence) {
+		return 0, false
+	}
+	sequence, ok := nonNegativeInteger(resolution.value)
+	if !ok {
+		v.add(prefix, SeverityError, resolution.path, resolution.value, resolution.rangeAt,
+			record.spec.sequence+" must be a non-negative integer")
+		return 0, false
+	}
+	return sequence, true
+}
+
+func (v *pigstyValidator) validateScopedExtra(record scopedModuleRecord) {
+	resolution := record.extra
+	prefix := "PIG_" + strings.ToUpper(record.spec.module)
+	if resolution.blocked != nil {
+		if record.spec.extraNeeded {
+			v.unverifiable(resolution.blocked, record.spec.extra+" association")
+		}
+		return
+	}
+	if !resolution.declared || resolution.value == nil {
+		if record.spec.extraNeeded {
+			v.add(prefix+"_PGURL_REQUIRED", SeverityError, resolution.path, nil, resolution.rangeAt,
+				fmt.Sprintf("host %q requires %s", record.host.Name, record.spec.extra))
+		}
+		return
+	}
+	if v.unverifiable(resolution.value, record.spec.extra) {
+		return
+	}
+	text, ok := stringValue(resolution.value)
+	valid := ok && text != "" && strings.TrimSpace(text) == text
+	if record.spec.module == "kafka" {
+		valid = ok && (text == "combined" || text == "broker" || text == "controller")
+	}
+	if !valid {
+		code := prefix + "_PGURL"
+		message := record.spec.extra + " must be a non-empty string"
+		if record.spec.module == "kafka" {
+			code = prefix + "_ROLE"
+			message = "kafka_role must be combined, broker, or controller when declared"
+		}
+		v.add(code, SeverityError, resolution.path, resolution.value, resolution.rangeAt, message)
 	}
 }
 

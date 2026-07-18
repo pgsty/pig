@@ -3,6 +3,9 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	stycli "pig/cli/sty"
@@ -19,6 +22,7 @@ func TestInventoryRootCommandTree(t *testing.T) {
 	}{
 		{[]string{"inventory"}, inventoryCmd},
 		{[]string{"inv"}, inventoryCmd},
+		{[]string{"inventory", "status"}, inventoryStatusCmd},
 		{[]string{"inventory", "list"}, inventoryListCmd},
 		{[]string{"inv", "ls"}, inventoryListCmd},
 		{[]string{"inventory", "show"}, inventoryShowCmd},
@@ -26,7 +30,9 @@ func TestInventoryRootCommandTree(t *testing.T) {
 		{[]string{"inv", "e"}, inventoryEditCmd},
 		{[]string{"inventory", "validate"}, inventoryValidateCmd},
 		{[]string{"inv", "v"}, inventoryValidateCmd},
+		{[]string{"inventory", "diff"}, inventoryDiffCmd},
 		{[]string{"inventory", "cmdb"}, inventoryCMDBCmd},
+		{[]string{"inv", "cmdb", "check"}, inventoryCMDBCheckCmd},
 		{[]string{"inv", "cmdb", "init"}, inventoryCMDBInitCmd},
 		{[]string{"inv", "cmdb", "load"}, inventoryCMDBLoadCmd},
 		{[]string{"inv", "cmdb", "dump"}, inventoryCMDBDumpCmd},
@@ -45,19 +51,56 @@ func TestInventoryRootCommandTree(t *testing.T) {
 	if inventoryCmd.Run != nil || inventoryCmd.RunE != nil {
 		t.Fatal("bare inventory must only print help")
 	}
-	for _, flag := range []string{"strict", "ansible"} {
+	for _, flag := range []string{"strict", "ansible", "timeout"} {
 		if inventoryValidateCmd.Flags().Lookup(flag) == nil {
 			t.Fatalf("inventory validate missing --%s", flag)
+		}
+	}
+	if inventoryListCmd.Flags().Lookup("depth") == nil || inventoryEditCmd.Flags().Lookup("from") == nil {
+		t.Fatal("inventory list/edit usability flags are missing")
+	}
+}
+
+func TestV160InventoryCompatibilityFixture(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "v1.6.0-inventory-surface.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{}
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		state, command, ok := strings.Cut(line, " ")
+		if !ok || state != "present" && state != "absent" {
+			t.Fatalf("invalid compatibility fixture line %q", line)
+		}
+		want[command] = state == "present"
+	}
+	for command, present := range want {
+		args := strings.Fields(strings.TrimPrefix(command, "pig "))
+		found, remaining, findErr := rootCmd.Find(args)
+		registered := findErr == nil && found != nil && len(remaining) == 0 && found.CommandPath() == command
+		if !present && command == "pig inventory" {
+			if !registered {
+				t.Fatalf("canonical root Inventory introduced after v1.6.0 is not registered: found=%v remaining=%v err=%v", found, remaining, findErr)
+			}
+			continue
+		}
+		if registered != present {
+			t.Fatalf("v1.6.0 compatibility %q registered=%v, want %v (found=%v remaining=%v err=%v)", command, registered, present, found, remaining, findErr)
 		}
 	}
 }
 
 func TestInventoryCMDBCommandOptions(t *testing.T) {
-	for _, command := range []*cobra.Command{inventoryCMDBInitCmd, inventoryCMDBLoadCmd, inventoryCMDBDumpCmd, inventoryCMDBEnableCmd} {
-		for _, flag := range []string{"database", "data"} {
-			if command.Flags().Lookup(flag) == nil {
-				t.Fatalf("%s missing --%s", command.CommandPath(), flag)
-			}
+	for _, command := range []*cobra.Command{inventoryCMDBCheckCmd, inventoryCMDBInitCmd, inventoryCMDBLoadCmd, inventoryCMDBDumpCmd, inventoryCMDBEnableCmd} {
+		if command.Flags().Lookup("database") == nil {
+			t.Fatalf("%s missing --database", command.CommandPath())
+		}
+		if command.Flags().Lookup("data") != nil {
+			t.Fatalf("%s retains unreleased --data", command.CommandPath())
 		}
 	}
 	if inventoryCMDBInitCmd.Flags().Lookup("database").Shorthand != "d" {
@@ -69,30 +112,67 @@ func TestInventoryCMDBCommandOptions(t *testing.T) {
 	if inventoryCMDBInitCmd.Flags().Lookup("yes") == nil {
 		t.Fatal("inventory cmdb init missing --yes")
 	}
+	for _, item := range []struct {
+		command *cobra.Command
+		flags   []string
+	}{
+		{inventoryCMDBInitCmd, []string{"plan", "yes"}},
+		{inventoryCMDBLoadCmd, []string{"plan", "yes", "strict"}},
+		{inventoryCMDBDumpCmd, []string{"force"}},
+		{inventoryCMDBEnableCmd, []string{"plan"}},
+		{inventoryCMDBDisableCmd, []string{"plan"}},
+	} {
+		for _, name := range item.flags {
+			if item.command.Flags().Lookup(name) == nil {
+				t.Fatalf("%s missing --%s", item.command.CommandPath(), name)
+			}
+		}
+	}
+	if inventoryCMDBInitCmd.Flags().Lookup("yes").Shorthand != "y" || inventoryCMDBLoadCmd.Flags().Lookup("yes").Shorthand != "y" ||
+		inventoryCMDBDumpCmd.Flags().Lookup("force").Shorthand != "f" {
+		t.Fatal("CMDB confirmation/overwrite shorthands differ from the contract")
+	}
 	if inventoryCMDBCmd.Commands()[0].Parent() != inventoryCMDBCmd {
 		t.Fatal("CMDB subcommands are not attached")
 	}
 }
 
 func TestInventoryCMDBCommandsDelegate(t *testing.T) {
+	originalCheck := inventoryCMDBCheckExec
 	originalInit, originalLoad := inventoryCMDBInitExec, inventoryCMDBLoadExec
 	originalDump := inventoryCMDBDumpExec
 	originalEnable, originalDisable := inventoryCMDBEnableExec, inventoryCMDBDisableExec
-	originalHome, originalConfig := config.PigstyHome, config.PigstyConfig
+	originalHome, originalConfig, originalSource := config.PigstyHome, config.PigstyConfig, config.PigstyInventorySource
 	originalOSCode, originalOSArch := config.OSCode, config.OSArch
 	originalDatabase, originalYes := inventoryCMDBDatabase, inventoryCMDBInitYes
 	defer func() {
+		inventoryCMDBCheckExec = originalCheck
 		inventoryCMDBInitExec, inventoryCMDBLoadExec = originalInit, originalLoad
 		inventoryCMDBDumpExec = originalDump
 		inventoryCMDBEnableExec, inventoryCMDBDisableExec = originalEnable, originalDisable
-		config.PigstyHome, config.PigstyConfig = originalHome, originalConfig
+		config.PigstyHome, config.PigstyConfig, config.PigstyInventorySource = originalHome, originalConfig, originalSource
 		config.OSCode, config.OSArch = originalOSCode, originalOSArch
 		inventoryCMDBDatabase, inventoryCMDBInitYes = originalDatabase, originalYes
 		inventoryCMDBDumpCmd.SetOut(nil)
 	}()
 	config.PigstyHome, config.PigstyConfig = "/tmp/pigsty", "/tmp/pigsty/pigsty.yml"
+	config.PigstyInventorySource = config.InventorySourceDescriptor{Type: config.InventorySourceStaticYAML, Path: config.PigstyConfig}
 	config.OSCode, config.OSArch = "el9", "amd64"
 	inventoryCMDBDatabase, inventoryCMDBInitYes = "meta-test", true
+
+	var checked stycli.InventoryCMDBOptions
+	inventoryCMDBCheckExec = func(_ context.Context, options stycli.InventoryCMDBOptions) *output.Result {
+		checked = options
+		return output.OK("checked", nil)
+	}
+	_ = captureStdout(t, func() {
+		if err := inventoryCMDBCheckCmd.RunE(inventoryCMDBCheckCmd, []string{"/tmp/check.yml"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !checked.ExplicitPath || checked.Path != "/tmp/check.yml" || checked.Database != "meta-test" {
+		t.Fatalf("check options = %+v", checked)
+	}
 
 	var initialized stycli.InventoryCMDBOptions
 	inventoryCMDBInitExec = func(_ context.Context, options stycli.InventoryCMDBOptions) *output.Result {
@@ -118,7 +198,8 @@ func TestInventoryCMDBCommandsDelegate(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if loaded.Path != "/tmp/explicit.yml" || loaded.OSCode != "el9" || loaded.OSArch != "amd64" {
+	if loaded.Path != "/tmp/explicit.yml" || !loaded.ExplicitPath || loaded.OSCode != "el9" || loaded.OSArch != "amd64" ||
+		loaded.Source.Type != config.InventorySourceStaticYAML {
 		t.Fatalf("load options = %+v", loaded)
 	}
 
@@ -159,20 +240,125 @@ func TestInventoryCMDBCommandsDelegate(t *testing.T) {
 	}
 }
 
+func TestInventoryCMDBLoadConfirmationIsTTYOnlyAndRechecksPlan(t *testing.T) {
+	originalExec := inventoryCMDBLoadExec
+	originalTerminal := styCMDBTextInputIsTerminal
+	originalConfirm := highRiskTextConfirm
+	originalFormat := config.OutputFormat
+	defer func() {
+		inventoryCMDBLoadExec = originalExec
+		styCMDBTextInputIsTerminal = originalTerminal
+		highRiskTextConfirm = originalConfirm
+		config.OutputFormat = originalFormat
+	}()
+	config.OutputFormat = config.OUTPUT_TEXT
+	styCMDBTextInputIsTerminal = func() bool { return true }
+	confirmed := 0
+	highRiskTextConfirm = func(warning, action string) error {
+		confirmed++
+		if !strings.Contains(warning, "five") || action != "pig inventory cmdb load --yes" {
+			t.Fatalf("confirmation = %q / %q", warning, action)
+		}
+		return nil
+	}
+	calls := 0
+	inventoryCMDBLoadExec = func(_ context.Context, options stycli.InventoryCMDBOptions) *output.Result {
+		calls++
+		if !options.Yes {
+			return output.Fail(output.CodeStyCMDBConfirmationRequired, "confirmation required").WithData(&stycli.InventoryCMDBData{
+				Operation: "load", SourceRevision: "sha256:source", TargetDigest: "sha256:target", DatabaseTargetDigest: "sha256:database",
+			})
+		}
+		if options.ExpectedSourceRevision != "sha256:source" || options.ExpectedTargetDigest != "sha256:target" ||
+			options.ExpectedDatabaseTarget != "sha256:database" {
+			t.Fatalf("confirmation did not pin the displayed load plan: %+v", options)
+		}
+		return output.OK("loaded", nil)
+	}
+	_ = captureStdout(t, func() {
+		if err := runInventoryCMDBLoad(inventoryCMDBLoadCmd, stycli.InventoryCMDBOptions{}, "pig inventory cmdb load --yes"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if calls != 2 || confirmed != 1 {
+		t.Fatalf("interactive calls=%d confirmations=%d", calls, confirmed)
+	}
+
+	config.OutputFormat = config.OUTPUT_JSON
+	calls, confirmed = 0, 0
+	_ = captureStdout(t, func() {
+		if err := runInventoryCMDBLoad(inventoryCMDBLoadCmd, stycli.InventoryCMDBOptions{}, "pig inventory cmdb load --yes"); err == nil {
+			t.Fatal("structured changed load executed without --yes")
+		}
+	})
+	if calls != 1 || confirmed != 0 {
+		t.Fatalf("structured calls=%d confirmations=%d", calls, confirmed)
+	}
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	calls, confirmed = 0, 0
+	_ = captureStdout(t, func() {
+		if err := runInventoryCMDBLoad(inventoryCMDBLoadCmd, stycli.InventoryCMDBOptions{Plan: true}, "pig inventory cmdb load --yes"); err == nil {
+			t.Fatal("synthetic confirmation failure in plan mode should remain a failure")
+		}
+	})
+	if calls != 1 || confirmed != 0 {
+		t.Fatalf("plan calls=%d confirmations=%d", calls, confirmed)
+	}
+}
+
+func TestPinInventoryCMDBInitConfirmation(t *testing.T) {
+	options := stycli.InventoryCMDBOptions{}
+	result := output.Fail(output.CodeStyCMDBConfirmationRequired, "confirmation required").WithData(&stycli.InventoryCMDBData{
+		Operation: "init", SourceRevision: "sha256:baseline", DatabaseTargetDigest: "sha256:database", ExistingSchemas: 2,
+	})
+	if !pinInventoryCMDBConfirmation(result, &options) {
+		t.Fatal("init confirmation plan was not pinnable")
+	}
+	if options.ExpectedSourceRevision != "sha256:baseline" || options.ExpectedDatabaseTarget != "sha256:database" ||
+		options.ExpectedSchemas == nil || *options.ExpectedSchemas != 2 {
+		t.Fatalf("pinned init options = %+v", options)
+	}
+}
+
 func TestInventoryRootDelegatesToExistingUseCases(t *testing.T) {
+	originalStatus := inventoryStatusExec
+	originalDiff := inventoryDiffExec
 	originalList, originalShow := pigstyInventoryListExec, pigstyInventoryShowExec
 	originalEdit, originalValidate := pigstyEditExec, pigstyValidateExec
 	originalPath, originalFormat := config.PigstyConfig, config.OutputFormat
+	originalSource := config.PigstyInventorySource
 	originalStrict, originalAnsible := inventoryValidateStrict, inventoryValidateAnsible
 	defer func() {
+		inventoryStatusExec = originalStatus
+		inventoryDiffExec = originalDiff
 		pigstyInventoryListExec, pigstyInventoryShowExec = originalList, originalShow
 		pigstyEditExec, pigstyValidateExec = originalEdit, originalValidate
 		config.PigstyConfig, config.OutputFormat = originalPath, originalFormat
+		config.PigstyInventorySource = originalSource
 		inventoryValidateStrict, inventoryValidateAnsible = originalStrict, originalAnsible
 		inventoryShowCmd.SetOut(nil)
 	}()
 
 	config.PigstyConfig, config.OutputFormat = "/tmp/active.yml", config.OUTPUT_TEXT
+	config.PigstyInventorySource = config.InventorySourceDescriptor{
+		Tier: config.InventorySourceFlag, Type: config.InventorySourceStaticYAML,
+		Path: config.PigstyConfig, Exists: true, Readable: true,
+	}
+
+	var inspected config.InventorySourceDescriptor
+	inventoryStatusExec = func(source config.InventorySourceDescriptor) *output.Result {
+		inspected = source
+		return output.OK("inspected", nil)
+	}
+	_ = captureStdout(t, func() {
+		if err := inventoryStatusCmd.RunE(inventoryStatusCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if inspected.Path != config.PigstyConfig || inspected.Type != config.InventorySourceStaticYAML {
+		t.Fatalf("status source = %+v", inspected)
+	}
 
 	var listed stycli.InventoryOptions
 	pigstyInventoryListExec = func(options stycli.InventoryOptions) *output.Result {
@@ -186,6 +372,20 @@ func TestInventoryRootDelegatesToExistingUseCases(t *testing.T) {
 	})
 	if listed.Path != config.PigstyConfig || listed.Selector != "pg-meta" {
 		t.Fatalf("list options = %+v", listed)
+	}
+
+	var compared stycli.DiffOptions
+	inventoryDiffExec = func(options stycli.DiffOptions) *output.Result {
+		compared = options
+		return output.OK("compared", nil)
+	}
+	_ = captureStdout(t, func() {
+		if err := inventoryDiffCmd.RunE(inventoryDiffCmd, []string{"/tmp/other.yml"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if compared.Path != config.PigstyConfig || compared.OtherPath != "/tmp/other.yml" {
+		t.Fatalf("diff options = %+v", compared)
 	}
 
 	pigstyInventoryShowExec = func(options stycli.InventoryOptions) ([]byte, *output.Result) {
@@ -213,7 +413,7 @@ func TestInventoryRootDelegatesToExistingUseCases(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if edited.Path != config.PigstyConfig || edited.Selector != "vars" {
+	if edited.Path != config.PigstyConfig || edited.Selector != "vars" || edited.ResultKind != stycli.InventoryEditKind {
 		t.Fatalf("edit options = %+v", edited)
 	}
 
@@ -228,7 +428,7 @@ func TestInventoryRootDelegatesToExistingUseCases(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if validated.Path != "/tmp/explicit.yml" || !validated.Strict || !validated.Ansible {
+	if validated.Path != "/tmp/explicit.yml" || !validated.Strict || !validated.Ansible || validated.Timeout <= 0 || validated.ResultKind != stycli.RootInventoryValidateKind {
 		t.Fatalf("validate options = %+v", validated)
 	}
 }

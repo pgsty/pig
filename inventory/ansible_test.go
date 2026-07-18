@@ -78,7 +78,7 @@ func TestPigstyConfCorpusWithAnsible(t *testing.T) {
 		t.Skip("ansible-inventory is not installed")
 	}
 	root := pigstyConfCorpus(t)
-	for _, path := range yamlCorpusFiles(t, root) {
+	for _, path := range pigstyValidationCorpusFiles(t, root) {
 		doc, err := Load(path)
 		if err != nil {
 			t.Errorf("%s: %v", path, err)

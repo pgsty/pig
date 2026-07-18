@@ -360,8 +360,142 @@ func TestPigstyRulesDoNotResolveEffectiveVars(t *testing.T) {
 	}
 }
 
+func TestCanonicalHyphenatedGroupNamesDoNotWarn(t *testing.T) {
+	doc, err := Parse("hyphen.yml", []byte(`all:
+  children:
+    pg-meta:
+      hosts:
+        10.0.0.1: {}
+  vars: {}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, diagnostic := range doc.Validate(AnsibleRules) {
+		if diagnostic.Code == "INV_GROUP_NAME" {
+			t.Fatalf("canonical hyphenated group warned: %+v", diagnostic)
+		}
+	}
+}
+
+func TestKafkaAndMongoIdentityRulesAcceptParameterScopedDeclarations(t *testing.T) {
+	doc, err := Parse("module-identities.yml", []byte(`all:
+  children:
+    kf-main:
+      hosts:
+        10.0.0.1: { kafka_seq: 1 }
+        10.0.0.2: { kafka_seq: 2 }
+      vars: { kafka_cluster: kf-main }
+    pg-mongo:
+      hosts:
+        10.0.0.3: { mongo_seq: 0 }
+      vars:
+        mongo_cluster: ferret
+        mongo_pgurl: postgres:///
+  vars:
+    version: v4.4.0
+    admin_ip: 10.0.0.1
+    region: default
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostics := doc.Validate(YAMLRules, AnsibleRules, PigstyRules, CompleteInventoryRules)
+	if HasErrors(diagnostics) {
+		t.Fatalf("valid Kafka/Mongo declarations failed: %+v", diagnostics)
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "INV_GROUP_NAME" {
+			t.Fatalf("co-located module group warned: %+v", diagnostic)
+		}
+	}
+}
+
+func TestKafkaAndMongoIdentityRulesRejectInvalidDeclarations(t *testing.T) {
+	doc, err := Parse("invalid-module-identities.yml", []byte(`all:
+  children:
+    kafka-a:
+      hosts:
+        10.0.0.1: { kafka_seq: 1, kafka_role: invalid }
+        10.0.0.2: { kafka_seq: 1 }
+        10.0.0.3: { kafka_seq: -1 }
+      vars: { kafka_cluster: kf-a }
+    kafka-missing-cluster:
+      hosts:
+        10.0.0.4: { kafka_seq: 4 }
+    mongo-a:
+      hosts:
+        10.0.0.5: { mongo_seq: 0 }
+        10.0.0.6: { mongo_seq: 0 }
+        10.0.0.7: { mongo_seq: -1 }
+      vars: { mongo_cluster: ferret, mongo_pgurl: '' }
+    mongo-missing-url:
+      hosts:
+        10.0.0.8: { mongo_seq: 8 }
+      vars: { mongo_cluster: ferret-b }
+  vars:
+    version: v4.4.0
+    admin_ip: 10.0.0.1
+    region: default
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostics := doc.Validate(YAMLRules, AnsibleRules, PigstyRules, CompleteInventoryRules)
+	for _, code := range []string{
+		"PIG_KAFKA_CLUSTER_REQUIRED", "PIG_KAFKA_ROLE", "PIG_KAFKA_SEQ", "PIG_KAFKA_SEQ_DUPLICATE",
+		"PIG_MONGO_PGURL", "PIG_MONGO_PGURL_REQUIRED", "PIG_MONGO_SEQ", "PIG_MONGO_SEQ_DUPLICATE",
+	} {
+		if !hasDiagnostic(diagnostics, code) {
+			t.Errorf("missing %s in %+v", code, diagnostics)
+		}
+	}
+}
+
+func TestKafkaAndMongoRulesDoNotTriggerFromGroupNames(t *testing.T) {
+	doc, err := Parse("module-name-only.yml", []byte(`all:
+  children:
+    kafka:
+      hosts: { 10.0.0.1: {} }
+    mongo:
+      hosts: { 10.0.0.2: {} }
+  vars:
+    admin_ip: 10.0.0.1
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, diagnostic := range doc.Validate(PigstyRules) {
+		if strings.Contains(diagnostic.Code, "KAFKA") || strings.Contains(diagnostic.Code, "MONGO") {
+			t.Fatalf("module group name triggered identity rules: %+v", diagnostic)
+		}
+	}
+}
+
+func TestOpaqueKafkaIdentityIsUnverifiableNotMissing(t *testing.T) {
+	doc, err := Parse("opaque-kafka.yml", []byte(`all:
+  children:
+    mixed:
+      hosts: { 10.0.0.1: { kafka_seq: 1 } }
+      vars: { kafka_cluster: !vault opaque }
+  vars:
+    admin_ip: 10.0.0.1
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostics := doc.Validate(PigstyRules)
+	if HasErrors(diagnostics) || !hasDiagnostic(diagnostics, "UNVERIFIABLE") {
+		t.Fatalf("opaque Kafka identity diagnostics = %+v", diagnostics)
+	}
+	if hasDiagnostic(diagnostics, "PIG_KAFKA_CLUSTER_REQUIRED") {
+		t.Fatalf("opaque Kafka cluster was treated as missing: %+v", diagnostics)
+	}
+}
+
 type corpusBaseline struct {
 	Schema                  string         `json:"schema"`
+	Files                   []string       `json:"files"`
 	InventoryPaths          int            `json:"inventory_paths"`
 	RegularYAMLFiles        int            `json:"regular_yaml_files"`
 	SymlinkedInventoryPaths int            `json:"symlinked_inventory_paths"`
@@ -377,10 +511,22 @@ func TestPigstyConfCorpusValidationBaseline(t *testing.T) {
 	}
 	root = requireCorpusDirectory(t, root)
 	baseline := readJSONFixture[corpusBaseline](t, filepath.Join("testdata", "validate", "corpus-baseline.json"))
-	if baseline.Schema != "pig.sty.validate.corpus-baseline/v1" {
+	if baseline.Schema != "pig.inventory.validate.corpus-baseline/v2" {
 		t.Fatalf("unexpected baseline schema %q", baseline.Schema)
 	}
-	files := yamlCorpusFiles(t, root)
+	files := pigstyValidationCorpusFiles(t, root)
+	relativeFiles := make([]string, 0, len(files))
+	for _, path := range files {
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		relativeFiles = append(relativeFiles, filepath.ToSlash(relative))
+	}
+	added, removed := stringSetDifference(relativeFiles, baseline.Files)
+	if len(added) > 0 || len(removed) > 0 {
+		t.Fatalf("corpus manifest drift: added=%v removed=%v", added, removed)
+	}
 	regular, symlinks := 0, 0
 	warnings := make(map[string]int)
 	infoCounts := make(map[string]int)
@@ -416,6 +562,39 @@ func TestPigstyConfCorpusValidationBaseline(t *testing.T) {
 	if errorsCount != baseline.Errors || !reflect.DeepEqual(warnings, baseline.Warnings) || !reflect.DeepEqual(infoCounts, baseline.Info) {
 		t.Fatalf("corpus diagnostics errors=%d warnings=%v info=%v; baseline errors=%d warnings=%v info=%v", errorsCount, warnings, infoCounts, baseline.Errors, baseline.Warnings, baseline.Info)
 	}
+}
+
+func pigstyValidationCorpusFiles(t *testing.T, root string) []string {
+	t.Helper()
+	files := yamlCorpusFiles(t, root)
+	active := filepath.Join(filepath.Dir(root), "pigsty.yml")
+	if info, err := os.Lstat(active); err == nil && !info.IsDir() {
+		files = append(files, active)
+	}
+	sort.Strings(files)
+	return files
+}
+
+func stringSetDifference(actual, expected []string) (added, removed []string) {
+	actualSet := make(map[string]struct{}, len(actual))
+	expectedSet := make(map[string]struct{}, len(expected))
+	for _, item := range actual {
+		actualSet[item] = struct{}{}
+	}
+	for _, item := range expected {
+		expectedSet[item] = struct{}{}
+	}
+	for _, item := range actual {
+		if _, exists := expectedSet[item]; !exists {
+			added = append(added, item)
+		}
+	}
+	for _, item := range expected {
+		if _, exists := actualSet[item]; !exists {
+			removed = append(removed, item)
+		}
+	}
+	return added, removed
 }
 
 func legacyPython(t *testing.T) (string, bool) {

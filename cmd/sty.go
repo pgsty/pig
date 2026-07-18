@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"pig/cli/ext"
 	stycli "pig/cli/sty"
 	"pig/internal/config"
@@ -48,8 +47,6 @@ var (
 	pigstyGrafanaAll          bool
 	pigstyGrafanaYes          bool
 	pigstyGrafanaDryRun       bool
-	pigstyCMDBDatabase        string
-	pigstyCMDBInitYes         bool
 
 	pigstyDownloadDir string
 	pigstyVersion     string
@@ -68,17 +65,12 @@ var styCmd = &cobra.Command{
   pig sty init    [-mpfvd]        # install pigsty (~/pigsty by default)
   pig sty boot    [-rmpk]         # install ansible and prepare offline pkg
   pig sty conf    [-cvmrsoxnpg --raw] # configure pigsty and generate config
-  pig sty inventory list [selector]     # list ordered, redacted inventory metadata
-  pig sty inventory show [selector]     # show verbatim YAML in text mode
-  pig sty inventory edit [selector]     # edit inventory or one YAML fragment
-  pig sty inventory validate [file]     # validate a Pigsty inventory
+  pig sty edit [selector]               # deprecated delegate to inventory edit
   pig sty validate [file]               # delegate to inventory validate
   pig sty check                         # local readiness; remote profiles are opt-in
   pig sty grafana info|list|boot          # inspect or bootstrap Grafana
   pig sty grafana load|init|dump|clean    # manage Grafana dashboards
   pig sty grafana lang|style              # set language or visual style
-  pig sty cmdb init|load|dump             # compatibility: existing Pigsty CMDB
-  pig sty cmdb enable|disable             # compatibility: switch Inventory source
   pig sty deploy                  # use pigsty to deploy everything (CAUTION!)
   pig sty get                     # download pigsty source tarball
   pig sty list                    # list available pigsty versions
@@ -250,40 +242,6 @@ var pigstyConfCmd = &cobra.Command{
 	},
 }
 
-var pigstyInventoryCmd = &cobra.Command{
-	Use:         "inventory",
-	Aliases:     []string{"inv"},
-	Short:       "Inspect and edit the active Pigsty Inventory",
-	Annotations: ancsAnn("pig sty inventory", "query", "stable", "safe", true, "safe", "none", "current", 100),
-}
-
-var pigstyInventoryListCmd = &cobra.Command{
-	Use:         "list [selector]",
-	Short:       "List ordered Inventory topology and value kinds",
-	Annotations: ancsAnn("pig sty inventory list", "query", "stable", "safe", true, "safe", "none", "current", 500),
-	Args:        cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return handleAuxResult(pigstyInventoryListExec(stycli.InventoryOptions{Path: config.PigstyConfig, Selector: styInventorySelector(args)}))
-	},
-}
-
-var pigstyInventoryShowCmd = &cobra.Command{
-	Use:         "show [selector]",
-	Short:       "Show verbatim Inventory YAML (may contain secrets)",
-	Annotations: ancsAnn("pig sty inventory show", "query", "stable", "safe", true, "low", "none", "current", 500),
-	Args:        cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		body, failure := pigstyInventoryShowExec(stycli.InventoryOptions{Path: config.PigstyConfig, Selector: styInventorySelector(args)})
-		if failure != nil {
-			return handleAuxResult(failure)
-		}
-		if _, err := cmd.OutOrStdout().Write(body); err != nil {
-			return handleAuxResult(output.Fail(output.CodeStyInventoryReadFailed, "failed to write inventory output"))
-		}
-		return nil
-	},
-}
-
 const styInventoryEditLong = `Edit the active static Inventory through a private, revision-checked fragment.
 
 The committed file is replaced atomically and is owned by the user running Pig.
@@ -304,15 +262,6 @@ var pigstyEditCmd = &cobra.Command{
 	RunE: runPigstyInventoryEdit,
 }
 
-var pigstyInventoryEditCmd = &cobra.Command{
-	Use:         "edit [selector]",
-	Short:       "Edit Pigsty inventory or a selected YAML fragment",
-	Annotations: ancsAnn("pig sty inventory edit", "action", "volatile", "unsafe", false, "medium", "none", "current", 30000),
-	Args:        cobra.MaximumNArgs(1),
-	Long:        styInventoryEditLong,
-	RunE:        runPigstyInventoryEdit,
-}
-
 func runPigstyInventoryEdit(_ *cobra.Command, args []string) error {
 	return handleAuxResult(pigstyEditExec(stycli.EditOptions{Path: config.PigstyConfig, Selector: styInventorySelector(args)}))
 }
@@ -328,19 +277,6 @@ const styInventoryValidateLong = `Validate one complete static Pigsty Inventory 
 
 The validator analyzes declarations only; it does not resolve Ansible effective
 variables. --ansible adds a bounded compatibility parse whose stdout is discarded.`
-
-var pigstyInventoryValidateCmd = &cobra.Command{
-	Use:         "validate [file]",
-	Short:       "Validate a complete static Pigsty Inventory",
-	Annotations: ancsAnn("pig sty inventory validate", "query", "stable", "safe", true, "safe", "none", "current", 1000),
-	Args:        cobra.MaximumNArgs(1),
-	Long:        styInventoryValidateLong,
-	Example: `  pig sty inventory validate
-  pig sty inventory validate ./pigsty.yml
-  pig sty inventory validate --ansible
-  pig sty inventory validate --strict -o json`,
-	RunE: runPigstyInventoryValidate,
-}
 
 var pigstyValidateCmd = &cobra.Command{
 	Use:         "validate [file]",
@@ -408,90 +344,6 @@ var pigstyCheckCmd = &cobra.Command{
 		}))
 	},
 }
-
-var pigstyCMDBCmd = &cobra.Command{
-	Use:         "cmdb",
-	Short:       "Compatibility entry for pig inventory cmdb",
-	Annotations: inventoryCMDBAnnotations("pig sty cmdb", "query", "volatile", "restricted", true, "low", "none", 100),
-	Long: `Compatibility entry for Pigsty's existing PostgreSQL CMDB.
-
-The data primitives are init, load, and dump. Enable and disable only switch
-the [defaults] inventory directive between inventory.sh and pigsty.yml.
-New automation should use pig inventory cmdb.`,
-}
-
-var pigstyCMDBInitCmd = &cobra.Command{
-	Use:         "init",
-	Short:       "Apply the version-matched Pigsty files/cmdb.sql",
-	Annotations: mergeAnn(inventoryCMDBAnnotations("pig sty cmdb init", "action", "volatile", "unsafe", false, "critical", "required", 30000), map[string]string{"plan": "reports replacement scope before confirmation"}),
-	Args:        cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, _ []string) error {
-		options := styCMDBOptions("")
-		options.Yes = pigstyCMDBInitYes
-		return runInventoryCMDBInit(cmd, options, "pig sty cmdb init --yes")
-	},
-}
-
-var pigstyCMDBLoadCmd = &cobra.Command{
-	Use:         "load [file]",
-	Short:       "Replace existing CMDB declaration rows from static Inventory",
-	Annotations: inventoryCMDBAnnotations("pig sty cmdb load", "action", "volatile", "unsafe", false, "high", "recommended", 30000),
-	Args:        cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		path := config.PigstyConfig
-		if len(args) == 1 {
-			path = args[0]
-		}
-		return handleAuxResult(inventoryCMDBLoadExec(cmd.Context(), styCMDBOptions(path)))
-	},
-}
-
-var pigstyCMDBDumpCmd = &cobra.Command{
-	Use:         "dump [file]",
-	Short:       "Generate canonical YAML from pigsty.raw_config",
-	Annotations: inventoryCMDBAnnotations("pig sty cmdb dump", "query", "stable", "restricted", true, "low", "none", 30000),
-	Args:        cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		path := ""
-		if len(args) == 1 {
-			path = args[0]
-		}
-		return runInventoryCMDBDump(cmd, styCMDBOptions(path))
-	},
-}
-
-var pigstyCMDBEnableCmd = &cobra.Command{
-	Use:         "enable",
-	Short:       "Activate inventory.sh backed by pigsty.inventory",
-	Annotations: inventoryCMDBAnnotations("pig sty cmdb enable", "action", "volatile", "unsafe", true, "medium", "none", 10000),
-	Args:        cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, _ []string) error {
-		return handleAuxResult(inventoryCMDBEnableExec(cmd.Context(), styCMDBOptions("")))
-	},
-}
-
-var pigstyCMDBDisableCmd = &cobra.Command{
-	Use:         "disable",
-	Short:       "Restore the ansible.cfg Inventory source to pigsty.yml",
-	Annotations: inventoryCMDBAnnotations("pig sty cmdb disable", "action", "volatile", "unsafe", true, "medium", "none", 10000),
-	Args:        cobra.NoArgs,
-	RunE: func(_ *cobra.Command, _ []string) error {
-		return handleAuxResult(inventoryCMDBDisableExec(styCMDBOptions("")))
-	},
-}
-
-func styCMDBOptions(path string) stycli.InventoryCMDBOptions {
-	return stycli.InventoryCMDBOptions{
-		Home: config.PigstyHome, Database: pigstyCMDBDatabase, Path: path,
-		OSCode: config.OSCode, OSArch: config.OSArch,
-	}
-}
-func cmdbTextInputIsTerminal() bool {
-	info, err := os.Stdin.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
-
-var styCMDBTextInputIsTerminal = cmdbTextInputIsTerminal
 
 var pigstyGrafanaCmd = &cobra.Command{
 	Use:         "grafana",
@@ -886,7 +738,6 @@ func init() {
 
 	addStyConfigureFlags(pigstyConfCmd)
 	pigstyConfCmd.Flags().BoolVar(&pigstyConfRaw, "raw", false, "use raw shell configure implementation")
-	addStyValidateFlags(pigstyInventoryValidateCmd)
 	addStyValidateFlags(pigstyValidateCmd)
 	pigstyCheckCmd.Flags().StringSliceVarP(&pigstyCheckProfiles, "profile", "p", nil, "additional profile: ansible, network, or ssh")
 	pigstyCheckCmd.Flags().BoolVar(&pigstyCheckSudo, "sudo", false, "with the ssh profile, also observe sudo -n true")
@@ -901,8 +752,6 @@ func init() {
 	pigstyGrafanaCleanCmd.Flags().BoolVar(&pigstyGrafanaAll, "all", false, "delete every live dashboard and folder; mutually exclusive with PATH")
 	pigstyGrafanaCleanCmd.Flags().BoolVarP(&pigstyGrafanaYes, "yes", "y", false, "confirm the displayed deletion scope")
 	pigstyGrafanaCleanCmd.Flags().BoolVar(&pigstyGrafanaDryRun, "dry-run", false, "print the deletion plan without applying it")
-	addCMDBDatabaseFlags(&pigstyCMDBDatabase, pigstyCMDBInitCmd, pigstyCMDBLoadCmd, pigstyCMDBDumpCmd, pigstyCMDBEnableCmd)
-	pigstyCMDBInitCmd.Flags().BoolVarP(&pigstyCMDBInitYes, "yes", "y", false, "confirm replacement of existing pigsty and pglog schemas")
 	pigstyGetcmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
 	pigstyGetcmd.Flags().BoolVarP(&pigstyGetMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
@@ -912,13 +761,11 @@ func init() {
 	pigstyReleaseGetCmd.Flags().BoolVarP(&pigstyGetMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 	pigstyReleaseListCmd.Flags().BoolVarP(&pigstyListMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
-	pigstyInventoryCmd.AddCommand(pigstyInventoryListCmd, pigstyInventoryShowCmd, pigstyInventoryEditCmd, pigstyInventoryValidateCmd)
 	pigstyGrafanaCmd.AddCommand(
 		pigstyGrafanaInfoCmd, pigstyGrafanaListCmd, pigstyGrafanaBootCmd,
 		pigstyGrafanaLoadCmd, pigstyGrafanaInitCmd, pigstyGrafanaDumpCmd, pigstyGrafanaCleanCmd,
 		pigstyGrafanaLangCmd, pigstyGrafanaStyleCmd,
 	)
-	pigstyCMDBCmd.AddCommand(pigstyCMDBInitCmd, pigstyCMDBLoadCmd, pigstyCMDBDumpCmd, pigstyCMDBEnableCmd, pigstyCMDBDisableCmd)
 	pigstyReleaseCmd.AddCommand(pigstyReleaseListCmd, pigstyReleaseGetCmd)
-	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyInventoryCmd, pigstyEditCmd, pigstyValidateCmd, pigstyCheckCmd, pigstyGrafanaCmd, pigstyCMDBCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
+	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyEditCmd, pigstyValidateCmd, pigstyCheckCmd, pigstyGrafanaCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
 }
