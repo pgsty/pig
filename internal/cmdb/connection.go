@@ -29,6 +29,8 @@ const (
 	ConnectionFileSource ConnectionSource = "connection-file"
 	ConnectionEnvSource  ConnectionSource = "environment"
 	ConnectionMetaSource ConnectionSource = "service:meta"
+	ConnectionArgSource  ConnectionSource = "argument"
+	ConnectionURLSource  ConnectionSource = "environment:METADB_URL"
 )
 
 // ResolvedConnection keeps the connection value private to this package.
@@ -175,6 +177,7 @@ type targetIdentity struct {
 type Store struct {
 	pool       *pgxpool.Pool
 	source     ConnectionSource
+	connection string
 	timeouts   Timeouts
 	identityMu sync.Mutex
 	identity   *targetIdentity
@@ -213,7 +216,7 @@ func Open(ctx context.Context, resolved ResolvedConnection, options OpenOptions)
 	config.ConnConfig.RuntimeParams["lock_timeout"] = durationMilliseconds(timeouts.Lock)
 	config.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = durationMilliseconds(timeouts.Transaction)
 
-	store := &Store{source: resolved.source, timeouts: timeouts}
+	store := &Store{source: resolved.source, connection: resolved.value, timeouts: timeouts}
 	config.AfterConnect = store.verifyConnectionIdentity
 	connectCtx, cancel := context.WithTimeout(ctx, timeouts.Connect)
 	defer cancel()
@@ -236,7 +239,7 @@ func (s *Store) verifyConnectionIdentity(ctx context.Context, connection *pgx.Co
 	var identity targetIdentity
 	err := connection.QueryRow(ctx, `
 SELECT current_database(), d.oid, COALESCE(inet_server_addr()::text, 'local'),
-       inet_server_port(), current_setting('server_version_num')::integer,
+       COALESCE(inet_server_port(), 0), current_setting('server_version_num')::integer,
        pg_postmaster_start_time()
   FROM pg_database AS d
  WHERE d.datname = current_database()`).Scan(

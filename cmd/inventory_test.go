@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	stycli "pig/cli/sty"
@@ -25,6 +26,12 @@ func TestInventoryRootCommandTree(t *testing.T) {
 		{[]string{"inv", "e"}, inventoryEditCmd},
 		{[]string{"inventory", "validate"}, inventoryValidateCmd},
 		{[]string{"inv", "v"}, inventoryValidateCmd},
+		{[]string{"inventory", "cmdb"}, inventoryCMDBCmd},
+		{[]string{"inv", "cmdb", "init"}, inventoryCMDBInitCmd},
+		{[]string{"inv", "cmdb", "load"}, inventoryCMDBLoadCmd},
+		{[]string{"inv", "cmdb", "dump"}, inventoryCMDBDumpCmd},
+		{[]string{"inv", "cmdb", "enable"}, inventoryCMDBEnableCmd},
+		{[]string{"inv", "cmdb", "disable"}, inventoryCMDBDisableCmd},
 		{[]string{"i"}, installCmd},
 	} {
 		found, _, err := rootCmd.Find(test.args)
@@ -42,6 +49,108 @@ func TestInventoryRootCommandTree(t *testing.T) {
 		if inventoryValidateCmd.Flags().Lookup(flag) == nil {
 			t.Fatalf("inventory validate missing --%s", flag)
 		}
+	}
+}
+
+func TestInventoryCMDBCommandOptions(t *testing.T) {
+	for _, flag := range []string{"database", "data"} {
+		if inventoryCMDBCmd.PersistentFlags().Lookup(flag) == nil {
+			t.Fatalf("inventory cmdb missing --%s", flag)
+		}
+	}
+	if inventoryCMDBCmd.PersistentFlags().Lookup("database").Shorthand != "d" {
+		t.Fatal("inventory cmdb --database must use -d")
+	}
+	if inventoryCMDBInitCmd.Flags().Lookup("yes") == nil {
+		t.Fatal("inventory cmdb init missing --yes")
+	}
+	if inventoryCMDBCmd.Commands()[0].Parent() != inventoryCMDBCmd {
+		t.Fatal("CMDB subcommands are not attached")
+	}
+}
+
+func TestInventoryCMDBCommandsDelegate(t *testing.T) {
+	originalInit, originalLoad := inventoryCMDBInitExec, inventoryCMDBLoadExec
+	originalDump := inventoryCMDBDumpExec
+	originalEnable, originalDisable := inventoryCMDBEnableExec, inventoryCMDBDisableExec
+	originalHome, originalConfig := config.PigstyHome, config.PigstyConfig
+	originalOSCode, originalOSArch := config.OSCode, config.OSArch
+	originalDatabase, originalYes := inventoryCMDBDatabase, inventoryCMDBInitYes
+	defer func() {
+		inventoryCMDBInitExec, inventoryCMDBLoadExec = originalInit, originalLoad
+		inventoryCMDBDumpExec = originalDump
+		inventoryCMDBEnableExec, inventoryCMDBDisableExec = originalEnable, originalDisable
+		config.PigstyHome, config.PigstyConfig = originalHome, originalConfig
+		config.OSCode, config.OSArch = originalOSCode, originalOSArch
+		inventoryCMDBDatabase, inventoryCMDBInitYes = originalDatabase, originalYes
+		inventoryCMDBDumpCmd.SetOut(nil)
+	}()
+	config.PigstyHome, config.PigstyConfig = "/tmp/pigsty", "/tmp/pigsty/pigsty.yml"
+	config.OSCode, config.OSArch = "el9", "amd64"
+	inventoryCMDBDatabase, inventoryCMDBInitYes = "meta-test", true
+
+	var initialized stycli.InventoryCMDBOptions
+	inventoryCMDBInitExec = func(_ context.Context, options stycli.InventoryCMDBOptions) *output.Result {
+		initialized = options
+		return output.OK("initialized", nil)
+	}
+	_ = captureStdout(t, func() {
+		if err := inventoryCMDBInitCmd.RunE(inventoryCMDBInitCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if initialized.Home != config.PigstyHome || initialized.Database != "meta-test" || !initialized.Yes {
+		t.Fatalf("init options = %+v", initialized)
+	}
+
+	var loaded stycli.InventoryCMDBOptions
+	inventoryCMDBLoadExec = func(_ context.Context, options stycli.InventoryCMDBOptions) *output.Result {
+		loaded = options
+		return output.OK("loaded", nil)
+	}
+	_ = captureStdout(t, func() {
+		if err := inventoryCMDBLoadCmd.RunE(inventoryCMDBLoadCmd, []string{"/tmp/explicit.yml"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if loaded.Path != "/tmp/explicit.yml" || loaded.OSCode != "el9" || loaded.OSArch != "amd64" {
+		t.Fatalf("load options = %+v", loaded)
+	}
+
+	inventoryCMDBDumpExec = func(_ context.Context, options stycli.InventoryCMDBOptions) ([]byte, *output.Result) {
+		if options.Path != "" || options.Database != "meta-test" {
+			t.Fatalf("dump options = %+v", options)
+		}
+		return []byte("all: {}\n"), output.OK("dumped", nil)
+	}
+	var dump bytes.Buffer
+	inventoryCMDBDumpCmd.SetOut(&dump)
+	if err := inventoryCMDBDumpCmd.RunE(inventoryCMDBDumpCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if dump.String() != "all: {}\n" {
+		t.Fatalf("dump stdout = %q", dump.String())
+	}
+
+	var enabled, disabled stycli.InventoryCMDBOptions
+	inventoryCMDBEnableExec = func(_ context.Context, options stycli.InventoryCMDBOptions) *output.Result {
+		enabled = options
+		return output.OK("enabled", nil)
+	}
+	inventoryCMDBDisableExec = func(options stycli.InventoryCMDBOptions) *output.Result {
+		disabled = options
+		return output.OK("disabled", nil)
+	}
+	_ = captureStdout(t, func() {
+		if err := inventoryCMDBEnableCmd.RunE(inventoryCMDBEnableCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := inventoryCMDBDisableCmd.RunE(inventoryCMDBDisableCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if enabled.Home != config.PigstyHome || disabled.Home != config.PigstyHome {
+		t.Fatalf("source options: enabled=%+v disabled=%+v", enabled, disabled)
 	}
 }
 

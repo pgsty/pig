@@ -64,20 +64,21 @@ func TestRiskyCommandsRejectUndeclaredPositionals(t *testing.T) {
 	// These commands intentionally consume a positional operand. Raw restore
 	// and initdb operands still have their own "--" placement validation.
 	allowed := map[string]string{
-		"pig do node-rm":         "node selector(s)",
-		"pig do pgsql-rm":        "cluster and instance selector(s)",
-		"pig do redis-rm":        "redis selector and port(s)",
-		"pig patroni failover":   "optional failover candidate",
-		"pig patroni reinit":     "required member name",
-		"pig patroni restart":    "optional member name",
-		"pig pgbackrest restore": "raw pgBackRest args after --",
-		"pig pitr":               "raw pgBackRest args after --",
-		"pig postgres clone":     "source and destination database names",
-		"pig postgres fork":      "legacy fork target or action",
-		"pig postgres fork init": "fork name",
-		"pig postgres fork rm":   "fork name",
-		"pig postgres fork stop": "fork name",
-		"pig sty cmdb load":      "optional static Inventory file",
+		"pig do node-rm":          "node selector(s)",
+		"pig do pgsql-rm":         "cluster and instance selector(s)",
+		"pig do redis-rm":         "redis selector and port(s)",
+		"pig patroni failover":    "optional failover candidate",
+		"pig patroni reinit":      "required member name",
+		"pig patroni restart":     "optional member name",
+		"pig pgbackrest restore":  "raw pgBackRest args after --",
+		"pig pitr":                "raw pgBackRest args after --",
+		"pig inventory cmdb load": "optional static Inventory file",
+		"pig postgres clone":      "source and destination database names",
+		"pig postgres fork":       "legacy fork target or action",
+		"pig postgres fork init":  "fork name",
+		"pig postgres fork rm":    "fork name",
+		"pig postgres fork stop":  "fork name",
+		"pig sty cmdb load":       "optional static Inventory file",
 	}
 
 	var unsafe []string
