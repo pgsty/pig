@@ -308,12 +308,14 @@ func confirmLevel(confirm string) int {
 
 // TestAnnotationsSemanticConsistency verifies that Annotations values are
 // semantically consistent according to the ANCS rules:
-// 1. query commands have risk <= low
-// 2. high/critical risk commands have confirm >= recommended
-// 3. critical risk commands have confirm = required
-// 4. all enum values are valid
-// 5. cost is a non-negative integer
-// 6. name field is consistent with command path
+//  1. query commands have risk <= low
+//  2. high/critical risk commands have confirm >= recommended unless an
+//     explicit command invocation is itself the documented consent boundary
+//  3. critical risk commands have confirm = required
+//  4. all enum values are valid
+//  5. cost is a non-negative integer
+//  6. name field is consistent with command path
+//
 // (AC#6: 语义一致性验证测试)
 func TestAnnotationsSemanticConsistency(t *testing.T) {
 	cmds := allCommands(rootCmd)
@@ -336,8 +338,12 @@ func TestAnnotationsSemanticConsistency(t *testing.T) {
 			}
 
 			// Rule 2: high/critical risk commands must have confirm >= recommended
-			if riskLevel(schema.Risk) >= riskLevel("high") && confirmLevel(schema.Confirm) < confirmLevel("recommended") {
+			invocationConsent := ann["consent"] == "invocation"
+			if riskLevel(schema.Risk) >= riskLevel("high") && confirmLevel(schema.Confirm) < confirmLevel("recommended") && !invocationConsent {
 				t.Errorf("risk=%q but confirm=%q (expected recommended or required)", schema.Risk, schema.Confirm)
+			}
+			if invocationConsent && (schema.Type != "action" || schema.Confirm != "none") {
+				t.Errorf("consent=invocation requires action type and confirm=none")
 			}
 
 			// Rule 3: critical risk commands must have confirm = required

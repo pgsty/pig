@@ -1,4 +1,4 @@
-package sty
+package inventorycli
 
 import (
 	"bytes"
@@ -111,7 +111,7 @@ func TestEditInvalidCandidateAndCASNeverOverwrite(t *testing.T) {
 			edit: func(_ string, fragment string) error {
 				return os.WriteFile(fragment, []byte("- not-a-mapping\n"), 0600)
 			},
-			code: output.CodeStyInventoryInvalid,
+			code: output.CodeInventoryInvalid,
 		},
 		{
 			name: "cas",
@@ -125,7 +125,7 @@ func TestEditInvalidCandidateAndCASNeverOverwrite(t *testing.T) {
 				}
 				return os.WriteFile(fragment, bytes.Replace(content, []byte("default"), []byte("china"), 1), 0600)
 			},
-			code: output.CodeStyEditConflict,
+			code: output.CodeInventoryEditConflict,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -244,7 +244,7 @@ func TestEditRefusesSymlinkInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := Edit(EditOptions{Path: link, Editor: "test-editor"})
-	if result.Success || result.Code != output.CodeStyEditInvalidArgs {
+	if result.Success || result.Code != output.CodeInventoryEditInvalidArgs {
 		t.Fatalf("symlink edit result = %+v", result)
 	}
 	content, err := os.ReadFile(target)
@@ -310,7 +310,7 @@ func TestEditAllowsTargetedRepairButBlocksSelectedErrors(t *testing.T) {
 	result = Edit(EditOptions{
 		Path: path, Selector: "/all/children/pgsql/hosts/10.0.0.2", Editor: "test-editor",
 	})
-	if result == nil || result.Success || result.Code != output.CodeStyInventoryInvalid {
+	if result == nil || result.Success || result.Code != output.CodeInventoryInvalid {
 		t.Fatalf("selected error was not blocked: %+v", result)
 	}
 	retained := strings.TrimPrefix(result.Detail, "edited fragment retained at ")
@@ -338,7 +338,7 @@ func TestEditFromStdinIsNonInteractiveAndStructuredSafe(t *testing.T) {
 		return errors.New("editor must not run for --from")
 	}
 	result := Edit(EditOptions{
-		Path: path, Selector: "vars.region", From: "-", Stdin: strings.NewReader("china\n"), ResultKind: InventoryEditKind,
+		Path: path, Selector: "vars.region", From: "-", Stdin: strings.NewReader("china\n"),
 	})
 	if result == nil || !result.Success {
 		t.Fatalf("Edit --from - failed: %+v", result)
@@ -374,14 +374,14 @@ func TestEditFromRejectsReplacementSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := Edit(EditOptions{Path: path, Selector: "vars.region", From: link})
-	if result == nil || result.Success || result.Code != output.CodeStyEditInvalidArgs {
+	if result == nil || result.Success || result.Code != output.CodeInventoryEditInvalidArgs {
 		t.Fatalf("replacement symlink result = %+v", result)
 	}
 }
 
 func TestEditFromExplicitEmptyValueIsInvalid(t *testing.T) {
 	result := Edit(EditOptions{Path: "unused.yml", FromSet: true})
-	if result == nil || result.Success || result.Code != output.CodeStyEditInvalidArgs {
+	if result == nil || result.Success || result.Code != output.CodeInventoryEditInvalidArgs {
 		t.Fatalf("explicit empty --from result = %+v", result)
 	}
 }
@@ -391,7 +391,7 @@ func TestEditRejectsStructuredOutput(t *testing.T) {
 	defer func() { config.OutputFormat = original }()
 	config.OutputFormat = config.OUTPUT_JSON
 	result := Edit(EditOptions{Path: "unused.yml"})
-	if result.Success || result.Code != output.CodeStyEditInvalidArgs {
+	if result.Success || result.Code != output.CodeInventoryEditInvalidArgs {
 		t.Fatalf("structured Edit result = %+v", result)
 	}
 }
@@ -409,15 +409,15 @@ func TestValidateInventoryDiagnosticsAndStrictWarnings(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := ValidateInventory(ValidateOptions{Path: invalid})
-	if result.Success || result.Code != output.CodeStyValidationFailed {
+	if result.Success || result.Code != output.CodeInventoryValidationFailed {
 		t.Fatalf("ValidateInventory result = %+v", result)
 	}
 	data, ok := result.Data.(*ValidateData)
 	if !ok {
 		t.Fatalf("validation data type = %T", result.Data)
 	}
-	if data.Kind != InventoryValidateKind {
-		t.Fatalf("validation kind = %q, want %q", data.Kind, InventoryValidateKind)
+	if data.Kind != "pig.inventory.validate/v1" {
+		t.Fatalf("validation kind = %q, want canonical root kind", data.Kind)
 	}
 	want := map[string]bool{"PIG_ADMIN_IP": false, "PIG_HOST_IP": false, "PIG_PG_CLUSTER": false, "PIG_SEQ_TYPE": false, "PIG_PG_ROLE": false, "PIG_PG_UPSTREAM": false}
 	for _, diagnostic := range data.Diagnostics {
@@ -473,7 +473,7 @@ func TestValidateMalformedYAMLReturnsStableDiagnostic(t *testing.T) {
 
 func TestValidateRequiresCompleteStaticInventorySource(t *testing.T) {
 	dir := t.TempDir()
-	if result := ValidateInventory(ValidateOptions{Path: dir}); result.Success || result.Code != output.CodeStyValidateInvalidArgs {
+	if result := ValidateInventory(ValidateOptions{Path: dir}); result.Success || result.Code != output.CodeInventoryValidateInvalidArgs {
 		t.Fatalf("directory validation result = %+v", result)
 	}
 
@@ -481,7 +481,7 @@ func TestValidateRequiresCompleteStaticInventorySource(t *testing.T) {
 	if err := os.WriteFile(dynamic, []byte("#!/bin/sh\necho all:\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if result := ValidateInventory(ValidateOptions{Path: dynamic}); result.Success || result.Code != output.CodeStyValidateInvalidArgs {
+	if result := ValidateInventory(ValidateOptions{Path: dynamic}); result.Success || result.Code != output.CodeInventoryValidateInvalidArgs {
 		t.Fatalf("dynamic validation result = %+v", result)
 	}
 
@@ -506,7 +506,7 @@ func TestValidateRequiresCompleteStaticInventorySource(t *testing.T) {
 }
 
 func TestValidatePigstyConfCorpus(t *testing.T) {
-	root := pigstyConfTestRoot(t)
+	root := inventoryConfTestRoot(t)
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -523,6 +523,29 @@ func TestValidatePigstyConfCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func inventoryConfTestRoot(t *testing.T) string {
+	t.Helper()
+	if configured := os.Getenv("PIGSTY_CONF_DIR"); configured != "" {
+		info, err := os.Stat(configured)
+		if err != nil || !info.IsDir() {
+			t.Fatalf("PIGSTY_CONF_DIR %q is not a directory: %v", configured, err)
+		}
+		return filepath.Clean(configured)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidate := filepath.Join(home, "pigsty", "conf")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return filepath.Clean(candidate)
+		}
+	}
+	candidate := filepath.Join("..", "..", "..", "pigsty", "conf")
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return filepath.Clean(candidate)
+	}
+	t.Skip("Pigsty conf corpus is unavailable; set PIGSTY_CONF_DIR to enable it")
+	return ""
 }
 
 func TestEditChangeSetDoesNotContainValues(t *testing.T) {
@@ -599,7 +622,7 @@ func TestListInventoryOrderedMetadataNeverContainsValues(t *testing.T) {
 		}
 	}
 	negative := -1
-	if result := ListInventory(InventoryOptions{Path: path, Depth: &negative}); result.Success || result.Code != output.CodeStyInventoryListInvalidArgs {
+	if result := ListInventory(InventoryOptions{Path: path, Depth: &negative}); result.Success || result.Code != output.CodeInventoryListInvalidArgs {
 		t.Fatalf("negative depth result = %+v", result)
 	}
 }
@@ -659,7 +682,7 @@ func TestShowInventoryIsVerbatimAndBodyStaysOutsideResult(t *testing.T) {
 
 	config.OutputFormat = config.OUTPUT_JSON
 	body, failure = ShowInventory(InventoryOptions{Path: path})
-	if len(body) != 0 || failure == nil || failure.Code != output.CodeStyInventoryShowInvalidArgs || failure.ExitCode() != 2 {
+	if len(body) != 0 || failure == nil || failure.Code != output.CodeInventoryShowInvalidArgs || failure.ExitCode() != 2 {
 		t.Fatalf("structured show body=%q failure=%+v", body, failure)
 	}
 	rendered, err := failure.JSON()
@@ -673,13 +696,13 @@ func TestShowInventoryIsVerbatimAndBodyStaysOutsideResult(t *testing.T) {
 
 func TestInventoryQueriesRejectNonStaticSource(t *testing.T) {
 	directory := t.TempDir()
-	if result := ListInventory(InventoryOptions{Path: directory}); result.Success || result.Code != output.CodeStyInventoryListInvalidArgs {
+	if result := ListInventory(InventoryOptions{Path: directory}); result.Success || result.Code != output.CodeInventoryListInvalidArgs {
 		t.Fatalf("directory list result = %+v", result)
 	}
 	originalFormat := config.OutputFormat
 	defer func() { config.OutputFormat = originalFormat }()
 	config.OutputFormat = config.OUTPUT_TEXT
-	if body, result := ShowInventory(InventoryOptions{Path: directory}); len(body) != 0 || result == nil || result.Code != output.CodeStyInventoryShowInvalidArgs {
+	if body, result := ShowInventory(InventoryOptions{Path: directory}); len(body) != 0 || result == nil || result.Code != output.CodeInventoryShowInvalidArgs {
 		t.Fatalf("directory show body=%q result=%+v", body, result)
 	}
 
@@ -687,10 +710,10 @@ func TestInventoryQueriesRejectNonStaticSource(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("#!/usr/bin/env python3\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if result := ListInventory(InventoryOptions{Path: executable}); result.Success || result.Code != output.CodeStyInventoryListInvalidArgs || !strings.Contains(result.Message, "dynamic") {
+	if result := ListInventory(InventoryOptions{Path: executable}); result.Success || result.Code != output.CodeInventoryListInvalidArgs || !strings.Contains(result.Message, "dynamic") {
 		t.Fatalf("dynamic list result = %+v", result)
 	}
-	if result := Edit(EditOptions{Path: directory, Editor: "test-editor"}); result.Success || result.Code != output.CodeStyEditInvalidArgs {
+	if result := Edit(EditOptions{Path: directory, Editor: "test-editor"}); result.Success || result.Code != output.CodeInventoryEditInvalidArgs {
 		t.Fatalf("directory edit result = %+v", result)
 	}
 }

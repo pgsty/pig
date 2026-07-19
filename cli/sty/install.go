@@ -2,15 +2,18 @@ package sty
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	_ "embed"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"pig/cli/license"
 	"pig/internal/config"
+	"pig/internal/output"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -21,87 +24,297 @@ var embeddedEULA []byte
 
 const DefaultDir = "~/pigsty"
 
+type installOptions struct {
+	Overwrite  bool
+	AcceptEULA bool
+}
+
 // InstallPigsty installs pigsty to the specified directory.
 // If targetDir is empty, it defaults to ~/pigsty.
 // If overwrite is true, it will overwrite existing files.
 // Returns error if installation fails.
 func InstallPigsty(srcTarball []byte, targetDir string, overwrite bool) error {
+	return installPigsty(srcTarball, targetDir, installOptions{Overwrite: overwrite})
+}
+
+// installPigsty stages a complete final tree beside the target and
+// commits it only after extraction succeeds. Existing --force installations
+// are cloned into staging first so protected and user-created files retain the
+// historical overlay semantics.
+func installPigsty(srcTarball []byte, targetDir string, options installOptions) error {
 	if srcTarball == nil {
-		return fmt.Errorf("source tarball not provided")
+		return commandFailedf(output.CodeStyInitInvalidArgs, "source tarball not provided")
 	}
-	if targetDir == "" {
-		targetDir = DefaultDir
+	resolvedTarget, existing, targetExists, err := inspectInstallTarget(targetDir, options.Overwrite)
+	if err != nil {
+		return err
 	}
-
-	// Expand ~ to home directory
-	if strings.HasPrefix(targetDir, "~/") {
-		if config.HomeDir != "" {
-			targetDir = filepath.Join(config.HomeDir, targetDir[2:])
-		} else {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("failed to get user home directory: %w", err)
-			}
-			targetDir = filepath.Join(homeDir, targetDir[2:])
-		}
+	if targetExists {
+		logrus.Warnf("overwriting existing directory transactionally: %s", resolvedTarget)
 	}
 
-	// Check if target directory exists
-	if exists := pathExists(targetDir); exists {
-		if !overwrite {
-			return fmt.Errorf("directory already exists: %s (use -f to overwrite)", targetDir)
-		}
-		logrus.Warnf("overwriting existing directory: %s", targetDir)
-	} else if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", targetDir, err)
-	}
-
-	// if a valid license is found, goes to pro mode, ask user to agree the EULA
+	// Consent is resolved before creating a target, staging directory, or any
+	// parent directory. --accept-eula is the only non-interactive acceptance.
 	if license.Manager.Valid {
-		// fmt.Println("------------------------------------------------------------------------------")
-		fmt.Println("##############################################################################")
-		fmt.Println(string(embeddedEULA))
-		fmt.Println("##############################################################################")
-		fmt.Println()
-		fmt.Println()
-		logrus.Warnf("to proceed with Pigsty Pro installation, you must accept the EULA")
-		logrus.Infof("do you accept the terms of the EULA? (yes/no)")
-		fmt.Printf("> ")
-		var response string
-		fmt.Scanln(&response)
-		response = strings.ToLower(strings.TrimSpace(response))
-		switch strings.ToLower(response) {
-		case "no", "n", "nay", "off", "false":
-			logrus.Errorf("installation aborted: EULA not accepted")
-			logrus.Warnf("consider using AGPLv3 OSS version (remove license file)")
-			return fmt.Errorf("EULA not accepted")
-		case "yes", "y", "ok", "true":
-			logrus.Infof("EULA accepted, proceeding with installation")
-		default:
-			return fmt.Errorf("invalid response: %s", response)
+		if err := acceptProEULA(options.AcceptEULA); err != nil {
+			return err
 		}
 	}
 
-	// Extract content to target directory
-	if err := extractPigsty(srcTarball, targetDir); err != nil {
-		return fmt.Errorf("failed to extract pigsty: %w", err)
+	parent := filepath.Dir(resolvedTarget)
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return fmt.Errorf("failed to create install parent %s: %w", parent, err)
 	}
+	stage, err := os.MkdirTemp(parent, "."+filepath.Base(resolvedTarget)+".install-*")
+	if err != nil {
+		return fmt.Errorf("failed to create install staging directory: %w", err)
+	}
+	stageOwned := true
+	defer func() {
+		if stageOwned {
+			_ = os.RemoveAll(stage)
+		}
+	}()
 
+	rootMode := os.FileMode(0755)
+	var preservedDirectoryModes []directoryMode
+	if targetExists {
+		rootMode = existing.Mode().Perm()
+		preservedDirectoryModes, err = copyDirectoryContents(resolvedTarget, stage)
+		if err != nil {
+			return fmt.Errorf("failed to stage existing installation: %w", err)
+		}
+	}
+	if err := extractPigsty(srcTarball, stage); err != nil {
+		return fmt.Errorf("failed to stage pigsty archive: %w", err)
+	}
+	for i := len(preservedDirectoryModes) - 1; i >= 0; i-- {
+		item := preservedDirectoryModes[i]
+		if err := os.Chmod(item.path, item.mode); err != nil {
+			return fmt.Errorf("failed to restore staged directory mode: %w", err)
+		}
+	}
 	if license.Manager.Valid {
-		licensePath := filepath.Join(targetDir, "EULA.md")
+		licensePath := filepath.Join(stage, "EULA.md")
 		if err := os.WriteFile(licensePath, embeddedEULA, 0644); err != nil {
-			return fmt.Errorf("failed to write EULA: %w", err)
+			return fmt.Errorf("failed to stage EULA: %w", err)
 		}
-		logrus.Debugf("EULA written: %s", licensePath)
 	}
+	if err := os.Chmod(stage, rootMode); err != nil {
+		return fmt.Errorf("failed to preserve install directory mode: %w", err)
+	}
+	if err := syncDirectory(stage); err != nil {
+		return fmt.Errorf("failed to sync staged installation: %w", err)
+	}
+	if err := commitStagedInstall(stage, resolvedTarget, targetExists); err != nil {
+		return err
+	}
+	stageOwned = false
 
-	logrus.Infof("pigsty installed: %s", targetDir)
+	logrus.Infof("pigsty installed: %s", resolvedTarget)
 	logrus.Infof("next steps:")
 	logrus.Infof("  pig sty boot    # install ansible and prepare offline pkg")
 	logrus.Infof("  pig sty conf    # configure pigsty and generate config")
 	logrus.Infof("  pig sty install # install & provision env (DANGEROUS!)")
 
 	return nil
+}
+
+func resolveInstallTarget(targetDir string) (string, error) {
+	if targetDir == "" {
+		targetDir = DefaultDir
+	}
+	if strings.HasPrefix(targetDir, "~/") {
+		homeDir := config.HomeDir
+		if homeDir == "" {
+			var err error
+			homeDir, err = os.UserHomeDir()
+			if err != nil {
+				return "", fmt.Errorf("failed to get user home directory: %w", err)
+			}
+		}
+		targetDir = filepath.Join(homeDir, targetDir[2:])
+	}
+	abs, err := filepath.Abs(targetDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve install target: %w", err)
+	}
+	return abs, nil
+}
+
+func inspectInstallTarget(targetDir string, overwrite bool) (string, os.FileInfo, bool, error) {
+	resolved, err := resolveInstallTarget(targetDir)
+	if err != nil {
+		return "", nil, false, err
+	}
+	info, err := os.Lstat(resolved)
+	if os.IsNotExist(err) {
+		return resolved, nil, false, nil
+	}
+	if err != nil {
+		return resolved, nil, false, fmt.Errorf("failed to inspect target %s: %w", resolved, err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return resolved, info, true, commandFailedf(output.CodeStyInitTargetExists, "install target is not a directory: %s", resolved)
+	}
+	if !overwrite {
+		return resolved, info, true, commandFailedf(output.CodeStyInitTargetExists, "directory already exists: %s (use -f to overwrite)", resolved)
+	}
+	return resolved, info, true, nil
+}
+
+func acceptProEULA(accepted bool) error {
+	if accepted {
+		return nil
+	}
+	if os.Getenv("PIG_NON_INTERACTIVE") != "" || !stdinIsTerminal() {
+		return commandFailedf(output.CodeStyInitEULARequired, "Pigsty Pro EULA acceptance required; review the EULA and rerun with --accept-eula")
+	}
+
+	fmt.Println("##############################################################################")
+	fmt.Println(string(embeddedEULA))
+	fmt.Println("##############################################################################")
+	logrus.Warnf("to proceed with Pigsty Pro installation, you must accept the EULA")
+	logrus.Infof("do you accept the terms of the EULA? (yes/no)")
+	fmt.Printf("> ")
+	response, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("failed to read EULA response: %w", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(response)) {
+	case "yes", "y", "ok", "true":
+		logrus.Infof("EULA accepted, proceeding with installation")
+		return nil
+	case "no", "n", "nay", "off", "false":
+		return commandFailedf(output.CodeStyInitEULARequired, "EULA not accepted")
+	default:
+		return commandFailedf(output.CodeStyInitEULARequired, "invalid EULA response")
+	}
+}
+
+func stdinIsTerminal() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+type directoryMode struct {
+	path string
+	mode os.FileMode
+}
+
+func copyDirectoryContents(src, dst string) ([]directoryMode, error) {
+	var directories []directoryMode
+	err := filepath.WalkDir(src, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil || rel == "." {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case entry.IsDir():
+			if err := os.MkdirAll(target, 0700); err != nil {
+				return err
+			}
+			directories = append(directories, directoryMode{path: target, mode: info.Mode().Perm()})
+			return nil
+		case entry.Type()&os.ModeSymlink != 0:
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, target)
+		case info.Mode().IsRegular():
+			return copyRegularFile(path, target, info.Mode().Perm())
+		default:
+			return fmt.Errorf("unsupported existing file type: %s", path)
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return directories, nil
+}
+
+func copyRegularFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(dst, mode)
+}
+
+func commitStagedInstall(stage, target string, replacing bool) error {
+	parent := filepath.Dir(target)
+	if !replacing {
+		if err := os.Rename(stage, target); err != nil {
+			return fmt.Errorf("failed to commit installation: %w", err)
+		}
+		return syncDirectory(parent)
+	}
+
+	backup, err := unusedSiblingPath(parent, "."+filepath.Base(target)+".backup-*")
+	if err != nil {
+		return fmt.Errorf("failed to reserve install rollback path: %w", err)
+	}
+	if err := os.Rename(target, backup); err != nil {
+		return fmt.Errorf("failed to stage current installation for rollback: %w", err)
+	}
+	if err := os.Rename(stage, target); err != nil {
+		if restoreErr := os.Rename(backup, target); restoreErr != nil {
+			return fmt.Errorf("failed to commit installation: %v (rollback also failed: %v)", err, restoreErr)
+		}
+		return fmt.Errorf("failed to commit installation: %w", err)
+	}
+	if err := syncDirectory(parent); err != nil {
+		return fmt.Errorf("installation committed but parent sync failed: %w", err)
+	}
+	if err := os.RemoveAll(backup); err != nil {
+		logrus.Warnf("installation committed; failed to remove rollback directory %s: %v", backup, err)
+	}
+	return nil
+}
+
+func unusedSiblingPath(parent, pattern string) (string, error) {
+	path, err := os.MkdirTemp(parent, pattern)
+	if err != nil {
+		return "", err
+	}
+	if err := os.Remove(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 // extractPigsty extracts pigsty source from embedded tarball to destination directory.
@@ -155,7 +368,9 @@ func extractPigsty(data []byte, dst string) error {
 			return fmt.Errorf("failed to extract %s: %w", target, err)
 		}
 	}
-
+	if _, err := io.Copy(io.Discard, gzr); err != nil {
+		return fmt.Errorf("failed to validate gzip trailer: %w", err)
+	}
 	return nil
 }
 
@@ -243,10 +458,16 @@ func extractTarEntry(header *tar.Header, target, dstAbs string, reader *tar.Read
 		if err != nil {
 			return fmt.Errorf("failed to create file: %w", err)
 		}
-		defer f.Close()
-
 		if _, err := io.Copy(f, reader); err != nil {
+			_ = f.Close()
 			return fmt.Errorf("failed to write file: %w", err)
+		}
+		if err := f.Sync(); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("failed to sync file: %w", err)
+		}
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("failed to close file: %w", err)
 		}
 	case tar.TypeSymlink:
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
@@ -361,10 +582,4 @@ func fileExists(path string) bool {
 		return false
 	}
 	return !info.IsDir()
-}
-
-// pathExists checks if a path exists (can be file or directory)
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return !os.IsNotExist(err)
 }

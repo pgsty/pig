@@ -106,18 +106,48 @@ func TestRiskyCommandsRejectUndeclaredPositionals(t *testing.T) {
 func TestInventoryEnvironmentDetectionIsScopedToCMDBLoad(t *testing.T) {
 	for _, command := range []*cobra.Command{
 		inventoryStatusCmd, inventoryListCmd, inventoryShowCmd, inventoryEditCmd,
-		inventoryValidateCmd, inventoryDiffCmd, inventoryCMDBCheckCmd,
+		inventoryValidateCmd, inventoryCheckCmd, inventoryDiffCmd, inventoryCMDBCheckCmd,
 		inventoryCMDBInitCmd, inventoryCMDBDumpCmd, inventoryCMDBEnableCmd, inventoryCMDBDisableCmd,
 	} {
-		if !inventoryCommandSkipsEnvironment(command) {
+		if !commandSkipsEnvironment(command) {
+			t.Fatalf("%s unexpectedly enables external environment probes", command.CommandPath())
+		}
+		if commandInitOptions(command).CreateConfig {
+			t.Fatalf("%s unexpectedly creates persistent Pig config", command.CommandPath())
+		}
+	}
+	if commandSkipsEnvironment(inventoryCMDBLoadCmd) {
+		t.Fatal("CMDB load skipped OS detection required by OS-default parity")
+	}
+	if commandSkipsEnvironment(installCmd) {
+		t.Fatal("non-Inventory command inherited Inventory initialization policy")
+	}
+}
+
+func TestStyInitializationIsSideEffectFreeAndProbeScoped(t *testing.T) {
+	originalRaw := pigstyConfRaw
+	defer func() { pigstyConfRaw = originalRaw }()
+
+	for _, command := range []*cobra.Command{
+		styCmd, pigstyInitCmd, pigstyBootCmd, pigstyDeployCmd, pigstyGrafanaCmd,
+		pigstyGrafanaListCmd, pigstyReleaseCmd, pigstyReleaseListCmd, pigstyReleaseGetCmd,
+	} {
+		options := commandInitOptions(command)
+		if options.CreateConfig {
+			t.Fatalf("%s unexpectedly creates persistent Pig config", command.CommandPath())
+		}
+		if !options.SkipEnvironment {
 			t.Fatalf("%s unexpectedly enables external environment probes", command.CommandPath())
 		}
 	}
-	if inventoryCommandSkipsEnvironment(inventoryCMDBLoadCmd) {
-		t.Fatal("CMDB load skipped OS detection required by OS-default parity")
+
+	pigstyConfRaw = false
+	if options := commandInitOptions(pigstyConfCmd); options.CreateConfig || options.SkipEnvironment {
+		t.Fatalf("native configure init options = %+v, want no config creation with environment probes", options)
 	}
-	if inventoryCommandSkipsEnvironment(installCmd) {
-		t.Fatal("non-Inventory command inherited Inventory initialization policy")
+	pigstyConfRaw = true
+	if options := commandInitOptions(pigstyConfCmd); options.CreateConfig || !options.SkipEnvironment {
+		t.Fatalf("raw configure init options = %+v, want no config creation or duplicate probes", options)
 	}
 }
 

@@ -1,6 +1,8 @@
 package get
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"pig/internal/config"
 	"pig/internal/utils"
 	"regexp"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -74,48 +77,100 @@ func md5sumFile(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func shouldSkipOrRemoveExistingFile(targetPath string, expectedChecksum string) (skip bool, err error) {
-	if _, err := os.Stat(targetPath); err != nil {
+func shouldSkipExistingFile(targetPath string, expectedChecksum string) (bool, error) {
+	info, err := os.Stat(targetPath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to inspect existing file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("download target is not a regular file: %s", targetPath)
+	}
+
+	if expectedChecksum != "" {
+		existingChecksum, err := md5sumFile(targetPath)
+		if err != nil {
+			return false, fmt.Errorf("failed to checksum existing file: %w", err)
+		}
+		if strings.EqualFold(existingChecksum, expectedChecksum) {
+			logrus.Infof("file exists with matching checksum, skipping: %s", targetPath)
+			return true, nil
+		}
+		logrus.Warnf("existing file checksum differs; preserving it until replacement is verified: %s", targetPath)
 		return false, nil
 	}
 
-	if expectedChecksum == "" {
-		logrus.Infof("file exists, skipping download: %s", targetPath)
+	if err := validateTarGzip(targetPath); err == nil {
+		logrus.Infof("complete source archive exists, skipping download: %s", targetPath)
 		return true, nil
 	}
-
-	existingChecksum, err := md5sumFile(targetPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to open existing file: %w", err)
-	}
-
-	if existingChecksum == expectedChecksum {
-		logrus.Infof("file exists with matching checksum, skipping: %s", targetPath)
-		return true, nil
-	}
-
-	logrus.Warnf("removing existing file with mismatched checksum: %s", targetPath)
-	if err := os.Remove(targetPath); err != nil {
-		return false, fmt.Errorf("failed to remove existing file: %w", err)
-	}
+	logrus.Warnf("existing source archive is incomplete or invalid; preserving it until replacement is verified: %s", targetPath)
 	return false, nil
 }
 
-func downloadWithMD5(url, targetPath, filename string) (checksum string, sizeMiB float64, err error) {
+// validateTarGzip consumes the complete gzip stream, including its checksum,
+// and requires at least one tar entry. It is the integrity fallback for
+// releases whose checksum metadata is unavailable.
+func validateTarGzip(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("invalid gzip stream: %w", err)
+	}
+	defer gz.Close()
+
+	entries := 0
+	reader := tar.NewReader(gz)
+	for {
+		_, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("invalid tar stream: %w", err)
+		}
+		entries++
+	}
+	if entries == 0 {
+		return fmt.Errorf("empty tar archive")
+	}
+	// tar.Reader stops after the archive terminator. Draining gzip validates
+	// the trailer checksum and catches a truncated compressed stream.
+	if _, err := io.Copy(io.Discard, gz); err != nil {
+		return fmt.Errorf("invalid gzip trailer: %w", err)
+	}
+	return nil
+}
+
+func downloadToTemp(url, targetDir, filename string) (tempPath, checksum string, sizeMiB float64, err error) {
 	resp, err := utils.DefaultClient().Get(url)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to download file: %w", err)
+		return "", "", 0, fmt.Errorf("failed to download file: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", 0, fmt.Errorf("download failed: %s", resp.Status)
+		return "", "", 0, fmt.Errorf("download failed: %s", resp.Status)
 	}
 
-	out, err := os.Create(targetPath)
+	out, err := os.CreateTemp(targetDir, "."+filename+".part-*")
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to create output file: %w", err)
+		return "", "", 0, fmt.Errorf("failed to create temporary output file: %w", err)
 	}
-	defer out.Close()
+	tempPath = out.Name()
+	committed := false
+	defer func() {
+		_ = out.Close()
+		if !committed {
+			_ = os.Remove(tempPath)
+		}
+	}()
 
 	size := resp.ContentLength
 	sizeMiB = float64(size) / 1024 / 1024
@@ -133,12 +188,37 @@ func downloadWithMD5(url, targetPath, filename string) (checksum string, sizeMiB
 		fmt.Println() // New line after progress bar.
 	}
 	if err != nil {
-		return "", sizeMiB, fmt.Errorf("download error: %w", err)
+		return "", "", sizeMiB, fmt.Errorf("download error: %w", err)
 	}
 	if size <= 0 {
 		sizeMiB = float64(n) / 1024 / 1024
 	}
-	return hex.EncodeToString(h.Sum(nil)), sizeMiB, nil
+	if err := out.Sync(); err != nil {
+		return "", "", sizeMiB, fmt.Errorf("failed to sync temporary download: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return "", "", sizeMiB, fmt.Errorf("failed to close temporary download: %w", err)
+	}
+	committed = true
+	return tempPath, hex.EncodeToString(h.Sum(nil)), sizeMiB, nil
+}
+
+func commitDownload(tempPath, targetPath string) error {
+	if err := os.Chmod(tempPath, 0644); err != nil {
+		return fmt.Errorf("failed to set download permissions: %w", err)
+	}
+	if err := os.Rename(tempPath, targetPath); err != nil {
+		return fmt.Errorf("failed to commit download: %w", err)
+	}
+	dir, err := os.Open(filepath.Dir(targetPath))
+	if err != nil {
+		return fmt.Errorf("failed to open download directory for sync: %w", err)
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("failed to sync download directory: %w", err)
+	}
+	return nil
 }
 
 // DownloadSrc downloads the pigsty source package of specified version to target directory
@@ -159,7 +239,7 @@ func DownloadSrc(version string, targetDir string) error {
 	filename := fmt.Sprintf("pigsty-%s.tgz", version)
 	targetPath := filepath.Join(targetDir, filename)
 
-	skip, err := shouldSkipOrRemoveExistingFile(targetPath, verInfo.Checksum)
+	skip, err := shouldSkipExistingFile(targetPath, verInfo.Checksum)
 	if err != nil {
 		return err
 	}
@@ -169,19 +249,30 @@ func DownloadSrc(version string, targetDir string) error {
 
 	// Start download
 	logrus.Infof("downloading: %s", verInfo.DownloadURL)
-	downloadedChecksum, sizeMiB, err := downloadWithMD5(verInfo.DownloadURL, targetPath, filename)
+	tempPath, downloadedChecksum, sizeMiB, err := downloadToTemp(verInfo.DownloadURL, targetDir, filename)
 	if err != nil {
 		return err
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tempPath)
+		}
+	}()
 
 	// Verify checksum if available
 	if verInfo.Checksum != "" {
-		if downloadedChecksum != verInfo.Checksum {
-			logrus.Warnf("removing file due to checksum mismatch")
-			_ = os.Remove(targetPath)
+		if !strings.EqualFold(downloadedChecksum, verInfo.Checksum) {
 			return fmt.Errorf("checksum mismatch: expected %s, got %s", verInfo.Checksum, downloadedChecksum)
 		}
 	}
+	if err := validateTarGzip(tempPath); err != nil {
+		return fmt.Errorf("downloaded source archive is invalid: %w", err)
+	}
+	if err := commitDownload(tempPath, targetPath); err != nil {
+		return err
+	}
+	committed = true
 
 	logrus.Infof("downloaded: %s (%.1f MiB, %s)", targetPath, sizeMiB, downloadedChecksum)
 	return nil

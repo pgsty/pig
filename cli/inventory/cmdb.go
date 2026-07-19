@@ -1,4 +1,4 @@
-package sty
+package inventorycli
 
 import (
 	"bytes"
@@ -291,7 +291,7 @@ func InventoryCMDBInit(ctx context.Context, options InventoryCMDBOptions) *outpu
 		if data.Plan != nil && len(data.Plan.NextActions) > 0 {
 			next = data.Plan.NextActions[0]
 		}
-		return output.Fail(output.CodeStyCMDBConfirmationRequired, "CMDB init will replace existing pigsty/pglog schemas").
+		return output.Fail(output.CodeInventoryCMDBConfirmationRequired, "CMDB init will replace existing pigsty/pglog schemas").
 			WithData(data).
 			WithNextActions(next)
 	}
@@ -311,7 +311,7 @@ func InventoryCMDBLoad(ctx context.Context, options InventoryCMDBOptions) *outpu
 		return cmdbFailureResult("--plan and --yes are mutually exclusive", &cmdb.Error{Code: "CMDB_PARAMETER_INVALID"})
 	}
 	if !options.ExplicitPath && options.Source.Type != "" && options.Source.Type != config.InventorySourceStaticYAML {
-		return output.Fail(output.CodeStyCMDBConfigInvalid, "active Inventory source is not one static YAML file").
+		return output.Fail(output.CodeInventoryCMDBConfigInvalid, "active Inventory source is not one static YAML file").
 			WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: "CMDB_SOURCE_INVALID"}).
 			WithNextActions(output.NextAction{Command: "pig inventory cmdb load <file>", Reason: "provide an explicit static Inventory file", Required: true})
 	}
@@ -359,7 +359,7 @@ func InventoryCMDBLoad(ctx context.Context, options InventoryCMDBOptions) *outpu
 		if data.Plan != nil && len(data.Plan.NextActions) > 0 {
 			next = data.Plan.NextActions[0]
 		}
-		return output.Fail(output.CodeStyCMDBConfirmationRequired, "CMDB load will replace all declaration rows").
+		return output.Fail(output.CodeInventoryCMDBConfirmationRequired, "CMDB load will replace all declaration rows").
 			WithData(data).
 			WithNextActions(next)
 	}
@@ -391,10 +391,10 @@ func InventoryCMDBLoad(ctx context.Context, options InventoryCMDBOptions) *outpu
 // metadata. With a destination, the returned body is nil.
 func InventoryCMDBDump(ctx context.Context, options InventoryCMDBOptions) ([]byte, *output.Result) {
 	if strings.TrimSpace(options.Path) == "" && options.Force {
-		return nil, output.Fail(output.CodeStyCMDBInvalidArgs, "--force requires a CMDB dump destination file")
+		return nil, output.Fail(output.CodeInventoryCMDBInvalidArgs, "--force requires a CMDB dump destination file")
 	}
 	if strings.TrimSpace(options.Path) == "" && config.IsStructuredOutput() {
-		return nil, output.Fail(output.CodeStyCMDBInvalidArgs, "structured CMDB dump requires a destination file")
+		return nil, output.Fail(output.CodeInventoryCMDBInvalidArgs, "structured CMDB dump requires a destination file")
 	}
 	store, failure := openPigstyCMDB(ctx, options.Database)
 	if failure != nil {
@@ -428,7 +428,7 @@ func InventoryCMDBDump(ctx context.Context, options InventoryCMDBOptions) ([]byt
 		if cmdb.IsCode(err, "CMDB_OUTPUT_EXISTS") {
 			path, _ := filepath.Abs(strings.TrimSpace(options.Path))
 			data.OutputPath = filepath.Clean(path)
-			return nil, output.Fail(output.CodeStyCMDBOutputFailed, "CMDB dump destination already contains different bytes").
+			return nil, output.Fail(output.CodeInventoryCMDBOutputFailed, "CMDB dump destination already contains different bytes").
 				WithData(data).
 				WithNextActions(safeCMDBNextAction(data, "pig inventory cmdb dump "+shellCommandQuote(data.OutputPath)+" --force", "replace the differing destination", true))
 		}
@@ -513,30 +513,30 @@ func cmdbFailureResult(message string, err error) *output.Result {
 func cmdbFailureCode(err error) (string, int) {
 	var failure *cmdb.Error
 	if !errors.As(err, &failure) || failure == nil || failure.Code == "" {
-		return "CMDB_INTERNAL", output.CodeStyCMDBOperationFailed
+		return "CMDB_INTERNAL", output.CodeInventoryCMDBOperationFailed
 	}
 	switch failure.Code {
 	case "CMDB_PARAMETER_INVALID", "CMDB_DECLARATION_INVALID":
-		return failure.Code, output.CodeStyCMDBInvalidArgs
+		return failure.Code, output.CodeInventoryCMDBInvalidArgs
 	case "CMDB_SWITCH_PERMISSION":
-		return failure.Code, output.CodeStyCMDBPermissionDenied
+		return failure.Code, output.CodeInventoryCMDBPermissionDenied
 	case "CMDB_CONNECTION_FAILED":
-		return failure.Code, output.CodeStyCMDBConnectionFailed
+		return failure.Code, output.CodeInventoryCMDBConnectionFailed
 	case "CMDB_CONNECTION_INVALID", "CMDB_SOURCE_INVALID", "CMDB_CONNECTION_SECRET", "CMDB_ANSIBLE_CONFIG_INVALID", "CMDB_SWITCH_INVALID",
 		"CMDB_INVENTORY_SCRIPT_UNMANAGED", "CMDB_INVENTORY_DIRECTIVE_UNMANAGED", "CMDB_MANAGED_SOURCE_INVALID", "CMDB_RAW_CONFIG_INVALID":
-		return failure.Code, output.CodeStyCMDBConfigInvalid
+		return failure.Code, output.CodeInventoryCMDBConfigInvalid
 	case "CMDB_NESTED_GROUP_UNSUPPORTED", "CMDB_HOSTS_REQUIRED", "CMDB_HOST_VARS_REQUIRED":
-		return failure.Code, output.CodeStyCMDBUnrepresentable
+		return failure.Code, output.CodeInventoryCMDBUnrepresentable
 	case "CMDB_BASELINE_INVALID", "CMDB_BASELINE_VERIFY_FAILED":
-		return failure.Code, output.CodeStyCMDBSchemaInvalid
+		return failure.Code, output.CodeInventoryCMDBSchemaInvalid
 	case "CMDB_OUTPUT_INVALID", "CMDB_OUTPUT_FAILED", "CMDB_SWITCH_PARTIAL":
-		return failure.Code, output.CodeStyCMDBOutputFailed
+		return failure.Code, output.CodeInventoryCMDBOutputFailed
 	case "CMDB_SOURCE_CHANGED":
-		return failure.Code, output.CodeStyCMDBSourceChanged
+		return failure.Code, output.CodeInventoryCMDBSourceChanged
 	case "CMDB_CONFIRMATION_REQUIRED":
-		return failure.Code, output.CodeStyCMDBConfirmationRequired
+		return failure.Code, output.CodeInventoryCMDBConfirmationRequired
 	default:
-		return failure.Code, output.CodeStyCMDBOperationFailed
+		return failure.Code, output.CodeInventoryCMDBOperationFailed
 	}
 }
 
@@ -550,14 +550,6 @@ type preparedPigstyInventory struct {
 	Snapshot     *cmdbSourceSnapshot
 }
 
-func preparePigstyDeclarations(path string) (cmdb.Declarations, *output.Result) {
-	prepared, failure := preparePigstyInventory(path, false)
-	if failure != nil {
-		return cmdb.Declarations{}, failure
-	}
-	return prepared.Declarations, nil
-}
-
 func preparePigstyInventory(path string, strict bool) (*preparedPigstyInventory, *output.Result) {
 	snapshot, err := readInventoryCMDBSourceSnapshot(path)
 	if err != nil {
@@ -566,13 +558,13 @@ func preparePigstyInventory(path string, strict bool) (*preparedPigstyInventory,
 	doc, err := inventory.Parse(snapshot.Path, snapshot.Body)
 	if err != nil {
 		diagnostic := parseDiagnostic(err)
-		return nil, output.Fail(output.CodeStyValidationFailed, "Inventory validation failed before CMDB operation").
+		return nil, output.Fail(output.CodeInventoryValidationFailed, "Inventory validation failed before CMDB operation").
 			WithData(&CMDBValidationData{Kind: CMDBValidationKind, Path: snapshot.Path, Diagnostics: inventoryDiagnostics([]inventory.Diagnostic{diagnostic})})
 	}
 	diagnostics := doc.Validate(inventory.YAMLRules, inventory.AnsibleRules, inventory.PigstyRules, inventory.CompleteInventoryRules)
 	inventory.SortDiagnostics(diagnostics)
 	if inventory.HasErrors(diagnostics) || strict && hasWarnings(diagnostics) {
-		return nil, output.Fail(output.CodeStyValidationFailed, "Inventory validation failed before CMDB operation").
+		return nil, output.Fail(output.CodeInventoryValidationFailed, "Inventory validation failed before CMDB operation").
 			WithData(&CMDBValidationData{Kind: CMDBValidationKind, Path: snapshot.Path, Diagnostics: inventoryDiagnostics(diagnostics)})
 	}
 	declarations, representabilityFailure := pigstyDeclarationsFromDocument(doc, snapshot.Path)
@@ -593,6 +585,11 @@ func pigstyDeclarationsFromDocument(doc *inventory.Document, path string) (cmdb.
 	semantic := doc.Inventory()
 	if semantic == nil || semantic.All == nil || len(semantic.All.Hosts) > 0 {
 		return cmdb.Declarations{}, cmdbRepresentabilityFailure(path, "CMDB_DECLARATION_INVALID")
+	}
+	for _, group := range semantic.Groups {
+		if group != nil && !cmdbAllChildGroupPath(group.Path) {
+			return cmdb.Declarations{}, cmdbRepresentabilityFailure(path, "CMDB_ROOT_GROUP_UNSUPPORTED")
+		}
 	}
 	globals, err := valueFields(semantic.All.Vars)
 	if err != nil {
@@ -631,8 +628,14 @@ func pigstyDeclarationsFromDocument(doc *inventory.Document, path string) (cmdb.
 	return declarations, nil
 }
 
+func cmdbAllChildGroupPath(path inventory.Path) bool {
+	return len(path) >= 3 &&
+		path[0].Kind == inventory.KeySegment && path[0].Key == "all" &&
+		path[1].Kind == inventory.KeySegment && path[1].Key == "children"
+}
+
 func cmdbRepresentabilityFailure(path, code string) *output.Result {
-	return output.Fail(output.CodeStyCMDBUnrepresentable, "Inventory cannot be represented by the existing Pigsty CMDB").
+	return output.Fail(output.CodeInventoryCMDBUnrepresentable, "Inventory cannot be represented by the existing Pigsty CMDB").
 		WithData(&CMDBFailureData{Kind: CMDBFailureKind, CMDBCode: code}).
 		WithDetail("source: " + path)
 }
@@ -759,8 +762,20 @@ func readPigstyOSDefaults(home, osCode, arch string) (cmdb.OSDefaults, string) {
 	if err != nil {
 		return cmdb.OSDefaults{}, "CMDB_DEFAULTS_UNAVAILABLE"
 	}
-	var values map[string]any
-	if err := yaml.Unmarshal(source, &values); err != nil {
+	doc, err := inventory.Parse(path, source)
+	if err != nil {
+		return cmdb.OSDefaults{}, "CMDB_DEFAULTS_PARSE_FAILED"
+	}
+	root, ok := doc.Lookup(nil)
+	if !ok {
+		return cmdb.OSDefaults{}, "CMDB_DEFAULTS_PARSE_FAILED"
+	}
+	plain, err := plainInventoryValue(root)
+	if err != nil {
+		return cmdb.OSDefaults{}, "CMDB_DEFAULTS_PARSE_FAILED"
+	}
+	values, ok := plain.(map[string]any)
+	if !ok {
 		return cmdb.OSDefaults{}, "CMDB_DEFAULTS_PARSE_FAILED"
 	}
 	defaults := cmdb.OSDefaults{}

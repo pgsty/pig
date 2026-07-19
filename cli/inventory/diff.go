@@ -1,4 +1,4 @@
-package sty
+package inventorycli
 
 import (
 	"pig/internal/output"
@@ -39,17 +39,17 @@ func (d *InventoryDiffData) Text() string {
 }
 
 func DiffInventory(opts DiffOptions) *output.Result {
-	left, failure := loadStaticInventory(opts.Path, output.CodeStyInventoryListInvalidArgs)
+	left, failure := loadStaticInventory(opts.Path, output.CodeInventoryListInvalidArgs)
 	if failure != nil {
 		return failure
 	}
-	right, failure := loadStaticInventory(opts.OtherPath, output.CodeStyInventoryListInvalidArgs)
+	right, failure := loadStaticInventory(opts.OtherPath, output.CodeInventoryListInvalidArgs)
 	if failure != nil {
 		return failure
 	}
 	differences, err := inventory.DiffDocuments(left, right)
 	if err != nil {
-		return output.Fail(output.CodeStyInventoryInvalid, "inventory declarations could not be compared")
+		return output.Fail(output.CodeInventoryInvalid, "inventory declarations could not be compared")
 	}
 	changes := make([]InventoryDiffItem, 0, len(differences))
 	for _, difference := range differences {

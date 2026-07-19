@@ -16,6 +16,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type testStatusError struct {
+	code int
+	err  error
+}
+
+func (e *testStatusError) Error() string   { return e.err.Error() }
+func (e *testStatusError) Unwrap() error   { return e.err }
+func (e *testStatusError) StatusCode() int { return e.code }
+
 func TestRunLegacyStructuredCapturesCommandOutput(t *testing.T) {
 	origFormat := config.OutputFormat
 	defer func() {
@@ -62,6 +71,28 @@ func TestRunLegacyStructuredCapturesCommandOutput(t *testing.T) {
 	}
 	if captured, _ := data["captured_output"].(string); !strings.Contains(captured, "legacy text output") {
 		t.Fatalf("expected captured output, got %q", captured)
+	}
+}
+
+func TestRunLegacyStructuredUsesExecutorStatusCode(t *testing.T) {
+	original := config.OutputFormat
+	config.OutputFormat = config.OUTPUT_JSON
+	defer func() { config.OutputFormat = original }()
+
+	raw := captureStdout(t, func() {
+		err := runLegacyStructured(legacyModuleSty, "pig sty test", nil, nil, func() error {
+			return &testStatusError{code: output.CodeStyDeployDependencyMissing, err: errors.New("missing dependency")}
+		})
+		if err == nil || utils.ExitCode(err) != 4 {
+			t.Fatalf("runLegacyStructured error = %v, exit = %d", err, utils.ExitCode(err))
+		}
+	})
+	var payload output.Result
+	if err := json.Unmarshal(trimJSONSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("decode result: %v; raw=%q", err, raw)
+	}
+	if payload.Code != output.CodeStyDeployDependencyMissing || payload.Detail != "missing dependency" {
+		t.Fatalf("structured result = %+v", payload)
 	}
 }
 

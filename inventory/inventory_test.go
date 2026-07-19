@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -47,6 +48,16 @@ func TestParseAndNoopCommitAreByteExact(t *testing.T) {
 	assertByteExact(t, "committed document serialization", source, writeDocument(t, committed))
 }
 
+func TestLoadRejectsExecutableDynamicSource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inventory.yml")
+	if err := os.WriteFile(path, []byte("all:\n  children: {}\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "dynamic") {
+		t.Fatalf("Load executable source error = %v", err)
+	}
+}
+
 func TestSemanticScalarsRetainRawLexemes(t *testing.T) {
 	doc, err := Parse("lossless.yml", loadLosslessFixture(t))
 	if err != nil {
@@ -56,11 +67,15 @@ func TestSemanticScalarsRetainRawLexemes(t *testing.T) {
 	if !ok || mode.Scalar == nil || mode.Scalar.Raw != "0755" {
 		t.Fatalf("mode scalar = %+v", mode)
 	}
-	for _, key := range []string{"flag_y", "flag_off"} {
+	for _, key := range []string{"flag_y"} {
 		value, ok := doc.Lookup(AllVars(key))
 		if !ok || value.Scalar == nil || value.Scalar.Kind != StringScalar {
 			t.Fatalf("%s should remain a string scalar: %+v", key, value)
 		}
+	}
+	off, ok := doc.Lookup(AllVars("flag_off"))
+	if !ok || off.Scalar == nil || off.Scalar.Kind != BoolScalar || off.Scalar.Value != false || off.Scalar.Raw != "off" {
+		t.Fatalf("flag_off should follow Ansible YAML 1.1 semantics: %+v", off)
 	}
 	folded, ok := doc.Lookup(AllVars("folded"))
 	if !ok || folded.Scalar == nil || !strings.Contains(folded.Scalar.Raw, "line two") {
@@ -69,6 +84,162 @@ func TestSemanticScalarsRetainRawLexemes(t *testing.T) {
 	inv := doc.Inventory()
 	if inv == nil || inv.All == nil || inv.All.Vars == nil {
 		t.Fatalf("semantic inventory not built: %+v", inv)
+	}
+}
+
+func TestSemanticScalarsMatchAnsibleLegacyResolver(t *testing.T) {
+	source := []byte(`all:
+  vars:
+    yes_value: yes
+    off_value: OFF
+    quoted: "off"
+    sexagesimal_int: 1:20
+    sexagesimal_float: 1:20.5
+    legacy_octal: 0755
+    yaml12_octal: 0o755
+    yaml12_exponent: 1e3
+    float_exponent: 1.0e+3
+  children: {}
+`)
+	doc, err := Parse("ansible-scalars.yml", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		key   string
+		kind  ScalarKind
+		value any
+	}{
+		{"yes_value", BoolScalar, true},
+		{"off_value", BoolScalar, false},
+		{"quoted", StringScalar, "off"},
+		{"sexagesimal_int", IntegerScalar, int64(80)},
+		{"sexagesimal_float", FloatScalar, 80.5},
+		{"legacy_octal", IntegerScalar, int64(493)},
+		{"yaml12_octal", StringScalar, "0o755"},
+		{"yaml12_exponent", StringScalar, "1e3"},
+		{"float_exponent", FloatScalar, 1000.0},
+	}
+	for _, test := range tests {
+		value, ok := doc.Lookup(AllVars(test.key))
+		if !ok || value.Scalar == nil || value.Scalar.Kind != test.kind || fmt.Sprint(value.Scalar.Value) != fmt.Sprint(test.value) {
+			t.Errorf("%s = %+v, want %s %v", test.key, value, test.kind, test.value)
+		}
+	}
+	if !bytes.Equal(doc.Bytes(), source) {
+		t.Fatal("semantic resolution changed source bytes")
+	}
+}
+
+func TestDuplicateKeysFollowAnsibleNumericEquality(t *testing.T) {
+	for _, source := range []string{
+		"all:\n  vars: { 1: first, yes: second }\n",
+		"all:\n  vars: { 1: first, 1.0: second }\n",
+		"all:\n  vars: { 0: first, off: second }\n",
+	} {
+		if _, err := Parse("ansible-duplicate.yml", []byte(source)); err == nil || !strings.Contains(err.Error(), "duplicate mapping key") {
+			t.Fatalf("Ansible-equivalent duplicate was accepted: source=%q err=%v", source, err)
+		}
+	}
+	if _, err := Parse("typed-distinct.yml", []byte("all:\n  vars: { 1: numeric, '1': string }\n")); err != nil {
+		t.Fatalf("numeric and quoted string keys should remain distinct: %v", err)
+	}
+}
+
+func TestSemanticSnapshotsCannotMutateDocument(t *testing.T) {
+	doc, err := Parse("snapshot.yml", []byte("all:\n  vars:\n    region: default\n  children: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv := doc.Inventory()
+	inv.All.Name = "changed"
+	inv.All.Vars.Mapping[0].Value.Scalar.Value = "changed"
+	value, _ := doc.Lookup(AllVars("region"))
+	value.Scalar.Value = "also-changed"
+
+	fresh := doc.Inventory()
+	region, _ := doc.Lookup(AllVars("region"))
+	if fresh.All.Name != "all" || fresh.All.Vars.Mapping[0].Value.Scalar.Value != "default" || region.Scalar.Value != "default" {
+		t.Fatalf("caller mutation escaped semantic snapshot: inventory=%+v region=%+v", fresh, region)
+	}
+}
+
+func TestInventoryRetainsRootLevelGroups(t *testing.T) {
+	doc, err := Parse("root-groups.yml", []byte(`all:
+  vars: {}
+foo:
+  hosts:
+    192.0.2.1: { role: root }
+  children:
+    nested:
+      hosts: {}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv := doc.Inventory()
+	if inv == nil || inv.All == nil || len(inv.Groups) != 2 {
+		t.Fatalf("root groups missing from semantic inventory: %+v", inv)
+	}
+	if inv.Groups[0].Name != "foo" || inv.Groups[0].Path.String() != "/foo" || inv.Groups[1].Path.String() != "/foo/children/nested" {
+		t.Fatalf("root group paths = %+v", inv.Groups)
+	}
+}
+
+func TestInventoryGroupOrderFollowsRootDeclarations(t *testing.T) {
+	doc, err := Parse("ordered-root-groups.yml", []byte(`before:
+  hosts: {}
+all:
+  children:
+    nested:
+      hosts: {}
+after:
+  hosts: {}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv := doc.Inventory()
+	if inv == nil || inv.All == nil || len(inv.Groups) != 3 {
+		t.Fatalf("semantic inventory = %+v", inv)
+	}
+	want := []string{"before", "nested", "after"}
+	for index, name := range want {
+		if inv.Groups[index].Name != name {
+			t.Fatalf("group order = %v, want %v", []string{inv.Groups[0].Name, inv.Groups[1].Name, inv.Groups[2].Name}, want)
+		}
+	}
+	if diagnostics := doc.Validate(AnsibleRules); !HasErrors(diagnostics) || !hasDiagnostic(diagnostics, "INV_ALL_FIRST") {
+		t.Fatalf("non-leading all must fail validation: %+v", diagnostics)
+	}
+
+	withoutAll, err := Parse("missing-all.yml", []byte("orphan:\n  hosts: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := withoutAll.Inventory()
+	if missing == nil || missing.All != nil || len(missing.Groups) != 1 || missing.Groups[0].Name != "orphan" {
+		t.Fatalf("root declarations disappeared without all: %+v", missing)
+	}
+}
+
+func TestInventoryNamesRetainSourceDeclarationText(t *testing.T) {
+	doc, err := Parse("ambiguous-names.yml", []byte(`all:
+  children:
+    yes:
+      hosts:
+        off: {}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv := doc.Inventory()
+	if inv == nil || len(inv.Groups) != 1 || inv.Groups[0].Name != "yes" || len(inv.Groups[0].Hosts) != 1 || inv.Groups[0].Hosts[0].Name != "off" {
+		t.Fatalf("source declaration names were semantically coerced: %+v", inv)
+	}
+	diagnostics := doc.Validate(AnsibleRules)
+	if !hasDiagnostic(diagnostics, "INV_GROUP_NAME_TYPE") || !hasDiagnostic(diagnostics, "INV_HOST_NAME_TYPE") {
+		t.Fatalf("ambiguous Ansible identity diagnostics = %+v", diagnostics)
 	}
 }
 
@@ -170,10 +341,10 @@ func TestBlockInsertInheritsPaddingAndCommentColumn(t *testing.T) {
 		t.Fatal(err)
 	}
 	editor := doc.Edit()
-	if err := editor.Insert(AllVars(), "medium", "new", AfterKey("short"), WithComment("inserted value")); err != nil {
+	if err := editor.Insert(AllVars(), "medium", "new", AfterKey("short"), WithInlineComment("inserted value")); err != nil {
 		t.Fatal(err)
 	}
-	if err := editor.Insert(AllVars(), "tiny", "added", AfterKey("short"), WithComment("second value")); err != nil {
+	if err := editor.Insert(AllVars(), "tiny", "added", AfterKey("short"), WithInlineComment("second value")); err != nil {
 		t.Fatal(err)
 	}
 	committed, _, err := editor.Commit()
@@ -204,7 +375,7 @@ func TestBlockInsertInfersAlignmentFromNearbySiblings(t *testing.T) {
 		t.Fatal(err)
 	}
 	editor := doc.Edit()
-	if err := editor.Insert(AllVars(), "mid", "new", AfterKey("longest_key"), WithComment("inserted comment")); err != nil {
+	if err := editor.Insert(AllVars(), "mid", "new", AfterKey("longest_key"), WithInlineComment("inserted comment")); err != nil {
 		t.Fatal(err)
 	}
 	committed, _, err := editor.Commit()
@@ -405,14 +576,14 @@ func TestMutationScopedVariablesAndContinuousVisibility(t *testing.T) {
 		t.Fatalf("ReplaceAll = %d, %v", count, err)
 	}
 	globals := mutation.AllVars()
-	if err := globals.Set("region", "china", WithComment("must not replace existing comment")); err != nil {
+	if err := globals.Set("region", "china", WithInlineComment("must not replace existing comment")); err != nil {
 		t.Fatal(err)
 	}
-	if err := globals.Set("pg_version", 18, AfterKey("region"), WithComment("postgres major")); err != nil {
+	if err := globals.Set("pg_version", 18, AfterKey("region"), WithInlineComment("postgres major")); err != nil {
 		t.Fatal(err)
 	}
 	proxy := globals.Mapping("proxy_env", AfterKey("region"))
-	if err := proxy.Set("http_proxy", "http://proxy.example", WithComment("download proxy")); err != nil {
+	if err := proxy.Set("http_proxy", "http://proxy.example", WithInlineComment("download proxy")); err != nil {
 		t.Fatal(err)
 	}
 	if err := proxy.Set("no_proxy", "localhost"); err != nil {
@@ -428,13 +599,13 @@ func TestMutationScopedVariablesAndContinuousVisibility(t *testing.T) {
 	if host.Name != "10.0.0.2" {
 		t.Fatalf("renamed host = %q", host.Name)
 	}
-	if err := mutation.GroupVars(group).Set("pg_cluster", "pg-test", WithComment("cluster identity")); err != nil {
+	if err := mutation.GroupVars(group).Set("pg_cluster", "pg-test", WithInlineComment("cluster identity")); err != nil {
 		t.Fatal(err)
 	}
-	if err := mutation.HostVars(host).Set("pg_seq", 1, WithComment("instance sequence")); err != nil {
+	if err := mutation.HostVars(host).Set("pg_seq", 1, WithInlineComment("instance sequence")); err != nil {
 		t.Fatal(err)
 	}
-	if err := mutation.HostVars(host).Set("pg_role", "primary", WithComment("instance role")); err != nil {
+	if err := mutation.HostVars(host).Set("pg_role", "primary", WithInlineComment("instance role")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -505,7 +676,7 @@ func TestMutationPopulatesExplicitNullVars(t *testing.T) {
 		t.Fatal(err)
 	}
 	mutation := doc.Mutate()
-	if err := mutation.AllVars().Set("region", "china", WithComment("region selector")); err != nil {
+	if err := mutation.AllVars().Set("region", "china", WithInlineComment("region selector")); err != nil {
 		t.Fatal(err)
 	}
 	committed, _, err := mutation.Commit()
@@ -529,10 +700,10 @@ func TestMutationHostVarsKeepDuplicateDeclarationsSeparate(t *testing.T) {
 		t.Fatalf("groups = %+v", groups)
 	}
 	mutation := doc.Mutate()
-	if err := mutation.HostVars(groups[0].Hosts[0]).Set("color", "blue", WithComment("blue declaration")); err != nil {
+	if err := mutation.HostVars(groups[0].Hosts[0]).Set("color", "blue", WithInlineComment("blue declaration")); err != nil {
 		t.Fatal(err)
 	}
-	if err := mutation.HostVars(groups[1].Hosts[0]).Set("color", "green", WithComment("green declaration")); err != nil {
+	if err := mutation.HostVars(groups[1].Hosts[0]).Set("color", "green", WithInlineComment("green declaration")); err != nil {
 		t.Fatal(err)
 	}
 	committed, _, err := mutation.Commit()
@@ -653,7 +824,7 @@ func TestPigstyConfCorpusLosslessSerialization(t *testing.T) {
 			}
 			totalBytes += len(source)
 
-			// Load must complete both the private CST parse and the public
+			// Load must complete private syntax/comment indexing and the public
 			// declaration-oriented semantic model before lossless serialization.
 			doc, err := Load(file)
 			if err != nil {
@@ -772,7 +943,7 @@ func TestPigstyConfCorpusReversibleStyledInsertion(t *testing.T) {
 				t.Fatalf("test probe key %q already exists", probeKey)
 			}
 			editor := doc.Edit()
-			if err := editor.Insert(AllVars(), probeKey, "style-probe", AfterKey(anchor), WithComment("round-trip style probe")); err != nil {
+			if err := editor.Insert(AllVars(), probeKey, "style-probe", AfterKey(anchor), WithInlineComment("round-trip style probe")); err != nil {
 				t.Fatal(err)
 			}
 			committed, _, err := editor.Commit()

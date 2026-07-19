@@ -174,11 +174,14 @@ func validateAnsible(doc *Document) []Diagnostic {
 	if !hasAll {
 		diagnostics = append(diagnostics, doc.diagnostic("INV_ALL_REQUIRED", SeverityError, Keys("all"), doc.nodeSpan(doc.root), "top-level group all is required"))
 	} else if len(doc.root.Content) < 2 || doc.root.Content[0].Value != "all" {
-		diagnostics = append(diagnostics, doc.diagnostic("INV_ALL_FIRST", SeverityWarning, nil, doc.nodeSpan(doc.root), "top-level group all should be the first mapping entry"))
+		diagnostics = append(diagnostics, doc.diagnostic("INV_ALL_FIRST", SeverityError, nil, doc.nodeSpan(doc.root), "top-level group all must be the first mapping entry"))
 	}
 	declarations := make(map[string]string)
-	var validateGroup func(string, *yaml.Node, Path, []string)
-	validateGroup = func(name string, node *yaml.Node, path Path, ancestors []string) {
+	var validateGroup func(string, *yaml.Node, *yaml.Node, Path, []string)
+	validateGroup = func(name string, keyNode, node *yaml.Node, path Path, ancestors []string) {
+		if keyNode != nil && doc.semanticScalar(keyNode, doc.scalarSpan(keyNode)).Kind != StringScalar {
+			diagnostics = append(diagnostics, doc.diagnostic("INV_GROUP_NAME_TYPE", SeverityError, path, doc.nodeSpan(keyNode), fmt.Sprintf("group name %q must resolve to a string", name)))
+		}
 		if name != "all" && !validGroupName.MatchString(name) {
 			diagnostics = append(diagnostics, doc.diagnostic("INV_GROUP_NAME", SeverityWarning, path, doc.nodeSpan(node), fmt.Sprintf("group %q contains characters Ansible may transform or reject", name)))
 		}
@@ -233,9 +236,13 @@ func validateAnsible(doc *Document) []Diagnostic {
 				}
 				if valueNode.Kind == yaml.MappingNode {
 					for hostIndex := 0; hostIndex+1 < len(valueNode.Content); hostIndex += 2 {
-						hostName := valueNode.Content[hostIndex].Value
+						hostKey := valueNode.Content[hostIndex]
+						hostName := hostKey.Value
 						hostNode := valueNode.Content[hostIndex+1]
 						hostPath := appendPath(childPath, Key(hostName))
+						if doc.semanticScalar(hostKey, doc.scalarSpan(hostKey)).Kind != StringScalar {
+							diagnostics = append(diagnostics, doc.diagnostic("INV_HOST_NAME_TYPE", SeverityError, hostPath, doc.nodeSpan(hostKey), fmt.Sprintf("host name %q must resolve to a string", hostName)))
+						}
 						if isOpaqueYAMLNode(hostNode) {
 							diagnostics = append(diagnostics, doc.diagnostic("UNVERIFIABLE", SeverityInfo, hostPath, doc.nodeSpan(hostNode), "plaintext value is unavailable for host vars validation"))
 						} else if !isMappingOrNull(hostNode) {
@@ -254,9 +261,10 @@ func validateAnsible(doc *Document) []Diagnostic {
 				}
 				if valueNode.Kind == yaml.MappingNode {
 					for childIndex := 0; childIndex+1 < len(valueNode.Content); childIndex += 2 {
-						childName := valueNode.Content[childIndex].Value
+						childKey := valueNode.Content[childIndex]
+						childName := childKey.Value
 						childNode := valueNode.Content[childIndex+1]
-						validateGroup(childName, childNode, appendPath(childPath, Key(childName)), descendants)
+						validateGroup(childName, childKey, childNode, appendPath(childPath, Key(childName)), descendants)
 					}
 				}
 			default:
@@ -270,8 +278,9 @@ func validateAnsible(doc *Document) []Diagnostic {
 		}
 	}
 	for i := 0; i+1 < len(doc.root.Content); i += 2 {
-		name := doc.root.Content[i].Value
-		validateGroup(name, doc.root.Content[i+1], Keys(name), nil)
+		keyNode := doc.root.Content[i]
+		name := keyNode.Value
+		validateGroup(name, keyNode, doc.root.Content[i+1], Keys(name), nil)
 	}
 	return diagnostics
 }

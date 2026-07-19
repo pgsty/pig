@@ -56,7 +56,20 @@ func ParseSelector(doc *Document, selector string) (Path, error) {
 	if parts[0].Key == "vars" {
 		path = Keys("all", "vars")
 	} else {
-		path = Keys("all", "children", parts[0].Key)
+		childPath := Keys("all", "children", parts[0].Key)
+		rootPath := Keys(parts[0].Key)
+		_, childExists := doc.Lookup(childPath)
+		_, rootExists := doc.Lookup(rootPath)
+		switch {
+		case childExists && rootExists:
+			return nil, selectorFailure(SelectorSyntax, selector, "group %q has multiple source declarations; use a canonical pointer", parts[0].Key)
+		case childExists:
+			path = childPath
+		case rootExists:
+			path = rootPath
+		default:
+			path = childPath
+		}
 		group = true
 	}
 	if err := requireSelectorPath(doc, selector, path); err != nil {

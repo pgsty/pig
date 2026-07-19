@@ -4,8 +4,12 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"os"
 	"path/filepath"
+	"pig/cli/license"
+	"pig/internal/output"
+	"strings"
 	"testing"
 )
 
@@ -148,6 +152,106 @@ func TestInstallPigsty(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestProInstallRequiresExplicitNonInteractiveEULAAcceptanceBeforeMutation(t *testing.T) {
+	original := license.Manager
+	license.Manager = &license.LicenseManager{Valid: true}
+	t.Cleanup(func() { license.Manager = original })
+	t.Setenv("PIG_NON_INTERACTIVE", "1")
+
+	target := filepath.Join(t.TempDir(), "pigsty")
+	err := installPigsty(createTestPigstyTarball(t), target, installOptions{})
+	if err == nil || !strings.Contains(err.Error(), "--accept-eula") {
+		t.Fatalf("installPigsty error = %v, want actionable EULA failure", err)
+	}
+	var coded interface{ StatusCode() int }
+	if !errors.As(err, &coded) || coded.StatusCode() != output.CodeStyInitEULARequired {
+		t.Fatalf("EULA error code = %v, want %d", coded, output.CodeStyInitEULARequired)
+	}
+	if _, statErr := os.Lstat(target); !os.IsNotExist(statErr) {
+		t.Fatalf("rejected Pro install mutated target: %v", statErr)
+	}
+}
+
+func TestProInstallAcceptEULAStagesAndCommits(t *testing.T) {
+	original := license.Manager
+	license.Manager = &license.LicenseManager{Valid: true}
+	t.Cleanup(func() { license.Manager = original })
+	t.Setenv("PIG_NON_INTERACTIVE", "1")
+
+	target := filepath.Join(t.TempDir(), "pigsty")
+	err := installPigsty(createTestPigstyTarball(t), target, installOptions{AcceptEULA: true})
+	if err != nil {
+		t.Fatalf("installPigsty: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(target, "EULA.md"))
+	if err != nil {
+		t.Fatalf("read installed EULA: %v", err)
+	}
+	if !bytes.Equal(got, embeddedEULA) {
+		t.Fatal("installed EULA differs from embedded contract")
+	}
+}
+
+func TestInstallExtractionFailureLeavesNewTargetAbsent(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "pigsty")
+	err := installPigsty([]byte("not a gzip archive"), target, installOptions{})
+	if err == nil {
+		t.Fatal("installPigsty unexpectedly accepted invalid archive")
+	}
+	if _, statErr := os.Lstat(target); !os.IsNotExist(statErr) {
+		t.Fatalf("failed install left target behind: %v", statErr)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(filepath.Dir(target), ".pigsty.install-*")); len(matches) != 0 {
+		t.Fatalf("failed install left staging directories: %v", matches)
+	}
+}
+
+func TestForcedInstallStagesBeforeChangingExistingTarget(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "pigsty")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(target, "existing.txt")
+	if err := os.WriteFile(existing, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := installPigsty([]byte("broken"), target, installOptions{Overwrite: true})
+	if err == nil {
+		t.Fatal("installPigsty unexpectedly accepted invalid archive")
+	}
+	got, readErr := os.ReadFile(existing)
+	if readErr != nil || string(got) != "original" {
+		t.Fatalf("existing target changed after staging failure: %q, %v", got, readErr)
+	}
+	if info, statErr := os.Stat(existing); statErr != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("existing file mode changed after staging failure: %v, %v", info, statErr)
+	}
+}
+
+func TestCommitStagedInstallRollsBackFailedReplacement(t *testing.T) {
+	parent := t.TempDir()
+	target := filepath.Join(parent, "pigsty")
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(target, "old.txt")
+	if err := os.WriteFile(marker, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	missingStage := filepath.Join(parent, "missing-stage")
+	if err := commitStagedInstall(missingStage, target, true); err == nil {
+		t.Fatal("commitStagedInstall unexpectedly succeeded with a missing candidate")
+	}
+	got, err := os.ReadFile(marker)
+	if err != nil || string(got) != "old" {
+		t.Fatalf("rollback did not restore the old target: %q, %v", got, err)
+	}
+	if backups, _ := filepath.Glob(filepath.Join(parent, ".pigsty.backup-*")); len(backups) != 0 {
+		t.Fatalf("rollback left backup directories: %v", backups)
 	}
 }
 

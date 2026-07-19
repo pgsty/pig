@@ -1,4 +1,4 @@
-package sty
+package inventorycli
 
 import (
 	"context"
@@ -16,6 +16,12 @@ import (
 	"pig/internal/output"
 	"pig/inventory"
 )
+
+func TestCheckKindUsesInventoryDomain(t *testing.T) {
+	if CheckKind != "pig.inventory.check/v1" {
+		t.Fatalf("CheckKind = %q, want pig.inventory.check/v1", CheckKind)
+	}
+}
 
 func TestCheckDefaultIsLocalAndPerformsNoNetworkIO(t *testing.T) {
 	home, inventoryPath := makeCheckFixture(t, "127.0.0.1")
@@ -77,7 +83,7 @@ func TestCheckOptionsFailImmediately(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, _, failure := normalizeCheckOptions(&test.opts)
-			if failure == nil || failure.Code != output.CodeStyCheckInvalidArgs || failure.ExitCode() != 2 {
+			if failure == nil || failure.Code != output.CodeInventoryCheckInvalidArgs || failure.ExitCode() != 2 {
 				t.Fatalf("failure = %+v", failure)
 			}
 		})
@@ -92,11 +98,11 @@ func TestCheckOptionsFailImmediately(t *testing.T) {
 
 func TestCheckFindingsDeduplicateByContractKey(t *testing.T) {
 	findings := []Finding{
-		newCheckFinding("DUP", inventory.SeverityError, checkStageNetwork, "/same", "10.0.0.1", "later", output.CodeStyCheckNetworkFailed),
+		newCheckFinding("DUP", inventory.SeverityError, checkStageNetwork, "/same", "10.0.0.1", "later", output.CodeInventoryCheckNetworkFailed),
 		newCheckFinding("KEEP", inventory.SeverityWarning, checkStageLocal, "/one", "", "one", 0),
-		newCheckFinding("DUP", inventory.SeverityError, checkStageValidate, "/same", "10.0.0.1", "earlier", output.CodeStyCheckValidationFailed),
-		newCheckFinding("DUP", inventory.SeverityError, checkStageSSH, "/same", "10.0.0.2", "different target", output.CodeStyCheckSSHFailed),
-		newCheckFinding("DUP", inventory.SeverityError, checkStageSSH, "/other", "10.0.0.1", "different path", output.CodeStyCheckSSHFailed),
+		newCheckFinding("DUP", inventory.SeverityError, checkStageValidate, "/same", "10.0.0.1", "earlier", output.CodeInventoryCheckValidationFailed),
+		newCheckFinding("DUP", inventory.SeverityError, checkStageSSH, "/same", "10.0.0.2", "different target", output.CodeInventoryCheckSSHFailed),
+		newCheckFinding("DUP", inventory.SeverityError, checkStageSSH, "/other", "10.0.0.1", "different path", output.CodeInventoryCheckSSHFailed),
 	}
 	got := deduplicateCheckFindings(findings)
 	if len(got) != 4 {
@@ -115,13 +121,13 @@ func TestCheckFindingsDeduplicateByContractKey(t *testing.T) {
 
 func TestCheckFailureSelectionUsesSeverityStageAndStableCode(t *testing.T) {
 	findings := []Finding{
-		newCheckFinding("A_NETWORK", inventory.SeverityError, checkStageNetwork, "", "10.0.0.1", "network", output.CodeStyCheckNetworkFailed),
-		newCheckFinding("Z_VALIDATE", inventory.SeverityError, checkStageValidate, "/z", "", "validation", output.CodeStyCheckValidationFailed),
-		newCheckFinding("A_VALIDATE", inventory.SeverityError, checkStageValidate, "/a", "", "validation", output.CodeStyCheckProbeFailed),
-		newCheckFinding("A_LOCAL", inventory.SeverityWarning, checkStageLocal, "ssh", "", "warning", output.CodeStyCheckDependencyMissing),
+		newCheckFinding("A_NETWORK", inventory.SeverityError, checkStageNetwork, "", "10.0.0.1", "network", output.CodeInventoryCheckNetworkFailed),
+		newCheckFinding("Z_VALIDATE", inventory.SeverityError, checkStageValidate, "/z", "", "validation", output.CodeInventoryCheckValidationFailed),
+		newCheckFinding("A_VALIDATE", inventory.SeverityError, checkStageValidate, "/a", "", "validation", output.CodeInventoryCheckProbeFailed),
+		newCheckFinding("A_LOCAL", inventory.SeverityWarning, checkStageLocal, "ssh", "", "warning", output.CodeInventoryCheckDependencyMissing),
 	}
 	selected := selectCheckFailure(findings)
-	if selected == nil || selected.Code != "A_VALIDATE" || selected.ResultCode != output.CodeStyCheckProbeFailed {
+	if selected == nil || selected.Code != "A_VALIDATE" || selected.ResultCode != output.CodeInventoryCheckProbeFailed {
 		t.Fatalf("selected = %#v", selected)
 	}
 	if selectedExit := output.ExitCode(selected.ResultCode); selectedExit != 1 {
@@ -140,14 +146,14 @@ func TestCheckStatusCodesKeepGlobalShellMapping(t *testing.T) {
 		code int
 		exit int
 	}{
-		{output.CodeStyCheckInvalidArgs, 2},
-		{output.CodeStyCheckPermissionDenied, 3},
-		{output.CodeStyCheckDependencyMissing, 4},
-		{output.CodeStyCheckNetworkFailed, 5},
-		{output.CodeStyCheckResourceMissing, 6},
-		{output.CodeStyCheckValidationFailed, 8},
-		{output.CodeStyCheckProbeFailed, 1},
-		{output.CodeStyCheckSSHFailed, 1},
+		{output.CodeInventoryCheckInvalidArgs, 2},
+		{output.CodeInventoryCheckPermissionDenied, 3},
+		{output.CodeInventoryCheckDependencyMissing, 4},
+		{output.CodeInventoryCheckNetworkFailed, 5},
+		{output.CodeInventoryCheckResourceMissing, 6},
+		{output.CodeInventoryCheckValidationFailed, 8},
+		{output.CodeInventoryCheckProbeFailed, 1},
+		{output.CodeInventoryCheckSSHFailed, 1},
 	} {
 		if got := output.ExitCode(test.code); got != test.exit {
 			t.Errorf("ExitCode(%d) = %d, want %d", test.code, got, test.exit)
@@ -169,14 +175,14 @@ func TestCheckMixedCategoryResultSelectsValidationStage(t *testing.T) {
 	runtime := fakeCheckRuntime()
 	runtime.lookPath = func(string) (string, error) { return "", execNotFoundError{} }
 	result := checkWithRuntime(CheckOptions{Path: inventoryPath, Home: home}, runtime)
-	if result.Success || result.Code != output.CodeStyCheckValidationFailed || result.ExitCode() != 8 {
+	if result.Success || result.Code != output.CodeInventoryCheckValidationFailed || result.ExitCode() != 8 {
 		t.Fatalf("mixed result = %+v", result)
 	}
 	data := result.Data.(*CheckData)
 	var validation, dependency bool
 	for _, finding := range data.Findings {
 		validation = validation || finding.Stage == checkStageValidate && finding.Severity == inventory.SeverityError
-		dependency = dependency || finding.Stage == checkStageLocal && finding.ResultCode == output.CodeStyCheckDependencyMissing
+		dependency = dependency || finding.Stage == checkStageLocal && finding.ResultCode == output.CodeInventoryCheckDependencyMissing
 	}
 	if !validation || !dependency {
 		t.Fatalf("mixed findings = %#v", data.Findings)

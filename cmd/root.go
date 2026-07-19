@@ -82,33 +82,46 @@ func initAllForCommand(cmd *cobra.Command) error {
 	if err := initLogger(logLevel, logPath); err != nil {
 		return err
 	}
-	config.InitConfigWithOptions(inventory, pigstyHome, config.InitOptions{
-		CreateConfig: !inventoryCommandOwnsSource(cmd), SkipEnvironment: inventoryCommandSkipsEnvironment(cmd),
-	})
+	config.InitConfigWithOptions(inventory, pigstyHome, commandInitOptions(cmd))
 	initOutputFormat()
 	return nil
 }
 
-func inventoryCommandSkipsEnvironment(cmd *cobra.Command) bool {
-	if !inventoryCommandOwnsSource(cmd) || cmd == nil {
-		return false
+func commandInitOptions(cmd *cobra.Command) config.InitOptions {
+	return config.InitOptions{
+		CreateConfig:    !commandAvoidsPersistentConfig(cmd),
+		SkipEnvironment: commandSkipsEnvironment(cmd),
 	}
-	// Load alone mirrors the legacy OS-default/package-map phase and therefore
-	// needs controller OS detection. Other Inventory operations require only
-	// source/config discovery and must not spawn environment probes.
-	return cmd.CommandPath() != "pig inventory cmdb load"
 }
 
-// Inventory source selection is invocation-local. It must not manufacture a
-// persistent Pig config merely because an Inventory command was inspected or
-// executed. Released Sty delegates share that corrected behavior.
-func inventoryCommandOwnsSource(cmd *cobra.Command) bool {
+// Inventory and Sty resolve their state for the current invocation. Inspecting
+// or running either namespace must not manufacture ~/.pig/config.yml. Existing
+// configuration is still read when present.
+func commandAvoidsPersistentConfig(cmd *cobra.Command) bool {
 	if cmd == nil {
 		return false
 	}
 	path := cmd.CommandPath()
 	return path == "pig inventory" || strings.HasPrefix(path, "pig inventory ") ||
-		path == "pig sty edit" || path == "pig sty validate"
+		path == "pig sty" || strings.HasPrefix(path, "pig sty ")
+}
+
+func commandSkipsEnvironment(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	path := cmd.CommandPath()
+	if path == "pig inventory" || strings.HasPrefix(path, "pig inventory ") {
+		// CMDB load alone needs the controller OS defaults/package map in order
+		// to preserve inventory_load parity.
+		return path != "pig inventory cmdb load"
+	}
+	if path == "pig sty" || strings.HasPrefix(path, "pig sty ") {
+		// Native configure performs CPU and OS-aware tuning. The raw script owns
+		// its own probes; every other Sty operation only needs source discovery.
+		return path != "pig sty conf" || pigstyConfRaw
+	}
+	return false
 }
 
 // validateOutputFormat validates and normalizes the output format.

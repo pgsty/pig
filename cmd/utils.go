@@ -19,6 +19,8 @@ import (
 
 const legacyOutputCaptureLimit = 64 * 1024
 
+func showCommandHelp(command *cobra.Command, _ []string) error { return command.Help() }
+
 type legacyCommandData struct {
 	Kind            string                 `json:"kind,omitempty" yaml:"kind,omitempty"`
 	Command         string                 `json:"command" yaml:"command"`
@@ -167,7 +169,12 @@ func runLegacyStructuredContract(module int, command, kind string, args []string
 	}
 
 	if err != nil {
-		result := output.Fail(output.GenericOpFailed(module), command+" failed").
+		code := output.GenericOpFailed(module)
+		var coded interface{ StatusCode() int }
+		if errors.As(err, &coded) && coded.StatusCode() != 0 {
+			code = coded.StatusCode()
+		}
+		result := output.Fail(code, command+" failed").
 			WithDetail(err.Error()).
 			WithData(data)
 		return handleAuxResult(result)

@@ -1,4 +1,4 @@
-package sty
+package inventorycli
 
 import (
 	"bytes"
@@ -12,8 +12,17 @@ import (
 	"testing"
 
 	"pig/internal/cmdb"
+	"pig/internal/output"
 	"pig/inventory"
 )
+
+func preparePigstyDeclarations(path string) (cmdb.Declarations, *output.Result) {
+	prepared, failure := preparePigstyInventory(path, false)
+	if failure != nil {
+		return cmdb.Declarations{}, failure
+	}
+	return prepared.Declarations, nil
+}
 
 func TestPreparePigstyDeclarationsUsesExistingShape(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pigsty.yml")
@@ -63,6 +72,49 @@ func TestPreparePigstyDeclarationsRejectsNestedGroups(t *testing.T) {
 	_, failure := preparePigstyDeclarations(path)
 	if failure == nil {
 		t.Fatal("nested groups were accepted")
+	}
+}
+
+func TestPreparePigstyDeclarationsRejectsRootLevelGroups(t *testing.T) {
+	source := []byte(`all:
+  vars: {}
+  children: {}
+outside:
+  hosts:
+    192.0.2.1: {}
+`)
+	doc, err := inventory.Parse("root-group.yml", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, failure := pigstyDeclarationsFromDocument(doc, "root-group.yml")
+	if failure == nil {
+		t.Fatal("root-level group was silently omitted")
+	}
+	data, ok := failure.Data.(*CMDBFailureData)
+	if !ok || data.CMDBCode != "CMDB_ROOT_GROUP_UNSUPPORTED" {
+		t.Fatalf("root-level group failure = %+v", failure)
+	}
+}
+
+func TestPigstyDeclarationsUseAnsibleScalarSemantics(t *testing.T) {
+	doc, err := inventory.Parse("ansible-scalars.yml", []byte(`all:
+  vars:
+    enabled: yes
+    duration: 1:20
+    yaml12_octal: 0o755
+  children: {}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations, failure := pigstyDeclarationsFromDocument(doc, "ansible-scalars.yml")
+	if failure != nil {
+		t.Fatalf("declaration failure: %+v", failure)
+	}
+	values := jsonFieldsObject(declarations.Globals)
+	if values["enabled"] != true || values["duration"] != float64(80) || values["yaml12_octal"] != "0o755" {
+		t.Fatalf("CMDB scalar projection = %#v", values)
 	}
 }
 
@@ -119,6 +171,23 @@ package_map:
 	}
 	if !keys["repo_packages"] || !keys["node_packages"] {
 		t.Fatalf("mapped keys = %v", keys)
+	}
+}
+
+func TestReadPigstyOSDefaultsUsesAnsibleScalarSemantics(t *testing.T) {
+	home := t.TempDir()
+	directory := filepath.Join(home, "roles", "node_id", "vars")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte("repo_packages_default: yes\npackage_map:\n  duration: 1:20\n")
+	if err := os.WriteFile(filepath.Join(directory, "el9.x86_64.yml"), source, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defaults, warning := readPigstyOSDefaults(home, "el9", "x86_64")
+	if warning != "" || len(defaults.Values) != 1 || string(defaults.Values[0].Value) != "true" ||
+		len(defaults.Packages) != 1 || defaults.Packages[0].Value != "80" {
+		t.Fatalf("defaults = %+v, warning=%q", defaults, warning)
 	}
 }
 

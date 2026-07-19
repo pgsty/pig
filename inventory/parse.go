@@ -5,14 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"math/big"
 	"os"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/lexer"
-	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"gopkg.in/yaml.v3"
 )
@@ -40,8 +43,9 @@ type nodeRef struct {
 }
 
 // Parse parses one non-empty UTF-8 YAML document while retaining its exact
-// source representation. Syntax/CST parsing is performed by goccy/go-yaml;
-// the semantic tree is private and is never used for write-back marshaling.
+// source representation. goccy/go-yaml identifies comment tokens while the
+// private yaml.Node tree supplies semantics; neither is used for write-back
+// marshaling.
 func Parse(name string, source []byte) (*Document, error) {
 	if !utf8.Valid(source) {
 		return nil, fmt.Errorf("%s: inventory source is not valid UTF-8", sourceName(name))
@@ -51,14 +55,6 @@ func Parse(name string, source []byte) (*Document, error) {
 	}
 
 	tokens := lexer.Tokenize(string(source))
-	cst, err := parser.Parse(tokens, parser.ParseComments)
-	if err != nil {
-		return nil, fmt.Errorf("%s: invalid YAML: %w", sourceName(name), err)
-	}
-	if len(cst.Docs) != 1 || cst.Docs[0] == nil || cst.Docs[0].Body == nil {
-		return nil, fmt.Errorf("%s: inventory must contain exactly one non-empty YAML document", sourceName(name))
-	}
-
 	root, err := decodeOneYAMLDocument(source)
 	if err != nil {
 		return nil, fmt.Errorf("%s: invalid YAML: %w", sourceName(name), err)
@@ -89,6 +85,16 @@ func Parse(name string, source []byte) (*Document, error) {
 
 // Load reads and parses a static YAML inventory.
 func Load(path string) (*Document, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("inventory source must be one static YAML file")
+	}
+	if info.Mode().Perm()&0111 != 0 {
+		return nil, fmt.Errorf("executable dynamic inventory sources are unsupported")
+	}
 	source, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -331,15 +337,22 @@ func (d *Document) indexNode(node, parent, key *yaml.Node, entry int, path Path,
 
 	switch node.Kind {
 	case yaml.MappingNode:
+		seenKeys := make(map[string]struct{}, len(node.Content)/2)
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			keyNode := node.Content[i]
 			valueNode := node.Content[i+1]
 			keyName := keyNode.Value
 			childPath := appendPath(path, Key(keyName))
 			keySpan := d.scalarSpan(keyNode)
+			keyScalar := d.semanticScalar(keyNode, keySpan)
+			identity := scalarKeyIdentity(keyScalar)
+			if _, exists := seenKeys[identity]; exists {
+				return fmt.Errorf("%s: duplicate mapping key %q", childPath.String(), keyName)
+			}
+			seenKeys[identity] = struct{}{}
 			childValue := &value.Mapping[i/2]
 			*childValue = Entry{
-				Key: d.semanticScalar(keyNode, keySpan), Path: clonePath(childPath),
+				Key: keyScalar, Path: clonePath(childPath),
 				Range: d.sourceRange(byteSpan{start: keySpan.start, end: d.nodeSpan(valueNode).end}),
 			}
 			d.keyPaths[keyName] = append(d.keyPaths[keyName], clonePath(childPath))
@@ -362,6 +375,42 @@ func (d *Document) indexNode(node, parent, key *yaml.Node, entry int, path Path,
 		}
 	}
 	return nil
+}
+
+// scalarKeyIdentity follows the equality behavior of PyYAML's Python mapping:
+// booleans, integers, and floats share one numeric key space (true == 1 ==
+// 1.0), while strings remain distinct. This prevents declarations that
+// Ansible would silently collapse from entering the semantic model.
+func scalarKeyIdentity(scalar Scalar) string {
+	switch scalar.Kind {
+	case BoolScalar:
+		if value, _ := scalar.Value.(bool); value {
+			return "number\x001"
+		}
+		return "number\x000"
+	case IntegerScalar:
+		return "number\x00" + fmt.Sprint(scalar.Value)
+	case FloatScalar:
+		value, ok := scalar.Value.(float64)
+		switch {
+		case !ok:
+			return "float\x00" + fmt.Sprint(scalar.Value)
+		case math.IsNaN(value):
+			return "float\x00nan"
+		case math.IsInf(value, 1):
+			return "float\x00+inf"
+		case math.IsInf(value, -1):
+			return "float\x00-inf"
+		default:
+			return "number\x00" + new(big.Rat).SetFloat64(value).RatString()
+		}
+	case StringScalar:
+		return "string\x00" + fmt.Sprint(scalar.Value)
+	case NullScalar:
+		return "null"
+	default:
+		return string(scalar.Kind) + "\x00" + scalar.Tag + "\x00" + scalar.Raw
+	}
 }
 
 func clonePath(path Path) Path {
@@ -594,6 +643,10 @@ func (d *Document) semanticScalar(node *yaml.Node, span byteSpan) Scalar {
 		raw = string(d.source[span.start:span.end])
 	}
 	scalar := Scalar{Kind: UnknownScalar, Value: node.Value, Raw: raw, Tag: node.Tag, Style: scalarStyle(node), Range: d.sourceRange(span)}
+	if implicitPlainScalar(node) {
+		scalar.Kind, scalar.Value = resolveAnsiblePlainScalar(node.Value)
+		return scalar
+	}
 	switch node.Tag {
 	case "!!str":
 		scalar.Kind = StringScalar
@@ -623,6 +676,121 @@ func (d *Document) semanticScalar(node *yaml.Node, span byteSpan) Scalar {
 		}
 	}
 	return scalar
+}
+
+var (
+	ansiblePlainBool  = regexp.MustCompile(`^(?:yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$`)
+	ansiblePlainInt   = regexp.MustCompile(`^[-+]?(?:0b[0-1_]+|0[0-7_]+|(?:0|[1-9][0-9_]*)|0x[0-9a-fA-F_]+|[1-9][0-9_]*(?::[0-5]?[0-9])+)$`)
+	ansiblePlainFloat = regexp.MustCompile(
+		`^[-+]?(?:(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?|[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*|\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$`,
+	)
+)
+
+func implicitPlainScalar(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.ScalarNode {
+		return false
+	}
+	return node.Style&(yaml.TaggedStyle|yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle|yaml.LiteralStyle|yaml.FoldedStyle) == 0
+}
+
+// resolveAnsiblePlainScalar follows the scalar resolver used by PyYAML's
+// SafeLoader, which is also the semantic baseline of Ansible's legacy YAML
+// inventory plugin and Pigsty's bin/inventory_load. The original lexeme remains
+// in Scalar.Raw, so this affects semantics without normalizing presentation.
+func resolveAnsiblePlainScalar(text string) (ScalarKind, any) {
+	if text == "" || text == "~" || text == "null" || text == "Null" || text == "NULL" {
+		return NullScalar, nil
+	}
+	if ansiblePlainBool.MatchString(text) {
+		switch strings.ToLower(text) {
+		case "yes", "true", "on":
+			return BoolScalar, true
+		default:
+			return BoolScalar, false
+		}
+	}
+	if ansiblePlainInt.MatchString(text) {
+		value, ok := parseAnsibleInteger(text)
+		if !ok {
+			return UnknownScalar, text
+		}
+		return IntegerScalar, value
+	}
+	if ansiblePlainFloat.MatchString(text) {
+		value, ok := parseAnsibleFloat(text)
+		if !ok {
+			return UnknownScalar, text
+		}
+		return FloatScalar, value
+	}
+	return StringScalar, text
+}
+
+func parseAnsibleInteger(text string) (any, bool) {
+	cleaned := strings.ReplaceAll(text, "_", "")
+	if strings.Contains(cleaned, ":") {
+		sign := int64(1)
+		if cleaned[0] == '-' || cleaned[0] == '+' {
+			if cleaned[0] == '-' {
+				sign = -1
+			}
+			cleaned = cleaned[1:]
+		}
+		parts := strings.Split(cleaned, ":")
+		value := int64(0)
+		for _, part := range parts {
+			digit, err := strconv.ParseInt(part, 10, 64)
+			if err != nil || value > (math.MaxInt64-digit)/60 {
+				return nil, false
+			}
+			value = value*60 + digit
+		}
+		return sign * value, true
+	}
+	if value, err := strconv.ParseInt(cleaned, 0, 64); err == nil {
+		return value, true
+	}
+	if !strings.HasPrefix(cleaned, "-") {
+		unsigned := strings.TrimPrefix(cleaned, "+")
+		if value, err := strconv.ParseUint(unsigned, 0, 64); err == nil {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func parseAnsibleFloat(text string) (float64, bool) {
+	cleaned := strings.ReplaceAll(text, "_", "")
+	lower := strings.ToLower(cleaned)
+	switch lower {
+	case ".inf", "+.inf":
+		return math.Inf(1), true
+	case "-.inf":
+		return math.Inf(-1), true
+	case ".nan", "+.nan", "-.nan":
+		return math.NaN(), true
+	}
+	if strings.Contains(cleaned, ":") {
+		sign := 1.0
+		if cleaned[0] == '-' || cleaned[0] == '+' {
+			if cleaned[0] == '-' {
+				sign = -1
+			}
+			cleaned = cleaned[1:]
+		}
+		parts := strings.Split(cleaned, ":")
+		value := 0.0
+		for _, part := range parts {
+			digit, err := strconv.ParseFloat(part, 64)
+			if err != nil {
+				return 0, false
+			}
+			value = value*60 + digit
+		}
+		return sign * value, true
+	}
+	value, err := strconv.ParseFloat(cleaned, 64)
+	return value, err == nil
 }
 
 func scalarStyle(node *yaml.Node) string {
@@ -669,12 +837,7 @@ func (d *Document) buildInventory() *Inventory {
 	if !ok || root.Kind != MappingValue {
 		return &Inventory{}
 	}
-	allValue, ok := root.LookupKey("all")
-	if !ok {
-		return &Inventory{}
-	}
 	inv := &Inventory{}
-	inv.All = d.buildGroup("all", Keys("all"), allValue)
 	var flatten func(*Group)
 	flatten = func(group *Group) {
 		if group == nil {
@@ -685,8 +848,29 @@ func (d *Document) buildInventory() *Inventory {
 			flatten(child)
 		}
 	}
-	flatten(inv.All)
+	for i := range root.Mapping {
+		entry := &root.Mapping[i]
+		name := declarationKey(entry)
+		if name == "all" {
+			inv.All = d.buildGroup("all", entry.Path, &entry.Value)
+			flatten(inv.All)
+			continue
+		}
+		group := d.buildGroup(name, entry.Path, &entry.Value)
+		inv.Groups = append(inv.Groups, group)
+		flatten(group)
+	}
 	return inv
+}
+
+func declarationKey(entry *Entry) string {
+	if entry != nil {
+		if segment, ok := entry.Path.Last(); ok && segment.Kind == KeySegment {
+			return segment.Key
+		}
+		return fmt.Sprint(entry.Key.Value)
+	}
+	return ""
 }
 
 func (d *Document) buildGroup(name string, path Path, source *Value) *Group {
@@ -705,7 +889,7 @@ func (d *Document) buildGroup(name string, path Path, source *Value) *Group {
 		for i := range hosts.Mapping {
 			entry := &hosts.Mapping[i]
 			group.Hosts = append(group.Hosts, &Host{
-				Name: fmt.Sprint(entry.Key.Value), Vars: entry.Value,
+				Name: declarationKey(entry), Vars: entry.Value,
 				Path: clonePath(entry.Path), Range: entry.Range,
 			})
 		}
@@ -713,7 +897,7 @@ func (d *Document) buildGroup(name string, path Path, source *Value) *Group {
 	if children, ok := source.LookupKey("children"); ok && children.Kind == MappingValue {
 		for i := range children.Mapping {
 			entry := &children.Mapping[i]
-			childName := fmt.Sprint(entry.Key.Value)
+			childName := declarationKey(entry)
 			group.Children = append(group.Children, d.buildGroup(childName, entry.Path, &entry.Value))
 		}
 	}

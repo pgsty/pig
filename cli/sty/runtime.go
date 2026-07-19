@@ -6,7 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"pig/cli/get"
+	"pig/cli/license"
 	"pig/internal/config"
+	"pig/internal/output"
 	"pig/internal/utils"
 	"strings"
 
@@ -17,6 +19,7 @@ type InitOptions struct {
 	TargetPath  string
 	Force       bool
 	Mirror      bool
+	AcceptEULA  bool
 	Version     string
 	DownloadDir string
 	Args        []string
@@ -24,14 +27,27 @@ type InitOptions struct {
 
 func Init(opts InitOptions) error {
 	version := strings.TrimSpace(opts.Version)
-	if len(opts.Args) > 0 && version == "" {
-		version = opts.Args[0]
+	if len(opts.Args) > 1 || len(opts.Args) > 0 && version != "" {
+		return commandFailedf(output.CodeStyInitInvalidArgs, "specify the Pigsty version either positionally or with --version, not both")
+	}
+	if len(opts.Args) > 0 {
+		version = strings.TrimSpace(opts.Args[0])
 	}
 	if version == "" {
 		version = "latest"
 	}
 	if version != "latest" && len(version) > 0 && version[0] >= '0' && version[0] <= '9' {
 		version = "v" + version
+	}
+	if _, _, _, err := inspectInstallTarget(opts.TargetPath, opts.Force); err != nil {
+		return err
+	}
+	eulaAccepted := opts.AcceptEULA
+	if license.Manager.Valid {
+		if err := acceptProEULA(eulaAccepted); err != nil {
+			return err
+		}
+		eulaAccepted = true
 	}
 
 	get.NetworkCondition()
@@ -47,38 +63,33 @@ func Init(opts InitOptions) error {
 		if len(version) > 0 && version[0] >= '0' && version[0] <= '9' {
 			version = "v" + version
 		}
-		baseURL := config.RepoPigstyIO
-		if opts.Mirror {
-			baseURL = config.RepoPigstyCC
-		}
-		ver = &get.VersionInfo{
-			Version:     version,
-			DownloadURL: fmt.Sprintf("%s/src/pigsty-%s.tgz", baseURL, version),
-		}
+		ver = get.IsValidVersion(version)
 	} else {
 		version = get.CompleteVersion(version)
 		ver = get.IsValidVersion(version)
-		if ver == nil {
-			logrus.Errorf("invalid pigsty version: %v", version)
-			return fmt.Errorf("invalid pigsty version: %s", version)
-		}
+	}
+	if ver == nil {
+		logrus.Errorf("invalid pigsty version: %v", version)
+		return commandFailedf(output.CodeStyInitInvalidArgs, "invalid pigsty version: %s", version)
 	}
 
 	logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, opts.DownloadDir)
 	if err := get.DownloadSrc(version, opts.DownloadDir); err != nil {
 		logrus.Errorf("failed to download pigsty src %s: %v", version, err)
-		return fmt.Errorf("failed to download pigsty src %s: %w", version, err)
+		return commandFailed(output.CodeStyInitFailed, fmt.Errorf("failed to download pigsty src %s: %w", version, err))
 	}
 
 	srcPath := filepath.Join(opts.DownloadDir, fmt.Sprintf("pigsty-%s.tgz", version))
 	srcTarball, err := LoadPigstySrc(srcPath)
 	if err != nil {
 		logrus.Errorf("failed to load pigsty src %s: %v", version, err)
-		return fmt.Errorf("failed to load pigsty src %s: %w", version, err)
+		return commandFailed(output.CodeStyInitFailed, fmt.Errorf("failed to load pigsty src %s: %w", version, err))
 	}
-	if err := InstallPigsty(srcTarball, opts.TargetPath, opts.Force); err != nil {
+	if err := installPigsty(srcTarball, opts.TargetPath, installOptions{
+		Overwrite: opts.Force, AcceptEULA: eulaAccepted,
+	}); err != nil {
 		logrus.Errorf("failed to install pigsty src %s: %v", version, err)
-		return err
+		return commandFailed(output.CodeStyInitFailed, err)
 	}
 	logrus.Infof("proceed with pig boot & pig conf")
 	return nil
@@ -102,13 +113,13 @@ type BootstrapOptions struct {
 
 func Bootstrap(opts BootstrapOptions) error {
 	if opts.PigstyHome == "" {
-		logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
-		return fmt.Errorf("pigsty home & inventory not found")
+		logrus.Errorf("pigsty home not found, specify it with -H/--home")
+		return commandFailedf(output.CodeStyBootstrapResourceMissing, "pigsty home not found")
 	}
 	bootstrapPath := filepath.Join(opts.PigstyHome, "bootstrap")
-	if _, err := os.Stat(bootstrapPath); os.IsNotExist(err) {
+	if info, err := os.Stat(bootstrapPath); err != nil || info.IsDir() {
 		logrus.Errorf("bootstrap script not found: %s", bootstrapPath)
-		return fmt.Errorf("bootstrap script not found: %s", bootstrapPath)
+		return commandFailedf(output.CodeStyBootstrapResourceMissing, "bootstrap script not found: %s", bootstrapPath)
 	}
 
 	cmdArgs := []string{bootstrapPath}
@@ -122,12 +133,12 @@ func Bootstrap(opts BootstrapOptions) error {
 		cmdArgs = append(cmdArgs, "-k")
 	}
 	if err := os.Chdir(opts.PigstyHome); err != nil {
-		return fmt.Errorf("failed to change directory to %s: %w", opts.PigstyHome, err)
+		return commandFailed(output.CodeStyBootstrapResourceMissing, fmt.Errorf("failed to change directory to %s: %w", opts.PigstyHome, err))
 	}
 	logrus.Infof("bootstrap with: %s", strings.Join(cmdArgs, " "))
 	if err := utils.ShellCommand(cmdArgs); err != nil {
 		logrus.Errorf("bootstrap execution failed: %v", err)
-		return err
+		return commandFailed(output.CodeStyBootstrapFailed, err)
 	}
 	return nil
 }
@@ -150,14 +161,14 @@ type RawConfigureOptions struct {
 
 func ConfigureRaw(opts RawConfigureOptions) error {
 	if opts.PigstyHome == "" {
-		logrus.Errorf("pigsty home & inventory not found, specify the inventory with -i")
-		return fmt.Errorf("pigsty home & inventory not found")
+		logrus.Errorf("pigsty home not found, specify it with -H/--home")
+		return commandFailedf(output.CodeStyConfigureResourceMissing, "pigsty home not found")
 	}
 
 	configurePath := filepath.Join(opts.PigstyHome, "configure")
-	if _, err := os.Stat(configurePath); os.IsNotExist(err) {
+	if info, err := os.Stat(configurePath); err != nil || info.IsDir() {
 		logrus.Errorf("configure script not found: %s", configurePath)
-		return fmt.Errorf("configure script not found: %s", configurePath)
+		return commandFailedf(output.CodeStyConfigureResourceMissing, "configure script not found: %s", configurePath)
 	}
 
 	cmdArgs := []string{configurePath}
@@ -194,11 +205,11 @@ func ConfigureRaw(opts RawConfigureOptions) error {
 	cmdArgs = append(cmdArgs, opts.Args...)
 
 	if err := os.Chdir(opts.PigstyHome); err != nil {
-		return fmt.Errorf("failed to change directory to %s: %w", opts.PigstyHome, err)
+		return commandFailed(output.CodeStyConfigureResourceMissing, fmt.Errorf("failed to change directory to %s: %w", opts.PigstyHome, err))
 	}
 
 	logrus.Infof("configure with: %s", strings.Join(cmdArgs, " "))
-	return utils.ShellCommand(cmdArgs)
+	return commandFailed(output.CodeStyRawConfigureFailed, utils.ShellCommand(cmdArgs))
 }
 
 type DownloadOptions struct {
@@ -209,6 +220,14 @@ type DownloadOptions struct {
 }
 
 func Download(opts DownloadOptions) error {
+	version := strings.TrimSpace(opts.Version)
+	if len(opts.Args) > 1 || len(opts.Args) > 0 && version != "" {
+		return commandFailedf(output.CodeStyReleaseInvalidArgs, "specify the Pigsty version either positionally or with --version, not both")
+	}
+	if len(opts.Args) > 0 {
+		version = strings.TrimSpace(opts.Args[0])
+	}
+
 	logrus.Info("fetching pigsty version info...")
 	get.NetworkCondition()
 	if opts.Mirror {
@@ -216,13 +235,9 @@ func Download(opts DownloadOptions) error {
 	}
 	if get.AllVersions == nil {
 		logrus.Errorf("Fail to get pigsty version list")
-		return fmt.Errorf("failed to get pigsty version list")
+		return commandFailedf(output.CodeStyReleaseMetadataUnavailable, "failed to get pigsty version list")
 	}
 
-	version := strings.TrimSpace(opts.Version)
-	if version == "" && len(opts.Args) > 0 {
-		version = opts.Args[0]
-	}
 	if version != "" && version != "latest" && len(version) > 0 && version[0] >= '0' && version[0] <= '9' {
 		version = "v" + version
 	}
@@ -235,14 +250,14 @@ func Download(opts DownloadOptions) error {
 	ver := get.IsValidVersion(version)
 	if ver == nil {
 		logrus.Errorf("Invalid version: %s", version)
-		return fmt.Errorf("invalid version: %s", version)
+		return commandFailedf(output.CodeStyReleaseInvalidArgs, "invalid version: %s", version)
 	}
 	logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, opts.DownloadDir)
 
 	logrus.Debugf("Download pigsty src %s to %s", version, opts.DownloadDir)
 	if err := get.DownloadSrc(version, opts.DownloadDir); err != nil {
 		logrus.Errorf("failed to download pigsty src: %v", err)
-		return err
+		return commandFailed(output.CodeStyReleaseDownloadFailed, err)
 	}
 	return nil
 }
@@ -264,7 +279,7 @@ func ListVersionsWithOptions(opts ListOptions) error {
 	}
 	if get.AllVersions == nil {
 		logrus.Errorf("Fail to list pigsty versions")
-		return fmt.Errorf("failed to list pigsty versions")
+		return commandFailedf(output.CodeStyReleaseMetadataUnavailable, "failed to list pigsty versions")
 	}
 
 	var since string
@@ -287,7 +302,7 @@ func ListVersionsWithOptions(opts ListOptions) error {
 
 	if !get.ValidVersion(since) {
 		logrus.Errorf("invalid version: %s", since)
-		return fmt.Errorf("invalid version: %s", since)
+		return commandFailedf(output.CodeStyReleaseInvalidArgs, "invalid version: %s", since)
 	}
 	logrus.Debugf("the since version %s given", since)
 
@@ -305,32 +320,32 @@ func Deploy(opts DeployOptions) error {
 	if _, err := exec.LookPath("ansible-playbook"); err != nil {
 		logrus.Errorf("ansible-playbook command not found: %v", err)
 		logrus.Infof("have you run: pig sty boot to install ansible?")
-		return err
+		return commandFailed(output.CodeStyDeployDependencyMissing, err)
 	}
 
-	if _, err := os.Stat(opts.PigstyHome); os.IsNotExist(err) {
+	if info, err := os.Stat(opts.PigstyHome); err != nil || !info.IsDir() {
 		logrus.Errorf("pigsty home %s not found: %v", opts.PigstyHome, err)
 		logrus.Infof("have you run: pig sty init to install pigsty?")
-		return err
+		return commandFailedf(output.CodeStyDeployResourceMissing, "pigsty home not found: %s", opts.PigstyHome)
 	}
 
-	if _, err := os.Stat(opts.PigstyConfig); os.IsNotExist(err) {
+	if info, err := os.Stat(opts.PigstyConfig); err != nil || !info.Mode().IsRegular() {
 		logrus.Errorf("pigsty inventory not found: %s", opts.PigstyConfig)
 		logrus.Infof("have you run: pig sty conf to generate pigsty.yml config?")
-		return err
+		return commandFailedf(output.CodeStyDeployResourceMissing, "pigsty inventory not found: %s", opts.PigstyConfig)
 	}
 
 	playbookName, err := resolveDeployPlaybook(opts.PigstyHome)
 	if err != nil {
-		return err
+		return commandFailed(output.CodeStyDeployResourceMissing, err)
 	}
 
 	if err := os.Chdir(opts.PigstyHome); err != nil {
-		return fmt.Errorf("failed to change directory to %s: %w", opts.PigstyHome, err)
+		return commandFailed(output.CodeStyDeployResourceMissing, fmt.Errorf("failed to change directory to %s: %w", opts.PigstyHome, err))
 	}
 	logrus.Infof("run playbook %s", playbookName)
 	logrus.Warnf("IT'S DANGEROUS TO RUN THIS ON INSTALLED SYSTEM!!! Use Ctrl+C to abort")
-	return utils.Command([]string{"ansible-playbook", playbookName})
+	return commandFailed(output.CodeStyDeployFailed, utils.Command([]string{"ansible-playbook", playbookName}))
 }
 
 func resolveDeployPlaybook(home string) (string, error) {

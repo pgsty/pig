@@ -1,4 +1,4 @@
-package sty
+package inventorycli
 
 import "pig/inventory"
 

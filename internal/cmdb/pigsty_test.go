@@ -1,7 +1,9 @@
 package cmdb
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -299,6 +301,72 @@ func TestEnablePlanRechecksUnchangedManagedScriptBeforeSwitch(t *testing.T) {
 	configAfter, _ := os.ReadFile(configPath)
 	if string(configAfter) != string(configBefore) {
 		t.Fatal("stale managed script changed ansible.cfg")
+	}
+}
+
+func TestEnablePlanRollsBackScriptWhenConfigCommitFails(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "new", true: "existing"}[existing], func(t *testing.T) {
+			home, err := os.MkdirTemp(".", ".cmdb-enable-rollback-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			home, err = filepath.Abs(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(home)
+			configPath := filepath.Join(home, "ansible.cfg")
+			configBefore := []byte("[defaults]\ninventory = pigsty.yml\n")
+			if err := os.WriteFile(configPath, configBefore, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			scriptPath := filepath.Join(home, "inventory.sh")
+			oldScript := []byte("#!/bin/bash\nexec psql 'service=old' -AXtwc 'SELECT text FROM pigsty.inventory;'\n")
+			if existing {
+				if err := os.WriteFile(scriptPath, oldScript, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			candidate := []byte("#!/bin/bash\nexec psql 'service=meta' -AXtwc 'SELECT text FROM pigsty.inventory;'\n")
+			document, err := readAnsibleConfig(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			patch, changed, err := planGuardedInventoryLiteral(document, home, "inventory.sh")
+			if err != nil || !changed {
+				t.Fatalf("config patch = %+v, %v", patch, err)
+			}
+			plan := &PigstySourcePlan{
+				ConfigPath: configPath, InventoryPath: scriptPath, scriptBody: candidate,
+				ConfigChanged: true, Changed: true, configPatch: patch,
+				commitConfig: func(*ansibleConfigPatch) error {
+					return failure("CMDB_SWITCH_FAILED", "injected ansible.cfg failure")
+				},
+			}
+			if err := inspectManagedInventoryScript(plan); err != nil || !plan.ScriptChanged {
+				t.Fatalf("script plan = %+v, %v", plan, err)
+			}
+			if _, err := plan.Apply(); !IsCode(err, "CMDB_SWITCH_FAILED") {
+				t.Fatalf("apply error = %v", err)
+			}
+			configAfter, _ := os.ReadFile(configPath)
+			if !bytes.Equal(configAfter, configBefore) {
+				t.Fatalf("ansible.cfg changed: %q", configAfter)
+			}
+			if existing {
+				after, readErr := os.ReadFile(scriptPath)
+				info, statErr := os.Stat(scriptPath)
+				if readErr != nil || statErr != nil {
+					t.Fatalf("existing script cannot be read after rollback: read=%v stat=%v", readErr, statErr)
+				}
+				if !bytes.Equal(after, oldScript) || info.Mode().Perm() != 0o700 {
+					t.Fatalf("existing script was not restored: %q mode=%v", after, info.Mode())
+				}
+			} else if _, err := os.Lstat(scriptPath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("new script remains after rollback: %v", err)
+			}
+		})
 	}
 }
 

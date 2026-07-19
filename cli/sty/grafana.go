@@ -359,11 +359,7 @@ func loadGrafanaCredentialInventory(filename string) (*inventory.Document, error
 	if filename == "" {
 		return nil, nil
 	}
-	resolved, source, failure := readStaticInventorySource(filename, 0)
-	if failure != nil {
-		return nil, errors.New("active Inventory could not be read for Grafana credential resolution")
-	}
-	doc, err := inventory.Parse(resolved, source)
+	doc, err := inventory.Load(filename)
 	if err != nil {
 		return nil, errors.New("active Inventory could not be parsed for Grafana credential resolution")
 	}

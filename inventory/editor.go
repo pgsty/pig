@@ -134,26 +134,12 @@ type insertOptions struct {
 // InsertOption customizes a mapping insertion.
 type InsertOption func(*insertOptions)
 
-// Pair and OrderedMapping allow callers to insert a small flow mapping without
-// losing caller-defined key order.
-type Pair struct {
-	Key   string
-	Value any
-}
-
-type OrderedMapping []Pair
-
 // AfterKey inserts immediately after an existing sibling when possible.
 func AfterKey(key string) InsertOption {
 	return func(options *insertOptions) {
 		options.after = key
 		options.hasAfter = true
 	}
-}
-
-// WithComment is the compatibility spelling for WithInlineComment.
-func WithComment(comment string) InsertOption {
-	return WithInlineComment(comment)
 }
 
 // WithInlineComment appends one inline comment to a newly inserted entry.
@@ -1063,16 +1049,6 @@ func renderNewValue(value any, flow bool) (string, error) {
 			parts = append(parts, rendered)
 		}
 		return "[ " + strings.Join(parts, ", ") + " ]", nil
-	case OrderedMapping:
-		parts := make([]string, 0, len(typed))
-		for _, pair := range typed {
-			rendered, err := renderNewValue(pair.Value, true)
-			if err != nil {
-				return "", err
-			}
-			parts = append(parts, renderKey(pair.Key)+": "+rendered)
-		}
-		return "{ " + strings.Join(parts, ", ") + " }", nil
 	default:
 		return "", fmt.Errorf("unsupported inserted value type %T", value)
 	}

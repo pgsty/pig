@@ -261,17 +261,24 @@ const (
 	CodeStyCheckInvalidArgs            = MODULE_STY + CAT_PARAM + 6      // Invalid Check profile or probe arguments
 	CodeStyGrafanaInvalidArgs          = MODULE_STY + CAT_PARAM + 7      // Invalid Grafana connection, scope, or dump arguments
 	CodeStyCMDBInvalidArgs             = MODULE_STY + CAT_PARAM + 8      // Invalid CMDB source or operation arguments
+	CodeStyInitInvalidArgs             = MODULE_STY + CAT_PARAM + 9      // Invalid Pigsty init version or option combination
+	CodeStyReleaseInvalidArgs          = MODULE_STY + CAT_PARAM + 10     // Invalid Pigsty release selector or version
 	CodeStyCheckPermissionDenied       = MODULE_STY + CAT_PERM + 1       // Check observed a permission or privilege failure
 	CodeStyGrafanaPermissionDenied     = MODULE_STY + CAT_PERM + 2       // Grafana rejected credentials or authorization
 	CodeStyCMDBPermissionDenied        = MODULE_STY + CAT_PERM + 3       // CMDB connection or private file permissions are insufficient
 	CodeStyCheckDependencyMissing      = MODULE_STY + CAT_DEPEND + 1     // A required local Check executable is unavailable
+	CodeStyDeployDependencyMissing     = MODULE_STY + CAT_DEPEND + 2     // ansible-playbook is unavailable
 	CodeStyCheckNetworkFailed          = MODULE_STY + CAT_NETWORK + 1    // A selected target failed its TCP reachability probe
 	CodeStyGrafanaNetworkFailed        = MODULE_STY + CAT_NETWORK + 2    // Grafana endpoint could not be reached within bounds
 	CodeStyCMDBConnectionFailed        = MODULE_STY + CAT_NETWORK + 3    // Native PostgreSQL CMDB could not be reached within bounds
+	CodeStyReleaseMetadataUnavailable  = MODULE_STY + CAT_NETWORK + 4    // Release metadata endpoints are unavailable
 	CodeStyConfigureTemplateNotFound   = MODULE_STY + CAT_RESOURCE + 1   // Configure template file not found
 	CodeStyInventoryNotFound           = MODULE_STY + CAT_RESOURCE + 2   // Inventory file not found
 	CodeStyCheckResourceMissing        = MODULE_STY + CAT_RESOURCE + 3   // Pigsty home or required project layout is unavailable
 	CodeStyGrafanaResourceMissing      = MODULE_STY + CAT_RESOURCE + 4   // Grafana dashboard path or dump destination is unavailable
+	CodeStyBootstrapResourceMissing    = MODULE_STY + CAT_RESOURCE + 5   // Pigsty home or bootstrap script is unavailable
+	CodeStyConfigureResourceMissing    = MODULE_STY + CAT_RESOURCE + 6   // Pigsty home or raw configure script is unavailable
+	CodeStyDeployResourceMissing       = MODULE_STY + CAT_RESOURCE + 7   // Pigsty home, inventory, or playbook is unavailable
 	CodeStyInventoryInvalid            = MODULE_STY + CAT_CONFIG + 1     // Inventory YAML or semantics are invalid
 	CodeStyValidationFailed            = MODULE_STY + CAT_CONFIG + 2     // Inventory validation reported diagnostics
 	CodeStyCheckValidationFailed       = MODULE_STY + CAT_CONFIG + 3     // Check found an invalid active Inventory
@@ -281,6 +288,7 @@ const (
 	CodeStyCMDBSchemaInvalid           = MODULE_STY + CAT_CONFIG + 7     // Existing Pigsty CMDB baseline is invalid
 	CodeStyEditConflict                = MODULE_STY + CAT_STATE + 1      // Inventory changed during an edit session
 	CodeStyGrafanaPlanChanged          = MODULE_STY + CAT_STATE + 2      // Grafana clean plan changed before interactive application
+	CodeStyInitTargetExists            = MODULE_STY + CAT_STATE + 3      // Pigsty init target already exists without --force
 	CodeStyCMDBSourceChanged           = MODULE_STY + CAT_STATE + 6      // Static source bytes changed during a planned operation
 	CodeStyConfigureFailed             = MODULE_STY + CAT_OPERATION + 1  // Configure generation failed
 	CodeStyConfigureWriteFailed        = MODULE_STY + CAT_OPERATION + 2  // Configure output write failed
@@ -293,8 +301,51 @@ const (
 	CodeStyGrafanaDumpFailed           = MODULE_STY + CAT_OPERATION + 9  // Grafana dashboard export failed
 	CodeStyCMDBOperationFailed         = MODULE_STY + CAT_OPERATION + 10 // Native CMDB transaction or verification failed
 	CodeStyCMDBOutputFailed            = MODULE_STY + CAT_OPERATION + 11 // Private CMDB output could not be committed
+	CodeStyInitFailed                  = MODULE_STY + CAT_OPERATION + 12 // Pigsty source download, staging, or commit failed
+	CodeStyBootstrapFailed             = MODULE_STY + CAT_OPERATION + 13 // Pigsty bootstrap execution failed
+	CodeStyRawConfigureFailed          = MODULE_STY + CAT_OPERATION + 14 // Legacy raw configure execution failed
+	CodeStyReleaseDownloadFailed       = MODULE_STY + CAT_OPERATION + 15 // Pigsty release download failed
+	CodeStyDeployFailed                = MODULE_STY + CAT_OPERATION + 16 // ansible-playbook execution failed
 	CodeStyGrafanaConfirmationRequired = MODULE_STY + CAT_CONFIRM + 1    // Grafana deletion requires explicit confirmation
 	CodeStyCMDBConfirmationRequired    = MODULE_STY + CAT_CONFIRM + 2    // CMDB mutation requires explicit consent
+	CodeStyInitEULARequired            = MODULE_STY + CAT_CONFIRM + 3    // Pigsty Pro init requires explicit EULA acceptance
+)
+
+// Inventory is a top-level command domain but retains the frozen MODULE_STY
+// wire range for compatibility. New Inventory code should use these canonical
+// names; CodeSty* aliases remain available to existing consumers.
+const (
+	MODULE_INVENTORY = MODULE_STY
+
+	CodeInventoryEditInvalidArgs          = CodeStyEditInvalidArgs
+	CodeInventoryValidateInvalidArgs      = CodeStyValidateInvalidArgs
+	CodeInventoryListInvalidArgs          = CodeStyInventoryListInvalidArgs
+	CodeInventoryShowInvalidArgs          = CodeStyInventoryShowInvalidArgs
+	CodeInventoryCheckInvalidArgs         = CodeStyCheckInvalidArgs
+	CodeInventoryCMDBInvalidArgs          = CodeStyCMDBInvalidArgs
+	CodeInventoryCheckPermissionDenied    = CodeStyCheckPermissionDenied
+	CodeInventoryCMDBPermissionDenied     = CodeStyCMDBPermissionDenied
+	CodeInventoryCheckDependencyMissing   = CodeStyCheckDependencyMissing
+	CodeInventoryCheckNetworkFailed       = CodeStyCheckNetworkFailed
+	CodeInventoryCMDBConnectionFailed     = CodeStyCMDBConnectionFailed
+	CodeInventoryNotFound                 = CodeStyInventoryNotFound
+	CodeInventoryCheckResourceMissing     = CodeStyCheckResourceMissing
+	CodeInventoryInvalid                  = CodeStyInventoryInvalid
+	CodeInventoryValidationFailed         = CodeStyValidationFailed
+	CodeInventoryCheckValidationFailed    = CodeStyCheckValidationFailed
+	CodeInventoryCMDBConfigInvalid        = CodeStyCMDBConfigInvalid
+	CodeInventoryCMDBUnrepresentable      = CodeStyCMDBUnrepresentable
+	CodeInventoryCMDBSchemaInvalid        = CodeStyCMDBSchemaInvalid
+	CodeInventoryEditConflict             = CodeStyEditConflict
+	CodeInventoryCMDBSourceChanged        = CodeStyCMDBSourceChanged
+	CodeInventoryEditFailed               = CodeStyEditFailed
+	CodeInventoryEditWriteFailed          = CodeStyEditWriteFailed
+	CodeInventoryReadFailed               = CodeStyInventoryReadFailed
+	CodeInventoryCheckProbeFailed         = CodeStyCheckProbeFailed
+	CodeInventoryCheckSSHFailed           = CodeStyCheckSSHFailed
+	CodeInventoryCMDBOperationFailed      = CodeStyCMDBOperationFailed
+	CodeInventoryCMDBOutputFailed         = CodeStyCMDBOutputFailed
+	CodeInventoryCMDBConfirmationRequired = CodeStyCMDBConfirmationRequired
 )
 
 // System module specific codes (MODULE_SYSTEM = 990000)

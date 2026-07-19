@@ -1,4 +1,4 @@
-package sty
+package inventorycli
 
 import (
 	"bytes"
@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	CheckKind = "pig.sty.check/v1"
+	CheckKind = "pig.inventory.check/v1"
 
 	checkProfileLocal   = "local"
 	checkProfileAnsible = "ansible"
@@ -58,7 +58,7 @@ type CheckOptions struct {
 	User     string
 }
 
-// CheckStage is the fixed composite-result stage order from the Sty contract.
+// CheckStage is the fixed composite-result stage order from the Inventory contract.
 type CheckStage string
 
 // Finding is a redacted, stable Check diagnostic. ResultCode is the MMCCNN
@@ -224,17 +224,17 @@ func checkWithRuntime(opts CheckOptions, runtime checkRuntime) *output.Result {
 
 func normalizeCheckOptions(opts *CheckOptions) ([]string, map[string]bool, *output.Result) {
 	if opts == nil {
-		return nil, nil, output.Fail(output.CodeStyCheckInvalidArgs, "check options are required")
+		return nil, nil, output.Fail(output.CodeInventoryCheckInvalidArgs, "check options are required")
 	}
 	if opts.Port == 0 {
 		opts.Port = 22
 	}
 	if opts.Port < 1 || opts.Port > 65535 {
-		return nil, nil, output.Fail(output.CodeStyCheckInvalidArgs, "check port must be between 1 and 65535")
+		return nil, nil, output.Fail(output.CodeInventoryCheckInvalidArgs, "check port must be between 1 and 65535")
 	}
 	opts.User = strings.TrimSpace(opts.User)
 	if opts.User != "" && !checkUserPattern.MatchString(opts.User) {
-		return nil, nil, output.Fail(output.CodeStyCheckInvalidArgs, "check SSH user is invalid")
+		return nil, nil, output.Fail(output.CodeInventoryCheckInvalidArgs, "check SSH user is invalid")
 	}
 
 	enabled := map[string]bool{checkProfileLocal: true}
@@ -248,12 +248,12 @@ func normalizeCheckOptions(opts *CheckOptions) ([]string, map[string]bool, *outp
 			case checkProfileLocal, checkProfileAnsible, checkProfileNetwork, checkProfileSSH:
 				enabled[profile] = true
 			default:
-				return nil, nil, output.Fail(output.CodeStyCheckInvalidArgs, fmt.Sprintf("unknown check profile: %s", profile))
+				return nil, nil, output.Fail(output.CodeInventoryCheckInvalidArgs, fmt.Sprintf("unknown check profile: %s", profile))
 			}
 		}
 	}
 	if opts.Sudo && !enabled[checkProfileSSH] {
-		return nil, nil, output.Fail(output.CodeStyCheckInvalidArgs, "--sudo requires --profile ssh")
+		return nil, nil, output.Fail(output.CodeInventoryCheckInvalidArgs, "--sudo requires --profile ssh")
 	}
 	profiles := make([]string, 0, len(enabled))
 	for _, profile := range checkProfileOrder {
@@ -265,30 +265,30 @@ func normalizeCheckOptions(opts *CheckOptions) ([]string, map[string]bool, *outp
 }
 
 func checkInventory(path string) (*inventory.Document, bool, []Finding) {
-	resolved, source, failure := readStaticInventorySource(path, output.CodeStyCheckInvalidArgs)
+	resolved, source, failure := readStaticInventorySource(path, output.CodeInventoryCheckInvalidArgs)
 	if failure != nil {
-		resultCode := output.CodeStyCheckProbeFailed
+		resultCode := output.CodeInventoryCheckProbeFailed
 		code := "CHECK_INVENTORY_SOURCE"
 		message := "active Inventory source could not be read"
 		switch failure.Code {
-		case output.CodeStyInventoryNotFound:
-			resultCode, code, message = output.CodeStyCheckResourceMissing, "CHECK_INVENTORY_MISSING", "active Inventory is not configured or does not exist"
-		case output.CodeStyCheckInvalidArgs:
-			resultCode, code, message = output.CodeStyCheckValidationFailed, "CHECK_INVENTORY_SOURCE", "active Inventory must be one static YAML file"
+		case output.CodeInventoryNotFound:
+			resultCode, code, message = output.CodeInventoryCheckResourceMissing, "CHECK_INVENTORY_MISSING", "active Inventory is not configured or does not exist"
+		case output.CodeInventoryCheckInvalidArgs:
+			resultCode, code, message = output.CodeInventoryCheckValidationFailed, "CHECK_INVENTORY_SOURCE", "active Inventory must be one static YAML file"
 		}
 		return nil, false, []Finding{newCheckFinding(code, inventory.SeverityError, checkStageValidate, resolved, "", message, resultCode)}
 	}
 	doc, err := inventory.Parse(resolved, source)
 	if err != nil {
 		diagnostic := parseDiagnostic(err)
-		return nil, false, []Finding{newCheckFinding(diagnostic.Code, diagnostic.Severity, checkStageValidate, diagnostic.Path.String(), "", diagnostic.Message, output.CodeStyCheckValidationFailed)}
+		return nil, false, []Finding{newCheckFinding(diagnostic.Code, diagnostic.Severity, checkStageValidate, diagnostic.Path.String(), "", diagnostic.Message, output.CodeInventoryCheckValidationFailed)}
 	}
 	diagnostics := doc.Validate(inventory.YAMLRules, inventory.AnsibleRules, inventory.PigstyRules, inventory.CompleteInventoryRules)
 	findings := make([]Finding, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
 		resultCode := 0
 		if diagnostic.Severity == inventory.SeverityError {
-			resultCode = output.CodeStyCheckValidationFailed
+			resultCode = output.CodeInventoryCheckValidationFailed
 		}
 		findings = append(findings, newCheckFinding(diagnostic.Code, diagnostic.Severity, checkStageValidate, diagnostic.Path.String(), "", diagnostic.Message, resultCode))
 	}
@@ -298,14 +298,14 @@ func checkInventory(path string) (*inventory.Document, bool, []Finding) {
 func checkLocalLayout(runtime checkRuntime, home string) []Finding {
 	home = strings.TrimSpace(home)
 	if home == "" {
-		return []Finding{newCheckFinding("CHECK_HOME_MISSING", inventory.SeverityError, checkStageLocal, "", "", "Pigsty home is not configured", output.CodeStyCheckResourceMissing)}
+		return []Finding{newCheckFinding("CHECK_HOME_MISSING", inventory.SeverityError, checkStageLocal, "", "", "Pigsty home is not configured", output.CodeInventoryCheckResourceMissing)}
 	}
 	info, err := runtime.stat(home)
 	if err != nil {
 		return []Finding{checkStatFinding("CHECK_HOME_UNAVAILABLE", home, "Pigsty home is unavailable", err)}
 	}
 	if !info.IsDir() {
-		return []Finding{newCheckFinding("CHECK_HOME_NOT_DIRECTORY", inventory.SeverityError, checkStageLocal, home, "", "Pigsty home is not a directory", output.CodeStyCheckResourceMissing)}
+		return []Finding{newCheckFinding("CHECK_HOME_NOT_DIRECTORY", inventory.SeverityError, checkStageLocal, home, "", "Pigsty home is not a directory", output.CodeInventoryCheckResourceMissing)}
 	}
 
 	var findings []Finding
@@ -319,9 +319,9 @@ func checkLocalLayout(runtime checkRuntime, home string) []Finding {
 	installOK := installErr == nil && install.Mode().IsRegular()
 	if !deployOK && !installOK {
 		if errors.Is(deployErr, os.ErrPermission) || errors.Is(installErr, os.ErrPermission) {
-			findings = append(findings, newCheckFinding("CHECK_LAYOUT_PLAYBOOK", inventory.SeverityError, checkStageLocal, deployPath, "", "Pigsty deployment playbook cannot be inspected", output.CodeStyCheckPermissionDenied))
+			findings = append(findings, newCheckFinding("CHECK_LAYOUT_PLAYBOOK", inventory.SeverityError, checkStageLocal, deployPath, "", "Pigsty deployment playbook cannot be inspected", output.CodeInventoryCheckPermissionDenied))
 		} else {
-			findings = append(findings, newCheckFinding("CHECK_LAYOUT_PLAYBOOK", inventory.SeverityError, checkStageLocal, deployPath, "", "deploy.yml or legacy install.yml is required", output.CodeStyCheckResourceMissing))
+			findings = append(findings, newCheckFinding("CHECK_LAYOUT_PLAYBOOK", inventory.SeverityError, checkStageLocal, deployPath, "", "deploy.yml or legacy install.yml is required", output.CodeInventoryCheckResourceMissing))
 		}
 	}
 	return findings
@@ -337,15 +337,15 @@ func checkRequiredPath(runtime checkRuntime, path string, directory bool, code s
 		valid = info.IsDir()
 	}
 	if !valid {
-		return []Finding{newCheckFinding(code, inventory.SeverityError, checkStageLocal, path, "", "required Pigsty project path has the wrong type", output.CodeStyCheckResourceMissing)}
+		return []Finding{newCheckFinding(code, inventory.SeverityError, checkStageLocal, path, "", "required Pigsty project path has the wrong type", output.CodeInventoryCheckResourceMissing)}
 	}
 	return nil
 }
 
 func checkStatFinding(code, path, message string, err error) Finding {
-	resultCode := output.CodeStyCheckResourceMissing
+	resultCode := output.CodeInventoryCheckResourceMissing
 	if errors.Is(err, os.ErrPermission) {
-		resultCode = output.CodeStyCheckPermissionDenied
+		resultCode = output.CodeInventoryCheckPermissionDenied
 	}
 	return newCheckFinding(code, inventory.SeverityError, checkStageLocal, path, "", message, resultCode)
 }
@@ -354,7 +354,7 @@ func checkLocalTool(runtime checkRuntime, name string, kind checkCommandKind) (C
 	tool := CheckTool{Name: name}
 	executable, err := runtime.lookPath(name)
 	if err != nil || strings.TrimSpace(executable) == "" {
-		return tool, []Finding{newCheckFinding("CHECK_TOOL_MISSING", inventory.SeverityError, checkStageLocal, name, "", "required local executable is unavailable", output.CodeStyCheckDependencyMissing)}
+		return tool, []Finding{newCheckFinding("CHECK_TOOL_MISSING", inventory.SeverityError, checkStageLocal, name, "", "required local executable is unavailable", output.CodeInventoryCheckDependencyMissing)}
 	}
 	tool.Available = true
 	tool.Path = safeCheckPath(executable)
@@ -372,7 +372,7 @@ func checkLocalTool(runtime checkRuntime, name string, kind checkCommandKind) (C
 		if errors.Is(deadline, context.DeadlineExceeded) || errors.Is(runErr, context.DeadlineExceeded) {
 			code, message = "CHECK_TOOL_VERSION_TIMEOUT", "local executable version probe timed out"
 		}
-		return tool, []Finding{newCheckFinding(code, inventory.SeverityError, checkStageLocal, name, "", message, output.CodeStyCheckProbeFailed)}
+		return tool, []Finding{newCheckFinding(code, inventory.SeverityError, checkStageLocal, name, "", message, output.CodeInventoryCheckProbeFailed)}
 	}
 	tool.Version = parseCheckVersion(kind, commandOutput.stdout+"\n"+commandOutput.stderr)
 	if tool.Version == "" {
@@ -385,7 +385,7 @@ func checkAnsibleProfile(runtime checkRuntime, doc *inventory.Document, path str
 	tool := CheckTool{Name: "ansible-inventory"}
 	executable, err := runtime.lookPath(tool.Name)
 	if err != nil || strings.TrimSpace(executable) == "" {
-		return tool, []Finding{newCheckFinding("CHECK_ANSIBLE_INVENTORY_MISSING", inventory.SeverityError, checkStageAnsible, tool.Name, "", "ansible-inventory is required by the ansible profile", output.CodeStyCheckDependencyMissing)}
+		return tool, []Finding{newCheckFinding("CHECK_ANSIBLE_INVENTORY_MISSING", inventory.SeverityError, checkStageAnsible, tool.Name, "", "ansible-inventory is required by the ansible profile", output.CodeInventoryCheckDependencyMissing)}
 	}
 	tool.Available = true
 	tool.Path = safeCheckPath(executable)
@@ -397,7 +397,7 @@ func checkAnsibleProfile(runtime checkRuntime, doc *inventory.Document, path str
 	deadline := ctx.Err()
 	cancel()
 	if errors.Is(deadline, context.DeadlineExceeded) {
-		return tool, []Finding{newCheckFinding("CHECK_ANSIBLE_TIMEOUT", inventory.SeverityError, checkStageAnsible, path, "", "ansible-inventory compatibility probe timed out", output.CodeStyCheckProbeFailed)}
+		return tool, []Finding{newCheckFinding("CHECK_ANSIBLE_TIMEOUT", inventory.SeverityError, checkStageAnsible, path, "", "ansible-inventory compatibility probe timed out", output.CodeInventoryCheckProbeFailed)}
 	}
 	findings := make([]Finding, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
@@ -405,11 +405,11 @@ func checkAnsibleProfile(runtime checkRuntime, doc *inventory.Document, path str
 		resultCode := 0
 		if diagnostic.Code == "ANSIBLE_NOT_FOUND" {
 			severity = inventory.SeverityError
-			resultCode = output.CodeStyCheckDependencyMissing
+			resultCode = output.CodeInventoryCheckDependencyMissing
 		} else if severity == inventory.SeverityError {
-			resultCode = output.CodeStyCheckProbeFailed
+			resultCode = output.CodeInventoryCheckProbeFailed
 			if diagnostic.Code == "ANSIBLE_INVENTORY_REJECTED" {
-				resultCode = output.CodeStyCheckValidationFailed
+				resultCode = output.CodeInventoryCheckValidationFailed
 			}
 		}
 		diagnosticPath := diagnostic.Path.String()
@@ -466,7 +466,7 @@ func checkNetworkTargets(runtime checkRuntime, targets []string, port int) []Fin
 		if errors.Is(deadline, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
 			code, message = "CHECK_NETWORK_TIMEOUT", "TCP reachability probe timed out"
 		}
-		findings = append(findings, newCheckFinding(code, inventory.SeverityError, checkStageNetwork, "", target, message, output.CodeStyCheckNetworkFailed))
+		findings = append(findings, newCheckFinding(code, inventory.SeverityError, checkStageNetwork, "", target, message, output.CodeInventoryCheckNetworkFailed))
 	}
 	return findings
 }
@@ -492,15 +492,15 @@ func checkSSHTargets(runtime checkRuntime, executable string, targets []string, 
 func runSSHCheckProbe(runtime checkRuntime, executable, target, user string, port int, privilege bool) (bool, *Finding) {
 	timeout := runtime.timeouts.ssh
 	stage := checkStageSSH
-	resultCode := output.CodeStyCheckSSHFailed
+	resultCode := output.CodeInventoryCheckSSHFailed
 	if privilege {
 		timeout = runtime.timeouts.privilege
 		stage = checkStagePrivilege
-		resultCode = output.CodeStyCheckPermissionDenied
+		resultCode = output.CodeInventoryCheckPermissionDenied
 	}
 	args, err := buildSSHCheckArgs(target, user, port, timeout, privilege, runtime.knownHostsFile, runtime.identityFile)
 	if err != nil {
-		finding := newCheckFinding("CHECK_SSH_TARGET_INVALID", inventory.SeverityError, stage, "", target, "SSH target could not be represented safely", output.CodeStyCheckInvalidArgs)
+		finding := newCheckFinding("CHECK_SSH_TARGET_INVALID", inventory.SeverityError, stage, "", target, "SSH target could not be represented safely", output.CodeInventoryCheckInvalidArgs)
 		return false, &finding
 	}
 	command := checkCommand{
@@ -527,7 +527,7 @@ func runSSHCheckProbe(runtime checkRuntime, executable, target, user string, por
 		}
 	}
 	if errors.Is(runErr, errCheckCommandBlocked) {
-		code, message, resultCode = "CHECK_COMMAND_BLOCKED", "probe command did not match the Check allowlist", output.CodeStyCheckProbeFailed
+		code, message, resultCode = "CHECK_COMMAND_BLOCKED", "probe command did not match the Check allowlist", output.CodeInventoryCheckProbeFailed
 	}
 	finding := newCheckFinding(code, inventory.SeverityError, stage, "", target, message, resultCode)
 	return false, &finding

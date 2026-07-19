@@ -72,18 +72,22 @@ type ConfigureOptions struct {
 	DisablePreflight bool
 }
 
+const ConfigureKind = "pig.sty.configure/v1"
+
 // ConfigureData is structured output for native configure execution.
 type ConfigureData struct {
-	Mode             string   `json:"mode" yaml:"mode"`
-	TemplatePath     string   `json:"template_path" yaml:"template_path"`
-	OutputPath       string   `json:"output_path" yaml:"output_path"`
-	Region           string   `json:"region" yaml:"region"`
-	PrimaryIP        string   `json:"primary_ip" yaml:"primary_ip"`
-	SSHPort          string   `json:"ssh_port,omitempty" yaml:"ssh_port,omitempty"`
-	PGVersion        string   `json:"pg_version,omitempty" yaml:"pg_version,omitempty"`
-	Native           bool     `json:"native" yaml:"native"`
-	GeneratedSecrets []string `json:"generated_secrets,omitempty" yaml:"generated_secrets,omitempty"`
-	Warnings         []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+	Kind               string   `json:"kind" yaml:"kind"`
+	Mode               string   `json:"mode" yaml:"mode"`
+	TemplatePath       string   `json:"template_path" yaml:"template_path"`
+	OutputPath         string   `json:"output_path" yaml:"output_path"`
+	Region             string   `json:"region" yaml:"region"`
+	PrimaryIP          string   `json:"primary_ip" yaml:"primary_ip"`
+	SSHPort            string   `json:"ssh_port,omitempty" yaml:"ssh_port,omitempty"`
+	PGVersion          string   `json:"pg_version,omitempty" yaml:"pg_version,omitempty"` // requested version, retained for compatibility
+	EffectivePGVersion string   `json:"effective_pg_version,omitempty" yaml:"effective_pg_version,omitempty"`
+	Native             bool     `json:"native" yaml:"native"`
+	GeneratedSecrets   []string `json:"generated_secrets,omitempty" yaml:"generated_secrets,omitempty"`
+	Warnings           []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 }
 
 const (
@@ -154,6 +158,9 @@ func (d *ConfigureData) Text() string {
 	}
 	if d.PGVersion != "" {
 		lines = append(lines, style.ok(formatConfigureKV("pg_version", d.PGVersion)))
+	}
+	if d.EffectivePGVersion != "" && d.EffectivePGVersion != d.PGVersion {
+		lines = append(lines, style.ok(formatConfigureKV("effective_pg_version", d.EffectivePGVersion)))
 	}
 	if len(d.GeneratedSecrets) > 0 {
 		lines = append(lines, style.ok(formatConfigureKV("passwords", fmt.Sprintf("%d generated", len(d.GeneratedSecrets)))))
@@ -285,16 +292,18 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 	}
 
 	data := &ConfigureData{
-		Mode:             mode,
-		TemplatePath:     templatePath,
-		OutputPath:       outputPath,
-		Region:           region,
-		PrimaryIP:        primaryIP,
-		SSHPort:          strings.TrimSpace(opts.SSHPort),
-		PGVersion:        strings.TrimSpace(opts.PGVersion),
-		Native:           true,
-		GeneratedSecrets: mutationResult.Generated,
-		Warnings:         warnings,
+		Kind:               ConfigureKind,
+		Mode:               mode,
+		TemplatePath:       templatePath,
+		OutputPath:         outputPath,
+		Region:             region,
+		PrimaryIP:          primaryIP,
+		SSHPort:            strings.TrimSpace(opts.SSHPort),
+		PGVersion:          strings.TrimSpace(opts.PGVersion),
+		EffectivePGVersion: formatOptionalPGVersion(mutationResult.EffectivePGVersion),
+		Native:             true,
+		GeneratedSecrets:   mutationResult.Generated,
+		Warnings:           warnings,
 	}
 
 	msg := "pigsty configured"
@@ -821,20 +830,10 @@ type mutationOptions struct {
 }
 
 type templateMutationResult struct {
-	Document  *inventory.Document
-	Changes   inventory.ChangeSet
-	Generated []string
-	Warnings  []string
-}
-
-// mutateTemplate is retained as a string-oriented test helper. Production
-// configure consumes the committed Document directly and never reparses text.
-func mutateTemplate(content string, opts mutationOptions) (string, []string, []string, error) {
-	result, err := mutateTemplateDocument(content, opts)
-	if err != nil {
-		return "", nil, nil, err
-	}
-	return string(result.Document.Bytes()), result.Generated, result.Warnings, nil
+	Document           *inventory.Document
+	EffectivePGVersion int
+	Generated          []string
+	Warnings           []string
 }
 
 func mutateTemplateDocument(content string, opts mutationOptions) (*templateMutationResult, error) {
@@ -889,36 +888,49 @@ func mutateTemplateDocument(content string, opts mutationOptions) (*templateMuta
 
 	pinnedKernelMode := opts.Mode == "mssql" || opts.Mode == "polar"
 	pgMajorTemplate := pgMajorTemplateMode.MatchString(opts.Mode)
+	templatePGVersion, _ := mappingInteger(globals, "pg_version")
+	if templatePGVersion == 0 && pgMajorTemplate {
+		templatePGVersion, _ = strconv.Atoi(strings.TrimPrefix(opts.Mode, "pg"))
+	}
+	effectivePGVersion := templatePGVersion
 	if opts.PGVersion > 0 && !pinnedKernelMode && !pgMajorTemplate {
 		insertOptions := insertAfterExisting(globals, "node_repo_modules")
 		if err := globals.Set("pg_version", opts.PGVersion, insertOptions...); err != nil {
 			return nil, err
 		}
-		if _, err := mutation.ReplaceAll("pg18-", fmt.Sprintf("pg%d-", opts.PGVersion),
-			inventory.WithLiteralTargets(inventory.LiteralScalars|inventory.LiteralComments),
-			inventory.WithIdentifier("pg_package_alias")); err != nil {
-			return nil, err
+		effectivePGVersion = opts.PGVersion
+		if templatePGVersion > 0 && templatePGVersion != opts.PGVersion {
+			if _, err := mutation.ReplaceAll(fmt.Sprintf("pg%d-", templatePGVersion), fmt.Sprintf("pg%d-", opts.PGVersion),
+				inventory.WithLiteralTargets(inventory.LiteralScalars|inventory.LiteralComments),
+				inventory.WithIdentifier("pg_package_alias")); err != nil {
+				return nil, err
+			}
 		}
 		warnings = append(warnings, pgVersionOverrideWarnings(mutation.Document(), opts.PGVersion)...)
-	} else if opts.PGVersion > 0 && pinnedKernelMode {
-		warnings = append(warnings, fmt.Sprintf(
-			"pg_version %d ignored: %s template pins its own kernel version", opts.PGVersion, opts.Mode))
+	} else if opts.PGVersion > 0 && opts.PGVersion != effectivePGVersion {
+		if effectivePGVersion > 0 {
+			warnings = append(warnings, fmt.Sprintf(
+				"pg_version %d ignored: %s template pins PostgreSQL %d", opts.PGVersion, opts.Mode, effectivePGVersion))
+		} else {
+			warnings = append(warnings, fmt.Sprintf(
+				"pg_version %d ignored: %s template pins its own PostgreSQL version", opts.PGVersion, opts.Mode))
+		}
 	}
 
 	// Beta majors beyond the stable window ship from the PGDG testing repos.
 	// Only all.vars module lists are changed; group/host overrides remain intact.
-	if ext.IsBetaPGMajor(opts.PGVersion) && !pinnedKernelMode {
+	if ext.IsBetaPGMajor(effectivePGVersion) {
 		enabled, err := enableBetaRepoModules(mutation)
 		if err != nil {
 			return nil, err
 		}
 		if !enabled {
 			warnings = append(warnings, fmt.Sprintf(
-				"beta repo module not enabled: no all.vars repo module list with 'pgsql' in template, add 'beta' manually for PG%d packages", opts.PGVersion))
+				"beta repo module not enabled: no all.vars repo module list with 'pgsql' in template, add 'beta' manually for PG%d packages", effectivePGVersion))
 		}
 	}
 
-	if shouldSetLocale(opts.PGVersion, opts.Mode, opts.LocaleAvailable) {
+	if shouldSetLocale(effectivePGVersion, opts.Mode, opts.LocaleAvailable) {
 		if err := ensureLocaleSettings(mutation); err != nil {
 			return nil, err
 		}
@@ -932,18 +944,29 @@ func mutateTemplateDocument(content string, opts mutationOptions) (*templateMuta
 		}
 	}
 
-	committed, changes, err := mutation.Commit()
+	committed, _, err := mutation.Commit()
 	if err != nil {
 		if opts.GeneratePassword {
 			return nil, fmt.Errorf("failed to commit inventory edits after secret generation")
 		}
 		return nil, fmt.Errorf("failed to commit inventory edits: %w", err)
 	}
-	return &templateMutationResult{Document: committed, Changes: changes, Generated: generated, Warnings: warnings}, nil
+	return &templateMutationResult{
+		Document: committed, EffectivePGVersion: effectivePGVersion, Generated: generated, Warnings: warnings,
+	}, nil
 }
 
 func enableChinaTemplateKey(mutation *inventory.Mutation, key string) error {
-	before := mutation.Document().CommentedKeyCount(key)
+	doc := mutation.Document()
+	before := doc.CommentedKeyCount(key)
+	activeBefore := doc.PathsByKey(key)
+	if before == 0 && len(activeBefore) == 0 {
+		// Most templates do not declare PIP_MIRROR_URL, and specialized
+		// inventories may not manage Docker at all. Match the legacy configure
+		// contract: activate every declaration that exists, but do not invent a
+		// template-specific value when the key is absent.
+		return nil
+	}
 	result, err := mutation.UncommentKey(key)
 	if err != nil {
 		return err
@@ -957,7 +980,11 @@ func enableChinaTemplateKey(mutation *inventory.Mutation, key string) error {
 	if len(result.Paths) != result.Changed {
 		return fmt.Errorf("china mirror key %s produced %d paths for %d edits", key, len(result.Paths), result.Changed)
 	}
-	for _, path := range result.Paths {
+	activeAfter := mutation.Document().PathsByKey(key)
+	if len(activeAfter) == 0 {
+		return fmt.Errorf("china mirror key %s has no active declaration", key)
+	}
+	for _, path := range activeAfter {
 		if !variableDeclarationPath(path) {
 			return fmt.Errorf("china mirror key %s activated outside vars at %s", key, path.String())
 		}
@@ -999,6 +1026,32 @@ func pgVersionOverrideWarnings(doc *inventory.Document, target int) []string {
 }
 
 var pgMajorTemplateMode = regexp.MustCompile(`^pg[0-9]+$`)
+
+func mappingInteger(mapping *inventory.MappingEditor, key string) (int, bool) {
+	value, ok := mapping.Lookup(key)
+	if !ok || value == nil || value.Scalar == nil || value.Scalar.Kind != inventory.IntegerScalar {
+		return 0, false
+	}
+	switch number := value.Scalar.Value.(type) {
+	case int:
+		return number, true
+	case int64:
+		return int(number), int64(int(number)) == number
+	case uint:
+		return int(number), uint(int(number)) == number
+	case uint64:
+		return int(number), uint64(int(number)) == number
+	default:
+		return 0, false
+	}
+}
+
+func formatOptionalPGVersion(version int) string {
+	if version <= 0 {
+		return ""
+	}
+	return strconv.Itoa(version)
+}
 
 func scalarEquals(mapping *inventory.MappingEditor, key, expected string) bool {
 	value, ok := mapping.Lookup(key)
@@ -1094,7 +1147,7 @@ func ensureLocaleSettings(mutation *inventory.Mutation) error {
 	}
 	anchor := "pg_version"
 	for _, locale := range locales {
-		if err := globals.Set(locale.key, "C.UTF-8", inventory.AfterKey(anchor), inventory.WithComment(locale.comment)); err != nil {
+		if err := globals.Set(locale.key, "C.UTF-8", inventory.AfterKey(anchor), inventory.WithInlineComment(locale.comment)); err != nil {
 			return err
 		}
 		anchor = locale.key
@@ -1115,11 +1168,15 @@ func replacePasswordsInMutation(mutation *inventory.Mutation) ([]string, error) 
 	}
 	generated := make([]string, 0, len(prefixKeys)+7)
 	for _, key := range prefixKeys {
+		paths := mutation.Document().PathsByKey(key)
+		if len(paths) == 0 {
+			continue
+		}
 		pass, err := randomPassword(24)
 		if err != nil {
 			return nil, err
 		}
-		for _, path := range mutation.Document().PathsByKey(key) {
+		for _, path := range paths {
 			if err := mutation.Set(path, pass); err != nil {
 				return nil, err
 			}
@@ -1141,12 +1198,15 @@ func replacePasswordsInMutation(mutation *inventory.Mutation) ([]string, error) 
 		if err != nil {
 			return nil, err
 		}
-		if _, err := mutation.ReplaceAll(token, pass,
+		count, err := mutation.ReplaceAll(token, pass,
 			inventory.WithLiteralTargets(inventory.LiteralScalars),
-			inventory.WithIdentifier(token)); err != nil {
+			inventory.WithIdentifier(token))
+		if err != nil {
 			return nil, err
 		}
-		generated = append(generated, token)
+		if count > 0 {
+			generated = append(generated, token)
+		}
 	}
 	return generated, nil
 }

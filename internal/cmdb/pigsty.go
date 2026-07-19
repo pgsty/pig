@@ -679,6 +679,7 @@ type PigstySourcePlan struct {
 	inventoryOwnerGID uint32
 	inventoryExists   bool
 	configPatch       *ansibleConfigPatch
+	commitConfig      func(*ansibleConfigPatch) error
 }
 
 // EnablePigstyInventory writes the same query adapter as inventory_cmdb and
@@ -751,6 +752,9 @@ func inspectManagedInventoryScript(plan *PigstySourcePlan) error {
 		ownerUID, ownerGID, owned := fileOwner(info)
 		if !owned || ownerUID != uint32(os.Geteuid()) || ownerGID != uint32(os.Getegid()) {
 			return failure("CMDB_SWITCH_PERMISSION", "inventory.sh is not owner-controlled")
+		}
+		if info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
+			return failure("CMDB_INVENTORY_SCRIPT_UNMANAGED", "inventory.sh has unsupported special mode bits")
 		}
 		before, readErr := os.ReadFile(plan.InventoryPath)
 		if readErr != nil {
@@ -892,9 +896,18 @@ func (p *PigstySourcePlan) Apply() (PigstySourceResult, error) {
 		} else if !p.inventorySourceCurrent() {
 			return PigstySourceResult{}, failure("CMDB_SOURCE_CHANGED", "Inventory source changed after planning")
 		}
-		if err := commitAnsibleConfigPatch(p.configPatch); err != nil {
+		commit := commitAnsibleConfigPatch
+		if p.commitConfig != nil {
+			commit = p.commitConfig
+		}
+		if err := commit(p.configPatch); err != nil {
 			if p.ScriptChanged {
-				return PigstySourceResult{}, failure("CMDB_SWITCH_PARTIAL", "inventory.sh changed but ansible.cfg did not")
+				if p.configCandidateCurrent() {
+					return PigstySourceResult{}, failure("CMDB_SWITCH_PARTIAL", "ansible.cfg changed but its commit could not be verified")
+				}
+				if rollbackErr := p.rollbackInventoryScript(); rollbackErr != nil {
+					return PigstySourceResult{}, failure("CMDB_SWITCH_PARTIAL", "inventory.sh changed and could not be rolled back after ansible.cfg failed")
+				}
 			}
 			return PigstySourceResult{}, err
 		}
@@ -903,6 +916,48 @@ func (p *PigstySourcePlan) Apply() (PigstySourceResult, error) {
 		ConfigPath: p.ConfigPath, InventoryPath: p.InventoryPath, Changed: p.Changed,
 		ScriptChanged: p.ScriptChanged, ConfigChanged: p.ConfigChanged,
 	}, nil
+}
+
+func (p *PigstySourcePlan) configCandidateCurrent() bool {
+	if p == nil || p.configPatch == nil || p.configPatch.document == nil {
+		return false
+	}
+	current, err := readAnsibleConfig(p.ConfigPath)
+	return err == nil && bytes.Equal(current.body, p.configPatch.candidate)
+}
+
+func (p *PigstySourcePlan) rollbackInventoryScript() error {
+	if p == nil || p.InventoryPath == "" || !p.managedCandidateCurrent() {
+		return errors.New("managed Inventory candidate changed before rollback")
+	}
+	if !p.inventoryExists {
+		if err := os.Remove(p.InventoryPath); err != nil {
+			return err
+		}
+		if err := syncDirectory(filepath.Dir(p.InventoryPath)); err != nil {
+			return err
+		}
+		if _, err := os.Lstat(p.InventoryPath); !errors.Is(err, os.ErrNotExist) {
+			return errors.New("new Inventory script still exists after rollback")
+		}
+		return nil
+	}
+	if err := utils.AtomicWriteFile(p.InventoryPath, p.inventoryBefore, p.inventoryMode.Perm()); err != nil {
+		return err
+	}
+	info, err := os.Lstat(p.InventoryPath)
+	if err != nil || info.Mode() != p.inventoryMode {
+		return errors.New("Inventory script mode was not restored")
+	}
+	ownerUID, ownerGID, owned := fileOwner(info)
+	if !owned || ownerUID != p.inventoryOwnerUID || ownerGID != p.inventoryOwnerGID {
+		return errors.New("Inventory script ownership was not restored")
+	}
+	body, err := os.ReadFile(p.InventoryPath)
+	if err != nil || !bytes.Equal(body, p.inventoryBefore) {
+		return errors.New("Inventory script content was not restored")
+	}
+	return nil
 }
 
 func (p *PigstySourcePlan) inventorySourceCurrent() bool {

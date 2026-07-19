@@ -2,8 +2,8 @@
 // for Pigsty's compact, static Ansible YAML inventories.
 //
 // Document is the write-back authority: it retains the original source and
-// applies local byte patches. Inventory and Value are read-only semantic views
-// and must never be marshaled to update the source document.
+// applies local byte patches. Inventory and Value are detached semantic
+// snapshots and must never be marshaled to update the source document.
 package inventory
 
 import (
@@ -71,11 +71,6 @@ func AllVars(names ...string) Path {
 	return Keys(append([]string{"all", "vars"}, names...)...)
 }
 
-// HostVars returns the declaration path for a host in a group beneath all.
-func HostVars(group, host string) Path {
-	return Keys("all", "children", group, "hosts", host)
-}
-
 // ChildKey appends a mapping key without modifying the receiver.
 func (p Path) ChildKey(name string) Path {
 	return append(slices.Clone(p), Key(name))
@@ -102,8 +97,8 @@ func (p Path) Last() (Segment, bool) {
 	return p[len(p)-1], true
 }
 
-// String renders a diagnostic-only pointer representation. It is not parsed
-// by the editing API.
+// String renders the canonical escaped pointer used by diagnostics and CLI
+// metadata. In-process editing APIs still accept typed Path values directly.
 func (p Path) String() string {
 	if len(p) == 0 {
 		return "/"
@@ -229,7 +224,7 @@ type Inventory struct {
 }
 
 // Document retains the original bytes plus private source and semantic indexes.
-// goccy CST/token types are transient; the private yaml.Node is never exposed.
+// goccy lexer tokens are transient; the private yaml.Node is never exposed.
 type Document struct {
 	name       string
 	source     []byte
@@ -260,23 +255,92 @@ func (d *Document) Bytes() []byte {
 	return slices.Clone(d.source)
 }
 
-// Inventory returns the immutable declaration-oriented semantic view. Values,
-// groups, and hosts are bound to this Document snapshot; retain their Path,
-// rather than their pointer, across an Editor or Mutation commit.
+// Inventory returns a detached declaration-oriented semantic snapshot. A
+// caller may modify the returned DTO without mutating Document indexes or later
+// snapshots. Retain source Paths, rather than pointers, across commits.
 func (d *Document) Inventory() *Inventory {
 	if d == nil {
 		return nil
 	}
-	return d.inventory
+	return cloneInventory(d.inventory)
 }
 
-// Lookup returns the semantic value at path.
+// Lookup returns a detached semantic value at path.
 func (d *Document) Lookup(path Path) (*Value, bool) {
 	if d == nil {
 		return nil, false
 	}
 	value, ok := d.values[pathKey(path)]
-	return value, ok
+	if !ok {
+		return nil, false
+	}
+	cloned := cloneValue(value)
+	return &cloned, true
+}
+
+func cloneInventory(source *Inventory) *Inventory {
+	if source == nil {
+		return nil
+	}
+	memo := make(map[*Group]*Group)
+	var cloneGroup func(*Group) *Group
+	cloneGroup = func(group *Group) *Group {
+		if group == nil {
+			return nil
+		}
+		if cloned, ok := memo[group]; ok {
+			return cloned
+		}
+		cloned := &Group{Name: group.Name, Path: clonePath(group.Path), Range: group.Range}
+		memo[group] = cloned
+		if group.Vars != nil {
+			value := cloneValue(group.Vars)
+			cloned.Vars = &value
+		}
+		cloned.Hosts = make([]*Host, 0, len(group.Hosts))
+		for _, host := range group.Hosts {
+			if host == nil {
+				cloned.Hosts = append(cloned.Hosts, nil)
+				continue
+			}
+			cloned.Hosts = append(cloned.Hosts, &Host{
+				Name: host.Name, Vars: cloneValue(&host.Vars), Path: clonePath(host.Path), Range: host.Range,
+			})
+		}
+		cloned.Children = make([]*Group, 0, len(group.Children))
+		for _, child := range group.Children {
+			cloned.Children = append(cloned.Children, cloneGroup(child))
+		}
+		return cloned
+	}
+	result := &Inventory{All: cloneGroup(source.All), Groups: make([]*Group, 0, len(source.Groups))}
+	for _, group := range source.Groups {
+		result.Groups = append(result.Groups, cloneGroup(group))
+	}
+	return result
+}
+
+func cloneValue(source *Value) Value {
+	if source == nil {
+		return Value{}
+	}
+	result := *source
+	result.Path = clonePath(source.Path)
+	if source.Scalar != nil {
+		scalar := *source.Scalar
+		result.Scalar = &scalar
+	}
+	result.Mapping = make([]Entry, len(source.Mapping))
+	for index := range source.Mapping {
+		result.Mapping[index] = source.Mapping[index]
+		result.Mapping[index].Path = clonePath(source.Mapping[index].Path)
+		result.Mapping[index].Value = cloneValue(&source.Mapping[index].Value)
+	}
+	result.Sequence = make([]Value, len(source.Sequence))
+	for index := range source.Sequence {
+		result.Sequence[index] = cloneValue(&source.Sequence[index])
+	}
+	return result
 }
 
 // PathsByKey returns active mapping-value paths whose final key matches key,

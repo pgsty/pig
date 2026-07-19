@@ -25,6 +25,7 @@
     "demo/kafka.yml",
     "demo/kernel.yml",
     "demo/minio.yml",
+    "demo/mysql.yml",
     "demo/redis.yml",
     "demo/remote.yml",
     "demo/saas.yml",
@@ -55,8 +56,8 @@
     "vibe.yml",
     "../pigsty.yml"
   ],
-  "inventory_paths": 51,
-  "regular_yaml_files": 50,
+  "inventory_paths": 52,
+  "regular_yaml_files": 51,
   "symlinked_inventory_paths": 1,
   "errors": 0,
   "warnings": {

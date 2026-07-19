@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	stycli "pig/cli/sty"
 	"pig/internal/config"
-	"pig/internal/output"
 	"strings"
 	"testing"
 )
@@ -70,125 +69,111 @@ func TestStyConfOutputFileFlagKeepsGlobalOutputFlag(t *testing.T) {
 	}
 }
 
-func TestStyReleasedInventoryDelegatesAndRemovedNamespaces(t *testing.T) {
-	for _, test := range []struct {
-		args []string
-		want *cobra.Command
-	}{
-		{args: []string{"sty", "edit"}, want: pigstyEditCmd},
-		{args: []string{"sty", "e"}, want: pigstyEditCmd},
-		{args: []string{"sty", "validate"}, want: pigstyValidateCmd},
-		{args: []string{"sty", "val"}, want: pigstyValidateCmd},
-		{args: []string{"sty", "v"}, want: pigstyValidateCmd},
-		{args: []string{"sty", "check"}, want: pigstyCheckCmd},
-		{args: []string{"sty", "ck"}, want: pigstyCheckCmd},
+func TestStyInventoryCommandsAreRemoved(t *testing.T) {
+	for _, args := range [][]string{
+		{"sty", "edit"}, {"sty", "e"}, {"sty", "check"}, {"sty", "ck"},
+		{"sty", "inventory"}, {"sty", "inv"}, {"sty", "cmdb"},
+		{"sty", "validate"}, {"sty", "val"}, {"sty", "v"},
 	} {
-		found, _, err := rootCmd.Find(test.args)
-		if err != nil {
-			t.Fatalf("Find(%v): %v", test.args, err)
-		}
-		if found != test.want {
-			t.Fatalf("Find(%v) = %v, want %v", test.args, found, test.want)
-		}
-	}
-	if pigstyValidateCmd.Flags().Lookup("strict") == nil || pigstyValidateCmd.Flags().Lookup("ansible") == nil {
-		t.Fatalf("%s is missing --strict or --ansible", pigstyValidateCmd.CommandPath())
-	}
-	for _, args := range [][]string{{"sty", "inventory"}, {"sty", "inv"}, {"sty", "cmdb"}} {
 		if found, remaining, err := rootCmd.Find(args); err == nil && found != nil && len(remaining) == 0 {
-			t.Fatalf("unreleased namespace remains registered: %v -> %s", args, found.CommandPath())
+			t.Fatalf("removed Sty Inventory command remains registered: %v -> %s", args, found.CommandPath())
 		}
 	}
-	if pigstyEditCmd.Flags().Lookup("output") != nil {
-		t.Fatal("pig sty edit must not shadow the global output flag")
+	for _, argument := range []string{"edit", "e", "check", "ck", "inventory", "inv", "cmdb", "validate", "val", "v"} {
+		if err := styCmd.ValidateArgs([]string{argument}); err == nil {
+			t.Fatalf("removed sty command %q is still accepted as a positional argument", argument)
+		}
 	}
 }
 
-func TestStyCheckFlagsAndOptionMapping(t *testing.T) {
-	for _, flag := range []string{"profile", "sudo", "port", "user"} {
-		if pigstyCheckCmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("pig sty check is missing --%s", flag)
+func TestStyOperationalClaimsMatchExecutionSemantics(t *testing.T) {
+	for _, test := range []struct {
+		command                 *cobra.Command
+		parallel, risk, confirm string
+	}{
+		{pigstyBootCmd, "unsafe", "medium", "none"},
+		{pigstyConfCmd, "unsafe", "medium", "recommended"},
+		{pigstyGrafanaDumpCmd, "restricted", "low", "none"},
+		{pigstyGetcmd, "restricted", "low", "none"},
+		{pigstyReleaseGetCmd, "restricted", "low", "none"},
+		{pigstyDeployCmd, "unsafe", "high", "none"},
+	} {
+		annotations := test.command.Annotations
+		if annotations["parallel"] != test.parallel || annotations["risk"] != test.risk || annotations["confirm"] != test.confirm {
+			t.Errorf("%s annotations = %v", test.command.CommandPath(), annotations)
 		}
 	}
-	if shorthand := pigstyCheckCmd.Flags().Lookup("profile").Shorthand; shorthand != "p" {
-		t.Fatalf("--profile shorthand = %q, want p", shorthand)
+	if pigstyDeployCmd.Annotations["consent"] != "invocation" {
+		t.Fatalf("deploy consent = %q, want invocation", pigstyDeployCmd.Annotations["consent"])
 	}
-
-	originalExec := pigstyCheckExec
-	originalPath, originalHome := config.PigstyConfig, config.PigstyHome
-	originalFormat := config.OutputFormat
-	originalProfiles := append([]string(nil), pigstyCheckProfiles...)
-	originalSudo, originalPort, originalUser := pigstyCheckSudo, pigstyCheckPort, pigstyCheckUser
-	defer func() {
-		pigstyCheckExec = originalExec
-		config.PigstyConfig, config.PigstyHome = originalPath, originalHome
-		config.OutputFormat = originalFormat
-		pigstyCheckProfiles = originalProfiles
-		pigstyCheckSudo, pigstyCheckPort, pigstyCheckUser = originalSudo, originalPort, originalUser
-	}()
-
-	config.PigstyConfig, config.PigstyHome = "/tmp/active.yml", "/tmp/pigsty"
-	config.OutputFormat = config.OUTPUT_TEXT
-	pigstyCheckProfiles = []string{"ansible", "ssh"}
-	pigstyCheckSudo, pigstyCheckPort, pigstyCheckUser = true, 2222, "admin"
-	var got stycli.CheckOptions
-	pigstyCheckExec = func(opts stycli.CheckOptions) *output.Result {
-		got = opts
-		return output.OK("checked", &stycli.CheckData{Kind: stycli.CheckKind, Ready: true})
-	}
-	_ = captureStdout(t, func() {
-		if err := pigstyCheckCmd.RunE(pigstyCheckCmd, nil); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if got.Path != config.PigstyConfig || got.Home != config.PigstyHome || strings.Join(got.Profiles, ",") != "ansible,ssh" || !got.Sudo || got.Port != 2222 || got.User != "admin" {
-		t.Fatalf("Check options = %+v", got)
+	if !strings.Contains(pigstyDeployCmd.Long, "starts immediately") || !strings.Contains(styCmd.Long, "release get") {
+		t.Fatal("Sty help does not describe immediate deploy and canonical release commands")
 	}
 }
 
-func TestStyInventoryReleasedDelegateUseCases(t *testing.T) {
-	originalEdit := pigstyEditExec
-	originalValidate := pigstyValidateExec
-	originalPath := config.PigstyConfig
+func TestStyDeployInvokesExecutorImmediately(t *testing.T) {
+	originalExec := pigstyDeployExec
 	originalFormat := config.OutputFormat
-	originalStrict, originalAnsible := pigstyValidateStrict, pigstyValidateAnsible
 	defer func() {
-		pigstyEditExec = originalEdit
-		pigstyValidateExec = originalValidate
-		config.PigstyConfig = originalPath
+		pigstyDeployExec = originalExec
 		config.OutputFormat = originalFormat
-		pigstyValidateStrict, pigstyValidateAnsible = originalStrict, originalAnsible
 	}()
-	config.PigstyConfig = "/tmp/selected.yml"
+	calls := 0
+	pigstyDeployExec = func(stycli.DeployOptions) error {
+		calls++
+		return nil
+	}
 	config.OutputFormat = config.OUTPUT_TEXT
-
-	var edited []stycli.EditOptions
-	pigstyEditExec = func(opts stycli.EditOptions) *output.Result {
-		edited = append(edited, opts)
-		return output.OK("edited", nil)
+	if err := pigstyDeployCmd.RunE(pigstyDeployCmd, nil); err != nil {
+		t.Fatal(err)
 	}
-	_ = captureStdout(t, func() {
-		if err := pigstyEditCmd.RunE(pigstyEditCmd, []string{"vars"}); err != nil {
+	if calls != 1 {
+		t.Fatalf("deploy executor calls = %d, want immediate single execution", calls)
+	}
+
+	config.OutputFormat = config.OUTPUT_JSON
+	raw := captureStdout(t, func() {
+		if err := pigstyDeployCmd.RunE(pigstyDeployCmd, nil); err != nil {
 			t.Fatal(err)
 		}
 	})
-	if len(edited) != 1 || edited[0].Path != config.PigstyConfig || edited[0].Selector != "vars" {
-		t.Fatalf("edit delegates = %+v", edited)
+	if !strings.Contains(raw, `"kind":"pig.sty.deploy/v1"`) {
+		t.Fatalf("structured deploy payload = %q", raw)
 	}
+}
 
-	pigstyValidateStrict, pigstyValidateAnsible = true, true
-	var validated []stycli.ValidateOptions
-	pigstyValidateExec = func(opts stycli.ValidateOptions) *output.Result {
-		validated = append(validated, opts)
-		return output.OK("validated", nil)
-	}
-	_ = captureStdout(t, func() {
-		if err := pigstyValidateCmd.RunE(pigstyValidateCmd, []string{"/tmp/explicit.yml"}); err != nil {
-			t.Fatal(err)
+func TestStyMirrorAndRegionFlagsAreMutuallyExclusive(t *testing.T) {
+	const annotation = "cobra_annotation_mutually_exclusive"
+	for _, command := range []*cobra.Command{pigstyBootCmd, pigstyConfCmd} {
+		for _, name := range []string{"mirror", "region"} {
+			flag := command.Flags().Lookup(name)
+			if flag == nil || !strings.Contains(strings.Join(flag.Annotations[annotation], " "), "mirror region") {
+				t.Fatalf("%s --%s lacks mirror/region exclusion: %+v", command.CommandPath(), name, flag)
+			}
 		}
-	})
-	if len(validated) != 1 || validated[0].Path != "/tmp/explicit.yml" || !validated[0].Strict || !validated[0].Ansible {
-		t.Fatalf("validate delegates = %+v", validated)
+	}
+}
+
+func TestStyInitAcceptEULAFlagPassesOption(t *testing.T) {
+	flag := pigstyInitCmd.Flags().Lookup("accept-eula")
+	if flag == nil {
+		t.Fatal("pig sty init missing --accept-eula")
+	}
+	originalExec, originalValue := pigstyInitExec, pigstyInitEULA
+	defer func() {
+		pigstyInitExec, pigstyInitEULA = originalExec, originalValue
+		_ = flag.Value.Set("false")
+	}()
+	var got stycli.InitOptions
+	pigstyInitExec = func(options stycli.InitOptions) error { got = options; return nil }
+	if err := flag.Value.Set("true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := pigstyInitCmd.RunE(pigstyInitCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !got.AcceptEULA {
+		t.Fatal("--accept-eula was not passed to InitOptions")
 	}
 }
 
@@ -287,14 +272,45 @@ func TestStyReleaseGetDelegateUsesIdenticalOptions(t *testing.T) {
 		calls = append(calls, opts)
 		return nil
 	}
+	var legacyErr bytes.Buffer
+	pigstyGetcmd.SetErr(&legacyErr)
+	defer pigstyGetcmd.SetErr(os.Stderr)
 	if err := pigstyGetcmd.RunE(pigstyGetcmd, []string{"v4"}); err != nil {
 		t.Fatal(err)
 	}
+	if got := strings.Count(legacyErr.String(), "Deprecated:"); got != 1 {
+		t.Fatalf("legacy get deprecation count = %d in %q", got, legacyErr.String())
+	}
+	var canonicalErr bytes.Buffer
+	pigstyReleaseGetCmd.SetErr(&canonicalErr)
+	defer pigstyReleaseGetCmd.SetErr(os.Stderr)
 	if err := pigstyReleaseGetCmd.RunE(pigstyReleaseGetCmd, []string{"v4"}); err != nil {
 		t.Fatal(err)
 	}
+	if canonicalErr.Len() != 0 {
+		t.Fatalf("canonical get wrote deprecation: %q", canonicalErr.String())
+	}
 	if len(calls) != 2 || calls[0].Version != calls[1].Version || calls[0].DownloadDir != calls[1].DownloadDir || calls[0].Mirror != calls[1].Mirror || strings.Join(calls[0].Args, "\x00") != strings.Join(calls[1].Args, "\x00") {
 		t.Fatalf("release get delegate calls = %+v", calls)
+	}
+
+	config.OutputFormat = config.OUTPUT_JSON
+	legacyErr.Reset()
+	legacy := captureStdout(t, func() {
+		if err := pigstyGetcmd.RunE(pigstyGetcmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	canonical := captureStdout(t, func() {
+		if err := pigstyReleaseGetCmd.RunE(pigstyReleaseGetCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if legacyErr.Len() != 0 || strings.Contains(legacy, "Deprecated:") || !strings.Contains(legacy, `"command":"pig sty get"`) || !strings.Contains(legacy, `"kind":"pig.sty.release.get/v1"`) {
+		t.Fatalf("legacy release get stdout=%q stderr=%q", legacy, legacyErr.String())
+	}
+	if !strings.Contains(canonical, `"command":"pig sty release get"`) || !strings.Contains(canonical, `"kind":"pig.sty.release.get/v1"`) {
+		t.Fatalf("canonical release get payload = %q", canonical)
 	}
 }
 
@@ -513,6 +529,8 @@ func TestStyConfMirrorFlagSetsRegionChina(t *testing.T) {
     node_tune: oltp
     pg_version: 18
     pg_conf: oltp.yml
+    # docker_registry_mirrors: ["https://docker.1ms.run"]
+    # PIP_MIRROR_URL: "https://pypi.tuna.tsinghua.edu.cn/simple"
 `
 	if err := os.WriteFile(filepath.Join(home, "conf", "meta.yml"), []byte(template), 0o644); err != nil {
 		t.Fatalf("write template: %v", err)
@@ -539,6 +557,11 @@ func TestStyConfMirrorFlagSetsRegionChina(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "region: china") {
 		t.Fatalf("expected mirror to set region china, got:\n%s", string(got))
+	}
+	for _, declaration := range []string{"docker_registry_mirrors:", "PIP_MIRROR_URL:"} {
+		if !strings.Contains(string(got), "    "+declaration) || strings.Contains(string(got), "# "+declaration) {
+			t.Fatalf("expected mirror to activate %s, got:\n%s", declaration, string(got))
+		}
 	}
 }
 
@@ -613,6 +636,45 @@ func TestStyConfRawFlagUsesRawRoute(t *testing.T) {
 	}
 	if strings.TrimSpace(string(got)) != "raw" {
 		t.Fatalf("unexpected raw marker content: %q", string(got))
+	}
+}
+
+func TestStyConfRawStructuredOutputRetainsGeneratedSecrets(t *testing.T) {
+	restore := saveStyConfState(t)
+	originalFormat := config.OutputFormat
+	defer func() {
+		restore()
+		config.OutputFormat = originalFormat
+	}()
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(cwd) }()
+
+	home := t.TempDir()
+	if err := writeExecutable(filepath.Join(home, "configure"), "#!/bin/sh\nprintf 'generated_password=raw-random-secret\\n'\n"); err != nil {
+		t.Fatal(err)
+	}
+	config.PigstyHome = home
+	config.OutputFormat = config.OUTPUT_JSON
+	pigstyConfRaw = true
+	pigstyConfGenerate = true
+
+	raw := captureStdout(t, func() {
+		if err := pigstyConfCmd.RunE(pigstyConfCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, expected := range []string{
+		`"kind":"pig.sty.configure.raw/v1"`,
+		`"secret_bearing_output":true`,
+		`generated_password=raw-random-secret`,
+	} {
+		if !strings.Contains(raw, expected) {
+			t.Fatalf("raw structured configure omitted %q: %s", expected, raw)
+		}
 	}
 }
 

@@ -76,6 +76,40 @@ func TestParseSelectorShorthandAndCanonicalPointer(t *testing.T) {
 	}
 }
 
+func TestParseSelectorRootGroupAndAmbiguousDeclaration(t *testing.T) {
+	doc, err := Parse("root-selector.yml", []byte(`all:
+  vars: {}
+root-group:
+  vars:
+    enabled: true
+  hosts: {}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := ParseSelector(doc, "root-group.vars.enabled")
+	if err != nil || path.String() != "/root-group/vars/enabled" {
+		t.Fatalf("root selector = %s, %v", path.String(), err)
+	}
+
+	ambiguous, err := Parse("ambiguous-selector.yml", []byte(`all:
+  vars: {}
+  children:
+    duplicate:
+      hosts: {}
+duplicate:
+  hosts: {}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ParseSelector(ambiguous, "duplicate")
+	var selectorErr *SelectorError
+	if !errors.As(err, &selectorErr) || selectorErr.Code != SelectorSyntax {
+		t.Fatalf("ambiguous selector error = %v", err)
+	}
+}
+
 func TestExtractReplaceMappingFragmentIsLossless(t *testing.T) {
 	source := []byte(selectorFixture)
 	doc, err := Parse("fragment.yml", source)

@@ -33,9 +33,9 @@ func (m *Mutation) Document() *Document {
 	return m.current
 }
 
-// Apply runs one low-level edit transaction and makes its result visible to
+// apply runs one low-level edit transaction and makes its result visible to
 // subsequent mutation operations. Any failure aborts the entire session.
-func (m *Mutation) Apply(edit func(*Editor) error) error {
+func (m *Mutation) apply(edit func(*Editor) error) error {
 	if m == nil || m.base == nil || m.current == nil {
 		return errors.New("inventory mutation is nil")
 	}
@@ -60,29 +60,29 @@ func (m *Mutation) Apply(edit func(*Editor) error) error {
 
 // Set replaces an existing scalar at path.
 func (m *Mutation) Set(path Path, value any) error {
-	return m.Apply(func(editor *Editor) error { return editor.Set(path, value) })
+	return m.apply(func(editor *Editor) error { return editor.Set(path, value) })
 }
 
 // Upsert sets or inserts a mapping entry at path.
 func (m *Mutation) Upsert(path Path, value any, options ...InsertOption) error {
-	return m.Apply(func(editor *Editor) error { return editor.Upsert(path, value, options...) })
+	return m.apply(func(editor *Editor) error { return editor.Upsert(path, value, options...) })
 }
 
 // Delete removes an active mapping entry.
 func (m *Mutation) Delete(path Path) error {
-	return m.Apply(func(editor *Editor) error { return editor.Delete(path) })
+	return m.apply(func(editor *Editor) error { return editor.Delete(path) })
 }
 
 // Rename changes only the final mapping-key lexeme at path.
 func (m *Mutation) Rename(path Path, newName string) error {
-	return m.Apply(func(editor *Editor) error { return editor.RenameKey(path, newName) })
+	return m.apply(func(editor *Editor) error { return editor.RenameKey(path, newName) })
 }
 
 // ReplaceAll replaces a placeholder in selected YAML key, scalar, and comment
 // token regions. It never scans YAML whitespace or delimiters.
 func (m *Mutation) ReplaceAll(old, replacement string, options ...ReplaceOption) (int, error) {
 	count := 0
-	err := m.Apply(func(editor *Editor) (err error) {
+	err := m.apply(func(editor *Editor) (err error) {
 		count, err = editor.ReplaceAll(old, replacement, options...)
 		return err
 	})
@@ -99,7 +99,7 @@ func (m *Mutation) UncommentKey(key string, options ...UncommentOption) (EditRes
 			before[pathKey(path)] = struct{}{}
 		}
 	}
-	err := m.Apply(func(editor *Editor) (err error) {
+	err := m.apply(func(editor *Editor) (err error) {
 		result, err = editor.UncommentKey(key, options...)
 		return err
 	})
@@ -265,7 +265,7 @@ func (m *MappingEditor) ensure() error {
 			if value.Scalar == nil || strings.TrimSpace(value.Scalar.Raw) == "" {
 				return nil
 			}
-			return m.mutation.Apply(func(editor *Editor) error {
+			return m.mutation.apply(func(editor *Editor) error {
 				ref, err := editor.reference(m.path)
 				if err != nil {
 					return err
@@ -288,7 +288,7 @@ func (m *MappingEditor) ensure() error {
 	if !ok || key.Kind != KeySegment {
 		return fmt.Errorf("mapping path %s must end in a key", m.path.String())
 	}
-	return m.mutation.Apply(func(editor *Editor) error {
+	return m.mutation.apply(func(editor *Editor) error {
 		return editor.Insert(parent, key.Key, implicitMapping{}, m.ensureOptions...)
 	})
 }

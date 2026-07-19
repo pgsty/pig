@@ -1,4 +1,4 @@
-package sty
+package inventorycli
 
 import (
 	"bytes"
@@ -17,13 +17,12 @@ import (
 
 // EditOptions controls one interactive, revision-checked inventory edit.
 type EditOptions struct {
-	Path       string
-	Selector   string
-	Editor     string // optional test/embedding override
-	ResultKind string
-	From       string
-	FromSet    bool
-	Stdin      io.Reader
+	Path     string
+	Selector string
+	Editor   string // optional test/embedding override
+	From     string
+	FromSet  bool
+	Stdin    io.Reader
 }
 
 const InventoryEditKind = "pig.inventory.edit/v1"
@@ -66,44 +65,44 @@ var (
 // user's editor and atomically writes a validated candidate when it changed.
 func Edit(opts EditOptions) *output.Result {
 	if opts.FromSet && strings.TrimSpace(opts.From) == "" {
-		return output.Fail(output.CodeStyEditInvalidArgs, "--from requires one regular file path or -")
+		return output.Fail(output.CodeInventoryEditInvalidArgs, "--from requires one regular file path or -")
 	}
 	path := strings.TrimSpace(opts.Path)
 	if path == "" {
-		return output.Fail(output.CodeStyInventoryNotFound, "inventory path is not configured")
+		return output.Fail(output.CodeInventoryNotFound, "inventory path is not configured")
 	}
 	nonInteractive := opts.FromSet || strings.TrimSpace(opts.From) != ""
 	if config.IsStructuredOutput() && !nonInteractive {
-		return output.Fail(output.CodeStyEditInvalidArgs, "interactive inventory edit requires text output")
+		return output.Fail(output.CodeInventoryEditInvalidArgs, "interactive inventory edit requires text output")
 	}
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return output.Fail(output.CodeStyInventoryNotFound, fmt.Sprintf("inventory not found: %s", path))
+		return output.Fail(output.CodeInventoryNotFound, fmt.Sprintf("inventory not found: %s", path))
 	}
 	if err != nil {
-		return output.Fail(output.CodeStyEditFailed, fmt.Sprintf("failed to inspect inventory: %v", err))
+		return output.Fail(output.CodeInventoryEditFailed, fmt.Sprintf("failed to inspect inventory: %v", err))
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return output.Fail(output.CodeStyEditInvalidArgs, "refusing to edit an inventory symlink")
+		return output.Fail(output.CodeInventoryEditInvalidArgs, "refusing to edit an inventory symlink")
 	}
-	if failure := staticInventorySourceFailure(info, output.CodeStyEditInvalidArgs); failure != nil {
+	if failure := staticInventorySourceFailure(info, output.CodeInventoryEditInvalidArgs); failure != nil {
 		return failure
 	}
 	source, err := os.ReadFile(path)
 	if err != nil {
-		return output.Fail(output.CodeStyEditFailed, fmt.Sprintf("failed to read inventory: %v", err))
+		return output.Fail(output.CodeInventoryEditFailed, fmt.Sprintf("failed to read inventory: %v", err))
 	}
 	doc, err := inventory.Parse(path, source)
 	if err != nil {
-		return output.Fail(output.CodeStyInventoryInvalid, "inventory cannot be edited until its YAML parse errors are fixed").WithDetail(parseErrorSummary(err))
+		return output.Fail(output.CodeInventoryInvalid, "inventory cannot be edited until its YAML parse errors are fixed").WithDetail(parseErrorSummary(err))
 	}
 	selected, err := inventory.ParseSelector(doc, opts.Selector)
 	if err != nil {
-		return output.Fail(output.CodeStyEditInvalidArgs, err.Error())
+		return output.Fail(output.CodeInventoryEditInvalidArgs, err.Error())
 	}
 	fragment, err := doc.Extract(selected)
 	if err != nil {
-		return output.Fail(output.CodeStyEditFailed, err.Error())
+		return output.Fail(output.CodeInventoryEditFailed, err.Error())
 	}
 
 	editorCommand := ""
@@ -117,7 +116,7 @@ func Edit(opts EditOptions) *output.Result {
 		}
 		if editorCommand == "" {
 			if !stdinIsTerminalFn() {
-				return output.Fail(output.CodeStyEditInvalidArgs, "VISUAL or EDITOR is required when stdin is not a terminal")
+				return output.Fail(output.CodeInventoryEditInvalidArgs, "VISUAL or EDITOR is required when stdin is not a terminal")
 			}
 			editorCommand = "vi"
 		}
@@ -125,7 +124,7 @@ func Edit(opts EditOptions) *output.Result {
 
 	tempDir, err := os.MkdirTemp("", "pig-sty-edit-*")
 	if err != nil {
-		return output.Fail(output.CodeStyEditFailed, "failed to create private edit directory")
+		return output.Fail(output.CodeInventoryEditFailed, "failed to create private edit directory")
 	}
 	removeTemp := true
 	defer func() {
@@ -134,11 +133,11 @@ func Edit(opts EditOptions) *output.Result {
 		}
 	}()
 	if err := os.Chmod(tempDir, 0700); err != nil {
-		return output.Fail(output.CodeStyEditFailed, "failed to secure edit directory")
+		return output.Fail(output.CodeInventoryEditFailed, "failed to secure edit directory")
 	}
 	tempPath := filepath.Join(tempDir, "fragment.yml")
 	if err := os.WriteFile(tempPath, fragment.Bytes, 0600); err != nil {
-		return output.Fail(output.CodeStyEditFailed, "failed to write private edit fragment")
+		return output.Fail(output.CodeInventoryEditFailed, "failed to write private edit fragment")
 	}
 	if nonInteractive {
 		replacement, failure := readEditReplacement(opts)
@@ -146,25 +145,25 @@ func Edit(opts EditOptions) *output.Result {
 			return failure
 		}
 		if err := os.WriteFile(tempPath, replacement, 0600); err != nil {
-			return output.Fail(output.CodeStyEditFailed, "failed to stage replacement fragment")
+			return output.Fail(output.CodeInventoryEditFailed, "failed to stage replacement fragment")
 		}
 	} else {
 		if err := runInventoryEditorFn(editorCommand, tempPath); err != nil {
 			removeTemp = false
-			return retainedEditFailure(output.CodeStyEditFailed, "inventory editor exited unsuccessfully", tempPath)
+			return retainedEditFailure(output.CodeInventoryEditFailed, "inventory editor exited unsuccessfully", tempPath)
 		}
 	}
 	edited, err := os.ReadFile(tempPath)
 	if err != nil {
 		removeTemp = false
-		return retainedEditFailure(output.CodeStyEditFailed, "failed to read edited fragment", tempPath)
+		return retainedEditFailure(output.CodeInventoryEditFailed, "failed to read edited fragment", tempPath)
 	}
-	data := &EditData{Kind: strings.TrimSpace(opts.ResultKind), Path: path, Selector: strings.TrimSpace(opts.Selector), Resolved: selected.String()}
+	data := &EditData{Kind: InventoryEditKind, Path: path, Selector: strings.TrimSpace(opts.Selector), Resolved: selected.String()}
 	originalDiagnostics := editRuleDiagnostics(doc)
 	if bytes.Equal(edited, fragment.Bytes) {
 		if blocking := editBlockingDiagnostics(originalDiagnostics, originalDiagnostics, selected); len(blocking) > 0 {
 			removeTemp = false
-			return retainedEditFailure(output.CodeStyInventoryInvalid, firstDiagnosticMessage(blocking), tempPath).
+			return retainedEditFailure(output.CodeInventoryInvalid, firstDiagnosticMessage(blocking), tempPath).
 				WithData(&EditData{Kind: data.Kind, Path: path, Selector: data.Selector, Resolved: data.Resolved, Diagnostics: inventoryDiagnostics(originalDiagnostics)})
 		}
 		return output.OK("inventory unchanged", data)
@@ -173,35 +172,35 @@ func Edit(opts EditOptions) *output.Result {
 	editor := doc.Edit()
 	if err := editor.ReplaceFragment(fragment, edited); err != nil {
 		removeTemp = false
-		return retainedEditFailure(output.CodeStyInventoryInvalid, fragmentEditMessage(err), tempPath)
+		return retainedEditFailure(output.CodeInventoryInvalid, fragmentEditMessage(err), tempPath)
 	}
 	candidate, changes, err := editor.CommitCandidate()
 	if err != nil {
 		removeTemp = false
-		return retainedEditFailure(output.CodeStyInventoryInvalid, editValidationMessage(err), tempPath)
+		return retainedEditFailure(output.CodeInventoryInvalid, editValidationMessage(err), tempPath)
 	}
 	diagnostics := editRuleDiagnostics(candidate)
 	blocking := editBlockingDiagnostics(originalDiagnostics, diagnostics, selected)
 	if len(blocking) > 0 {
 		removeTemp = false
-		return retainedEditFailure(output.CodeStyInventoryInvalid, firstDiagnosticMessage(blocking), tempPath).
+		return retainedEditFailure(output.CodeInventoryInvalid, firstDiagnosticMessage(blocking), tempPath).
 			WithData(&EditData{Kind: data.Kind, Path: path, Selector: data.Selector, Resolved: data.Resolved, Diagnostics: inventoryDiagnostics(diagnostics)})
 	}
 	latestInfo, err := os.Lstat(path)
 	if err != nil || latestInfo.Mode()&os.ModeSymlink != 0 || !latestInfo.Mode().IsRegular() {
 		removeTemp = false
-		return retainedEditFailure(output.CodeStyEditConflict, "inventory source changed shape while the editor was open; no file was written", tempPath)
+		return retainedEditFailure(output.CodeInventoryEditConflict, "inventory source changed shape while the editor was open; no file was written", tempPath)
 	}
 	latest, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(latest, source) {
 		removeTemp = false
-		return retainedEditFailure(output.CodeStyEditConflict, "inventory changed while the editor was open; no file was written", tempPath)
+		return retainedEditFailure(output.CodeInventoryEditConflict, "inventory changed while the editor was open; no file was written", tempPath)
 	}
 	modeBefore := latestInfo.Mode().Perm()
 	modeAfter := modeBefore & 0600
 	if err := utils.AtomicWriteFile(path, candidate.Bytes(), modeAfter); err != nil {
 		removeTemp = false
-		return retainedEditFailure(output.CodeStyEditWriteFailed, fmt.Sprintf("failed to write edited inventory: %v", err), tempPath)
+		return retainedEditFailure(output.CodeInventoryEditWriteFailed, fmt.Sprintf("failed to write edited inventory: %v", err), tempPath)
 	}
 	data.Changed = true
 	data.ModeBefore = fmt.Sprintf("%04o", modeBefore)
@@ -221,23 +220,23 @@ func readEditReplacement(opts EditOptions) ([]byte, *output.Result) {
 		}
 		body, err := io.ReadAll(reader)
 		if err != nil {
-			return nil, output.Fail(output.CodeStyEditFailed, "failed to read replacement fragment from stdin")
+			return nil, output.Fail(output.CodeInventoryEditFailed, "failed to read replacement fragment from stdin")
 		}
 		return body, nil
 	}
 	if from == "" {
-		return nil, output.Fail(output.CodeStyEditInvalidArgs, "replacement source is not configured")
+		return nil, output.Fail(output.CodeInventoryEditInvalidArgs, "replacement source is not configured")
 	}
 	info, err := os.Lstat(from)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, output.Fail(output.CodeStyInventoryNotFound, "replacement fragment file was not found")
+		return nil, output.Fail(output.CodeInventoryNotFound, "replacement fragment file was not found")
 	}
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return nil, output.Fail(output.CodeStyEditInvalidArgs, "replacement source must be one regular, non-symlink file")
+		return nil, output.Fail(output.CodeInventoryEditInvalidArgs, "replacement source must be one regular, non-symlink file")
 	}
 	body, err := os.ReadFile(from)
 	if err != nil {
-		return nil, output.Fail(output.CodeStyEditFailed, "failed to read replacement fragment file")
+		return nil, output.Fail(output.CodeInventoryEditFailed, "failed to read replacement fragment file")
 	}
 	return body, nil
 }

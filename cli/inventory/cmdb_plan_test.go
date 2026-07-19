@@ -1,4 +1,4 @@
-package sty
+package inventorycli
 
 import (
 	"bytes"
@@ -56,7 +56,7 @@ func TestCMDBPlanConfirmationConflictAndDynamicDefaultFailBeforeIO(t *testing.T)
 	if result.Success || !ok || failure.CMDBCode != "CMDB_SOURCE_INVALID" || len(result.NextActions) != 1 {
 		t.Fatalf("dynamic default load = %+v", result)
 	}
-	if _, result := InventoryCMDBDump(t.Context(), InventoryCMDBOptions{Force: true}); result.Success || result.Code != output.CodeStyCMDBInvalidArgs {
+	if _, result := InventoryCMDBDump(t.Context(), InventoryCMDBOptions{Force: true}); result.Success || result.Code != output.CodeInventoryCMDBInvalidArgs {
 		t.Fatalf("stdout dump with --force = %+v", result)
 	}
 }

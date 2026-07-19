@@ -8,9 +8,18 @@ import (
 	"pig/internal/output"
 	"pig/inventory"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func mutateTemplate(content string, opts mutationOptions) (string, []string, []string, error) {
+	result, err := mutateTemplateDocument(content, opts)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return string(result.Document.Bytes()), result.Generated, result.Warnings, nil
+}
 
 func betaPGMajorString() string {
 	return fmt.Sprintf("%d", ext.PostgresBetaMajorVersion)
@@ -330,8 +339,8 @@ func TestMutateTemplatePGMajorTemplateSkipsVersionRewrite(t *testing.T) {
 			if !strings.Contains(got, fmt.Sprintf("pg%d-main", tt.locked)) {
 				t.Fatalf("expected %s to keep locked package aliases, got:\n%s", tt.mode, got)
 			}
-			if len(warnings) != 0 {
-				t.Fatalf("unexpected warnings for %s: %v", tt.mode, warnings)
+			if len(warnings) != 1 || !strings.Contains(warnings[0], "ignored") || !strings.Contains(warnings[0], strconv.Itoa(tt.locked)) {
+				t.Fatalf("expected effective-version warning for %s: %v", tt.mode, warnings)
 			}
 		})
 	}
@@ -364,6 +373,57 @@ func TestMutateTemplateBetaSkippedOnceMajorIsStable(t *testing.T) {
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+}
+
+func TestMutateTemplateFixedPGMajorUsesEffectiveVersion(t *testing.T) {
+	content := `all:
+  vars:
+    node_repo_modules: node,infra,pgsql
+    pg_version: 18
+    pg_packages: [ pg18-main ]
+`
+	got, _, warnings, err := mutateTemplate(content, mutationOptions{
+		Mode: "pg18", PGVersion: ext.PostgresBetaMajorVersion,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "beta") || strings.Contains(got, betaPGVersionLine()) || !strings.Contains(got, "pg_version: 18") {
+		t.Fatalf("fixed PG18 template followed requested beta version:\n%s", got)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "pins PostgreSQL 18") {
+		t.Fatalf("effective-version warnings = %v", warnings)
+	}
+}
+
+func TestMutateTemplateFixedKernelDoesNotReportRequestedVersionAsEffective(t *testing.T) {
+	content := "all:\n  vars:\n    node_repo_modules: node,infra,pgsql\n"
+	result, err := mutateTemplateDocument(content, mutationOptions{Mode: "mssql", PGVersion: 17})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.EffectivePGVersion != 0 {
+		t.Fatalf("unknown pinned version reported as %d", result.EffectivePGVersion)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "pins its own PostgreSQL version") {
+		t.Fatalf("warnings = %v", result.Warnings)
+	}
+}
+
+func TestMutateTemplatePackageAliasUsesDeclaredTemplateVersion(t *testing.T) {
+	content := `all:
+  vars:
+    pg_version: 17
+    pg_packages: [ pg17-main ]
+    note: pg17-client
+`
+	got, _, _, err := mutateTemplate(content, mutationOptions{Mode: "meta", PGVersion: 16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "pg17-") || !strings.Contains(got, "pg16-main") || !strings.Contains(got, "pg16-client") {
+		t.Fatalf("declared package alias was not updated:\n%s", got)
 	}
 }
 
@@ -563,6 +623,9 @@ func TestMutateTemplatePasswordGeneration(t *testing.T) {
 	if len(generated) == 0 {
 		t.Fatal("expected generated secrets metadata")
 	}
+	if len(generated) != 9 {
+		t.Fatalf("generated identifiers = %v, want eight keys plus DBUser.Meta", generated)
+	}
 	for _, token := range []string{"DBUser.Meta", "S3User.Backup", "Vibe.Coding"} {
 		if strings.Contains(got, token) {
 			t.Fatalf("expected token %q replaced, got:\n%s", token, got)
@@ -571,6 +634,16 @@ func TestMutateTemplatePasswordGeneration(t *testing.T) {
 	re := regexp.MustCompile(`(?m)^\s*grafana_admin_password:\s*([A-Za-z0-9]{24})\s*$`)
 	if !re.MatchString(got) {
 		t.Fatalf("expected generated password format, got:\n%s", got)
+	}
+}
+
+func TestMutateTemplateChinaLeavesAbsentMirrorDeclarationsAbsent(t *testing.T) {
+	got, _, _, err := mutateTemplate("all:\n  vars:\n    region: default\n", mutationOptions{Mode: "custom", Region: "china"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "region: china") || strings.Contains(got, "docker_registry_mirrors") || strings.Contains(got, "PIP_MIRROR_URL") {
+		t.Fatalf("China mutation should change region without inventing template-specific mirrors:\n%s", got)
 	}
 }
 
@@ -828,6 +901,10 @@ func TestConfigureNativeEndToEndAbsoluteOutput(t *testing.T) {
 	if result == nil || !result.Success {
 		t.Fatalf("expected success result, got: %+v", result)
 	}
+	resultData, ok := result.Data.(*ConfigureData)
+	if !ok || resultData.Kind != ConfigureKind {
+		t.Fatalf("configure data = %#v, want kind %q", result.Data, ConfigureKind)
+	}
 	data, err := os.ReadFile(outPath)
 	if err != nil {
 		t.Fatalf("read output: %v", err)
@@ -964,6 +1041,7 @@ func TestConfigureNativePGMajorTemplateSkipsVersionRewrite(t *testing.T) {
 		Mode:             betaPGMode(),
 		PrimaryIP:        "192.168.0.10",
 		PGVersion:        "16",
+		Region:           "default",
 		OutputFile:       outPath,
 		NonInteractive:   true,
 		CPUCount:         8,
@@ -980,8 +1058,11 @@ func TestConfigureNativePGMajorTemplateSkipsVersionRewrite(t *testing.T) {
 	if data.PGVersion != "16" {
 		t.Fatalf("expected reported pg_version to preserve requested flag, got %q", data.PGVersion)
 	}
-	if len(data.Warnings) != 0 {
-		t.Fatalf("unexpected warnings: %v", data.Warnings)
+	if data.EffectivePGVersion != strconv.Itoa(ext.PostgresBetaMajorVersion) {
+		t.Fatalf("effective pg_version = %q", data.EffectivePGVersion)
+	}
+	if len(data.Warnings) != 1 || !strings.Contains(data.Warnings[0], "ignored") {
+		t.Fatalf("expected ignored-version warning: %v", data.Warnings)
 	}
 
 	out, err := os.ReadFile(outPath)
