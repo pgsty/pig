@@ -130,7 +130,11 @@ func TestPlainInventoryValueRejectsJSONKeyCoercionCollision(t *testing.T) {
 
 func TestCanonicalCMDBYAMLIsBlockAndSemanticallyStable(t *testing.T) {
 	raw := []byte(`{"all":{"children":{"demo":{"hosts":{"10.10.10.10":{"note":"yes","seq":1}},"vars":{}},"empty":{"hosts":null,"vars":null}},"vars":{"region":"china","enabled":true}}}`)
-	body, err := canonicalCMDBYAML(raw)
+	canonical, err := cmdb.CanonicalRawConfigJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := canonicalCMDBYAML(canonical)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,10 +1,11 @@
 package cmd
 
 import (
-	"os"
+	"context"
 	inventorycli "pig/cli/inventory"
 	"pig/internal/config"
 	"pig/internal/output"
+	"pig/internal/utils"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -60,14 +61,11 @@ var inventoryListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var depth *int
 		if cmd.Flags().Changed("depth") {
-			if inventoryListDepth < 0 {
-				return handleAuxResult(output.Fail(output.CodeInventoryListInvalidArgs, "inventory list depth must be non-negative"))
-			}
 			value := inventoryListDepth
 			depth = &value
 		}
 		return handleAuxResult(inventoryListExec(inventorycli.InventoryOptions{
-			Path: config.PigstyConfig, Selector: inventorySelector(args), Depth: depth,
+			Path: config.PigstyConfig, Selector: firstArg(args), Depth: depth,
 		}))
 	},
 }
@@ -79,7 +77,7 @@ var inventoryShowCmd = &cobra.Command{
 	Args:        cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		body, failure := inventoryShowExec(inventorycli.InventoryOptions{
-			Path: config.PigstyConfig, Selector: inventorySelector(args),
+			Path: config.PigstyConfig, Selector: firstArg(args),
 		})
 		if failure != nil {
 			return handleAuxResult(failure)
@@ -110,7 +108,7 @@ var inventoryEditCmd = &cobra.Command{
   pig inv e 'pg-meta.hosts["10.10.10.10"]'`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return handleAuxResult(inventoryEditExec(inventorycli.EditOptions{
-			Path: config.PigstyConfig, Selector: inventorySelector(args),
+			Path: config.PigstyConfig, Selector: firstArg(args),
 			From: inventoryEditFrom, FromSet: cmd.Flags().Changed("from"), Stdin: cmd.InOrStdin(),
 		}))
 	},
@@ -239,7 +237,8 @@ var inventoryCMDBInitCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		options := inventoryCMDBOptions("")
 		options.Yes, options.Plan = inventoryCMDBInitYes, inventoryCMDBInitPlan
-		return runInventoryCMDBInit(cmd, options, "pig inventory cmdb init --yes")
+		return runInventoryCMDBConfirmed(cmd, options, inventoryCMDBInitExec,
+			"This replaces the existing pigsty and pglog schemas.", "pig inventory cmdb init --yes")
 	},
 }
 
@@ -257,7 +256,8 @@ var inventoryCMDBLoadCmd = &cobra.Command{
 		options := inventoryCMDBOptions(path)
 		options.ExplicitPath = explicit
 		options.Yes, options.Plan, options.Strict = inventoryCMDBLoadYes, inventoryCMDBLoadPlan, inventoryCMDBLoadStrict
-		return runInventoryCMDBLoad(cmd, options, "pig inventory cmdb load --yes")
+		return runInventoryCMDBConfirmed(cmd, options, inventoryCMDBLoadExec,
+			"This replaces all five Pigsty CMDB declaration tables.", "pig inventory cmdb load --yes")
 	},
 }
 
@@ -308,34 +308,23 @@ func inventoryCMDBOptions(path string) inventorycli.InventoryCMDBOptions {
 	}
 }
 
-func runInventoryCMDBLoad(cmd *cobra.Command, options inventorycli.InventoryCMDBOptions, confirmationCommand string) error {
-	result := inventoryCMDBLoadExec(cmd.Context(), options)
+func runInventoryCMDBConfirmed(
+	cmd *cobra.Command,
+	options inventorycli.InventoryCMDBOptions,
+	execute func(context.Context, inventorycli.InventoryCMDBOptions) *output.Result,
+	warning, confirmationCommand string,
+) error {
+	result := execute(cmd.Context(), options)
 	if result != nil && result.Code == output.CodeInventoryCMDBConfirmationRequired && !options.Yes && !options.Plan &&
 		!config.IsStructuredOutput() && inventoryCMDBTextInputIsTerminal() {
 		if !pinInventoryCMDBConfirmation(result, &options) {
 			return handleAuxResult(result)
 		}
-		if err := highRiskTextConfirm("This replaces all five Pigsty CMDB declaration tables.", confirmationCommand); err != nil {
+		if err := highRiskTextConfirm(warning, confirmationCommand); err != nil {
 			return err
 		}
 		options.Yes = true
-		result = inventoryCMDBLoadExec(cmd.Context(), options)
-	}
-	return handleAuxResult(result)
-}
-
-func runInventoryCMDBInit(cmd *cobra.Command, options inventorycli.InventoryCMDBOptions, confirmationCommand string) error {
-	result := inventoryCMDBInitExec(cmd.Context(), options)
-	if result != nil && result.Code == output.CodeInventoryCMDBConfirmationRequired && !options.Yes && !options.Plan &&
-		!config.IsStructuredOutput() && inventoryCMDBTextInputIsTerminal() {
-		if !pinInventoryCMDBConfirmation(result, &options) {
-			return handleAuxResult(result)
-		}
-		if err := highRiskTextConfirm("This replaces the existing pigsty and pglog schemas.", confirmationCommand); err != nil {
-			return err
-		}
-		options.Yes = true
-		result = inventoryCMDBInitExec(cmd.Context(), options)
+		result = execute(cmd.Context(), options)
 	}
 	return handleAuxResult(result)
 }
@@ -348,19 +337,12 @@ func pinInventoryCMDBConfirmation(result *output.Result, target *inventorycli.In
 	if !ok || data == nil {
 		return false
 	}
-	target.ExpectedSourceRevision = data.SourceRevision
-	target.ExpectedTargetDigest = data.TargetDigest
-	target.ExpectedDatabaseTarget = data.DatabaseTargetDigest
-	switch data.Operation {
-	case "init":
-		value := data.ExistingSchemas
-		target.ExpectedSchemas = &value
-	case "load":
-	default:
+	digest := data.ConfirmationDigest()
+	if digest == "" {
 		return false
 	}
-	return data.SourceRevision != "" && data.DatabaseTargetDigest != "" && (data.Operation != "load" || data.TargetDigest != "") &&
-		(data.Operation != "init" || target.ExpectedSchemas != nil)
+	target.ExpectedPlanDigest = digest
+	return true
 }
 
 func runInventoryCMDBDump(cmd *cobra.Command, options inventorycli.InventoryCMDBOptions) error {
@@ -374,19 +356,7 @@ func runInventoryCMDBDump(cmd *cobra.Command, options inventorycli.InventoryCMDB
 	return nil
 }
 
-func inventorySelector(args []string) string {
-	if len(args) == 1 {
-		return args[0]
-	}
-	return ""
-}
-
-func cmdbTextInputIsTerminal() bool {
-	info, err := os.Stdin.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
-
-var inventoryCMDBTextInputIsTerminal = cmdbTextInputIsTerminal
+var inventoryCMDBTextInputIsTerminal = utils.StdinIsTerminal
 
 func addCMDBDatabaseFlags(target *string, commands ...*cobra.Command) {
 	for _, command := range commands {

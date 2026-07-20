@@ -94,7 +94,7 @@ func (d *Document) Extract(path Path) (*Fragment, error) {
 	switch ref.node.Kind {
 	case yaml.MappingNode, yaml.SequenceNode:
 		if ref.node.Style&yaml.FlowStyle != 0 || len(ref.node.Content) == 0 {
-			if bytes.IndexAny(d.source[span.start:span.end], "\r\n") >= 0 {
+			if bytes.ContainsAny(d.source[span.start:span.end], "\r\n") {
 				return nil, fmt.Errorf("extract %s: multiline flow collection: %w", path.String(), ErrFragmentUnsupported)
 			}
 			break

@@ -61,6 +61,38 @@ func TestCMDBPlanConfirmationConflictAndDynamicDefaultFailBeforeIO(t *testing.T)
 	}
 }
 
+func TestCMDBConfirmationDigestPinsMutationInputs(t *testing.T) {
+	base := InventoryCMDBData{
+		Operation: "load", SourceRevision: "source", DatabaseTargetDigest: "database", TargetDigest: "target",
+	}
+	digest := base.ConfirmationDigest()
+	if digest == "" {
+		t.Fatal("complete load plan has no confirmation digest")
+	}
+	for name, mutate := range map[string]func(*InventoryCMDBData){
+		"operation": func(data *InventoryCMDBData) { data.Operation = "init" },
+		"source":    func(data *InventoryCMDBData) { data.SourceRevision = "changed" },
+		"database":  func(data *InventoryCMDBData) { data.DatabaseTargetDigest = "changed" },
+		"target":    func(data *InventoryCMDBData) { data.TargetDigest = "changed" },
+	} {
+		changed := base
+		mutate(&changed)
+		if changed.ConfirmationDigest() == digest {
+			t.Fatalf("%s change retained confirmation digest", name)
+		}
+	}
+	base.TargetDigest = ""
+	if base.ConfirmationDigest() != "" {
+		t.Fatal("incomplete load plan is confirmable")
+	}
+	base.Operation = "init"
+	initDigest := base.ConfirmationDigest()
+	base.ExistingSchemas++
+	if initDigest == "" || base.ConfirmationDigest() == initDigest {
+		t.Fatal("init schema count is not pinned")
+	}
+}
+
 func TestCMDBSourceSnapshotTracksRegularSymlinkRevision(t *testing.T) {
 	directory := t.TempDir()
 	target := filepath.Join(directory, "target.yml")
@@ -189,8 +221,8 @@ func TestCMDBDumpDestinationRefusalAndIdempotence(t *testing.T) {
 
 func TestCMDBDumpEquivalenceAndPlansRemainValueFree(t *testing.T) {
 	raw := []byte(`{"all":{"children":{"demo":{"hosts":{"10.10.10.10":{"password":"secret"}},"vars":{}}},"vars":{}}}`)
-	body, err := canonicalCMDBYAML(raw)
-	if err != nil || proveCMDBDumpEquivalent(raw, body) != nil {
+	_, _, err := prepareCMDBDump(raw)
+	if err != nil {
 		t.Fatalf("dump equivalence = %v", err)
 	}
 	data := &InventoryCMDBData{
@@ -227,7 +259,15 @@ func TestCMDBValueFreeChangesRespectCanonicalNumericEquivalence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changes := cmdbValueFreeChanges(doc, current); len(changes) != 0 {
+	declarations, failure := pigstyDeclarationsFromDocument(doc, doc.Name())
+	if failure != nil {
+		t.Fatal(failure)
+	}
+	source, err := cmdb.CanonicalDeclarationsJSON(declarations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes := cmdbValueFreeChanges(doc, source, current); len(changes) != 0 {
 		t.Fatalf("canonical no-op changes = %+v", changes)
 	}
 }

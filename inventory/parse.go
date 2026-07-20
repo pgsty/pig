@@ -523,7 +523,7 @@ func (d *Document) validateScalarSpan(node *yaml.Node, span byteSpan) error {
 		return nil
 	}
 	if node.Style == 0 {
-		if bytes.IndexAny(raw, "\r\n") >= 0 || string(raw) != node.Value {
+		if bytes.ContainsAny(raw, "\r\n") || string(raw) != node.Value {
 			return errors.New("plain scalar source span does not match its semantic value")
 		}
 		return nil

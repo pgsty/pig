@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-func TestFindInventoryPathPrecedenceAndConcreteExplicitSource(t *testing.T) {
+func TestResolveInventorySourcePrecedenceAndConcreteExplicitSource(t *testing.T) {
 	originalHome := HomeDir
 	defer func() {
 		HomeDir = originalHome
@@ -35,25 +35,25 @@ func TestFindInventoryPathPrecedenceAndConcreteExplicitSource(t *testing.T) {
 	// A missing -i target is still authoritative; falling through would make a
 	// typo operate on an unrelated configured Inventory.
 	want := filepath.Join(root, "missing-explicit.yml")
-	if got := findInventoryPath("missing-explicit.yml", home); got != want {
+	if got := resolveInventorySource("missing-explicit.yml", home).Path; got != want {
 		t.Fatalf("explicit inventory = %q, want %q", got, want)
 	}
-	if got := findInventoryPath("", home); got != filepath.Join(root, "from-env.yml") {
+	if got := resolveInventorySource("", home).Path; got != filepath.Join(root, "from-env.yml") {
 		t.Fatalf("environment inventory = %q", got)
 	}
 
 	t.Setenv("PIGSTY_INVENTORY", "")
-	if got := findInventoryPath("", home); got != filepath.Join(home, "from-config.yml") {
+	if got := resolveInventorySource("", home).Path; got != filepath.Join(home, "from-config.yml") {
 		t.Fatalf("config inventory = %q", got)
 	}
 
 	viper.Set("inventory", "")
-	if got := findInventoryPath("", home); got != filepath.Join(home, "from-ansible.yml") {
+	if got := resolveInventorySource("", home).Path; got != filepath.Join(home, "from-ansible.yml") {
 		t.Fatalf("ansible.cfg inventory = %q", got)
 	}
 }
 
-func TestFindInventoryPathFallsBackWithinResolvedHome(t *testing.T) {
+func TestResolveInventorySourceFallsBackWithinResolvedHome(t *testing.T) {
 	originalHome := HomeDir
 	defer func() {
 		HomeDir = originalHome
@@ -72,7 +72,7 @@ func TestFindInventoryPathFallsBackWithinResolvedHome(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got, want := findInventoryPath("", home), filepath.Join(home, "pigsty.yml"); got != want {
+	if got, want := resolveInventorySource("", home).Path, filepath.Join(home, "pigsty.yml"); got != want {
 		t.Fatalf("fallback inventory = %q, want %q", got, want)
 	}
 }
@@ -92,12 +92,12 @@ inventory = also-ignored.yml
 	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := readAnsibleInventoryDirective(path)
+	directive, err := ReadAnsibleInventoryDirective(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "conf/pigsty.yml" {
-		t.Fatalf("inventory directive = %q, want conf/pigsty.yml", got)
+	if directive.Value != "conf/pigsty.yml" {
+		t.Fatalf("inventory directive = %q, want conf/pigsty.yml", directive.Value)
 	}
 }
 

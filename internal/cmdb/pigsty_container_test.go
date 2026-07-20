@@ -16,7 +16,7 @@ func TestContainerExistingPigstyBaselineLoadDumpAndTransactionRollback(t *testin
 	if cmdbContainer == nil || cmdbContainer.guard() != nil {
 		t.Fatal("destructive test guard failed")
 	}
-	if _, err := store.pool.Exec(t.Context(), `DROP SCHEMA IF EXISTS pigsty_cmdb CASCADE; DROP SCHEMA IF EXISTS pigsty CASCADE; DROP SCHEMA IF EXISTS pglog CASCADE`); err != nil {
+	if _, err := store.conn.Exec(t.Context(), `DROP SCHEMA IF EXISTS pigsty_cmdb CASCADE; DROP SCHEMA IF EXISTS pigsty CASCADE; DROP SCHEMA IF EXISTS pglog CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	home := os.Getenv("PIGSTY_HOME")
@@ -53,7 +53,15 @@ func TestContainerExistingPigstyBaselineLoadDumpAndTransactionRollback(t *testin
 			}},
 		}},
 	}
-	loaded, err := store.ReplaceDeclarations(t.Context(), declarations)
+	baselineRaw, err := store.RawConfig(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedRaw, err := CanonicalRawConfigJSON(baselineRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.ReplaceDeclarationsIfCurrent(t.Context(), declarations, expectedRaw)
 	if err != nil || loaded.Globals != 2 || loaded.Groups != 1 || loaded.Hosts != 1 || loaded.GroupVar != 1 || loaded.HostVar != 2 {
 		t.Fatalf("load result = %+v, %v", loaded, err)
 	}
@@ -79,17 +87,17 @@ func TestContainerExistingPigstyBaselineLoadDumpAndTransactionRollback(t *testin
 		t.Fatalf("CMDB inspection = %+v, %v", checked, err)
 	}
 
-	if _, err := store.pool.Exec(t.Context(), `INSERT INTO pigsty.global_var(key, value) VALUES ('concurrent_change', 'true')`); err != nil {
+	if _, err := store.conn.Exec(t.Context(), `INSERT INTO pigsty.global_var(key, value) VALUES ('concurrent_change', 'true')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.ReplaceDeclarationsIfCurrent(t.Context(), declarations, canonicalRaw); !IsCode(err, "CMDB_SOURCE_CHANGED") {
 		t.Fatalf("stale declaration replacement error = %v", err)
 	}
 	var concurrentExists bool
-	if err := store.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pigsty.global_var WHERE key = 'concurrent_change')`).Scan(&concurrentExists); err != nil || !concurrentExists {
+	if err := store.conn.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pigsty.global_var WHERE key = 'concurrent_change')`).Scan(&concurrentExists); err != nil || !concurrentExists {
 		t.Fatalf("stale replacement mutated rows: exists=%v err=%v", concurrentExists, err)
 	}
-	if _, err := store.pool.Exec(t.Context(), `DELETE FROM pigsty.global_var WHERE key = 'concurrent_change'`); err != nil {
+	if _, err := store.conn.Exec(t.Context(), `DELETE FROM pigsty.global_var WHERE key = 'concurrent_change'`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -98,7 +106,7 @@ func TestContainerExistingPigstyBaselineLoadDumpAndTransactionRollback(t *testin
 		Globals: []JSONField{{Key: "would_be_partial", Value: json.RawMessage(`true`)}},
 		Groups:  []GroupDeclaration{{Name: "bad\x00group"}},
 	}
-	if _, err := store.ReplaceDeclarations(t.Context(), invalid); !IsCode(err, "CMDB_LOAD_FAILED") {
+	if _, err := store.ReplaceDeclarationsIfCurrent(t.Context(), invalid, canonicalRaw); !IsCode(err, "CMDB_LOAD_FAILED") {
 		t.Fatalf("injected failure = %v", err)
 	}
 	after := declarationTableCounts(t, store)
@@ -114,7 +122,7 @@ func TestContainerExistingPigstyBaselineLoadDumpAndTransactionRollback(t *testin
 		t.Fatalf("OS defaults = %+v, %v", defaults, err)
 	}
 	var abandonedExists bool
-	if err := store.pool.QueryRow(t.Context(), `SELECT to_regnamespace('pigsty_cmdb') IS NOT NULL`).Scan(&abandonedExists); err != nil || abandonedExists {
+	if err := store.conn.QueryRow(t.Context(), `SELECT to_regnamespace('pigsty_cmdb') IS NOT NULL`).Scan(&abandonedExists); err != nil || abandonedExists {
 		t.Fatalf("corrected adapter created pigsty_cmdb: exists=%v err=%v", abandonedExists, err)
 	}
 }
@@ -190,7 +198,11 @@ func testContainerSourceSwitch(t *testing.T, expectedTarget string) {
 	if err != nil || plan.Changed {
 		t.Fatalf("idempotent enable plan = %+v, %v", plan, err)
 	}
-	disabled, err := DisablePigstyInventory(home)
+	disablePlan, err := PlanDisablePigstyInventory(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := disablePlan.Apply()
 	if err != nil || !disabled.Changed || disabled.ScriptChanged {
 		t.Fatalf("disable = %+v, %v", disabled, err)
 	}
@@ -206,7 +218,7 @@ func testContainerSourceSwitch(t *testing.T, expectedTarget string) {
 func declarationTableCounts(t *testing.T, store *Store) [5]int {
 	t.Helper()
 	var counts [5]int
-	if err := store.pool.QueryRow(t.Context(), `
+	if err := store.conn.QueryRow(t.Context(), `
 SELECT (SELECT count(*) FROM pigsty.global_var),
        (SELECT count(*) FROM pigsty.group),
        (SELECT count(*) FROM pigsty.group_var),

@@ -13,6 +13,7 @@ import (
 	"pig/internal/cmdb"
 	"pig/internal/config"
 	"pig/internal/output"
+	"pig/internal/utils"
 	"pig/inventory"
 )
 
@@ -130,6 +131,22 @@ func populateDeclarationCounts(data *InventoryCMDBData, declarations cmdb.Declar
 			data.HostVars += len(host.Vars)
 		}
 	}
+}
+
+func populateCMDBComparison(data *InventoryCMDBData, source *preparedPigstyInventory, targetCanonical []byte) bool {
+	if data == nil || source == nil {
+		return false
+	}
+	equivalent := bytes.Equal(source.Canonical, targetCanonical)
+	data.SourcePath = source.Path
+	data.SourceRevision = source.Revision
+	data.SourceDigest = contentDigest(source.Canonical)
+	data.TargetDigest = contentDigest(targetCanonical)
+	data.Diagnostics = inventoryDiagnostics(source.Diagnostics)
+	data.Compared, data.Equivalent = true, &equivalent
+	data.Changed, data.Noop = !equivalent, equivalent
+	data.Changes = cmdbValueFreeChanges(source.Document, source.Canonical, targetCanonical)
+	return equivalent
 }
 
 func buildCMDBInitPlan(data *InventoryCMDBData, existingSchemas int) *output.Plan {
@@ -250,14 +267,9 @@ func safeCMDBNextAction(data *InventoryCMDBData, command, reason string, require
 	return action
 }
 
-func cmdbValueFreeChanges(source *inventory.Document, currentCanonical []byte) []InventoryDiffItem {
-	if source == nil {
+func cmdbValueFreeChanges(source *inventory.Document, sourceCanonical, currentCanonical []byte) []InventoryDiffItem {
+	if source == nil || bytes.Equal(sourceCanonical, currentCanonical) {
 		return nil
-	}
-	if declarations, failure := pigstyDeclarationsFromDocument(source, source.Name()); failure == nil {
-		if candidate, err := cmdb.CanonicalDeclarationsJSON(declarations); err == nil && bytes.Equal(candidate, currentCanonical) {
-			return nil
-		}
 	}
 	body, err := canonicalCMDBYAML(currentCanonical)
 	if err != nil {
@@ -271,14 +283,7 @@ func cmdbValueFreeChanges(source *inventory.Document, currentCanonical []byte) [
 	if err != nil {
 		return nil
 	}
-	changes := make([]InventoryDiffItem, 0, len(differences))
-	for _, difference := range differences {
-		changes = append(changes, InventoryDiffItem{
-			Operation: difference.Operation, Path: difference.Path.String(),
-			Object: inventoryObjectKind(difference.Path), ValueKind: difference.ValueKind,
-		})
-	}
-	return changes
+	return inventoryDiffItems(differences)
 }
 
 func checkManagedLocalSource(home string, source config.InventorySourceDescriptor) (CMDBFinding, error) {
@@ -343,24 +348,28 @@ func copyCMDBValidation(data *InventoryCMDBData, result *output.Result) {
 	}
 }
 
-func proveCMDBDumpEquivalent(raw, body []byte) error {
-	want, err := cmdb.CanonicalRawConfigJSON(raw)
+func prepareCMDBDump(raw []byte) ([]byte, []byte, error) {
+	canonical, err := cmdb.CanonicalRawConfigJSON(raw)
 	if err != nil {
-		return err
+		return nil, nil, err
+	}
+	body, err := canonicalCMDBYAML(canonical)
+	if err != nil {
+		return nil, nil, &cmdb.Error{Code: "CMDB_DUMP_FAILED"}
 	}
 	doc, err := inventory.Parse("CMDB dump", body)
 	if err != nil {
-		return &cmdb.Error{Code: "CMDB_DUMP_FAILED"}
+		return nil, nil, &cmdb.Error{Code: "CMDB_DUMP_FAILED"}
 	}
 	declarations, failure := pigstyDeclarationsFromDocument(doc, "CMDB dump")
 	if failure != nil {
-		return &cmdb.Error{Code: "CMDB_DUMP_FAILED"}
+		return nil, nil, &cmdb.Error{Code: "CMDB_DUMP_FAILED"}
 	}
 	got, err := cmdb.CanonicalDeclarationsJSON(declarations)
-	if err != nil || !bytes.Equal(got, want) {
-		return &cmdb.Error{Code: "CMDB_DUMP_FAILED"}
+	if err != nil || !bytes.Equal(got, canonical) {
+		return nil, nil, &cmdb.Error{Code: "CMDB_DUMP_FAILED"}
 	}
-	return nil
+	return body, canonical, nil
 }
 
 type cmdbDumpState uint8
@@ -440,7 +449,7 @@ func commitCMDBDumpDestination(path string, candidate []byte, force bool) (*cmdb
 		return nil, &cmdb.Error{Code: "CMDB_OUTPUT_FAILED"}
 	}
 	warning := ""
-	if err := syncCMDBDirectory(parent); err != nil {
+	if err := utils.SyncDirectory(parent); err != nil {
 		warning = "CMDB_OUTPUT_DURABILITY_UNVERIFIED"
 	}
 	info, err := os.Lstat(absolute)
@@ -452,19 +461,6 @@ func commitCMDBDumpDestination(path string, candidate []byte, force bool) (*cmdb
 		return nil, &cmdb.Error{Code: "CMDB_OUTPUT_FAILED"}
 	}
 	return &cmdbDumpCommit{Path: absolute, Changed: true, Warning: warning}, nil
-}
-
-func syncCMDBDirectory(path string) error {
-	directory, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	syncErr := directory.Sync()
-	closeErr := directory.Close()
-	if syncErr != nil {
-		return syncErr
-	}
-	return closeErr
 }
 
 func inspectCMDBDumpDestination(path string, candidate []byte) (*cmdbDumpSnapshot, cmdbDumpState, error) {

@@ -94,12 +94,6 @@ type InitOptions struct {
 	SkipEnvironment bool
 }
 
-// InitConfig preserves the historical initialization behavior for commands
-// that may persist Pig configuration.
-func InitConfig(inventory, pigstyHome string) {
-	InitConfigWithOptions(inventory, pigstyHome, InitOptions{CreateConfig: true})
-}
-
 // InitConfigWithOptions initializes source selection. Read-only Inventory
 // commands pass CreateConfig=false so discovery never creates ~/.pig or its
 // config file.
@@ -233,16 +227,6 @@ func validatePigstyHome(pigstyHomePath string) bool {
 	return false
 }
 
-func findInventoryPath(inventory, pigstyHome string) string {
-	descriptor := resolveInventorySource(inventory, pigstyHome)
-	if descriptor.Path != "" {
-		logrus.Debugf("inventory selected (%s): %s", descriptor.Tier, descriptor.Path)
-	} else {
-		logrus.Debugf("inventory source is not configured: %v", descriptor.Findings)
-	}
-	return descriptor.Path
-}
-
 func resolveInventoryCandidate(value, base string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -257,20 +241,6 @@ func resolveInventoryCandidate(value, base string) string {
 		value = filepath.Join(base, value)
 	}
 	return filepath.Clean(value)
-}
-
-// readAnsibleInventoryDirective deliberately reads only the inventory setting
-// in the [defaults] section. It is not a general INI parser and does not infer
-// an Inventory source from database reachability or adjacent files.
-func readAnsibleInventoryDirective(path string) (string, error) {
-	directive, err := ReadAnsibleInventoryDirective(path)
-	if errors.Is(err, ErrAnsibleInventoryDirectiveMissing) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	return directive.Value, nil
 }
 
 // InitConfigFile will init the config file with provided path

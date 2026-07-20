@@ -51,6 +51,13 @@ func DiffInventory(opts DiffOptions) *output.Result {
 	if err != nil {
 		return output.Fail(output.CodeInventoryInvalid, "inventory declarations could not be compared")
 	}
+	data := &InventoryDiffData{
+		Kind: InventoryDiffKind, Path: strings.TrimSpace(opts.Path), OtherPath: strings.TrimSpace(opts.OtherPath), Changes: inventoryDiffItems(differences),
+	}
+	return output.OK("inventory declarations compared", data)
+}
+
+func inventoryDiffItems(differences []inventory.Difference) []InventoryDiffItem {
 	changes := make([]InventoryDiffItem, 0, len(differences))
 	for _, difference := range differences {
 		changes = append(changes, InventoryDiffItem{
@@ -58,8 +65,5 @@ func DiffInventory(opts DiffOptions) *output.Result {
 			Object: inventoryObjectKind(difference.Path), ValueKind: difference.ValueKind,
 		})
 	}
-	data := &InventoryDiffData{
-		Kind: InventoryDiffKind, Path: strings.TrimSpace(opts.Path), OtherPath: strings.TrimSpace(opts.OtherPath), Changes: changes,
-	}
-	return output.OK("inventory declarations compared", data)
+	return changes
 }

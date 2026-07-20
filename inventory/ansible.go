@@ -1,7 +1,6 @@
 package inventory
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +11,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"pig/internal/utils"
 )
 
 const maxAnsibleStderr = 8 * 1024
@@ -51,10 +52,10 @@ func ValidateWithAnsible(ctx context.Context, executable string, doc *Document) 
 		return []Diagnostic{{Code: "ANSIBLE_TEMPFILE", Severity: SeverityError, Message: "failed to close candidate used by ansible-inventory"}}
 	}
 
-	var stderr bytes.Buffer
+	stderr := utils.NewLimitedBuffer(maxAnsibleStderr)
 	cmd := exec.CommandContext(ctx, executable, "-i", name, "--list")
 	cmd.Stdout = io.Discard
-	cmd.Stderr = &limitedBuffer{buffer: &stderr, remaining: maxAnsibleStderr}
+	cmd.Stderr = stderr
 	err = cmd.Run()
 	if err == nil {
 		return nil
@@ -79,24 +80,6 @@ func ValidateWithAnsible(ctx context.Context, executable string, doc *Document) 
 func LookPathAndValidateWithAnsible(ctx context.Context, doc *Document) []Diagnostic {
 	executable, _ := exec.LookPath("ansible-inventory")
 	return ValidateWithAnsible(ctx, executable, doc)
-}
-
-type limitedBuffer struct {
-	buffer    *bytes.Buffer
-	remaining int
-}
-
-func (w *limitedBuffer) Write(p []byte) (int, error) {
-	original := len(p)
-	if w.remaining <= 0 {
-		return original, nil
-	}
-	if len(p) > w.remaining {
-		p = p[:w.remaining]
-	}
-	_, _ = w.buffer.Write(p)
-	w.remaining -= len(p)
-	return original, nil
 }
 
 func redactAnsibleStderr(stderr, tempPath string) string {

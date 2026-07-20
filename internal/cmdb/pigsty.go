@@ -70,11 +70,11 @@ var requiredPigstyObjects = []string{
 }
 
 func (s *Store) InspectPigstyBaseline(ctx context.Context) (BaselineInspection, error) {
-	if s == nil || s.pool == nil {
+	if s == nil || s.conn == nil {
 		return BaselineInspection{}, failure("CMDB_CONNECTION_INVALID", "database is not open")
 	}
 	var count int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM pg_namespace WHERE nspname = ANY($1::text[])`, []string{"pigsty", "pglog"}).Scan(&count); err != nil {
+	if err := s.conn.QueryRow(ctx, `SELECT count(*) FROM pg_namespace WHERE nspname = ANY($1::text[])`, []string{"pigsty", "pglog"}).Scan(&count); err != nil {
 		return BaselineInspection{}, sanitizeDatabaseFailure("CMDB_BASELINE_INSPECTION_FAILED", "baseline inspection", err)
 	}
 	return BaselineInspection{ExistingSchemas: count}, nil
@@ -83,22 +83,17 @@ func (s *Store) InspectPigstyBaseline(ctx context.Context) (BaselineInspection, 
 // ApplyPigstyBaseline executes the selected Pigsty files/cmdb.sql as one exact
 // simple-query stream. It does not translate the baseline into Go migrations.
 func (s *Store) ApplyPigstyBaseline(ctx context.Context, source []byte) (BaselineResult, error) {
-	if s == nil || s.pool == nil || len(bytes.TrimSpace(source)) == 0 {
+	if s == nil || s.conn == nil || len(bytes.TrimSpace(source)) == 0 {
 		return BaselineResult{}, failure("CMDB_BASELINE_INVALID", "cmdb.sql is empty or database is not open")
 	}
 	applyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	connection, err := s.pool.Acquire(applyCtx)
-	if err != nil {
-		return BaselineResult{}, failure("CMDB_CONNECTION_FAILED", "database connection failed")
-	}
-	defer connection.Release()
-	results, err := connection.Conn().PgConn().Exec(applyCtx, string(source)).ReadAll()
+	results, err := s.conn.PgConn().Exec(applyCtx, string(source)).ReadAll()
 	if err != nil {
 		return BaselineResult{}, failure("CMDB_BASELINE_APPLY_FAILED", "cmdb.sql execution failed")
 	}
 	var verified int
-	if err := s.pool.QueryRow(applyCtx, `
+	if err := s.conn.QueryRow(applyCtx, `
 SELECT count(*)
   FROM unnest($1::text[]) AS object_name
  WHERE to_regclass(object_name) IS NOT NULL`, requiredPigstyObjects).Scan(&verified); err != nil {
@@ -423,12 +418,6 @@ func validInet(value string) bool {
 	return err == nil
 }
 
-// ReplaceDeclarations mirrors bin/inventory_load's five-table replacement in
-// one transaction. Any failure rolls the truncate and all inserts back.
-func (s *Store) ReplaceDeclarations(ctx context.Context, input Declarations) (LoadResult, error) {
-	return s.replaceDeclarations(ctx, input, nil)
-}
-
 // ReplaceDeclarationsIfCurrent serializes declaration replacement against the
 // canonical raw_config observed by the caller. The five declaration tables are
 // locked before the comparison and stay locked through commit.
@@ -436,11 +425,7 @@ func (s *Store) ReplaceDeclarationsIfCurrent(ctx context.Context, input Declarat
 	if len(expectedCanonical) == 0 {
 		return LoadResult{}, failure("CMDB_SOURCE_CHANGED", "expected CMDB declaration revision is empty")
 	}
-	return s.replaceDeclarations(ctx, input, bytes.Clone(expectedCanonical))
-}
-
-func (s *Store) replaceDeclarations(ctx context.Context, input Declarations, expectedCanonical []byte) (LoadResult, error) {
-	if s == nil || s.pool == nil {
+	if s == nil || s.conn == nil {
 		return LoadResult{}, failure("CMDB_CONNECTION_INVALID", "database is not open")
 	}
 	if err := validateDeclarations(input); err != nil {
@@ -448,26 +433,24 @@ func (s *Store) replaceDeclarations(ctx context.Context, input Declarations, exp
 	}
 	txCtx, cancel := s.transactionContext(ctx)
 	defer cancel()
-	tx, err := s.pool.BeginTx(txCtx, pgx.TxOptions{})
+	tx, err := s.conn.BeginTx(txCtx, pgx.TxOptions{})
 	if err != nil {
 		return LoadResult{}, failure("CMDB_LOAD_FAILED", "Inventory transaction could not start")
 	}
 	defer tx.Rollback(txCtx) //nolint:errcheck
-	if len(expectedCanonical) > 0 {
-		if _, err := tx.Exec(txCtx, `LOCK TABLE pigsty.global_var, pigsty.group, pigsty.group_var, pigsty.host, pigsty.host_var IN SHARE ROW EXCLUSIVE MODE`); err != nil {
-			return LoadResult{}, failure("CMDB_LOAD_FAILED", "Inventory tables could not be locked")
-		}
-		var raw []byte
-		if err := tx.QueryRow(txCtx, `SELECT jsonb_build_object FROM pigsty.raw_config`).Scan(&raw); err != nil {
-			return LoadResult{}, failure("CMDB_RAW_CONFIG_INVALID", "raw_config could not be read during replacement")
-		}
-		current, err := CanonicalRawConfigJSON(raw)
-		if err != nil {
-			return LoadResult{}, err
-		}
-		if !bytes.Equal(current, expectedCanonical) {
-			return LoadResult{}, failure("CMDB_SOURCE_CHANGED", "CMDB declarations changed after planning")
-		}
+	if _, err := tx.Exec(txCtx, `LOCK TABLE pigsty.global_var, pigsty.group, pigsty.group_var, pigsty.host, pigsty.host_var IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return LoadResult{}, failure("CMDB_LOAD_FAILED", "Inventory tables could not be locked")
+	}
+	var raw []byte
+	if err := tx.QueryRow(txCtx, `SELECT jsonb_build_object FROM pigsty.raw_config`).Scan(&raw); err != nil {
+		return LoadResult{}, failure("CMDB_RAW_CONFIG_INVALID", "raw_config could not be read during replacement")
+	}
+	current, err := CanonicalRawConfigJSON(raw)
+	if err != nil {
+		return LoadResult{}, err
+	}
+	if !bytes.Equal(current, expectedCanonical) {
+		return LoadResult{}, failure("CMDB_SOURCE_CHANGED", "CMDB declarations changed after planning")
 	}
 	if _, err := tx.Exec(txCtx, `TRUNCATE pigsty.group, pigsty.host, pigsty.group_var, pigsty.host_var, pigsty.global_var`); err != nil {
 		return LoadResult{}, failure("CMDB_LOAD_FAILED", "Inventory tables could not be replaced")
@@ -527,7 +510,7 @@ type DefaultsResult struct {
 
 // ApplyOSDefaults mirrors the loader's separate best-effort default update.
 func (s *Store) ApplyOSDefaults(ctx context.Context, input OSDefaults) (DefaultsResult, error) {
-	if s == nil || s.pool == nil {
+	if s == nil || s.conn == nil {
 		return DefaultsResult{}, failure("CMDB_CONNECTION_INVALID", "database is not open")
 	}
 	if len(input.Values) == 0 && len(input.Packages) == 0 {
@@ -535,7 +518,7 @@ func (s *Store) ApplyOSDefaults(ctx context.Context, input OSDefaults) (Defaults
 	}
 	txCtx, cancel := s.transactionContext(ctx)
 	defer cancel()
-	tx, err := s.pool.BeginTx(txCtx, pgx.TxOptions{})
+	tx, err := s.conn.BeginTx(txCtx, pgx.TxOptions{})
 	if err != nil {
 		return DefaultsResult{}, failure("CMDB_DEFAULTS_FAILED", "OS-default transaction could not start")
 	}
@@ -572,22 +555,22 @@ func (s *Store) ApplyOSDefaults(ctx context.Context, input OSDefaults) (Defaults
 }
 
 func (s *Store) RawConfig(ctx context.Context) ([]byte, error) {
-	if s == nil || s.pool == nil {
+	if s == nil || s.conn == nil {
 		return nil, failure("CMDB_CONNECTION_INVALID", "database is not open")
 	}
 	var body []byte
-	if err := s.pool.QueryRow(ctx, `SELECT jsonb_build_object FROM pigsty.raw_config`).Scan(&body); err != nil || !json.Valid(body) {
+	if err := s.conn.QueryRow(ctx, `SELECT jsonb_build_object FROM pigsty.raw_config`).Scan(&body); err != nil || !json.Valid(body) {
 		return nil, failure("CMDB_DUMP_FAILED", "raw_config could not be read")
 	}
 	return bytes.Clone(body), nil
 }
 
 func (s *Store) DynamicInventory(ctx context.Context) ([]byte, error) {
-	if s == nil || s.pool == nil {
+	if s == nil || s.conn == nil {
 		return nil, failure("CMDB_CONNECTION_INVALID", "database is not open")
 	}
 	var body []byte
-	if err := s.pool.QueryRow(ctx, `SELECT text FROM pigsty.inventory`).Scan(&body); err != nil || !json.Valid(body) {
+	if err := s.conn.QueryRow(ctx, `SELECT text FROM pigsty.inventory`).Scan(&body); err != nil || !json.Valid(body) {
 		return nil, failure("CMDB_INVENTORY_FAILED", "dynamic Inventory could not be read")
 	}
 	return bytes.Clone(body), nil
@@ -608,11 +591,11 @@ type PigstyInspection struct {
 // InspectPigstyCMDB verifies the existing schema, declaration projection, and
 // dynamic Inventory projection without mutating the database.
 func (s *Store) InspectPigstyCMDB(ctx context.Context) (PigstyInspection, error) {
-	if s == nil || s.pool == nil {
+	if s == nil || s.conn == nil {
 		return PigstyInspection{}, failure("CMDB_CONNECTION_INVALID", "database is not open")
 	}
 	inspection := PigstyInspection{}
-	if err := s.pool.QueryRow(ctx, `
+	if err := s.conn.QueryRow(ctx, `
 SELECT count(*)
   FROM unnest($1::text[]) AS object_name
  WHERE to_regclass(object_name) IS NOT NULL`, requiredPigstyObjects).Scan(&inspection.VerifiedObjects); err != nil {
@@ -621,7 +604,7 @@ SELECT count(*)
 	if inspection.VerifiedObjects != len(requiredPigstyObjects) {
 		return PigstyInspection{}, failure("CMDB_BASELINE_VERIFY_FAILED", "required Pigsty CMDB objects are incomplete")
 	}
-	if err := s.pool.QueryRow(ctx, `
+	if err := s.conn.QueryRow(ctx, `
 SELECT (SELECT count(*) FROM pigsty.global_var),
        (SELECT count(*) FROM pigsty.group),
        (SELECT count(*) FROM pigsty.host),
@@ -680,16 +663,6 @@ type PigstySourcePlan struct {
 	inventoryExists   bool
 	configPatch       *ansibleConfigPatch
 	commitConfig      func(*ansibleConfigPatch) error
-}
-
-// EnablePigstyInventory writes the same query adapter as inventory_cmdb and
-// switches exactly one [defaults] inventory directive to inventory.sh.
-func (s *Store) EnablePigstyInventory(ctx context.Context, home string) (PigstySourceResult, error) {
-	plan, err := s.PlanEnablePigstyInventory(ctx, home)
-	if err != nil {
-		return PigstySourceResult{}, err
-	}
-	return plan.Apply()
 }
 
 // PlanEnablePigstyInventory performs database and local-file preflights without
@@ -771,16 +744,6 @@ func inspectManagedInventoryScript(plan *PigstySourcePlan) error {
 		plan.ScriptChanged = !bytes.Equal(before, plan.scriptBody) || !exactManagedScriptMode(info.Mode())
 	}
 	return nil
-}
-
-// DisablePigstyInventory mirrors inventory_conf without touching the database
-// or deleting inventory.sh.
-func DisablePigstyInventory(home string) (PigstySourceResult, error) {
-	plan, err := PlanDisablePigstyInventory(home)
-	if err != nil {
-		return PigstySourceResult{}, err
-	}
-	return plan.Apply()
 }
 
 // PlanDisablePigstyInventory validates the exact supported directive and
@@ -934,7 +897,7 @@ func (p *PigstySourcePlan) rollbackInventoryScript() error {
 		if err := os.Remove(p.InventoryPath); err != nil {
 			return err
 		}
-		if err := syncDirectory(filepath.Dir(p.InventoryPath)); err != nil {
+		if err := utils.SyncDirectory(filepath.Dir(p.InventoryPath)); err != nil {
 			return err
 		}
 		if _, err := os.Lstat(p.InventoryPath); !errors.Is(err, os.ErrNotExist) {
@@ -947,15 +910,15 @@ func (p *PigstySourcePlan) rollbackInventoryScript() error {
 	}
 	info, err := os.Lstat(p.InventoryPath)
 	if err != nil || info.Mode() != p.inventoryMode {
-		return errors.New("Inventory script mode was not restored")
+		return errors.New("inventory script mode was not restored")
 	}
 	ownerUID, ownerGID, owned := fileOwner(info)
 	if !owned || ownerUID != p.inventoryOwnerUID || ownerGID != p.inventoryOwnerGID {
-		return errors.New("Inventory script ownership was not restored")
+		return errors.New("inventory script ownership was not restored")
 	}
 	body, err := os.ReadFile(p.InventoryPath)
 	if err != nil || !bytes.Equal(body, p.inventoryBefore) {
-		return errors.New("Inventory script content was not restored")
+		return errors.New("inventory script content was not restored")
 	}
 	return nil
 }

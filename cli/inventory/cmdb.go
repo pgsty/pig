@@ -174,12 +174,36 @@ type InventoryCMDBOptions struct {
 	OSCode       string
 	OSArch       string
 	Source       config.InventorySourceDescriptor
-	// Expected* pins an interactive confirmation to the plan shown before the
-	// prompt. Direct --yes execution leaves these fields empty.
-	ExpectedSourceRevision string
-	ExpectedTargetDigest   string
-	ExpectedDatabaseTarget string
-	ExpectedSchemas        *int
+	// ExpectedPlanDigest pins an interactive confirmation to the plan shown
+	// before the prompt. Direct --yes execution leaves it empty.
+	ExpectedPlanDigest string
+}
+
+// ConfirmationDigest identifies the mutation inputs shown before an
+// interactive confirmation without exposing Inventory values or database
+// connection details.
+func (d *InventoryCMDBData) ConfirmationDigest() string {
+	if d == nil || d.SourceRevision == "" || d.DatabaseTargetDigest == "" {
+		return ""
+	}
+	switch d.Operation {
+	case "init":
+	case "load":
+		if d.TargetDigest == "" {
+			return ""
+		}
+	default:
+		return ""
+	}
+	projection := struct {
+		Operation      string
+		SourceRevision string
+		DatabaseTarget string
+		TargetDigest   string
+		ExistingSchema int
+	}{d.Operation, d.SourceRevision, d.DatabaseTargetDigest, d.TargetDigest, d.ExistingSchemas}
+	raw, _ := json.Marshal(projection)
+	return contentDigest(raw)
 }
 
 func openPigstyCMDB(ctx context.Context, database string) (*cmdb.Store, *output.Result) {
@@ -229,16 +253,7 @@ func InventoryCMDBCheck(ctx context.Context, options InventoryCMDBOptions) *outp
 			copyCMDBValidation(data, validationFailure)
 			return output.Fail(validationFailure.Code, validationFailure.Message).WithData(data)
 		}
-		data.SourcePath = prepared.Path
-		data.SourceRevision = prepared.Revision
-		data.SourceDigest = contentDigest(prepared.Canonical)
-		data.Diagnostics = inventoryDiagnostics(prepared.Diagnostics)
-		data.Compared = true
-		equivalent := bytes.Equal(prepared.Canonical, inspection.CanonicalRaw)
-		data.Equivalent = &equivalent
-		data.Changed = !equivalent
-		data.Noop = equivalent
-		data.Changes = cmdbValueFreeChanges(prepared.Document, inspection.CanonicalRaw)
+		equivalent := populateCMDBComparison(data, prepared, inspection.CanonicalRaw)
 		if equivalent {
 			data.Findings = append(data.Findings, CMDBFinding{Code: "CMDB_DECLARATIONS_EQUIVALENT", Status: "pass", Path: prepared.Path})
 		} else {
@@ -277,9 +292,7 @@ func InventoryCMDBInit(ctx context.Context, options InventoryCMDBOptions) *outpu
 	data.ExistingSchemas = inspection.ExistingSchemas
 	data.RequiresConfirmation = inspection.ExistingSchemas > 0
 	data.Plan = buildCMDBInitPlan(data, inspection.ExistingSchemas)
-	if options.ExpectedSourceRevision != "" && options.ExpectedSourceRevision != data.SourceRevision ||
-		options.ExpectedDatabaseTarget != "" && options.ExpectedDatabaseTarget != data.DatabaseTargetDigest ||
-		options.ExpectedSchemas != nil && *options.ExpectedSchemas != inspection.ExistingSchemas {
+	if options.ExpectedPlanDigest != "" && options.ExpectedPlanDigest != data.ConfirmationDigest() {
 		return inventoryCMDBFailure("CMDB init plan changed after confirmation", &cmdb.Error{Code: "CMDB_SOURCE_CHANGED"}, data)
 	}
 	if options.Plan {
@@ -329,22 +342,15 @@ func InventoryCMDBLoad(ctx context.Context, options InventoryCMDBOptions) *outpu
 		return inventoryCMDBFailure("CMDB target could not be inspected", err, nil)
 	}
 	data := &InventoryCMDBData{
-		Kind: InventoryCMDBLoadKind, Operation: "load", ConnectionSource: store.Source(), SourcePath: prepared.Path,
-		DatabaseTargetDigest: store.TargetFingerprint(),
-		SourceDigest:         contentDigest(prepared.Canonical), SourceRevision: prepared.Revision,
-		TargetDigest: contentDigest(inspection.CanonicalRaw), Diagnostics: inventoryDiagnostics(prepared.Diagnostics), Compared: true, Strict: options.Strict,
+		Kind: InventoryCMDBLoadKind, Operation: "load", ConnectionSource: store.Source(),
+		DatabaseTargetDigest: store.TargetFingerprint(), Strict: options.Strict,
 	}
+	populateCMDBComparison(data, prepared, inspection.CanonicalRaw)
 	populateDeclarationCounts(data, prepared.Declarations)
-	equivalent := bytes.Equal(prepared.Canonical, inspection.CanonicalRaw)
-	data.Equivalent = &equivalent
-	data.Changed, data.Noop = !equivalent, equivalent
-	data.Changes = cmdbValueFreeChanges(prepared.Document, inspection.CanonicalRaw)
 	data.RequiresConfirmation = data.Changed
 	preflightPigstyOSDefaults(data, options.Home, options.OSCode, options.OSArch)
 	data.Plan = buildCMDBLoadPlan(data)
-	if options.ExpectedSourceRevision != "" && options.ExpectedSourceRevision != data.SourceRevision ||
-		options.ExpectedDatabaseTarget != "" && options.ExpectedDatabaseTarget != data.DatabaseTargetDigest ||
-		options.ExpectedTargetDigest != "" && options.ExpectedTargetDigest != data.TargetDigest {
+	if options.ExpectedPlanDigest != "" && options.ExpectedPlanDigest != data.ConfirmationDigest() {
 		return inventoryCMDBFailure("CMDB load plan changed after confirmation", &cmdb.Error{Code: "CMDB_SOURCE_CHANGED"}, data)
 	}
 	if options.Plan {
@@ -408,18 +414,11 @@ func InventoryCMDBDump(ctx context.Context, options InventoryCMDBOptions) ([]byt
 	if err != nil {
 		return nil, inventoryCMDBFailure("Pigsty raw_config could not be exported", err, data)
 	}
-	body, err := canonicalCMDBYAML(raw)
+	body, canonical, err := prepareCMDBDump(raw)
 	if err != nil {
-		return nil, inventoryCMDBFailure("Pigsty raw_config could not be encoded as YAML", &cmdb.Error{Code: "CMDB_DUMP_FAILED"}, data)
-	}
-	canonical, err := cmdb.CanonicalRawConfigJSON(raw)
-	if err != nil {
-		return nil, inventoryCMDBFailure("Pigsty raw_config could not be canonicalized", err, data)
-	}
-	data.SourceDigest = contentDigest(canonical)
-	if err := proveCMDBDumpEquivalent(raw, body); err != nil {
 		return nil, inventoryCMDBFailure("CMDB dump declaration equivalence could not be verified", err, data)
 	}
+	data.SourceDigest = contentDigest(canonical)
 	if strings.TrimSpace(options.Path) == "" {
 		return body, output.OK("Pigsty CMDB dumped", data)
 	}
@@ -561,7 +560,7 @@ func preparePigstyInventory(path string, strict bool) (*preparedPigstyInventory,
 		return nil, output.Fail(output.CodeInventoryValidationFailed, "Inventory validation failed before CMDB operation").
 			WithData(&CMDBValidationData{Kind: CMDBValidationKind, Path: snapshot.Path, Diagnostics: inventoryDiagnostics([]inventory.Diagnostic{diagnostic})})
 	}
-	diagnostics := doc.Validate(inventory.YAMLRules, inventory.AnsibleRules, inventory.PigstyRules, inventory.CompleteInventoryRules)
+	diagnostics := doc.ValidateComplete()
 	inventory.SortDiagnostics(diagnostics)
 	if inventory.HasErrors(diagnostics) || strict && hasWarnings(diagnostics) {
 		return nil, output.Fail(output.CodeInventoryValidationFailed, "Inventory validation failed before CMDB operation").
@@ -832,10 +831,6 @@ func normalizeNodeVarsArch(arch string) string {
 }
 
 func canonicalCMDBYAML(source []byte) ([]byte, error) {
-	source, err := cmdb.CanonicalRawConfigJSON(source)
-	if err != nil {
-		return nil, err
-	}
 	var document yaml.Node
 	if err := yaml.Unmarshal(source, &document); err != nil {
 		return nil, err
@@ -850,11 +845,7 @@ func canonicalCMDBYAML(source []byte) ([]byte, error) {
 	if err := encoder.Close(); err != nil {
 		return nil, err
 	}
-	body := buffer.Bytes()
-	if _, err := inventory.Parse("CMDB dump", body); err != nil {
-		return nil, err
-	}
-	return body, nil
+	return buffer.Bytes(), nil
 }
 
 func clearGeneratedYAMLStyle(node *yaml.Node) {

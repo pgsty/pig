@@ -72,7 +72,7 @@ func AtomicWrite(path string, mode os.FileMode, write func(io.Writer) error) err
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("failed to replace file %q: %w", path, err)
 	}
-	if err := syncDirectory(dir); err != nil {
+	if err := SyncDirectory(dir); err != nil {
 		// Rename is the commit point and cannot be safely rolled back. Surface a
 		// durability warning without turning a successful replacement into an
 		// error whose "previous file preserved" guarantee would be false.
@@ -81,7 +81,8 @@ func AtomicWrite(path string, mode os.FileMode, write func(io.Writer) error) err
 	return nil
 }
 
-func syncDirectory(dir string) error {
+// SyncDirectory flushes directory metadata after a rename or removal.
+func SyncDirectory(dir string) error {
 	dirFile, err := os.Open(dir)
 	if err != nil {
 		return fmt.Errorf("failed to open parent directory %q: %w", dir, err)
@@ -200,7 +201,7 @@ func PutFileMode(path string, content []byte, mode os.FileMode) error {
 		return fmt.Errorf("failed to atomically replace privileged file %q: %w", path, err)
 	}
 	committed = true
-	if err := syncDirectory(filepath.Dir(path)); err != nil {
+	if err := SyncDirectory(filepath.Dir(path)); err != nil {
 		logrus.Warnf("file %q replaced but parent directory sync failed: %v", path, err)
 	}
 	return nil

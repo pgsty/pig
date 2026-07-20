@@ -76,6 +76,12 @@ func (d *Document) Validate(rules ...RuleSet) []Diagnostic {
 	return diagnostics
 }
 
+// ValidateComplete validates one complete static Pigsty Inventory using the
+// normative rule stack in contract order.
+func (d *Document) ValidateComplete() []Diagnostic {
+	return d.Validate(YAMLRules, AnsibleRules, PigstyRules, CompleteInventoryRules)
+}
+
 func uniqueDiagnostics(diagnostics []Diagnostic) []Diagnostic {
 	seen := make(map[string]struct{}, len(diagnostics))
 	result := diagnostics[:0]

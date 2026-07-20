@@ -312,21 +312,23 @@ func TestInventoryCMDBLoadConfirmationIsTTYOnlyAndRechecksPlan(t *testing.T) {
 		return nil
 	}
 	calls := 0
+	plan := &inventorycli.InventoryCMDBData{
+		Operation: "load", SourceRevision: "sha256:source", TargetDigest: "sha256:target", DatabaseTargetDigest: "sha256:database",
+	}
+	expectedDigest := plan.ConfirmationDigest()
 	inventoryCMDBLoadExec = func(_ context.Context, options inventorycli.InventoryCMDBOptions) *output.Result {
 		calls++
 		if !options.Yes {
-			return output.Fail(output.CodeInventoryCMDBConfirmationRequired, "confirmation required").WithData(&inventorycli.InventoryCMDBData{
-				Operation: "load", SourceRevision: "sha256:source", TargetDigest: "sha256:target", DatabaseTargetDigest: "sha256:database",
-			})
+			return output.Fail(output.CodeInventoryCMDBConfirmationRequired, "confirmation required").WithData(plan)
 		}
-		if options.ExpectedSourceRevision != "sha256:source" || options.ExpectedTargetDigest != "sha256:target" ||
-			options.ExpectedDatabaseTarget != "sha256:database" {
+		if options.ExpectedPlanDigest != expectedDigest {
 			t.Fatalf("confirmation did not pin the displayed load plan: %+v", options)
 		}
 		return output.OK("loaded", nil)
 	}
 	_ = captureStdout(t, func() {
-		if err := runInventoryCMDBLoad(inventoryCMDBLoadCmd, inventorycli.InventoryCMDBOptions{}, "pig inventory cmdb load --yes"); err != nil {
+		if err := runInventoryCMDBConfirmed(inventoryCMDBLoadCmd, inventorycli.InventoryCMDBOptions{}, inventoryCMDBLoadExec,
+			"This replaces all five Pigsty CMDB declaration tables.", "pig inventory cmdb load --yes"); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -337,7 +339,8 @@ func TestInventoryCMDBLoadConfirmationIsTTYOnlyAndRechecksPlan(t *testing.T) {
 	config.OutputFormat = config.OUTPUT_JSON
 	calls, confirmed = 0, 0
 	_ = captureStdout(t, func() {
-		if err := runInventoryCMDBLoad(inventoryCMDBLoadCmd, inventorycli.InventoryCMDBOptions{}, "pig inventory cmdb load --yes"); err == nil {
+		if err := runInventoryCMDBConfirmed(inventoryCMDBLoadCmd, inventorycli.InventoryCMDBOptions{}, inventoryCMDBLoadExec,
+			"This replaces all five Pigsty CMDB declaration tables.", "pig inventory cmdb load --yes"); err == nil {
 			t.Fatal("structured changed load executed without --yes")
 		}
 	})
@@ -348,7 +351,8 @@ func TestInventoryCMDBLoadConfirmationIsTTYOnlyAndRechecksPlan(t *testing.T) {
 	config.OutputFormat = config.OUTPUT_TEXT
 	calls, confirmed = 0, 0
 	_ = captureStdout(t, func() {
-		if err := runInventoryCMDBLoad(inventoryCMDBLoadCmd, inventorycli.InventoryCMDBOptions{Plan: true}, "pig inventory cmdb load --yes"); err == nil {
+		if err := runInventoryCMDBConfirmed(inventoryCMDBLoadCmd, inventorycli.InventoryCMDBOptions{Plan: true}, inventoryCMDBLoadExec,
+			"This replaces all five Pigsty CMDB declaration tables.", "pig inventory cmdb load --yes"); err == nil {
 			t.Fatal("synthetic confirmation failure in plan mode should remain a failure")
 		}
 	})
@@ -365,8 +369,8 @@ func TestPinInventoryCMDBInitConfirmation(t *testing.T) {
 	if !pinInventoryCMDBConfirmation(result, &options) {
 		t.Fatal("init confirmation plan was not pinnable")
 	}
-	if options.ExpectedSourceRevision != "sha256:baseline" || options.ExpectedDatabaseTarget != "sha256:database" ||
-		options.ExpectedSchemas == nil || *options.ExpectedSchemas != 2 {
+	data := result.Data.(*inventorycli.InventoryCMDBData)
+	if options.ExpectedPlanDigest == "" || options.ExpectedPlanDigest != data.ConfirmationDigest() {
 		t.Fatalf("pinned init options = %+v", options)
 	}
 }

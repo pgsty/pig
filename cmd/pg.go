@@ -1383,13 +1383,6 @@ func formatForkListRow(fork postgres.ForkInfo, now time.Time) forkListRow {
 	return row
 }
 
-func firstArg(args []string) string {
-	if len(args) == 0 {
-		return ""
-	}
-	return args[0]
-}
-
 func runFork(cmd *cobra.Command, opts *postgres.Options) error {
 	if opts.Instance.DestData != "" && !config.IsStructuredOutput() {
 		utils.PrintWarn("--dst-data creates an unmanaged fork; it will not appear in `pig pg fork list`")

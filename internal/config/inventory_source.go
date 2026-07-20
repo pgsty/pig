@@ -3,7 +3,6 @@ package config
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -214,7 +213,7 @@ func parseInventoryValue(configPath string, line []byte, valueOffset int) (strin
 		}
 		value = line[start:end]
 		valueEnd = end
-		if bytes.IndexAny(value, "'\"") >= 0 {
+		if bytes.ContainsAny(value, "'\"") {
 			return "", "", "", 0, 0, errors.New("unsupported inventory quote")
 		}
 	}
@@ -233,7 +232,7 @@ func parseInventoryValue(configPath string, line []byte, valueOffset int) (strin
 }
 
 func validInventoryLiteral(value []byte) bool {
-	if len(value) == 0 || !utf8.Valid(value) || bytes.IndexAny(value, "\x00\r\n\\,$") >= 0 {
+	if len(value) == 0 || !utf8.Valid(value) || bytes.ContainsAny(value, "\x00\r\n\\,$") {
 		return false
 	}
 	text := string(value)
@@ -515,15 +514,4 @@ func inspectResolvedInventoryPath(base InventorySourceDescriptor, path string, t
 		base.Findings = append(base.Findings, "SOURCE_UNREADABLE")
 	}
 	return base
-}
-
-func (d InventorySourceDescriptor) Supported() bool {
-	return d.Type == InventorySourceStaticYAML && d.Readable || d.Type == InventorySourceManagedCMDB
-}
-
-func (d InventorySourceDescriptor) String() string {
-	if d.Path != "" {
-		return fmt.Sprintf("%s:%s:%s", d.Tier, d.Type, d.Path)
-	}
-	return fmt.Sprintf("%s:%s", d.Tier, d.Type)
 }

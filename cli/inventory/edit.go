@@ -58,7 +58,7 @@ func (d *EditData) Text() string {
 
 var (
 	runInventoryEditorFn = runInventoryEditor
-	stdinIsTerminalFn    = stdinIsTerminal
+	stdinIsTerminalFn    = utils.StdinIsTerminal
 )
 
 // Edit opens a complete inventory or a dedented selector fragment in the
@@ -245,7 +245,7 @@ func editRuleDiagnostics(doc *inventory.Document) []inventory.Diagnostic {
 	if doc == nil {
 		return nil
 	}
-	return doc.Validate(inventory.YAMLRules, inventory.AnsibleRules, inventory.PigstyRules, inventory.CompleteInventoryRules)
+	return doc.ValidateComplete()
 }
 
 func editBlockingDiagnostics(original, candidate []inventory.Diagnostic, selected inventory.Path) []inventory.Diagnostic {
@@ -290,11 +290,6 @@ func runInventoryEditor(command, path string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-func stdinIsTerminal() bool {
-	info, err := os.Stdin.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func editValidationMessage(err error) string {

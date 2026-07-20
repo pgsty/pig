@@ -63,7 +63,7 @@ func ValidateInventory(opts ValidateOptions) *output.Result {
 		data := &ValidateData{Kind: InventoryValidateKind, Path: path, Strict: opts.Strict, Diagnostics: inventoryDiagnostics([]inventory.Diagnostic{diagnostic})}
 		return output.Fail(output.CodeInventoryValidationFailed, "inventory is invalid").WithData(data)
 	}
-	diagnostics := doc.Validate(inventory.YAMLRules, inventory.AnsibleRules, inventory.PigstyRules, inventory.CompleteInventoryRules)
+	diagnostics := doc.ValidateComplete()
 	if opts.Ansible {
 		timeout := opts.Timeout
 		if timeout == 0 {

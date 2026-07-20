@@ -5,11 +5,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ConnectionSource is the only connection metadata safe for public results.
@@ -28,8 +26,6 @@ type ResolvedConnection struct {
 	value  string
 }
 
-func (c ResolvedConnection) Source() ConnectionSource { return c.source }
-
 // Timeouts are bounded again by normalizeTimeouts before driver use.
 type Timeouts struct {
 	Connect     time.Duration
@@ -45,112 +41,78 @@ var defaultTimeouts = Timeouts{
 	Transaction: 30 * time.Second,
 }
 
-// OpenOptions controls the small native pool. Zero values use safe defaults.
+// OpenOptions controls the native database connection. Zero values use safe defaults.
 type OpenOptions struct {
 	Timeouts Timeouts
-	MaxConns int32
 }
 
-type targetIdentity struct {
-	Database       string
-	DatabaseOID    uint32
-	ServerAddress  string
-	ServerPort     int32
-	ServerVersion  int
-	PostmasterBoot time.Time
-}
-
-// Store owns a bounded pgx pool pinned to one database/server identity.
+// Store owns one connection pinned to one database/server identity.
 type Store struct {
-	pool       *pgxpool.Pool
-	source     ConnectionSource
-	connection string
-	timeouts   Timeouts
-	identityMu sync.Mutex
-	identity   *targetIdentity
+	conn              *pgx.Conn
+	source            ConnectionSource
+	connection        string
+	timeouts          Timeouts
+	targetFingerprint string
 }
 
-// Open connects eagerly, applies bounded runtime settings, and pins every pool
-// connection to the first observed target identity.
+// Open connects eagerly, applies bounded runtime settings, and records the
+// connected target identity for confirmation pinning.
 func Open(ctx context.Context, resolved ResolvedConnection, options OpenOptions) (*Store, error) {
 	if resolved.value == "" {
 		return nil, failure("CMDB_CONNECTION_INVALID", "connection source is unresolved")
 	}
 	timeouts := normalizeTimeouts(options.Timeouts)
-	config, err := pgxpool.ParseConfig(resolved.value)
+	config, err := pgx.ParseConfig(resolved.value)
 	if err != nil {
 		return nil, failure("CMDB_CONNECTION_INVALID", "connection configuration is invalid")
 	}
-	maxConns := options.MaxConns
-	if maxConns <= 0 {
-		maxConns = 4
-	} else if maxConns > 8 {
-		maxConns = 8
+	config.ConnectTimeout = timeouts.Connect
+	if config.RuntimeParams == nil {
+		config.RuntimeParams = make(map[string]string)
 	}
-	config.MaxConns = maxConns
-	config.MinConns = 0
-	config.MinIdleConns = 0
-	config.MaxConnIdleTime = time.Minute
-	config.MaxConnLifetime = 5 * time.Minute
-	config.HealthCheckPeriod = 30 * time.Second
-	config.PingTimeout = timeouts.Connect
-	config.ConnConfig.ConnectTimeout = timeouts.Connect
-	if config.ConnConfig.RuntimeParams == nil {
-		config.ConnConfig.RuntimeParams = make(map[string]string)
-	}
-	config.ConnConfig.RuntimeParams["application_name"] = "pig-inventory-cmdb"
-	config.ConnConfig.RuntimeParams["statement_timeout"] = durationMilliseconds(timeouts.Statement)
-	config.ConnConfig.RuntimeParams["lock_timeout"] = durationMilliseconds(timeouts.Lock)
-	config.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = durationMilliseconds(timeouts.Transaction)
+	config.RuntimeParams["application_name"] = "pig-inventory-cmdb"
+	config.RuntimeParams["statement_timeout"] = durationMilliseconds(timeouts.Statement)
+	config.RuntimeParams["lock_timeout"] = durationMilliseconds(timeouts.Lock)
+	config.RuntimeParams["idle_in_transaction_session_timeout"] = durationMilliseconds(timeouts.Transaction)
 
-	store := &Store{source: resolved.source, connection: resolved.value, timeouts: timeouts}
-	config.AfterConnect = store.verifyConnectionIdentity
 	connectCtx, cancel := context.WithTimeout(ctx, timeouts.Connect)
 	defer cancel()
-	pool, err := pgxpool.NewWithConfig(connectCtx, config)
+	connection, err := pgx.ConnectConfig(connectCtx, config)
 	if err != nil {
 		return nil, failure("CMDB_CONNECTION_FAILED", "database connection failed")
 	}
-	store.pool = pool
-	if err := pool.Ping(connectCtx); err != nil {
-		pool.Close()
-		if IsCode(err, "CMDB_TARGET_CHANGED") {
-			return nil, err
-		}
-		return nil, failure("CMDB_CONNECTION_FAILED", "database connection failed")
+	fingerprint, err := targetFingerprint(connectCtx, connection)
+	if err != nil {
+		_ = connection.Close(context.Background())
+		return nil, err
 	}
-	return store, nil
+	return &Store{
+		conn: connection, source: resolved.source, connection: resolved.value,
+		timeouts: timeouts, targetFingerprint: fingerprint,
+	}, nil
 }
 
-func (s *Store) verifyConnectionIdentity(ctx context.Context, connection *pgx.Conn) error {
-	var identity targetIdentity
+func targetFingerprint(ctx context.Context, connection *pgx.Conn) (string, error) {
+	var database, address string
+	var databaseOID uint32
+	var port int32
+	var version int
+	var postmasterBoot time.Time
 	err := connection.QueryRow(ctx, `
 SELECT current_database(), d.oid, COALESCE(inet_server_addr()::text, 'local'),
        COALESCE(inet_server_port(), 0), current_setting('server_version_num')::integer,
        pg_postmaster_start_time()
   FROM pg_database AS d
  WHERE d.datname = current_database()`).Scan(
-		&identity.Database,
-		&identity.DatabaseOID,
-		&identity.ServerAddress,
-		&identity.ServerPort,
-		&identity.ServerVersion,
-		&identity.PostmasterBoot,
+		&database, &databaseOID, &address, &port, &version, &postmasterBoot,
 	)
 	if err != nil {
-		return failure("CMDB_CONNECTION_FAILED", "database identity could not be verified")
+		return "", failure("CMDB_CONNECTION_FAILED", "database identity could not be verified")
 	}
-	s.identityMu.Lock()
-	defer s.identityMu.Unlock()
-	if s.identity == nil {
-		copy := identity
-		s.identity = &copy
-		return nil
-	}
-	if *s.identity != identity {
-		return failure("CMDB_TARGET_CHANGED", "connection pool resolved to a different database target")
-	}
-	return nil
+	material := fmt.Sprintf("%s\x00%d\x00%s\x00%d\x00%d\x00%d",
+		database, databaseOID, address, port, version, postmasterBoot.UnixNano())
+	sum := sha256.Sum256([]byte(material))
+	return fmt.Sprintf("sha256:%x", sum), nil
 }
 
 func normalizeTimeouts(value Timeouts) Timeouts {
@@ -194,22 +156,12 @@ func (s *Store) TargetFingerprint() string {
 	if s == nil {
 		return ""
 	}
-	s.identityMu.Lock()
-	defer s.identityMu.Unlock()
-	if s.identity == nil {
-		return ""
-	}
-	identity := s.identity
-	material := fmt.Sprintf("%s\x00%d\x00%s\x00%d\x00%d\x00%d",
-		identity.Database, identity.DatabaseOID, identity.ServerAddress, identity.ServerPort,
-		identity.ServerVersion, identity.PostmasterBoot.UnixNano())
-	sum := sha256.Sum256([]byte(material))
-	return fmt.Sprintf("sha256:%x", sum)
+	return s.targetFingerprint
 }
 
 func (s *Store) Close() {
-	if s != nil && s.pool != nil {
-		s.pool.Close()
+	if s != nil && s.conn != nil {
+		_ = s.conn.Close(context.Background())
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"pig/internal/config"
+	"pig/internal/utils"
 )
 
 const maxAnsibleConfigSize = 1 << 20
@@ -151,7 +152,7 @@ func commitAnsibleConfigPatch(patch *ansibleConfigPatch) error {
 	if err := os.Rename(temporaryName, path); err != nil {
 		return failure("CMDB_SWITCH_FAILED", "ansible.cfg atomic replacement failed")
 	}
-	if err := syncDirectory(parent); err != nil {
+	if err := utils.SyncDirectory(parent); err != nil {
 		return failure("CMDB_SWITCH_PARTIAL", "ansible.cfg was replaced but parent fsync failed")
 	}
 	committed, err := readAnsibleConfig(path)
@@ -186,13 +187,4 @@ func pathIsSymlinkFree(absolute string) bool {
 func sameSourceRevision(left, right os.FileInfo) bool {
 	return left != nil && right != nil && os.SameFile(left, right) && left.Mode() == right.Mode() &&
 		left.Size() == right.Size() && left.ModTime().Equal(right.ModTime())
-}
-
-func syncDirectory(path string) error {
-	directory, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
 }

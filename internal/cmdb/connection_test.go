@@ -28,7 +28,7 @@ func TestConnectionErrorsNeverExposeSecret(t *testing.T) {
 	}
 }
 
-func TestTimeoutAndPoolBounds(t *testing.T) {
+func TestTimeoutBounds(t *testing.T) {
 	got := normalizeTimeouts(Timeouts{
 		Connect: time.Hour, Statement: time.Hour, Lock: time.Hour, Transaction: time.Hour,
 	})

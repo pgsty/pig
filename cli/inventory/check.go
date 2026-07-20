@@ -1,7 +1,6 @@
 package inventorycli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"pig/internal/output"
+	"pig/internal/utils"
 	"pig/inventory"
 )
 
@@ -283,7 +283,7 @@ func checkInventory(path string) (*inventory.Document, bool, []Finding) {
 		diagnostic := parseDiagnostic(err)
 		return nil, false, []Finding{newCheckFinding(diagnostic.Code, diagnostic.Severity, checkStageValidate, diagnostic.Path.String(), "", diagnostic.Message, output.CodeInventoryCheckValidationFailed)}
 	}
-	diagnostics := doc.Validate(inventory.YAMLRules, inventory.AnsibleRules, inventory.PigstyRules, inventory.CompleteInventoryRules)
+	diagnostics := doc.ValidateComplete()
 	findings := make([]Finding, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
 		resultCode := 0
@@ -422,7 +422,11 @@ func checkAnsibleProfile(runtime checkRuntime, doc *inventory.Document, path str
 }
 
 func declaredCheckTargets(doc *inventory.Document) []string {
-	if doc == nil || doc.Inventory() == nil || doc.Inventory().All == nil {
+	if doc == nil {
+		return []string{}
+	}
+	semantic := doc.Inventory()
+	if semantic == nil || semantic.All == nil {
 		return []string{}
 	}
 	seen := make(map[string]struct{})
@@ -440,7 +444,7 @@ func declaredCheckTargets(doc *inventory.Document) []string {
 			visit(child)
 		}
 	}
-	visit(doc.Inventory().All)
+	visit(semantic.All)
 	targets := make([]string, 0, len(seen))
 	for target := range seen {
 		targets = append(targets, target)
@@ -620,37 +624,16 @@ func isAllowedCheckCommand(command checkCommand) bool {
 }
 
 func runSystemCheckCommand(ctx context.Context, command checkCommand) (checkCommandOutput, error) {
-	if !isAllowedCheckCommand(command) {
-		return checkCommandOutput{}, errCheckCommandBlocked
-	}
 	cmd := exec.CommandContext(ctx, command.executable, command.args...)
 	if command.kind == checkCommandSSH {
 		cmd.Stdout = io.Discard
 		cmd.Stderr = io.Discard
 		return checkCommandOutput{}, cmd.Run()
 	}
-	var stdout, stderr checkLimitedBuffer
-	stdout.remaining, stderr.remaining = 4096, 4096
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	stdout, stderr := utils.NewLimitedBuffer(4096), utils.NewLimitedBuffer(4096)
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	err := cmd.Run()
-	return checkCommandOutput{stdout: stdout.buffer.String(), stderr: stderr.buffer.String()}, err
-}
-
-type checkLimitedBuffer struct {
-	buffer    bytes.Buffer
-	remaining int
-}
-
-func (b *checkLimitedBuffer) Write(value []byte) (int, error) {
-	original := len(value)
-	if b.remaining > 0 {
-		if len(value) > b.remaining {
-			value = value[:b.remaining]
-		}
-		_, _ = b.buffer.Write(value)
-		b.remaining -= len(value)
-	}
-	return original, nil
+	return checkCommandOutput{stdout: stdout.String(), stderr: stderr.String()}, err
 }
 
 func parseCheckVersion(kind checkCommandKind, value string) string {

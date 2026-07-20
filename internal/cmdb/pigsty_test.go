@@ -388,7 +388,11 @@ func TestDisablePigstyInventoryUsesNarrowPatch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "pigsty.yml"), []byte("all: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result, err := DisablePigstyInventory(home)
+	plan, err := PlanDisablePigstyInventory(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := plan.Apply()
 	if err != nil || !result.Changed {
 		t.Fatalf("disable = %+v, %v", result, err)
 	}
@@ -404,7 +408,11 @@ func TestDisablePigstyInventoryUsesNarrowPatch(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0o640 {
 		t.Fatalf("ansible.cfg mode = %v, %v", info.Mode().Perm(), err)
 	}
-	result, err = DisablePigstyInventory(home)
+	plan, err = PlanDisablePigstyInventory(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = plan.Apply()
 	if err != nil || result.Changed {
 		t.Fatalf("second disable = %+v, %v", result, err)
 	}
