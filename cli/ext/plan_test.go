@@ -266,14 +266,14 @@ func TestPlanPackagesMatchPreparedOperation(t *testing.T) {
 		wantFailedErr  string
 	}{
 		{name: "add duplicate request", names: []string{"alpha", "alpha"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{"alpha_17"}},
-		{name: "add aliases share package", names: []string{"agensgraph", "agens"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{"agensgraph_17"}, wantOwner: "agensgraph"},
+		{name: "add aliases share package", names: []string{"agensgraph", "agens"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{"agensgraph-17"}, wantOwner: "agensgraph"},
 		{name: "add version pin", names: []string{"alpha=1.2.3"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{"alpha_17-1.2.3"}},
 		{name: "add not found", names: []string{"missing"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{}, wantFailedCode: output.CodeExtensionNotFound, wantFailedErr: "extension not found in catalog"},
 		{name: "add no package", names: []string{"no_pkg"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{}, wantFailedCode: output.CodeExtensionNoPackage, wantFailedErr: "no package available for extension on PG 17"},
 		{name: "add multiple", names: []string{"beta", "alpha"}, op: pkgOpInstall, parseVersion: true, wantPackages: []string{"beta_17", "beta_tools_17", "alpha_17"}},
 		{name: "add already installed", names: []string{"alpha"}, op: pkgOpInstall, parseVersion: true, installed: true, wantPackages: []string{"alpha_17"}},
 		{name: "rm duplicate request", names: []string{"alpha", "alpha"}, op: pkgOpRemove, wantPackages: []string{"alpha_17"}},
-		{name: "rm aliases share package", names: []string{"agensgraph", "agens"}, op: pkgOpRemove, wantPackages: []string{"agensgraph_17"}, wantOwner: "agensgraph"},
+		{name: "rm aliases share package", names: []string{"agensgraph", "agens"}, op: pkgOpRemove, wantPackages: []string{"agensgraph-17"}, wantOwner: "agensgraph"},
 		{name: "rm multiple", names: []string{"beta", "alpha"}, op: pkgOpRemove, wantPackages: []string{"beta_17", "beta_tools_17", "alpha_17"}},
 	}
 

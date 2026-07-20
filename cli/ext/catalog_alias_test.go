@@ -34,13 +34,14 @@ func TestLoadAliasMapRequestedAliasesEL9(t *testing.T) {
 
 	expect := map[string]string{
 		"docker":         "docker-ce docker-compose-plugin",
-		"kafka":          "kafka kafka_exporter",
+		"kafka-stack":    "kafka kafka_exporter jmx-exporter",
+		"mysql":          "mysql-community-server mysql-community-client mysql-shell mysql-router-community percona-xtrabackup-84 mysqld_exporter",
 		"kubernetes":     "kubeadm kubelet kubectl",
 		"java-runtime":   "java-17-openjdk-src java-17-openjdk-headless",
 		"kube-runtime":   "containerd.io",
-		"agensgraph":     "agensgraph_$v",
-		"agens":          "agensgraph_$v",
-		"pgedge":         "pgedge_$v spock_$v lolor_$v snowflake_$v",
+		"agensgraph":     "agensgraph-$v",
+		"agens":          "agensgraph-$v",
+		"pgedge":         "pgedge-$v",
 		"orioledb":       "orioledb-$v",
 		"vtraces":        "victoria-traces",
 		"hunspell":       "hunspell_cs_cz_$v hunspell_de_de_$v hunspell_en_us_$v hunspell_fr_$v hunspell_ne_np_$v hunspell_nl_nl_$v hunspell_nn_no_$v hunspell_ru_ru_$v hunspell_ru_ru_aot_$v",
@@ -55,6 +56,9 @@ func TestLoadAliasMapRequestedAliasesEL9(t *testing.T) {
 	}
 	if ec.AliasMap["ansible"] == ec.AliasMap["node-bootstrap"] {
 		t.Fatalf("ansible should be a lean combo and must differ from node-bootstrap, got %q", ec.AliasMap["ansible"])
+	}
+	if _, ok := ec.AliasMap["kafka"]; ok {
+		t.Fatal("legacy kafka alias should not shadow the raw kafka package")
 	}
 }
 
@@ -128,15 +132,63 @@ func TestLoadAliasMapIncludesPolarDBCanonicalAlias(t *testing.T) {
 			ec.LoadAliasMap(config.OSType)
 
 			for _, key := range []string{"polardb", "polar"} {
-				if got := ec.AliasMap[key]; got != "polardb-17" {
-					t.Fatalf("unexpected alias for %s: want %q, got %q", key, "polardb-17", got)
+				if got := ec.AliasMap[key]; got != "polardb-$v" {
+					t.Fatalf("unexpected alias for %s: want %q, got %q", key, "polardb-$v", got)
 				}
 			}
 		})
 	}
 }
 
-func TestLoadAliasMapIvorySQLUsesPG18Package(t *testing.T) {
+func TestLoadAliasMapIncludesCanonicalForkAliases(t *testing.T) {
+	tests := []struct {
+		name   string
+		osType string
+		osCode string
+		want   map[string]string
+	}{
+		{
+			name:   "el",
+			osType: config.DistroEL,
+			osCode: "el9",
+			want: map[string]string{
+				"openhalo":   "openhalodb-$v",
+				"ivorysql":   "ivorysql5",
+				"babelfish":  "babelfish-$v",
+				"cloudberry": "cloudberry cloudberry-backup cloudberry-pxf",
+			},
+		},
+		{
+			name:   "deb",
+			osType: config.DistroDEB,
+			osCode: "u24",
+			want: map[string]string{
+				"openhalo":   "openhalodb-$v",
+				"ivorysql":   "ivorysql-5",
+				"babelfish":  "babelfish-$v",
+				"cloudberry": "cloudberry cloudberry-backup cloudberry-pxf",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup := withAliasMapTestEnv(t, tt.osType, tt.osCode, "amd64")
+			defer cleanup()
+
+			ec := &ExtensionCatalog{}
+			ec.LoadAliasMap(config.OSType)
+
+			for key, want := range tt.want {
+				if got := ec.AliasMap[key]; got != want {
+					t.Fatalf("unexpected alias for %s: want %q, got %q", key, want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadAliasMapIncludesConfgenUtilityAliases(t *testing.T) {
 	tests := []struct {
 		name   string
 		osType string
@@ -154,8 +206,112 @@ func TestLoadAliasMapIvorySQLUsesPG18Package(t *testing.T) {
 			ec := &ExtensionCatalog{}
 			ec.LoadAliasMap(config.OSType)
 
-			if got := ec.AliasMap["ivorysqldb"]; got != "ivorysql-18" {
-				t.Fatalf("unexpected ivorysqldb alias: want %q, got %q", "ivorysql-18", got)
+			for key, want := range map[string]string{
+				"pg-hardstorage": "pg-hardstorage",
+				"pg_hardstorage": "pg-hardstorage",
+				"pgxnclient":     "pgxnclient",
+				"pgcopydb":       "pgcopydb",
+			} {
+				if got := ec.AliasMap[key]; got != want {
+					t.Fatalf("unexpected alias for %s: want %q, got %q", key, want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadAliasMapIncludesConfgenMiscAliases(t *testing.T) {
+	tests := []struct {
+		name   string
+		osType string
+		osCode string
+		want   map[string]string
+	}{
+		{
+			name:   "el",
+			osType: config.DistroEL,
+			osCode: "el9",
+			want: map[string]string{
+				"supabase":    "pg_tle_$v,pgvector_$v,pg_cron_$v,pgsodium_$v,pg_graphql_$v,pg_jsonschema_$v,wrappers_$v,vault_$v,pgjwt_$v,pgsql_http_$v,pg_net_$v,supautils_$v,index_advisor_$v,safeupdate_$v,pg_plan_filter_$v",
+				"sealos":      "sealos",
+				"tigerbeetle": "tigerbeetle",
+				"infra-extra": "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent victoria-traces grafana-victorialogs-ds rclone mysqld_exporter mongodb_exporter kafka_exporter",
+				"victoria":    "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent victoria-traces grafana-victorialogs-ds",
+				"vmetrics":    "victoria-metrics victoria-metrics-cluster vmutils",
+				"vlogs":       "victoria-logs vlogscli vlagent",
+			},
+		},
+		{
+			name:   "deb",
+			osType: config.DistroDEB,
+			osCode: "u24",
+			want: map[string]string{
+				"postgresql":  "postgresql-$v",
+				"supabase":    "postgresql-$v-pg-tle,postgresql-$v-pg-graphql,postgresql-$v-pg-jsonschema,postgresql-$v-wrappers,postgresql-$v-pgvector,postgresql-$v-cron,postgresql-$v-pgsodium,postgresql-$v-vault,postgresql-$v-pgjwt,postgresql-$v-http,postgresql-$v-pg-net,postgresql-$v-supautils,postgresql-$v-index-advisor,postgresql-$v-pg-safeupdate,postgresql-$v-pg-plan-filter",
+				"sealos":      "sealos",
+				"tigerbeetle": "tigerbeetle",
+				"infra-extra": "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent victoria-traces grafana-victorialogs-ds rclone mysqld-exporter mongodb-exporter kafka-exporter",
+				"victoria":    "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent victoria-traces grafana-victorialogs-ds",
+				"vmetrics":    "victoria-metrics victoria-metrics-cluster vmutils",
+				"vlogs":       "victoria-logs vlogscli vlagent",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup := withAliasMapTestEnv(t, tt.osType, tt.osCode, "amd64")
+			defer cleanup()
+
+			ec := &ExtensionCatalog{}
+			ec.LoadAliasMap(config.OSType)
+			for key, want := range tt.want {
+				if got := ec.AliasMap[key]; got != want {
+					t.Fatalf("unexpected alias for %s: want %q, got %q", key, want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadAliasMapOmitsGreenplumAlias(t *testing.T) {
+	cleanup := withAliasMapTestEnv(t, config.DistroEL, "el9", "amd64")
+	defer cleanup()
+
+	ec := &ExtensionCatalog{}
+	ec.LoadAliasMap(config.OSType)
+	if _, ok := ec.AliasMap["greenplum"]; ok {
+		t.Fatal("greenplum alias should not be present")
+	}
+}
+
+func TestLoadAliasMapPreservesNonConflictingLegacyForkAliases(t *testing.T) {
+	tests := []struct {
+		name   string
+		osType string
+		osCode string
+	}{
+		{name: "el", osType: config.DistroEL, osCode: "el9"},
+		{name: "deb", osType: config.DistroDEB, osCode: "u24"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup := withAliasMapTestEnv(t, tt.osType, tt.osCode, "amd64")
+			defer cleanup()
+
+			ec := &ExtensionCatalog{}
+			ec.LoadAliasMap(config.OSType)
+			for canonical, legacy := range map[string]string{
+				"agensgraph": "agens",
+				"polardb":    "polar",
+				"openhalo":   "openhalodb",
+				"ivorysql":   "ivorysqldb",
+				"babelfish":  "babelfishpg",
+			} {
+				if ec.AliasMap[legacy] != ec.AliasMap[canonical] {
+					t.Fatalf("legacy alias %s = %q, canonical %s = %q", legacy, ec.AliasMap[legacy], canonical, ec.AliasMap[canonical])
+				}
 			}
 		})
 	}
@@ -170,13 +326,14 @@ func TestLoadAliasMapRequestedAliasesU22(t *testing.T) {
 
 	expect := map[string]string{
 		"docker":         "docker-ce docker-compose-plugin",
-		"kafka":          "kafka kafka-exporter",
+		"kafka-stack":    "kafka kafka-exporter jmx-exporter",
+		"mysql":          "mysql-server mysql-client mysql-shell mysql-router-community percona-xtrabackup-84 mysqld-exporter",
 		"kubernetes":     "kubeadm kubelet kubectl",
 		"java-runtime":   "openjdk-17-jdk",
 		"kube-runtime":   "containerd.io",
 		"agensgraph":     "agensgraph-$v",
 		"agens":          "agensgraph-$v",
-		"pgedge":         "pgedge-$v pgedge-$v-spock pgedge-$v-lolor pgedge-$v-snowflake",
+		"pgedge":         "pgedge-$v",
 		"orioledb":       "orioledb-$v",
 		"vtraces":        "victoria-traces",
 		"hunspell":       "postgresql-$v-hunspell-cs-cz,postgresql-$v-hunspell-de-de,postgresql-$v-hunspell-en-us,postgresql-$v-hunspell-fr,postgresql-$v-hunspell-ne-np,postgresql-$v-hunspell-nl-nl,postgresql-$v-hunspell-nn-no,postgresql-$v-hunspell-ru-ru,postgresql-$v-hunspell-ru-ru-aot",
@@ -191,6 +348,9 @@ func TestLoadAliasMapRequestedAliasesU22(t *testing.T) {
 	}
 	if ec.AliasMap["ansible"] == ec.AliasMap["node-bootstrap"] {
 		t.Fatalf("ansible should be a lean combo and must differ from node-bootstrap, got %q", ec.AliasMap["ansible"])
+	}
+	if _, ok := ec.AliasMap["kafka"]; ok {
+		t.Fatal("legacy kafka alias should not shadow the raw kafka package")
 	}
 }
 
@@ -203,13 +363,14 @@ func TestLoadAliasMapRequestedAliasesU26(t *testing.T) {
 
 	expect := map[string]string{
 		"docker":         "docker-ce docker-compose-plugin",
-		"kafka":          "kafka kafka-exporter",
+		"kafka-stack":    "kafka kafka-exporter jmx-exporter",
+		"mysql":          "mysql-server mysql-client mysql-shell mysql-router-community percona-xtrabackup-84 mysqld-exporter",
 		"kubernetes":     "kubeadm kubelet kubectl",
 		"java-runtime":   "openjdk-17-jdk",
 		"kube-runtime":   "containerd.io",
 		"agensgraph":     "agensgraph-$v",
 		"agens":          "agensgraph-$v",
-		"pgedge":         "pgedge-$v pgedge-$v-spock pgedge-$v-lolor pgedge-$v-snowflake",
+		"pgedge":         "pgedge-$v",
 		"orioledb":       "orioledb-$v",
 		"vtraces":        "victoria-traces",
 		"hunspell":       "postgresql-$v-hunspell-cs-cz,postgresql-$v-hunspell-de-de,postgresql-$v-hunspell-en-us,postgresql-$v-hunspell-fr,postgresql-$v-hunspell-ne-np,postgresql-$v-hunspell-nl-nl,postgresql-$v-hunspell-nn-no,postgresql-$v-hunspell-ru-ru,postgresql-$v-hunspell-ru-ru-aot",
@@ -224,6 +385,9 @@ func TestLoadAliasMapRequestedAliasesU26(t *testing.T) {
 	}
 	if ec.AliasMap["ansible"] == ec.AliasMap["node-bootstrap"] {
 		t.Fatalf("ansible should be a lean combo and must differ from node-bootstrap, got %q", ec.AliasMap["ansible"])
+	}
+	if _, ok := ec.AliasMap["kafka"]; ok {
+		t.Fatal("legacy kafka alias should not shadow the raw kafka package")
 	}
 }
 
@@ -283,6 +447,14 @@ func TestLoadAliasMapOSOverrides(t *testing.T) {
 			osArch: "amd64",
 			key:    "ansible",
 			want:   ansibleComboDEB,
+		},
+		{
+			name:   "d11_node_bootstrap",
+			osType: config.DistroDEB,
+			osCode: "d11",
+			osArch: "amd64",
+			key:    "node-bootstrap",
+			want:   nodeBootstrapComboD12,
 		},
 		{
 			name:   "el7_kube_runtime",
