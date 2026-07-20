@@ -37,6 +37,23 @@ func TestStyConfHasConfigureAlias(t *testing.T) {
 	}
 }
 
+func TestStyDeployHasNoInstallAlias(t *testing.T) {
+	if got := strings.Join(pigstyDeployCmd.Aliases, ","); got != "d,de" {
+		t.Fatalf("deploy aliases = %q, want d,de", got)
+	}
+	for _, spelling := range []string{"install", "ins"} {
+		found, _, _ := rootCmd.Find([]string{"sty", spelling})
+		if found == pigstyDeployCmd {
+			t.Fatalf("removed spelling %q still resolves to deploy", spelling)
+		}
+		for _, help := range []string{styCmd.Long, styCmd.Example, pigstyDeployCmd.Long, pigstyDeployCmd.Example} {
+			if strings.Contains(help, "pig sty "+spelling) {
+				t.Fatalf("removed spelling %q remains in Sty help", spelling)
+			}
+		}
+	}
+}
+
 func TestStyConfHasRawFlagDefaultFalse(t *testing.T) {
 	flag := pigstyConfCmd.Flags().Lookup("raw")
 	if flag == nil {
@@ -95,7 +112,6 @@ func TestStyOperationalClaimsMatchExecutionSemantics(t *testing.T) {
 		{pigstyConfCmd, "unsafe", "medium", "recommended"},
 		{pigstyGrafanaDumpCmd, "restricted", "low", "none"},
 		{pigstyGetcmd, "restricted", "low", "none"},
-		{pigstyReleaseGetCmd, "restricted", "low", "none"},
 		{pigstyDeployCmd, "unsafe", "high", "none"},
 	} {
 		annotations := test.command.Annotations
@@ -106,7 +122,7 @@ func TestStyOperationalClaimsMatchExecutionSemantics(t *testing.T) {
 	if pigstyDeployCmd.Annotations["consent"] != "invocation" {
 		t.Fatalf("deploy consent = %q, want invocation", pigstyDeployCmd.Annotations["consent"])
 	}
-	if !strings.Contains(pigstyDeployCmd.Long, "starts immediately") || !strings.Contains(styCmd.Long, "release get") {
+	if !strings.Contains(pigstyDeployCmd.Long, "starts immediately") || !strings.Contains(styCmd.Long, "pig sty get") {
 		t.Fatal("Sty help does not describe immediate deploy and canonical release commands")
 	}
 }
@@ -152,6 +168,12 @@ func TestStyMirrorAndRegionFlagsAreMutuallyExclusive(t *testing.T) {
 			}
 		}
 	}
+	for _, name := range []string{"skip", "ip"} {
+		flag := pigstyConfCmd.Flags().Lookup(name)
+		if flag == nil || !strings.Contains(strings.Join(flag.Annotations[annotation], " "), "skip ip") {
+			t.Fatalf("%s --%s lacks skip/ip exclusion: %+v", pigstyConfCmd.CommandPath(), name, flag)
+		}
+	}
 }
 
 func TestStyInitAcceptEULAFlagPassesOption(t *testing.T) {
@@ -177,18 +199,16 @@ func TestStyInitAcceptEULAFlagPassesOption(t *testing.T) {
 	}
 }
 
-func TestStyReleaseNamespaceAndListDeprecation(t *testing.T) {
+func TestStyListAndGetAreCanonicalTopLevelCommands(t *testing.T) {
 	for _, test := range []struct {
 		args []string
 		want *cobra.Command
 	}{
-		{args: []string{"sty", "release"}, want: pigstyReleaseCmd},
-		{args: []string{"sty", "release", "list"}, want: pigstyReleaseListCmd},
-		{args: []string{"sty", "release", "ls"}, want: pigstyReleaseListCmd},
-		{args: []string{"sty", "release", "get"}, want: pigstyReleaseGetCmd},
 		{args: []string{"sty", "list"}, want: pigstyListcmd},
 		{args: []string{"sty", "ls"}, want: pigstyListcmd},
 		{args: []string{"sty", "get"}, want: pigstyGetcmd},
+		{args: []string{"sty", "g"}, want: pigstyGetcmd},
+		{args: []string{"sty", "download"}, want: pigstyGetcmd},
 	} {
 		found, _, err := rootCmd.Find(test.args)
 		if err != nil {
@@ -198,11 +218,12 @@ func TestStyReleaseNamespaceAndListDeprecation(t *testing.T) {
 			t.Fatalf("Find(%v) = %v, want %v", test.args, found, test.want)
 		}
 	}
-	for _, command := range []*cobra.Command{pigstyGetcmd, pigstyReleaseGetCmd} {
-		for _, flag := range []string{"version", "dir", "mirror"} {
-			if command.Flags().Lookup(flag) == nil {
-				t.Fatalf("%s missing --%s", command.CommandPath(), flag)
-			}
+	if found, remaining, err := rootCmd.Find([]string{"sty", "release"}); err == nil && found != nil && len(remaining) == 0 {
+		t.Fatalf("removed release namespace remains registered: %s", found.CommandPath())
+	}
+	for _, flag := range []string{"version", "dir", "mirror"} {
+		if pigstyGetcmd.Flags().Lookup(flag) == nil {
+			t.Fatalf("%s missing --%s", pigstyGetcmd.CommandPath(), flag)
 		}
 	}
 
@@ -214,49 +235,29 @@ func TestStyReleaseNamespaceAndListDeprecation(t *testing.T) {
 	}()
 	pigstyListExec = func(stycli.ListOptions) error { return nil }
 
-	config.OutputFormat = config.OUTPUT_TEXT
-	var legacyErr bytes.Buffer
-	pigstyListcmd.SetErr(&legacyErr)
+	var stderr bytes.Buffer
+	pigstyListcmd.SetErr(&stderr)
 	defer pigstyListcmd.SetErr(os.Stderr)
+	config.OutputFormat = config.OUTPUT_TEXT
 	if err := pigstyListcmd.RunE(pigstyListcmd, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(legacyErr.String(), "Deprecated:"); got != 1 {
-		t.Fatalf("legacy list deprecation count = %d in %q", got, legacyErr.String())
-	}
-
-	var canonicalErr bytes.Buffer
-	pigstyReleaseListCmd.SetErr(&canonicalErr)
-	defer pigstyReleaseListCmd.SetErr(os.Stderr)
-	if err := pigstyReleaseListCmd.RunE(pigstyReleaseListCmd, nil); err != nil {
-		t.Fatal(err)
-	}
-	if canonicalErr.Len() != 0 {
-		t.Fatalf("canonical list wrote deprecation: %q", canonicalErr.String())
+	if stderr.Len() != 0 {
+		t.Fatalf("canonical list wrote stderr: %q", stderr.String())
 	}
 
 	config.OutputFormat = config.OUTPUT_JSON
-	legacyErr.Reset()
 	raw := captureStdout(t, func() {
 		if err := pigstyListcmd.RunE(pigstyListcmd, nil); err != nil {
 			t.Fatal(err)
 		}
 	})
-	if legacyErr.Len() != 0 || strings.Contains(raw, "Deprecated:") || !strings.Contains(raw, `"command":"pig sty list"`) || strings.Contains(raw, `"kind":`) {
-		t.Fatalf("structured legacy list stdout=%q stderr=%q", raw, legacyErr.String())
-	}
-
-	raw = captureStdout(t, func() {
-		if err := pigstyReleaseListCmd.RunE(pigstyReleaseListCmd, nil); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(raw, `"command":"pig sty release list"`) || !strings.Contains(raw, `"kind":"pig.sty.release.list/v1"`) {
-		t.Fatalf("structured canonical list = %q", raw)
+	if stderr.Len() != 0 || strings.Contains(raw, "Deprecated:") || !strings.Contains(raw, `"command":"pig sty list"`) || strings.Contains(raw, `"kind":`) {
+		t.Fatalf("structured list stdout=%q stderr=%q", raw, stderr.String())
 	}
 }
 
-func TestStyReleaseGetDelegateUsesIdenticalOptions(t *testing.T) {
+func TestStyGetUsesTopLevelContract(t *testing.T) {
 	originalExec := pigstyGetExec
 	originalFormat := config.OutputFormat
 	originalVersion, originalDir, originalMirror := pigstyVersion, pigstyDownloadDir, pigstyGetMirror
@@ -267,50 +268,32 @@ func TestStyReleaseGetDelegateUsesIdenticalOptions(t *testing.T) {
 	}()
 	config.OutputFormat = config.OUTPUT_TEXT
 	pigstyVersion, pigstyDownloadDir, pigstyGetMirror = "v4.4.0", "/tmp/releases", true
-	var calls []stycli.DownloadOptions
+	var got stycli.DownloadOptions
 	pigstyGetExec = func(opts stycli.DownloadOptions) error {
-		calls = append(calls, opts)
+		got = opts
 		return nil
 	}
-	var legacyErr bytes.Buffer
-	pigstyGetcmd.SetErr(&legacyErr)
+	var stderr bytes.Buffer
+	pigstyGetcmd.SetErr(&stderr)
 	defer pigstyGetcmd.SetErr(os.Stderr)
 	if err := pigstyGetcmd.RunE(pigstyGetcmd, []string{"v4"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(legacyErr.String(), "Deprecated:"); got != 1 {
-		t.Fatalf("legacy get deprecation count = %d in %q", got, legacyErr.String())
+	if got.Version != pigstyVersion || got.DownloadDir != pigstyDownloadDir || !got.Mirror || strings.Join(got.Args, "\x00") != "v4" {
+		t.Fatalf("get options = %+v", got)
 	}
-	var canonicalErr bytes.Buffer
-	pigstyReleaseGetCmd.SetErr(&canonicalErr)
-	defer pigstyReleaseGetCmd.SetErr(os.Stderr)
-	if err := pigstyReleaseGetCmd.RunE(pigstyReleaseGetCmd, []string{"v4"}); err != nil {
-		t.Fatal(err)
-	}
-	if canonicalErr.Len() != 0 {
-		t.Fatalf("canonical get wrote deprecation: %q", canonicalErr.String())
-	}
-	if len(calls) != 2 || calls[0].Version != calls[1].Version || calls[0].DownloadDir != calls[1].DownloadDir || calls[0].Mirror != calls[1].Mirror || strings.Join(calls[0].Args, "\x00") != strings.Join(calls[1].Args, "\x00") {
-		t.Fatalf("release get delegate calls = %+v", calls)
+	if stderr.Len() != 0 {
+		t.Fatalf("canonical get wrote stderr: %q", stderr.String())
 	}
 
 	config.OutputFormat = config.OUTPUT_JSON
-	legacyErr.Reset()
-	legacy := captureStdout(t, func() {
+	raw := captureStdout(t, func() {
 		if err := pigstyGetcmd.RunE(pigstyGetcmd, nil); err != nil {
 			t.Fatal(err)
 		}
 	})
-	canonical := captureStdout(t, func() {
-		if err := pigstyReleaseGetCmd.RunE(pigstyReleaseGetCmd, nil); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if legacyErr.Len() != 0 || strings.Contains(legacy, "Deprecated:") || !strings.Contains(legacy, `"command":"pig sty get"`) || !strings.Contains(legacy, `"kind":"pig.sty.release.get/v1"`) {
-		t.Fatalf("legacy release get stdout=%q stderr=%q", legacy, legacyErr.String())
-	}
-	if !strings.Contains(canonical, `"command":"pig sty release get"`) || !strings.Contains(canonical, `"kind":"pig.sty.release.get/v1"`) {
-		t.Fatalf("canonical release get payload = %q", canonical)
+	if stderr.Len() != 0 || strings.Contains(raw, "Deprecated:") || !strings.Contains(raw, `"command":"pig sty get"`) || strings.Contains(raw, `"kind":`) {
+		t.Fatalf("structured get stdout=%q stderr=%q", raw, stderr.String())
 	}
 }
 
@@ -470,7 +453,6 @@ func TestStyBootMirrorFlagSetsRegionChina(t *testing.T) {
 		pigstyBootPackage = origPackage
 		pigstyBootKeep = origKeep
 		_ = flag.Value.Set(origMirror)
-		_ = os.Chdir(cwd)
 	}()
 
 	home := t.TempDir()
@@ -488,6 +470,9 @@ func TestStyBootMirrorFlagSetsRegionChina(t *testing.T) {
 
 	if err := pigstyBootCmd.RunE(pigstyBootCmd, nil); err != nil {
 		t.Fatalf("pig sty boot --mirror failed: %v", err)
+	}
+	if current, err := os.Getwd(); err != nil || current != cwd {
+		t.Fatalf("working directory changed from %q to %q: %v", cwd, current, err)
 	}
 
 	got, err := os.ReadFile(filepath.Join(home, "bootstrap.args"))
@@ -612,12 +597,6 @@ func TestStyConfRawFlagUsesRawRoute(t *testing.T) {
 	restore := saveStyConfState(t)
 	defer restore()
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	defer func() { _ = os.Chdir(cwd) }()
-
 	home := t.TempDir()
 	if err := writeExecutable(filepath.Join(home, "configure"), "#!/bin/sh\nprintf raw > route_raw.txt\n"); err != nil {
 		t.Fatalf("write configure script: %v", err)
@@ -646,12 +625,6 @@ func TestStyConfRawStructuredOutputRetainsGeneratedSecrets(t *testing.T) {
 		restore()
 		config.OutputFormat = originalFormat
 	}()
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Chdir(cwd) }()
 
 	home := t.TempDir()
 	if err := writeExecutable(filepath.Join(home, "configure"), "#!/bin/sh\nprintf 'generated_password=raw-random-secret\\n'\n"); err != nil {

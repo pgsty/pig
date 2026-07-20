@@ -14,6 +14,7 @@ import (
 	"pig/cli/license"
 	"pig/internal/config"
 	"pig/internal/output"
+	"pig/internal/utils"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -103,7 +104,7 @@ func installPigsty(srcTarball []byte, targetDir string, options installOptions) 
 	if err := os.Chmod(stage, rootMode); err != nil {
 		return fmt.Errorf("failed to preserve install directory mode: %w", err)
 	}
-	if err := syncDirectory(stage); err != nil {
+	if err := utils.SyncDirectory(stage); err != nil {
 		return fmt.Errorf("failed to sync staged installation: %w", err)
 	}
 	if err := commitStagedInstall(stage, resolvedTarget, targetExists); err != nil {
@@ -115,7 +116,7 @@ func installPigsty(srcTarball []byte, targetDir string, options installOptions) 
 	logrus.Infof("next steps:")
 	logrus.Infof("  pig sty boot    # install ansible and prepare offline pkg")
 	logrus.Infof("  pig sty conf    # configure pigsty and generate config")
-	logrus.Infof("  pig sty install # install & provision env (DANGEROUS!)")
+	logrus.Infof("  pig sty deploy  # deploy and provision env (DANGEROUS!)")
 
 	return nil
 }
@@ -167,7 +168,7 @@ func acceptProEULA(accepted bool) error {
 	if accepted {
 		return nil
 	}
-	if os.Getenv("PIG_NON_INTERACTIVE") != "" || !stdinIsTerminal() {
+	if os.Getenv("PIG_NON_INTERACTIVE") != "" || !utils.StdinIsTerminal() {
 		return commandFailedf(output.CodeStyInitEULARequired, "Pigsty Pro EULA acceptance required; review the EULA and rerun with --accept-eula")
 	}
 
@@ -190,11 +191,6 @@ func acceptProEULA(accepted bool) error {
 	default:
 		return commandFailedf(output.CodeStyInitEULARequired, "invalid EULA response")
 	}
-}
-
-func stdinIsTerminal() bool {
-	info, err := os.Stdin.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 type directoryMode struct {
@@ -272,7 +268,7 @@ func commitStagedInstall(stage, target string, replacing bool) error {
 		if err := os.Rename(stage, target); err != nil {
 			return fmt.Errorf("failed to commit installation: %w", err)
 		}
-		return syncDirectory(parent)
+		return utils.SyncDirectory(parent)
 	}
 
 	backup, err := unusedSiblingPath(parent, "."+filepath.Base(target)+".backup-*")
@@ -288,7 +284,7 @@ func commitStagedInstall(stage, target string, replacing bool) error {
 		}
 		return fmt.Errorf("failed to commit installation: %w", err)
 	}
-	if err := syncDirectory(parent); err != nil {
+	if err := utils.SyncDirectory(parent); err != nil {
 		return fmt.Errorf("installation committed but parent sync failed: %w", err)
 	}
 	if err := os.RemoveAll(backup); err != nil {
@@ -306,15 +302,6 @@ func unusedSiblingPath(parent, pattern string) (string, error) {
 		return "", err
 	}
 	return path, nil
-}
-
-func syncDirectory(path string) error {
-	dir, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
 }
 
 // extractPigsty extracts pigsty source from embedded tarball to destination directory.
@@ -408,29 +395,11 @@ func resolveArchiveTargetPath(dst, archivePath string) (string, string, error) {
 	return relPath, targetAbs, nil
 }
 
-// LoadPigstySrc loads pigsty source tarball from given path and returns the byte array
-func LoadPigstySrc(path string) ([]byte, error) {
-	// Open and read the file
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file %s: %w", path, err)
-	}
-	defer f.Close()
-
-	// Read file contents into byte slice
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file %s: %w", path, err)
-	}
-
-	return data, nil
-}
-
 // isProtectedFile checks if a file should be protected from overwriting
 func isProtectedFile(relPath string, dst string) bool {
 	// fmt.Println(relPath)
 	switch {
-	case filepath.Base(relPath) == "pigsty.yml" && fileExists(filepath.Join(dst, "pigsty.yml")):
+	case filepath.Base(relPath) == "pigsty.yml" && regularFileExists(filepath.Join(dst, "pigsty.yml")):
 		return true
 	case strings.HasPrefix(relPath, "files/pki") && !strings.HasSuffix(relPath, "/"):
 		return true
@@ -496,7 +465,7 @@ func validateSymlinkLinkname(base, linkPath, linkname string) error {
 		return fmt.Errorf("invalid symlink target: %s", linkname)
 	}
 	resolved := filepath.Clean(filepath.Join(filepath.Dir(linkPath), linkname))
-	ok, err := pathWithinBase(base, resolved)
+	ok, err := utils.IsPathWithin(base, resolved)
 	if err != nil {
 		return fmt.Errorf("failed to validate symlink target: %w", err)
 	}
@@ -504,14 +473,6 @@ func validateSymlinkLinkname(base, linkPath, linkname string) error {
 		return fmt.Errorf("symlink target escapes destination: %s -> %s", linkPath, linkname)
 	}
 	return nil
-}
-
-func pathWithinBase(base, target string) (bool, error) {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return false, err
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)), nil
 }
 
 func ensureNoSymlinkInPath(base, target string) error {
@@ -575,11 +536,8 @@ func ensureSymlinkTargetPath(target string) error {
 	return nil
 }
 
-// fileExists checks if a path exists and is a regular file
-func fileExists(path string) bool {
+// regularFileExists checks if a path exists and is a regular file.
+func regularFileExists(path string) bool {
 	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return !info.IsDir()
+	return err == nil && info.Mode().IsRegular()
 }

@@ -167,28 +167,6 @@ func TestPutFile(t *testing.T) {
 	}
 }
 
-// TestShellCommand tests the basic functionality of ShellCommand
-func TestShellCommand(t *testing.T) {
-	// Save the original value
-	originalTrySudo := TrySudo
-	defer func() {
-		TrySudo = originalTrySudo
-	}()
-
-	// Scenario 1: Simple command without sudo (echo)
-	TrySudo = false
-	err := ShellCommand([]string{"echo", "hello"})
-	if err != nil {
-		t.Fatalf("ShellCommand echo failed: %v", err)
-	}
-
-	// Scenario 2: Empty command
-	err = ShellCommand([]string{})
-	if err == nil {
-		t.Fatalf("expected error when no command is passed, got nil")
-	}
-}
-
 // TestSudoCommand tests the basic functionality of SudoCommand
 func TestSudoCommand(t *testing.T) {
 	// Save the original value

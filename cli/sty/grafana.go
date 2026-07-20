@@ -266,24 +266,11 @@ func prepareGrafanaInfo(options GrafanaOptions) (*grafanaPrepared, error) {
 // the endpoint itself still depends on Inventory, the regular preparation path
 // remains authoritative so Pig never probes a guessed instance.
 func prepareGrafanaInfoHealth(options GrafanaOptions) (grafanaAPI, *grafanaPrepared, error) {
-	if options.Password != "" && strings.TrimSpace(options.PasswordFile) != "" {
-		return nil, nil, errors.New("--password and --password-file are mutually exclusive")
-	}
 	// Explicit credential sources are validated locally before the health probe.
 	// Inventory is intentionally excluded here because reading it is the failure
 	// mode this two-phase info path is designed to keep observable.
-	if options.Password != "" {
-		if _, err := validateGrafanaPassword(options.Password, "--password"); err != nil {
-			return nil, nil, err
-		}
-	} else if strings.TrimSpace(options.PasswordFile) != "" {
-		if _, err := grafanaAPIPassword("", options.PasswordFile, nil); err != nil {
-			return nil, nil, err
-		}
-	} else if password := os.Getenv("GRAFANA_PASSWORD"); password != "" {
-		if _, err := validateGrafanaPassword(password, "GRAFANA_PASSWORD"); err != nil {
-			return nil, nil, err
-		}
+	if _, err := grafanaAPIPassword(options.Password, options.PasswordFile, nil); err != nil {
+		return nil, nil, err
 	}
 	endpoint := strings.TrimSpace(options.Endpoint)
 	if endpoint == "" {
@@ -301,9 +288,6 @@ func prepareGrafanaInfoHealth(options GrafanaOptions) (grafanaAPI, *grafanaPrepa
 }
 
 func prepareGrafanaConnection(options GrafanaOptions, requireAuthentication bool) (*grafanaPrepared, error) {
-	if options.Password != "" && strings.TrimSpace(options.PasswordFile) != "" {
-		return nil, errors.New("--password and --password-file are mutually exclusive")
-	}
 	// A complete explicit connection is an emergency escape hatch: it must not
 	// depend on an unrelated malformed or unavailable Inventory.
 	explicitConnection := strings.TrimSpace(options.Endpoint) != "" &&
@@ -367,6 +351,9 @@ func loadGrafanaCredentialInventory(filename string) (*inventory.Document, error
 }
 
 func grafanaAPIPassword(password, passwordFile string, doc *inventory.Document) (string, error) {
+	if password != "" && strings.TrimSpace(passwordFile) != "" {
+		return "", errors.New("--password and --password-file are mutually exclusive")
+	}
 	if password != "" {
 		return validateGrafanaPassword(password, "--password")
 	}
@@ -620,11 +607,7 @@ func applyGrafanaLoad(ctx context.Context, client grafanaLoadAPI, state *grafana
 			})
 			continue
 		}
-		dashboard, normalizeErr := dashboardForGrafanaInit(asset.Dashboard)
-		if normalizeErr != nil {
-			data.Results = append(data.Results, withGrafanaPhase(grafanaInternalFailure("dashboard", asset.UID, asset.FolderUID, "upsert", normalizeErr), phase))
-			continue
-		}
+		dashboard := dashboardForGrafanaInit(asset.Dashboard)
 		mutationErr := client.UpsertDashboard(ctx, dashboard, asset.FolderUID)
 		data.Results = append(data.Results, withGrafanaPhase(grafanaMutationResult("dashboard", asset.UID, asset.FolderUID, "upsert", mutationErr), phase))
 	}

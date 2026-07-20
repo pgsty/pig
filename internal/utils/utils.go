@@ -14,12 +14,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var (
-
-	// TrySudo is a flag to try to run a command with sudo
-	TrySudo = false
-)
-
 // configureCmdIO sets stdin/stdout/stderr for external commands.
 // In structured output mode, redirect stdout to stderr to keep stdout clean.
 func configureCmdIO(cmd *exec.Cmd) {
@@ -64,23 +58,6 @@ func CommandWithEnv(args []string, env []string) error {
 	configureCmdIO(cmd)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("command failed: %w", err)
-	}
-	return nil
-}
-
-// ShellCommand runs a command without sudo
-func ShellCommand(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("no command specified")
-	}
-	if TrySudo {
-		return SudoCommand(args)
-	}
-	logrus.Debugf("executing shell command: %v", args)
-	cmd := exec.Command(args[0], args[1:]...)
-	configureCmdIO(cmd)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("shell command failed: %w", err)
 	}
 	return nil
 }

@@ -26,18 +26,9 @@ type InitOptions struct {
 }
 
 func Init(opts InitOptions) error {
-	version := strings.TrimSpace(opts.Version)
-	if len(opts.Args) > 1 || len(opts.Args) > 0 && version != "" {
-		return commandFailedf(output.CodeStyInitInvalidArgs, "specify the Pigsty version either positionally or with --version, not both")
-	}
-	if len(opts.Args) > 0 {
-		version = strings.TrimSpace(opts.Args[0])
-	}
-	if version == "" {
-		version = "latest"
-	}
-	if version != "latest" && len(version) > 0 && version[0] >= '0' && version[0] <= '9' {
-		version = "v" + version
+	version, err := resolveReleaseVersionInput(opts.Version, opts.Args, "latest", output.CodeStyInitInvalidArgs)
+	if err != nil {
+		return err
 	}
 	if _, _, _, err := inspectInstallTarget(opts.TargetPath, opts.Force); err != nil {
 		return err
@@ -60,9 +51,6 @@ func Init(opts InitOptions) error {
 		if version == "latest" {
 			version = config.PigstyVersion
 		}
-		if len(version) > 0 && version[0] >= '0' && version[0] <= '9' {
-			version = "v" + version
-		}
 		ver = get.IsValidVersion(version)
 	} else {
 		version = get.CompleteVersion(version)
@@ -72,6 +60,7 @@ func Init(opts InitOptions) error {
 		logrus.Errorf("invalid pigsty version: %v", version)
 		return commandFailedf(output.CodeStyInitInvalidArgs, "invalid pigsty version: %s", version)
 	}
+	version = ver.Version
 
 	logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, opts.DownloadDir)
 	if err := get.DownloadSrc(version, opts.DownloadDir); err != nil {
@@ -80,7 +69,7 @@ func Init(opts InitOptions) error {
 	}
 
 	srcPath := filepath.Join(opts.DownloadDir, fmt.Sprintf("pigsty-%s.tgz", version))
-	srcTarball, err := LoadPigstySrc(srcPath)
+	srcTarball, err := os.ReadFile(srcPath)
 	if err != nil {
 		logrus.Errorf("failed to load pigsty src %s: %v", version, err)
 		return commandFailed(output.CodeStyInitFailed, fmt.Errorf("failed to load pigsty src %s: %w", version, err))
@@ -132,11 +121,8 @@ func Bootstrap(opts BootstrapOptions) error {
 	if opts.Keep {
 		cmdArgs = append(cmdArgs, "-k")
 	}
-	if err := os.Chdir(opts.PigstyHome); err != nil {
-		return commandFailed(output.CodeStyBootstrapResourceMissing, fmt.Errorf("failed to change directory to %s: %w", opts.PigstyHome, err))
-	}
 	logrus.Infof("bootstrap with: %s", strings.Join(cmdArgs, " "))
-	if err := utils.ShellCommand(cmdArgs); err != nil {
+	if err := utils.CommandInDir(cmdArgs, opts.PigstyHome); err != nil {
 		logrus.Errorf("bootstrap execution failed: %v", err)
 		return commandFailed(output.CodeStyBootstrapFailed, err)
 	}
@@ -203,13 +189,8 @@ func ConfigureRaw(opts RawConfigureOptions) error {
 		cmdArgs = append(cmdArgs, "-g")
 	}
 	cmdArgs = append(cmdArgs, opts.Args...)
-
-	if err := os.Chdir(opts.PigstyHome); err != nil {
-		return commandFailed(output.CodeStyConfigureResourceMissing, fmt.Errorf("failed to change directory to %s: %w", opts.PigstyHome, err))
-	}
-
 	logrus.Infof("configure with: %s", strings.Join(cmdArgs, " "))
-	return commandFailed(output.CodeStyRawConfigureFailed, utils.ShellCommand(cmdArgs))
+	return commandFailed(output.CodeStyRawConfigureFailed, utils.CommandInDir(cmdArgs, opts.PigstyHome))
 }
 
 type DownloadOptions struct {
@@ -220,12 +201,9 @@ type DownloadOptions struct {
 }
 
 func Download(opts DownloadOptions) error {
-	version := strings.TrimSpace(opts.Version)
-	if len(opts.Args) > 1 || len(opts.Args) > 0 && version != "" {
-		return commandFailedf(output.CodeStyReleaseInvalidArgs, "specify the Pigsty version either positionally or with --version, not both")
-	}
-	if len(opts.Args) > 0 {
-		version = strings.TrimSpace(opts.Args[0])
+	version, err := resolveReleaseVersionInput(opts.Version, opts.Args, "", output.CodeStyReleaseInvalidArgs)
+	if err != nil {
+		return err
 	}
 
 	logrus.Info("fetching pigsty version info...")
@@ -238,10 +216,6 @@ func Download(opts DownloadOptions) error {
 		return commandFailedf(output.CodeStyReleaseMetadataUnavailable, "failed to get pigsty version list")
 	}
 
-	if version != "" && version != "latest" && len(version) > 0 && version[0] >= '0' && version[0] <= '9' {
-		version = "v" + version
-	}
-
 	if completeVer := get.CompleteVersion(version); completeVer != version {
 		logrus.Debugf("Complete pigsty version from %s to %s", version, completeVer)
 		version = completeVer
@@ -252,6 +226,7 @@ func Download(opts DownloadOptions) error {
 		logrus.Errorf("Invalid version: %s", version)
 		return commandFailedf(output.CodeStyReleaseInvalidArgs, "invalid version: %s", version)
 	}
+	version = ver.Version
 	logrus.Infof("Get pigsty src %s from %s to %s", ver.Version, ver.DownloadURL, opts.DownloadDir)
 
 	logrus.Debugf("Download pigsty src %s to %s", version, opts.DownloadDir)
@@ -262,13 +237,23 @@ func Download(opts DownloadOptions) error {
 	return nil
 }
 
+func resolveReleaseVersionInput(flagValue string, args []string, fallback string, code int) (string, error) {
+	version := strings.TrimSpace(flagValue)
+	if len(args) > 1 || (len(args) == 1 && version != "") {
+		return "", commandFailedf(code, "specify the Pigsty version either positionally or with --version, not both")
+	}
+	if len(args) == 1 {
+		version = strings.TrimSpace(args[0])
+	}
+	if version == "" {
+		version = fallback
+	}
+	return version, nil
+}
+
 type ListOptions struct {
 	Mirror bool
 	Args   []string
-}
-
-func ListVersions(args []string) error {
-	return ListVersionsWithOptions(ListOptions{Args: args})
 }
 
 func ListVersionsWithOptions(opts ListOptions) error {
@@ -340,12 +325,9 @@ func Deploy(opts DeployOptions) error {
 		return commandFailed(output.CodeStyDeployResourceMissing, err)
 	}
 
-	if err := os.Chdir(opts.PigstyHome); err != nil {
-		return commandFailed(output.CodeStyDeployResourceMissing, fmt.Errorf("failed to change directory to %s: %w", opts.PigstyHome, err))
-	}
 	logrus.Infof("run playbook %s", playbookName)
 	logrus.Warnf("IT'S DANGEROUS TO RUN THIS ON INSTALLED SYSTEM!!! Use Ctrl+C to abort")
-	return commandFailed(output.CodeStyDeployFailed, utils.Command([]string{"ansible-playbook", playbookName}))
+	return commandFailed(output.CodeStyDeployFailed, utils.CommandInDir([]string{"ansible-playbook", playbookName}, opts.PigstyHome))
 }
 
 func resolveDeployPlaybook(home string) (string, error) {

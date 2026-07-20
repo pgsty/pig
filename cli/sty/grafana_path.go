@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"pig/internal/utils"
 	"regexp"
 	"sort"
 	"strings"
@@ -44,7 +46,6 @@ type grafanaAsset struct {
 	UID       string
 	FolderUID string
 	Dashboard map[string]interface{}
-	Raw       []byte
 }
 
 type grafanaScope struct {
@@ -53,7 +54,6 @@ type grafanaScope struct {
 	Kind      grafanaScopeKind
 	FolderUID string
 	UID       string
-	Defaulted bool
 	Assets    []grafanaAsset
 	Folders   []string
 }
@@ -69,10 +69,9 @@ func resolveGrafanaScope(options GrafanaOptions, action grafanaAction) (*grafana
 	}
 
 	selectedText := strings.TrimSpace(options.Path)
-	defaulted := selectedText == ""
 	selected := ""
 	root := ""
-	if defaulted {
+	if selectedText == "" {
 		if homeRoot == "" {
 			return nil, errors.New("Grafana path is required because Pigsty home could not be resolved")
 		}
@@ -97,7 +96,7 @@ func resolveGrafanaScope(options GrafanaOptions, action grafanaAction) (*grafana
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) || filepath.IsAbs(relative) {
 		return nil, errors.New("Grafana path escapes its root")
 	}
-	scope := &grafanaScope{Root: root, Path: selected, Defaulted: defaulted}
+	scope := &grafanaScope{Root: root, Path: selected}
 	parts := splitGrafanaRelative(relative)
 	switch len(parts) {
 	case 0:
@@ -418,7 +417,7 @@ func readGrafanaAsset(path, folderUID string) (grafanaAsset, error) {
 	if filenameUID != uid {
 		return grafanaAsset{}, fmt.Errorf("dashboard filename UID %q does not match JSON UID %q: %s", filenameUID, uid, path)
 	}
-	return grafanaAsset{Path: path, UID: uid, FolderUID: folderUID, Dashboard: dashboard, Raw: raw}, nil
+	return grafanaAsset{Path: path, UID: uid, FolderUID: folderUID, Dashboard: dashboard}, nil
 }
 
 func decodeGrafanaDashboard(raw []byte) (map[string]interface{}, error) {
@@ -446,13 +445,10 @@ func cloneGrafanaDashboard(value map[string]interface{}) (map[string]interface{}
 	return decodeGrafanaDashboard(raw)
 }
 
-func dashboardForGrafanaInit(value map[string]interface{}) (map[string]interface{}, error) {
-	clone, err := cloneGrafanaDashboard(value)
-	if err != nil {
-		return nil, err
-	}
+func dashboardForGrafanaInit(value map[string]interface{}) map[string]interface{} {
+	clone := maps.Clone(value)
 	clone["id"] = nil
-	return clone, nil
+	return clone
 }
 
 func dashboardForGrafanaDump(value map[string]interface{}) (map[string]interface{}, error) {
@@ -619,10 +615,5 @@ func writeAtomicGrafanaFile(filename string, raw []byte) error {
 		return err
 	}
 	committed = true
-	directoryHandle, err := os.Open(directory)
-	if err != nil {
-		return err
-	}
-	defer directoryHandle.Close()
-	return directoryHandle.Sync()
+	return utils.SyncDirectory(directory)
 }

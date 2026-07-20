@@ -64,10 +64,9 @@ and controller-side Grafana dashboards.
   pig sty boot                         # install Ansible and prepare offline pkg
   pig sty conf                         # generate pigsty.yml through Inventory APIs
   pig sty deploy                       # immediately run the deployment playbook
+  pig sty list [version]               # list available Pigsty releases
+  pig sty get [version]                # download a Pigsty source tarball
   pig sty grafana [info|list|boot|init|load|dump|clean|lang|style]
-  pig sty release list                 # list available Pigsty releases
-  pig sty release get [version]        # download a Pigsty source tarball
-  pig sty list|get                     # deprecated release delegates
 `,
 	Example: `  Get Started: https://pigsty.io/docs/setup/install/
   pig sty init                 # extract and init ~/pigsty
@@ -76,24 +75,14 @@ and controller-side Grafana dashboards.
   pig sty deploy               # run the deploy.yml playbook`,
 }
 
-var styConfigureLong = fmt.Sprintf(`Configure pigsty with native workflow (default) or raw shell workflow
+var styConfigureLong = fmt.Sprintf(`Configure Pigsty through the native Inventory workflow.
 
-pig sty conf (aliases: c, configure)
-  [-c|--conf <name>]      # config template: [meta|rich|slim|full|supabase|...]
-  [--ip <ip>]             # primary IP address (skip with -s)
-  [-v|--version <pgver>]  # postgres major version: [%s] (beta: %d)
-  [-r|--region <region>]  # upstream repo region: [default|china|europe]
-  [-m|--mirror]           # same as --region china
-  [-O|--output-file <file>]    # output config file path (default: pigsty.yml)
-  [-s|--skip]             # skip IP address probing
-  [-p|--port <port>]      # specify SSH port (for ssh accessibility check)
-  [-x|--proxy]            # write proxy env from environment
-  [-n|--non-interactive]  # non-interactive mode
+PostgreSQL major versions: %s (beta: %d). --skip uses the placeholder primary
+IP and skips the admin SSH/sudo preflight; it cannot be combined with --ip.
+Use --raw only for the legacy shell workflow, where generated passwords remain
+visible.
 
-  [-g|--generate]         # generate random default passwords (RECOMMENDED!)
-  [--raw]                 # use legacy shell workflow; -g passwords stay visible
-
-Check https://pigsty.io/docs/setup/install/#configure for details
+See https://pigsty.io/docs/setup/install/#configure for details.
 `, strings.Join(ext.PostgresActiveVersionStrings(), "|"), ext.PostgresBetaMajorVersion)
 
 const styConfigureExample = `
@@ -106,8 +95,8 @@ const styConfigureExample = `
   pig sty conf -c slim               # use conf/slim.yml template (minimal install)
   pig sty conf -c supabase           # use conf/supabase.yml template (self-hosting)
   pig sty conf -v 17 -c rich         # use conf/rich.yml template with PostgreSQL 17
-  pig sty conf -r china -s           # use china region mirrors, skip IP probe
-  pig sty conf -m -s                 # use mirror mode, skip IP probe
+  pig sty conf -r china -s           # use china mirrors and placeholder primary IP
+  pig sty conf -m -s                 # mirror mode with admin preflight skipped
   pig sty conf -x                    # write proxy env from environment to config
   pig sty conf -c full -g -O ha.yml  # full HA template with random passwords to ha.yml
 `
@@ -118,16 +107,11 @@ var pigstyInitCmd = &cobra.Command{
 	Annotations: ancsAnn("pig sty init", "action", "volatile", "unsafe", false, "medium", "recommended", "root", 30000),
 	Aliases:     []string{"i"},
 	Args:        cobra.MaximumNArgs(1),
-	Long: `
-pig sty init
-  -p | --path    : where to install, ~/pigsty by default
-  -f | --force   : force overwrite existing pigsty dir
-  -m | --mirror      : prefer mirror (pigsty.cc) as primary source
-       --accept-eula : accept the Pigsty Pro EULA for non-interactive init
-  -v | --version : pigsty version, latest by default
-  -d | --dir     : download directory, /tmp by default
+	Long: `Install a Pigsty release into the target directory.
 
-`,
+The version may be supplied positionally or with --version; the default is the
+latest release. Existing targets are preserved unless --force is set. Pigsty Pro
+requires interactive EULA acceptance or --accept-eula.`,
 	Example: `
   pig sty init                   # install to ~/pigsty with the latest version
   pig sty init -f                # install and OVERWRITE existing pigsty dir
@@ -166,16 +150,10 @@ var pigstyBootCmd = &cobra.Command{
 	Annotations: ancsAnn("pig sty boot", "action", "volatile", "unsafe", true, "medium", "none", "root", 60000),
 	Aliases:     []string{"b", "bootstrap"},
 	Args:        cobra.NoArgs,
-	Long: `Bootstrap pigsty with ./bootstrap script
+	Long: `Bootstrap Pigsty with its ./bootstrap script.
 
-pig sty boot
-  [-r|--region <region]   [default,china,europe]
-  [-m|--mirror]           same as --region china
-  [-p|--path <path>]      specify another offline pkg path
-  [-k|--keep]             keep existing upstream repo during bootstrap
-
-Check https://pigsty.io/docs/setup/offline/#bootstrap for details
-`,
+--mirror is shorthand for --region china. See
+https://pigsty.io/docs/setup/offline/#bootstrap for details.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		bootRegion := pigstyBootRegion
 		if pigstyBootMirror {
@@ -206,7 +184,7 @@ var pigstyConfCmd = &cobra.Command{
 	Args:        cobra.NoArgs,
 	Long:        styConfigureLong,
 	Example:     styConfigureExample,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		command := "pig sty conf"
 		if cmd != nil {
 			if called := strings.TrimSpace(cmd.CalledAs()); called != "" {
@@ -218,7 +196,7 @@ var pigstyConfCmd = &cobra.Command{
 			confRegion = "china"
 		}
 		if pigstyConfRaw {
-			return runLegacyStructuredKind(legacyModuleSty, command, "pig.sty.configure.raw/v1", args, styConfigureParams(confRegion), func() error {
+			return runLegacyStructuredKind(legacyModuleSty, command, "pig.sty.configure.raw/v1", nil, styConfigureParams(confRegion), func() error {
 				return stycli.ConfigureRaw(stycli.RawConfigureOptions{
 					PigstyHome:     config.PigstyHome,
 					Mode:           pigstyConfName,
@@ -231,11 +209,10 @@ var pigstyConfCmd = &cobra.Command{
 					UseProxy:       pigstyConfProxy,
 					NonInteractive: pigstyConfNonInteractive,
 					Generate:       pigstyConfGenerate,
-					Args:           args,
 				})
 			})
 		}
-		return runPigstyConfigureNative(command, args, confRegion)
+		return runPigstyConfigureNative(confRegion)
 	},
 }
 
@@ -437,14 +414,7 @@ func styConfigureParams(region string) map[string]interface{} {
 	}
 }
 
-func runPigstyConfigureNative(command string, args []string, region string) error {
-	if len(args) > 0 {
-		return structuredParamError(
-			legacyModuleSty, command, "invalid arguments",
-			fmt.Sprintf("unexpected arguments: %s", strings.Join(args, " ")),
-			args, styConfigureParams(region),
-		)
-	}
+func runPigstyConfigureNative(region string) error {
 	opts := stycli.ConfigureOptions{
 		PigstyHome:     config.PigstyHome,
 		Mode:           pigstyConfName,
@@ -471,7 +441,7 @@ func addStyConfigureFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&pigstyConfRegion, "region", "r", "", "upstream repo region")
 	cmd.Flags().BoolVarP(&pigstyConfMirror, "mirror", "m", false, "same as --region china")
 	cmd.Flags().StringVarP(&pigstyConfOutput, "output-file", "O", "", "output config file path")
-	cmd.Flags().BoolVarP(&pigstyConfSkip, "skip", "s", false, "skip ip probe")
+	cmd.Flags().BoolVarP(&pigstyConfSkip, "skip", "s", false, "use placeholder IP and skip admin SSH/sudo preflight")
 	cmd.Flags().BoolVarP(&pigstyConfProxy, "proxy", "x", false, "write proxy env from environment")
 	cmd.Flags().BoolVarP(&pigstyConfNonInteractive, "non-interactive", "n", false, "non-interactive mode")
 	cmd.Flags().StringVarP(&pigstyConfPort, "port", "p", "", "SSH port (only used if set)")
@@ -480,102 +450,42 @@ func addStyConfigureFlags(cmd *cobra.Command) {
 
 var pigstyListcmd = &cobra.Command{
 	Use:         "list [version]",
-	Short:       "List available Pigsty releases (compatibility spelling)",
+	Short:       "List available Pigsty releases",
 	Annotations: ancsAnn("pig sty list", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
 	Aliases:     []string{"l", "ls"},
 	Args:        cobra.MaximumNArgs(1),
-	Long: `List available pigsty versions
-
-	pig sty list [-v version]
-
-	Check https://pigsty.io/docs/releasenote for details
-	`,
 	Example: `
   pig sty list           # list available versions
   pig sty list 3.0.0     # list available versions since 3.0.0
   pig sty list v2        # list available versions since v2
   pig sty list all       # list all available versions
 	`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPigstyReleaseList(cmd, args, true)
+	RunE: func(_ *cobra.Command, args []string) error {
+		return runLegacyStructured(legacyModuleSty, "pig sty list", args, map[string]interface{}{
+			"mirror": pigstyListMirror,
+		}, func() error {
+			return pigstyListExec(stycli.ListOptions{Mirror: pigstyListMirror, Args: args})
+		})
 	},
 }
 
 var pigstyGetcmd = &cobra.Command{
 	Use:         "get [version]",
-	Short:       "Download a Pigsty release (compatibility spelling)",
+	Short:       "Download a Pigsty release",
 	Annotations: ancsAnn("pig sty get", "action", "volatile", "restricted", true, "low", "none", "current", 30000),
 	Aliases:     []string{"g", "download"},
 	Args:        cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPigstyReleaseGet(cmd, args, true)
-	},
-}
-
-var pigstyReleaseCmd = &cobra.Command{
-	Use:         "release",
-	Short:       "List and download Pigsty releases",
-	Annotations: ancsAnn("pig sty release", "query", "volatile", "safe", true, "safe", "none", "current", 100),
-	Args:        cobra.NoArgs,
-	RunE:        showCommandHelp,
-}
-
-var pigstyReleaseListCmd = &cobra.Command{
-	Use:         "list [version]",
-	Aliases:     []string{"ls"},
-	Short:       "List available Pigsty releases",
-	Annotations: ancsAnn("pig sty release list", "query", "volatile", "safe", true, "safe", "none", "current", 5000),
-	Args:        cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPigstyReleaseList(cmd, args, false)
-	},
-}
-
-var pigstyReleaseGetCmd = &cobra.Command{
-	Use:         "get [version]",
-	Short:       "Download a Pigsty release",
-	Annotations: ancsAnn("pig sty release get", "action", "volatile", "restricted", true, "low", "none", "current", 30000),
-	Args:        cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPigstyReleaseGet(cmd, args, false)
-	},
-}
-
-func runPigstyReleaseList(cmd *cobra.Command, args []string, deprecated bool) error {
-	command := "pig sty release list"
-	kind := "pig.sty.release.list/v1"
-	if deprecated && !config.IsStructuredOutput() {
-		fmt.Fprintln(cmd.ErrOrStderr(), "Deprecated: 'pig sty list' keeps its 1.x release meaning; use 'pig sty release list'.")
-	}
-	if deprecated {
-		// Preserve the existing 1.x structured payload while the text path emits
-		// its stderr-only migration notice.
-		command, kind = "pig sty list", ""
-	}
-	return runLegacyStructuredKind(legacyModuleSty, command, kind, args, map[string]interface{}{
-		"mirror": pigstyListMirror,
-	}, func() error {
-		return pigstyListExec(stycli.ListOptions{Mirror: pigstyListMirror, Args: args})
-	})
-}
-
-func runPigstyReleaseGet(cmd *cobra.Command, args []string, deprecated bool) error {
-	command := "pig sty release get"
-	if deprecated {
-		command = "pig sty get"
-		if !config.IsStructuredOutput() {
-			fmt.Fprintln(cmd.ErrOrStderr(), "Deprecated: 'pig sty get' is a compatibility spelling; use 'pig sty release get'.")
-		}
-	}
-	return runLegacyStructuredKind(legacyModuleSty, command, "pig.sty.release.get/v1", args, map[string]interface{}{
-		"version": pigstyVersion,
-		"dir":     pigstyDownloadDir,
-		"mirror":  pigstyGetMirror,
-	}, func() error {
-		return pigstyGetExec(stycli.DownloadOptions{
-			Version: pigstyVersion, DownloadDir: pigstyDownloadDir, Mirror: pigstyGetMirror, Args: args,
+	RunE: func(_ *cobra.Command, args []string) error {
+		return runLegacyStructured(legacyModuleSty, "pig sty get", args, map[string]interface{}{
+			"version": pigstyVersion,
+			"dir":     pigstyDownloadDir,
+			"mirror":  pigstyGetMirror,
+		}, func() error {
+			return pigstyGetExec(stycli.DownloadOptions{
+				Version: pigstyVersion, DownloadDir: pigstyDownloadDir, Mirror: pigstyGetMirror, Args: args,
+			})
 		})
-	})
+	},
 }
 
 var (
@@ -600,7 +510,7 @@ var pigstyDeployCmd = &cobra.Command{
 		ancsAnn("pig sty deploy", "action", "volatile", "unsafe", false, "high", "none", "root", 600000),
 		map[string]string{"consent": "invocation"},
 	),
-	Aliases: []string{"d", "de", "install", "ins"},
+	Aliases: []string{"d", "de"},
 	Args:    cobra.NoArgs,
 	Long: `Deploy Pigsty using the deploy.yml playbook
 
@@ -608,17 +518,11 @@ This command runs the deploy.yml playbook from your Pigsty installation.
 For backward compatibility, if deploy.yml doesn't exist but install.yml does,
 it will use install.yml instead.
 
-Aliases: deploy, d, de, install, ins (for backward compatibility)
-
 Invocation is explicit consent: deploy starts immediately without a Pig prompt
 or --yes gate. This operation changes the target system; use Ctrl+C to interrupt
 execution if the command was invoked by mistake.
 `,
-	Example: `  pig sty deploy       # run deploy.yml (or install.yml if deploy.yml not found)
-  pig sty install      # same as deploy (backward compatible)
-  pig sty d            # short alias
-  pig sty de           # short alias
-  pig sty ins          # short alias`,
+	Example: `  pig sty deploy       # run deploy.yml (or install.yml if deploy.yml not found)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructuredKind(legacyModuleSty, "pig sty deploy", "pig.sty.deploy/v1", args, nil, func() error {
 			return pigstyDeployExec(stycli.DeployOptions{
@@ -645,6 +549,7 @@ func init() {
 
 	addStyConfigureFlags(pigstyConfCmd)
 	pigstyConfCmd.MarkFlagsMutuallyExclusive("mirror", "region")
+	pigstyConfCmd.MarkFlagsMutuallyExclusive("skip", "ip")
 	pigstyConfCmd.Flags().BoolVar(&pigstyConfRaw, "raw", false, "use legacy shell configure; generated passwords remain visible")
 	pigstyGrafanaCmd.PersistentFlags().StringVar(&pigstyGrafanaEndpoint, "endpoint", "", "Grafana origin and optional path prefix (default http://i.pigsty/ui)")
 	pigstyGrafanaCmd.PersistentFlags().StringVar(&pigstyGrafanaUsername, "username", "", "Grafana API username")
@@ -659,16 +564,11 @@ func init() {
 	pigstyGetcmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
 	pigstyGetcmd.Flags().BoolVarP(&pigstyGetMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 	pigstyListcmd.Flags().BoolVarP(&pigstyListMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
-	pigstyReleaseGetCmd.Flags().StringVarP(&pigstyVersion, "version", "v", "", "pigsty version string")
-	pigstyReleaseGetCmd.Flags().StringVarP(&pigstyDownloadDir, "dir", "d", "/tmp", "pigsty download directory")
-	pigstyReleaseGetCmd.Flags().BoolVarP(&pigstyGetMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
-	pigstyReleaseListCmd.Flags().BoolVarP(&pigstyListMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
 	pigstyGrafanaCmd.AddCommand(
 		pigstyGrafanaInfoCmd, pigstyGrafanaListCmd, pigstyGrafanaBootCmd,
 		pigstyGrafanaLoadCmd, pigstyGrafanaInitCmd, pigstyGrafanaDumpCmd, pigstyGrafanaCleanCmd,
 		pigstyGrafanaLangCmd, pigstyGrafanaStyleCmd,
 	)
-	pigstyReleaseCmd.AddCommand(pigstyReleaseListCmd, pigstyReleaseGetCmd)
-	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyGrafanaCmd, pigstyDeployCmd, pigstyReleaseCmd, pigstyListcmd, pigstyGetcmd)
+	styCmd.AddCommand(pigstyInitCmd, pigstyBootCmd, pigstyConfCmd, pigstyGrafanaCmd, pigstyDeployCmd, pigstyListcmd, pigstyGetcmd)
 }

@@ -3,6 +3,7 @@ package sty
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -373,6 +374,9 @@ func validatePGVersion(ver string) (int, error) {
 
 func resolvePrimaryIP(opts ConfigureOptions, mode string) (string, []string, error) {
 	var warnings []string
+	if opts.Skip && strings.TrimSpace(opts.PrimaryIP) != "" {
+		return "", warnings, errors.New("--skip and --ip are mutually exclusive")
+	}
 	if strings.HasPrefix(mode, "build/") {
 		warnings = append(warnings, "primary_ip replacement skipped for build/* templates")
 		return defaultPrimaryIP, warnings, nil
@@ -755,22 +759,7 @@ func commandExists(name string) bool {
 }
 
 func effectiveCurrentUser() string {
-	u := strings.TrimSpace(currentUserFn())
-	if u != "" {
-		return u
-	}
-	if u = strings.TrimSpace(config.CurrentUser); u != "" {
-		return u
-	}
-	if cu, err := user.Current(); err == nil && cu != nil {
-		if name := strings.TrimSpace(cu.Username); name != "" {
-			return name
-		}
-	}
-	if env := strings.TrimSpace(os.Getenv("USER")); env != "" {
-		return env
-	}
-	return ""
+	return strings.TrimSpace(currentUserFn())
 }
 
 func detectCurrentUser() string {

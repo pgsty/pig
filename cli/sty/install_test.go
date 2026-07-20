@@ -155,6 +155,16 @@ func TestInstallPigsty(t *testing.T) {
 	}
 }
 
+func TestRegularFileExistsHandlesStatErrors(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if regularFileExists(filepath.Join(file, "child")) {
+		t.Fatal("path below a regular file reported as existing")
+	}
+}
+
 func TestProInstallRequiresExplicitNonInteractiveEULAAcceptanceBeforeMutation(t *testing.T) {
 	original := license.Manager
 	license.Manager = &license.LicenseManager{Valid: true}

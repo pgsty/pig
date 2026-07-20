@@ -125,7 +125,6 @@ func TestConfigureNativeCarriesSSHPort(t *testing.T) {
 		Region:           "default",
 		OutputFile:       "with-port.yml",
 		SSHPort:          "2222",
-		Skip:             true,
 		NonInteractive:   true,
 		DisablePreflight: true,
 	})
@@ -244,6 +243,9 @@ func TestResolvePrimaryIPBranches(t *testing.T) {
 	ip, warnings, err := resolvePrimaryIP(ConfigureOptions{Skip: true}, "meta")
 	if err != nil || ip != defaultPrimaryIP || len(warnings) != 0 {
 		t.Fatalf("skip branch mismatch: ip=%q warnings=%v err=%v", ip, warnings, err)
+	}
+	if _, _, err := resolvePrimaryIP(ConfigureOptions{Skip: true, PrimaryIP: "10.0.0.1"}, "meta"); err == nil {
+		t.Fatal("expected --skip and --ip conflict")
 	}
 
 	if _, _, err := resolvePrimaryIP(ConfigureOptions{PrimaryIP: "bad-ip"}, "meta"); err == nil {

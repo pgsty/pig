@@ -77,6 +77,57 @@ func TestLifecycleResourceAndDependencyCodes(t *testing.T) {
 	}
 }
 
+func TestLifecycleCommandsRunInHomeWithoutChangingProcessDirectory(t *testing.T) {
+	home := t.TempDir()
+	writeScript := func(name string) {
+		t.Helper()
+		body := "#!/bin/sh\npwd > " + name + ".cwd\n"
+		if err := os.WriteFile(filepath.Join(home, name), []byte(body), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeScript("bootstrap")
+	writeScript("configure")
+
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ansible-playbook"), []byte("#!/bin/sh\npwd > deploy.cwd\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, name := range []string{"deploy.yml", "pigsty.yml"} {
+		if err := os.WriteFile(filepath.Join(home, name), nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	before, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "bootstrap", run: func() error { return Bootstrap(BootstrapOptions{PigstyHome: home}) }},
+		{name: "configure", run: func() error { return ConfigureRaw(RawConfigureOptions{PigstyHome: home}) }},
+		{name: "deploy", run: func() error {
+			return Deploy(DeployOptions{PigstyHome: home, PigstyConfig: filepath.Join(home, "pigsty.yml")})
+		}},
+	}
+	for _, command := range commands {
+		if err := command.run(); err != nil {
+			t.Fatalf("%s: %v", command.name, err)
+		}
+		if _, err := os.Stat(filepath.Join(home, command.name+".cwd")); err != nil {
+			t.Fatalf("%s did not run in Pigsty home: %v", command.name, err)
+		}
+	}
+	after, err := os.Getwd()
+	if err != nil || after != before {
+		t.Fatalf("working directory changed from %q to %q: %v", before, after, err)
+	}
+}
+
 func TestProInitRejectsBeforeNetworkOrFilesystemMutation(t *testing.T) {
 	originalManager := license.Manager
 	originalSource := get.Source

@@ -99,13 +99,10 @@ pig sty
   init | i
   boot | b | bootstrap
   conf | c | configure
-  deploy | d | de | install | ins
+  deploy | d | de
 
-  list | l | ls                       # existing release listing in 1.x
-  release
-    list | ls                         # canonical release listing
-    get                               # canonical release download
-  get | g | download                  # delegate to `release get`
+  list | l | ls                       # canonical release listing
+  get | g | download                  # canonical release download
 
   grafana | gf
     info | list | boot
@@ -118,13 +115,9 @@ pig sty
   terraform | tf                      # deferred P3
 ```
 
-The `sty list/l/ls` and `sty get/g/download` compatibility paths emit exactly
-one deprecation notice on stderr in text mode. They preserve stdout and never
-emit that notice into JSON/YAML structured output. `release get` and its
-top-level delegate accept the same flags and execute the same implementation.
-
-Canonical and convenience spellings MUST share one business implementation.
-They MUST NOT drift into duplicate code paths.
+The released `sty list/l/ls` and `sty get/g/download` spellings are the sole
+release-management surface. They preserve their 1.x command identifiers and
+structured payloads; Sty has no nested `release` namespace.
 
 ### 3.2 Root Inventory migration promise
 
@@ -154,10 +147,9 @@ after `inventory check|ck` shipped. The unreleased `sty inventory` and
 The exact mapping and compatibility decision are defined by
 [`inventory.md`](inventory.md#9-compatibility-and-release-contract).
 
-`sty list/l/ls` MUST NEVER be repurposed to mean Inventory list, including in
-Pig 2.0. It remains a release-list delegate until it is hidden and eventually
-removed in a reviewed major-version change. `pig inv ls` provides the short
-Inventory spelling without changing an existing command's meaning.
+`sty list/l/ls` MUST NEVER be repurposed to mean Inventory list. It remains the
+canonical release listing, while `pig inv ls` provides the short Inventory
+spelling without changing an existing command's meaning.
 
 ### 3.3 Reserved names
 
@@ -173,9 +165,9 @@ an existing Pig config when present but MUST NOT create `~/.pig` or
 the only Sty path that performs controller CPU/OS discovery; raw Configure owns
 its script probes, and other Sty commands skip them.
 
-`sty release get` and its deprecated `sty get` delegate download into a private
-sibling candidate. Pig flushes and closes the candidate, verifies the published
-checksum when available, validates the complete gzip/tar stream in every case,
+`sty get` downloads into a private sibling candidate. Pig flushes and closes
+the candidate, verifies the published checksum when available, validates the
+complete gzip/tar stream in every case,
 then atomically renames it over the final file and syncs the parent directory.
 An existing file is trusted without checksum metadata only when it is already a
 complete archive. A failed or interrupted candidate MUST NOT truncate, delete,
@@ -998,8 +990,8 @@ pig inventory edit [selector]    # edit full Inventory or one fragment
 pig inventory validate [file]    # native baseline validation
 pig inventory check              # local readiness; remote profiles are opt-in
 pig sty deploy                   # immediately run deploy.yml/install.yml
-pig sty release list             # canonical release listing
-pig sty release get [version]    # canonical atomic release download
+pig sty list                     # list available Pigsty releases
+pig sty get [version]            # canonical atomic release download
 pig sty gf info                  # health and authentication status
 pig sty gf load [path]           # pure dashboard/folder loading
 pig sty gf init [root]           # complete load followed by boot

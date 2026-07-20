@@ -28,9 +28,8 @@ func TestResolveGrafanaScopeShapes(t *testing.T) {
 		kind      grafanaScopeKind
 		folderUID string
 		uid       string
-		defaulted bool
 	}{
-		{name: "default root", kind: grafanaScopeRoot, defaulted: true},
+		{name: "default root", kind: grafanaScopeRoot},
 		{name: "explicit root", path: root, kind: grafanaScopeRoot},
 		{name: "folder", path: folder, kind: grafanaScopeFolder, folderUID: "pgsql"},
 		{name: "root file", path: rootFile, kind: grafanaScopeFile, uid: "pigsty"},
@@ -41,7 +40,7 @@ func TestResolveGrafanaScopeShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if scope.Root != root || scope.Kind != test.kind || scope.FolderUID != test.folderUID || scope.UID != test.uid || scope.Defaulted != test.defaulted {
+			if scope.Root != root || scope.Kind != test.kind || scope.FolderUID != test.folderUID || scope.UID != test.uid {
 				t.Fatalf("scope = %+v", scope)
 			}
 		})
@@ -100,11 +99,22 @@ func TestResolveGrafanaDumpScopeAllowsArbitraryDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scope.Kind != grafanaScopeRoot || scope.Root != destination || scope.Path != destination || scope.Defaulted {
+	if scope.Kind != grafanaScopeRoot || scope.Root != destination || scope.Path != destination {
 		t.Fatalf("scope = %+v", scope)
 	}
 	if _, err := resolveGrafanaDumpScope(GrafanaOptions{Path: filepath.Join(parent, "grafana"), DumpDir: destination}); err == nil {
 		t.Fatal("--dir with PATH succeeded")
+	}
+}
+
+func TestDashboardForGrafanaInitDoesNotMutateSource(t *testing.T) {
+	source := map[string]interface{}{"id": json.Number("42"), "uid": "pigsty"}
+	dashboard := dashboardForGrafanaInit(source)
+	if dashboard["id"] != nil {
+		t.Fatalf("dashboard id = %v, want nil", dashboard["id"])
+	}
+	if source["id"] != json.Number("42") {
+		t.Fatalf("source id changed to %v", source["id"])
 	}
 }
 

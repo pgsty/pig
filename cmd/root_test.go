@@ -130,7 +130,7 @@ func TestStyInitializationIsSideEffectFreeAndProbeScoped(t *testing.T) {
 
 	for _, command := range []*cobra.Command{
 		styCmd, pigstyInitCmd, pigstyBootCmd, pigstyDeployCmd, pigstyGrafanaCmd,
-		pigstyGrafanaListCmd, pigstyReleaseCmd, pigstyReleaseListCmd, pigstyReleaseGetCmd,
+		pigstyGrafanaListCmd, pigstyListcmd, pigstyGetcmd,
 	} {
 		options := commandInitOptions(command)
 		if options.CreateConfig {
