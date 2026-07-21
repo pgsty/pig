@@ -104,7 +104,7 @@ func (r *RepoListData) Text() string {
 			if !repo.Available {
 				marker = "x"
 			}
-			sb.WriteString(fmt.Sprintf("  %s { name: %-14s ,description: %-20s ,module: %-8s ,releases: %s ,arch: %s ,baseurl: '%s' }\n",
+			sb.WriteString(fmt.Sprintf("  %s { name: %-14s ,description: %-20s ,module: %-8s ,releases: %-19s ,arch: %-17s ,baseurl: '%s' }\n",
 				marker, repo.Name, fmt.Sprintf("'%s'", repo.Description), repo.Module,
 				formatIntSlice(repo.Releases), formatStrSlice(repo.Arch), repo.BaseURL))
 		}
@@ -115,7 +115,7 @@ func (r *RepoListData) Text() string {
 			if repo == nil {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("  - { name: %-14s ,description: %-20s ,module: %-8s ,releases: %s ,arch: %s ,baseurl: '%s' }\n",
+			sb.WriteString(fmt.Sprintf("  - { name: %-14s ,description: %-20s ,module: %-8s ,releases: %-19s ,arch: %-17s ,baseurl: '%s' }\n",
 				repo.Name, fmt.Sprintf("'%s'", repo.Description), repo.Module,
 				formatIntSlice(repo.Releases), formatStrSlice(repo.Arch), repo.BaseURL))
 		}

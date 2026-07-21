@@ -2,6 +2,7 @@ package ext
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"pig/internal/config"
@@ -34,8 +35,8 @@ func TestLoadAliasMapRequestedAliasesEL9(t *testing.T) {
 
 	expect := map[string]string{
 		"docker":         "docker-ce docker-compose-plugin",
-		"kafka-stack":    "kafka kafka_exporter jmx-exporter",
-		"mysql":          "mysql-community-server mysql-community-client mysql-shell mysql-router-community percona-xtrabackup-84 mysqld_exporter",
+		"kafka-stack":    "kafka kafka-exporter jmx-exporter",
+		"mysql":          "mysql-community-server mysql-community-client mysql-shell mysql-router-community percona-xtrabackup-84 mysqld-exporter",
 		"kubernetes":     "kubeadm kubelet kubectl",
 		"java-runtime":   "java-17-openjdk-src java-17-openjdk-headless",
 		"kube-runtime":   "containerd.io",
@@ -59,6 +60,69 @@ func TestLoadAliasMapRequestedAliasesEL9(t *testing.T) {
 	}
 	if _, ok := ec.AliasMap["kafka"]; ok {
 		t.Fatal("legacy kafka alias should not shadow the raw kafka package")
+	}
+}
+
+func TestLoadAliasMapNormalizesLegacyInfraPackageNames(t *testing.T) {
+	legacy := map[string]string{
+		"blackbox_exporter":   "blackbox-exporter",
+		"kafka_exporter":      "kafka-exporter",
+		"keepalived_exporter": "keepalived-exporter",
+		"mongodb_exporter":    "mongodb-exporter",
+		"mysqld_exporter":     "mysqld-exporter",
+		"nginx_exporter":      "nginx-exporter",
+		"node_exporter":       "node-exporter",
+		"pg_exporter":         "pg-exporter",
+		"pg_timetable":        "pg-timetable",
+		"pgbackrest_exporter": "pgbackrest-exporter",
+		"redis_exporter":      "redis-exporter",
+		"zfs_exporter":        "zfs-exporter",
+	}
+	tests := []struct {
+		name      string
+		osType    string
+		osCode    string
+		ivoryOld  string
+		ivoryWant string
+	}{
+		{name: "el", osType: config.DistroEL, osCode: "el9", ivoryOld: "ivorysql5", ivoryWant: "ivorysql-18"},
+		{name: "deb", osType: config.DistroDEB, osCode: "u24", ivoryOld: "ivorysql-5", ivoryWant: "ivorysql-18"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup := withAliasMapTestEnv(t, tt.osType, tt.osCode, "amd64")
+			defer cleanup()
+
+			ec := &ExtensionCatalog{}
+			ec.LoadAliasMap(config.OSType)
+			legacyPackages := make(map[string]bool, len(legacy)+1)
+			for oldName, canonical := range legacy {
+				legacyPackages[oldName] = true
+				if got := ec.AliasMap[oldName]; got != canonical {
+					t.Fatalf("legacy alias %s = %q, want %q", oldName, got, canonical)
+				}
+				if got, ok := ec.AliasMap[canonical]; ok {
+					t.Fatalf("canonical package %s should not have an identity alias, got %q", canonical, got)
+				}
+			}
+			if got := ec.AliasMap[tt.ivoryOld]; got != tt.ivoryWant {
+				t.Fatalf("legacy alias %s = %q, want %q", tt.ivoryOld, got, tt.ivoryWant)
+			}
+			legacyPackages[tt.ivoryOld] = true
+			for alias, value := range ec.AliasMap {
+				for _, pkg := range strings.Fields(strings.ReplaceAll(value, ",", " ")) {
+					if legacyPackages[pkg] {
+						t.Fatalf("alias %s still references legacy package name %s", alias, pkg)
+					}
+				}
+			}
+			for _, canonical := range []string{"ivorysql-18", "ivorysql-18-contrib"} {
+				if got, ok := ec.AliasMap[canonical]; ok {
+					t.Fatalf("canonical package %s should not have an identity alias, got %q", canonical, got)
+				}
+			}
+		})
 	}
 }
 
@@ -152,10 +216,13 @@ func TestLoadAliasMapIncludesCanonicalForkAliases(t *testing.T) {
 			osType: config.DistroEL,
 			osCode: "el9",
 			want: map[string]string{
-				"openhalo":   "openhalodb-$v",
-				"ivorysql":   "ivorysql5",
-				"babelfish":  "babelfish-$v",
-				"cloudberry": "cloudberry cloudberry-backup cloudberry-pxf",
+				"openhalo":    "openhalodb-$v",
+				"openhalodb":  "openhalodb-$v",
+				"ivorysql":    "ivorysql-$v ivorysql-$v-contrib",
+				"ivorysqldb":  "ivorysql-$v ivorysql-$v-contrib",
+				"babelfish":   "babelfish-$v",
+				"babelfishpg": "babelfish-$v",
+				"cloudberry":  "cloudberry cloudberry-backup cloudberry-pxf",
 			},
 		},
 		{
@@ -163,10 +230,13 @@ func TestLoadAliasMapIncludesCanonicalForkAliases(t *testing.T) {
 			osType: config.DistroDEB,
 			osCode: "u24",
 			want: map[string]string{
-				"openhalo":   "openhalodb-$v",
-				"ivorysql":   "ivorysql-5",
-				"babelfish":  "babelfish-$v",
-				"cloudberry": "cloudberry cloudberry-backup cloudberry-pxf",
+				"openhalo":    "openhalodb-$v",
+				"openhalodb":  "openhalodb-$v",
+				"ivorysql":    "ivorysql-$v ivorysql-$v-contrib",
+				"ivorysqldb":  "ivorysql-$v ivorysql-$v-contrib",
+				"babelfish":   "babelfish-$v",
+				"babelfishpg": "babelfish-$v",
+				"cloudberry":  "cloudberry cloudberry-backup cloudberry-pxf",
 			},
 		},
 	}
@@ -188,7 +258,48 @@ func TestLoadAliasMapIncludesCanonicalForkAliases(t *testing.T) {
 	}
 }
 
-func TestLoadAliasMapIncludesConfgenUtilityAliases(t *testing.T) {
+func TestLoadAliasMapKeepsOnlyNonIdentityUtilityAliases(t *testing.T) {
+	tests := []struct {
+		name   string
+		osType string
+		osCode string
+		omit   []string
+	}{
+		{
+			name:   "el",
+			osType: config.DistroEL,
+			osCode: "el9",
+			omit:   []string{"pg-hardstorage", "pgxnclient", "pgformatter", "pgcopydb", "pgloader"},
+		},
+		{
+			name:   "deb",
+			osType: config.DistroDEB,
+			osCode: "u24",
+			omit:   []string{"pg-hardstorage"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup := withAliasMapTestEnv(t, tt.osType, tt.osCode, "amd64")
+			defer cleanup()
+
+			ec := &ExtensionCatalog{}
+			ec.LoadAliasMap(config.OSType)
+			if got := ec.AliasMap["pg_hardstorage"]; got != "pg-hardstorage" {
+				t.Fatalf("pg_hardstorage compatibility alias = %q, want pg-hardstorage", got)
+			}
+
+			for _, key := range tt.omit {
+				if got, ok := ec.AliasMap[key]; ok {
+					t.Fatalf("unexpected alias for unavailable package %s: %q", key, got)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadAliasMapOmitsIdentityAliases(t *testing.T) {
 	tests := []struct {
 		name   string
 		osType string
@@ -205,15 +316,9 @@ func TestLoadAliasMapIncludesConfgenUtilityAliases(t *testing.T) {
 
 			ec := &ExtensionCatalog{}
 			ec.LoadAliasMap(config.OSType)
-
-			for key, want := range map[string]string{
-				"pg-hardstorage": "pg-hardstorage",
-				"pg_hardstorage": "pg-hardstorage",
-				"pgxnclient":     "pgxnclient",
-				"pgcopydb":       "pgcopydb",
-			} {
-				if got := ec.AliasMap[key]; got != want {
-					t.Fatalf("unexpected alias for %s: want %q, got %q", key, want, got)
+			for alias, packages := range ec.AliasMap {
+				if alias == strings.TrimSpace(packages) {
+					t.Fatalf("identity alias %s -> %s should be omitted", alias, packages)
 				}
 			}
 		})
@@ -233,9 +338,7 @@ func TestLoadAliasMapIncludesConfgenMiscAliases(t *testing.T) {
 			osCode: "el9",
 			want: map[string]string{
 				"supabase":    "pg_tle_$v,pgvector_$v,pg_cron_$v,pgsodium_$v,pg_graphql_$v,pg_jsonschema_$v,wrappers_$v,vault_$v,pgjwt_$v,pgsql_http_$v,pg_net_$v,supautils_$v,index_advisor_$v,safeupdate_$v,pg_plan_filter_$v",
-				"sealos":      "sealos",
-				"tigerbeetle": "tigerbeetle",
-				"infra-extra": "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent victoria-traces grafana-victorialogs-ds rclone mysqld_exporter mongodb_exporter kafka_exporter",
+				"infra-extra": "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent victoria-traces grafana-victorialogs-ds rclone mysqld-exporter mongodb-exporter kafka-exporter",
 				"victoria":    "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent victoria-traces grafana-victorialogs-ds",
 				"vmetrics":    "victoria-metrics victoria-metrics-cluster vmutils",
 				"vlogs":       "victoria-logs vlogscli vlagent",
@@ -248,8 +351,6 @@ func TestLoadAliasMapIncludesConfgenMiscAliases(t *testing.T) {
 			want: map[string]string{
 				"postgresql":  "postgresql-$v",
 				"supabase":    "postgresql-$v-pg-tle,postgresql-$v-pg-graphql,postgresql-$v-pg-jsonschema,postgresql-$v-wrappers,postgresql-$v-pgvector,postgresql-$v-cron,postgresql-$v-pgsodium,postgresql-$v-vault,postgresql-$v-pgjwt,postgresql-$v-http,postgresql-$v-pg-net,postgresql-$v-supautils,postgresql-$v-index-advisor,postgresql-$v-pg-safeupdate,postgresql-$v-pg-plan-filter",
-				"sealos":      "sealos",
-				"tigerbeetle": "tigerbeetle",
 				"infra-extra": "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent victoria-traces grafana-victorialogs-ds rclone mysqld-exporter mongodb-exporter kafka-exporter",
 				"victoria":    "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent victoria-traces grafana-victorialogs-ds",
 				"vmetrics":    "victoria-metrics victoria-metrics-cluster vmutils",
@@ -274,18 +375,18 @@ func TestLoadAliasMapIncludesConfgenMiscAliases(t *testing.T) {
 	}
 }
 
-func TestLoadAliasMapOmitsGreenplumAlias(t *testing.T) {
+func TestLoadAliasMapPreservesGreenplumAlias(t *testing.T) {
 	cleanup := withAliasMapTestEnv(t, config.DistroEL, "el9", "amd64")
 	defer cleanup()
 
 	ec := &ExtensionCatalog{}
 	ec.LoadAliasMap(config.OSType)
-	if _, ok := ec.AliasMap["greenplum"]; ok {
-		t.Fatal("greenplum alias should not be present")
+	if got := ec.AliasMap["greenplum"]; got != "open-source-greenplum-db-7" {
+		t.Fatalf("greenplum compatibility alias = %q, want open-source-greenplum-db-7", got)
 	}
 }
 
-func TestLoadAliasMapPreservesNonConflictingLegacyForkAliases(t *testing.T) {
+func TestLoadAliasMapPreservesCompatibilityForkAliases(t *testing.T) {
 	tests := []struct {
 		name   string
 		osType string
@@ -302,15 +403,15 @@ func TestLoadAliasMapPreservesNonConflictingLegacyForkAliases(t *testing.T) {
 
 			ec := &ExtensionCatalog{}
 			ec.LoadAliasMap(config.OSType)
-			for canonical, legacy := range map[string]string{
-				"agensgraph": "agens",
-				"polardb":    "polar",
-				"openhalo":   "openhalodb",
-				"ivorysql":   "ivorysqldb",
-				"babelfish":  "babelfishpg",
+			for key, want := range map[string]string{
+				"agens":       "agensgraph-$v",
+				"polar":       "polardb-$v",
+				"openhalo":    "openhalodb-$v",
+				"ivorysqldb":  "ivorysql-$v ivorysql-$v-contrib",
+				"babelfishpg": "babelfish-$v",
 			} {
-				if ec.AliasMap[legacy] != ec.AliasMap[canonical] {
-					t.Fatalf("legacy alias %s = %q, canonical %s = %q", legacy, ec.AliasMap[legacy], canonical, ec.AliasMap[canonical])
+				if got := ec.AliasMap[key]; got != want {
+					t.Fatalf("compatibility alias %s = %q, want %q", key, got, want)
 				}
 			}
 		})
@@ -332,7 +433,6 @@ func TestLoadAliasMapRequestedAliasesU22(t *testing.T) {
 		"java-runtime":   "openjdk-17-jdk",
 		"kube-runtime":   "containerd.io",
 		"agensgraph":     "agensgraph-$v",
-		"agens":          "agensgraph-$v",
 		"pgedge":         "pgedge-$v",
 		"orioledb":       "orioledb-$v",
 		"vtraces":        "victoria-traces",
@@ -369,7 +469,6 @@ func TestLoadAliasMapRequestedAliasesU26(t *testing.T) {
 		"java-runtime":   "openjdk-17-jdk",
 		"kube-runtime":   "containerd.io",
 		"agensgraph":     "agensgraph-$v",
-		"agens":          "agensgraph-$v",
 		"pgedge":         "pgedge-$v",
 		"orioledb":       "orioledb-$v",
 		"vtraces":        "victoria-traces",
@@ -499,7 +598,7 @@ func TestLoadAliasMapEl9Arm64UsesNoarchPatroniAliases(t *testing.T) {
 	if got := ec.AliasMap["patroni"]; got != "patroni.noarch patroni-etcd.noarch" {
 		t.Fatalf("unexpected patroni alias for el9 arm64: %q", got)
 	}
-	if got := ec.AliasMap["pgsql-common"]; got != "patroni.noarch patroni-etcd.noarch pgbouncer pgbackrest pg_exporter pgbackrest_exporter vip-manager" {
+	if got := ec.AliasMap["pgsql-common"]; got != "patroni.noarch patroni-etcd.noarch pgbouncer pgbackrest pg-exporter pgbackrest-exporter vip-manager" {
 		t.Fatalf("unexpected pgsql-common alias for el9 arm64: %q", got)
 	}
 }

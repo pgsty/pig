@@ -42,7 +42,7 @@ func (r *Repository) ToInlineYAML() string {
 	module := r.Module
 	releases := compactIntArray(r.Releases)
 	arch := compactStrArray(r.Arch)
-	return fmt.Sprintf("- { name: %-14s ,description: %-20s ,module: %-8s ,releases: %-16s ,arch: %-18s ,baseurl: '%s' }",
+	return fmt.Sprintf("- { name: %-14s ,description: %-20s ,module: %-8s ,releases: %-19s ,arch: %-17s ,baseurl: '%s' }",
 		name, desc, module, releases, arch, r.BaseURL["default"])
 }
 

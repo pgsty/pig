@@ -162,6 +162,88 @@ func TestResolveExtensionPackagesAlias(t *testing.T) {
 	}
 }
 
+func TestResolveExtensionPackagesNormalizesLegacyInfraAliases(t *testing.T) {
+	legacy := []string{
+		"blackbox_exporter",
+		"kafka_exporter",
+		"keepalived_exporter",
+		"mongodb_exporter",
+		"mysqld_exporter",
+		"nginx_exporter",
+		"node_exporter",
+		"pg_exporter",
+		"pg_timetable",
+		"pgbackrest_exporter",
+		"redis_exporter",
+		"zfs_exporter",
+	}
+	canonical := []string{
+		"blackbox-exporter",
+		"kafka-exporter",
+		"keepalived-exporter",
+		"mongodb-exporter",
+		"mysqld-exporter",
+		"nginx-exporter",
+		"node-exporter",
+		"pg-exporter",
+		"pg-timetable",
+		"pgbackrest-exporter",
+		"redis-exporter",
+		"zfs-exporter",
+	}
+	tests := []struct {
+		name     string
+		osType   string
+		osCode   string
+		ivoryOld string
+	}{
+		{name: "el", osType: config.DistroEL, osCode: "el9", ivoryOld: "ivorysql5"},
+		{name: "deb", osType: config.DistroDEB, osCode: "u24", ivoryOld: "ivorysql-5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanup := withResolveAliasTestEnv(t, tt.osType, "", tt.osCode, "amd64", newEmptyTestCatalog())
+			defer cleanup()
+
+			names := append(append([]string{}, legacy...), tt.ivoryOld)
+			want := append(append([]string{}, canonical...), "ivorysql-18")
+			res := ResolveExtensionPackages(18, names, false)
+			if len(res.NotFound) != 0 || len(res.NoPackage) != 0 {
+				t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
+			}
+			if !reflect.DeepEqual(res.Packages, want) {
+				t.Fatalf("normalized packages = %v, want %v", res.Packages, want)
+			}
+		})
+	}
+}
+
+func TestResolveExtensionPackagesStaticAliasOverridesPackageAlias(t *testing.T) {
+	ivory := &Extension{
+		Name:   "ivorysql_ora",
+		Pkg:    "ivorysql",
+		Lead:   true,
+		RpmPkg: "ivorysql-$v",
+	}
+	cleanup := withResolveAliasTestEnv(t, config.DistroEL, "9", "el9", "amd64", newTestCatalog(ivory))
+	defer cleanup()
+
+	res := ResolveExtensionPackages(18, []string{"ivorysql"}, false)
+	want := []string{"ivorysql-18", "ivorysql-18-contrib"}
+	if len(res.NotFound) != 0 || len(res.NoPackage) != 0 {
+		t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
+	}
+	if !reflect.DeepEqual(res.Packages, want) {
+		t.Fatalf("ivorysql packages = %v, want %v", res.Packages, want)
+	}
+
+	direct := ResolveExtensionPackages(18, []string{"ivorysql_ora"}, false)
+	if !reflect.DeepEqual(direct.Packages, []string{"ivorysql-18"}) {
+		t.Fatalf("exact extension packages = %v, want [ivorysql-18]", direct.Packages)
+	}
+}
+
 func TestResolveInstallPackagesTranslateAndVersion(t *testing.T) {
 	ext := &Extension{
 		Name:   "test_ext",

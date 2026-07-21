@@ -161,18 +161,20 @@ func resolvePackagePattern(pgVer int, rawName, baseName string, opts packageReso
 			}
 			return pkgName, ext.Name, ext, ""
 		}
+		// Explicit aliases may define package groups that intentionally override
+		// the catalog's normalized package alias (for example, IvorySQL + contrib).
+		if pgPkg, matched, noPackage := resolveAliasPattern(pgVer, baseName); matched {
+			if noPackage {
+				return "", "", nil, "no_package"
+			}
+			return pgPkg, rawName, nil, ""
+		}
 		if ext, ok := Catalog.ExtPkgMap[baseName]; ok {
 			pkgName := ext.PackageName(pgVer)
 			if pkgName == "" {
 				return "", "", ext, "no_package"
 			}
 			return pkgName, ext.Name, ext, ""
-		}
-		if pgPkg, matched, noPackage := resolveAliasPattern(pgVer, baseName); matched {
-			if noPackage {
-				return "", "", nil, "no_package"
-			}
-			return pgPkg, rawName, nil, ""
 		}
 		if !opts.FallbackToRaw {
 			return "", "", nil, "not_found"

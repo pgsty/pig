@@ -2147,8 +2147,8 @@ func TestRepoListDataText(t *testing.T) {
 				Name:        "pgdg17",
 				Description: "PGDG 17",
 				Module:      "pgdg",
-				Releases:    []int{8, 9, 10},
-				Arch:        []string{"x86_64", "aarch64"},
+				Releases:    []int{9},
+				Arch:        []string{"x86_64"},
 				BaseURL:     "https://download.postgresql.org/pub/repos/yum",
 				Available:   true,
 			},
@@ -2174,6 +2174,21 @@ func TestRepoListDataText(t *testing.T) {
 	}
 	if !strings.Contains(text, "repo_modules:") {
 		t.Errorf("Expected 'repo_modules:' in text, got '%s'", text)
+	}
+	archColumn, baseURLColumn := -1, -1
+	for _, line := range strings.Split(text, "\n") {
+		if !strings.HasPrefix(line, "  - {") {
+			continue
+		}
+		arch := strings.Index(line, ",arch:")
+		baseURL := strings.Index(line, ",baseurl:")
+		if archColumn == -1 {
+			archColumn, baseURLColumn = arch, baseURL
+			continue
+		}
+		if arch != archColumn || baseURL != baseURLColumn {
+			t.Fatalf("repo columns are not aligned:\n%s", text)
+		}
 	}
 
 	// Test showAll=true

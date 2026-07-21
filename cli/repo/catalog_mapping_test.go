@@ -145,7 +145,7 @@ func TestUbuntuRepoReleasePolicy(t *testing.T) {
 	assertReleases("haproxyu", "Haproxy Ubuntu", "deb", "x86_64", []int{24, 26})
 	assertReleases("timescaledb", "TimescaleDB", "deb", "x86_64", []int{11, 12, 13, 22, 24})
 	assertReleases("clickhouse", "ClickHouse", "deb", "x86_64", []int{11, 12, 13, 22, 24, 26})
-	assertReleases("mysql", "MySQL", "deb", "x86_64", []int{11, 12, 22, 24})
+	assertReleases("mysql", "MySQL 8.4 LTS", "deb", "x86_64", []int{12, 13, 22, 24})
 
 	for _, r := range repos {
 		if r.Name == "wiltondb" && r.InferOS() == "deb" {
@@ -155,6 +155,37 @@ func TestUbuntuRepoReleasePolicy(t *testing.T) {
 			if _, ok := r.BaseURL["origin"]; ok {
 				t.Fatalf("percona deb repo should not carry origin mirror metadata anymore: %+v", r.BaseURL)
 			}
+		}
+	}
+}
+
+func TestPXB84ChinaMirrorContract(t *testing.T) {
+	var repos []Repository
+	if err := yaml.Unmarshal(embedRepoData, &repos); err != nil {
+		t.Fatalf("failed to parse embedded repo catalog: %v", err)
+	}
+
+	want := map[string]string{
+		"rpm": "https://mirrors.cloud.tencent.com/percona/pxb-84-lts/yum/release/$releasever/RPMS/$basearch/",
+		"deb": "https://mirrors.cloud.tencent.com/percona/pxb-84-lts/apt ${distro_codename} main",
+	}
+	seen := make(map[string]bool)
+	for _, r := range repos {
+		if r.Name != "pxb84" {
+			continue
+		}
+		distro := r.InferOS()
+		if r.BaseURL["china"] != want[distro] {
+			t.Fatalf("pxb84 %s China mirror = %q, want %q", distro, r.BaseURL["china"], want[distro])
+		}
+		if r.GetBaseURL("china") != want[distro] {
+			t.Fatalf("pxb84 %s does not select its China mirror", distro)
+		}
+		seen[distro] = true
+	}
+	for _, distro := range []string{"rpm", "deb"} {
+		if !seen[distro] {
+			t.Fatalf("pxb84 %s repository not found", distro)
 		}
 	}
 }
