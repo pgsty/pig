@@ -8,7 +8,6 @@ package patroni
 import (
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 )
@@ -76,6 +75,63 @@ func TestParsePatroniListJSON_Normal(t *testing.T) {
 		t.Error("expected non-nil lag for replica")
 	} else if *m1.Lag != 0 {
 		t.Errorf("expected lag 0, got %d", *m1.Lag)
+	}
+}
+
+func TestParsePatroniListJSON_Patroni414Fields(t *testing.T) {
+	input := `[
+  {
+    "Cluster": "pg-test",
+    "Group": 0,
+    "Member": "pg-test-1",
+    "Host": "10.0.0.1",
+    "Role": "Leader",
+    "State": "running",
+    "TL": "",
+    "Receive LSN": "",
+    "Receive Lag": "",
+    "Replay LSN": "",
+    "Replay Lag": ""
+  },
+  {
+    "Cluster": "pg-test",
+    "Group": 1,
+    "Member": "pg-test-2",
+    "Host": "10.0.0.2",
+    "Role": "Replica",
+    "State": "streaming",
+    "TL": "7",
+    "Receive LSN": "0/300",
+    "Receive Lag": 1,
+    "Replay LSN": "0/200",
+    "Replay Lag": 2,
+    "Pending restart": "*",
+    "Pending restart reason": "shared_buffers: 128MB->4GB",
+    "Scheduled restart": "2026-07-21T02:00:00+08:00",
+    "Tags": {"nofailover": true}
+  }
+]`
+
+	data, err := parsePatroniListJSON(input)
+	if err != nil {
+		t.Fatalf("parsePatroniListJSON() error = %v", err)
+	}
+	if len(data.Members) != 2 || data.Members[0].TL != 0 {
+		t.Fatalf("empty timeline should remain parseable: %+v", data)
+	}
+	member := data.Members[1]
+	if member.Group == nil || *member.Group != 1 || member.TL != 7 {
+		t.Fatalf("group/timeline not preserved: %+v", member)
+	}
+	if member.ReceiveLSN != "0/300" || member.ReceiveLag == nil || *member.ReceiveLag != 1 ||
+		member.ReplayLSN != "0/200" || member.ReplayLag == nil || *member.ReplayLag != 2 {
+		t.Fatalf("receive/replay state not preserved: %+v", member)
+	}
+	if member.Lag == nil || *member.Lag != 2 {
+		t.Fatalf("compatibility lag = %v, want replay lag 2", member.Lag)
+	}
+	if !member.PendingRestart || member.ScheduledRestart == "" || member.Tags == nil {
+		t.Fatalf("extended fields not preserved: %+v", member)
 	}
 }
 
@@ -401,11 +457,9 @@ func TestParsePatroniListJSON_RoleLowerCase(t *testing.T) {
 func TestListResultUsesOptionalCluster(t *testing.T) {
 	patroniTestDepsMu.Lock()
 	oldLookPath := patroniLookPath
-	oldStat := patroniStat
 	oldDBSUCommandStdout := patroniDBSUCommandStdout
 	t.Cleanup(func() {
 		patroniLookPath = oldLookPath
-		patroniStat = oldStat
 		patroniDBSUCommandStdout = oldDBSUCommandStdout
 		patroniTestDepsMu.Unlock()
 	})
@@ -414,20 +468,18 @@ func TestListResultUsesOptionalCluster(t *testing.T) {
 	patroniLookPath = func(file string) (string, error) {
 		return "/usr/bin/patronictl", nil
 	}
-	patroniStat = func(name string) (os.FileInfo, error) {
-		return os.Stat(".")
-	}
 	patroniDBSUCommandStdout = func(dbsu string, args []string) (string, error) {
 		captured = append([]string(nil), args...)
 		return `[{"Member":"pg-meta-1","Host":"10.0.0.1","Role":"Leader","State":"running","TL":1,"Lag in MB":null}]`, nil
 	}
 
-	result := ListResult("postgres", "pg-meta")
+	group := 2
+	result := ListResult("postgres", &group, "pg-meta")
 	if !result.Success {
 		t.Fatalf("ListResult should succeed with stubbed deps, got code=%d detail=%q", result.Code, result.Detail)
 	}
-	if !argsHasInOrder(captured, "/usr/bin/patronictl", "-c", DefaultConfigPath, "list", "pg-meta", "-f", "json") {
-		t.Fatalf("captured args = %v, want list pg-meta -f json", captured)
+	if !argsHasInOrder(captured, "/usr/bin/patronictl", "-c", DefaultConfigPath, "list", "pg-meta", "--group", "2", "-f", "json") {
+		t.Fatalf("captured args = %v, want list pg-meta --group 2 -f json", captured)
 	}
 	if argsHas(captured, "-t") {
 		t.Fatalf("structured list should not include -t, captured=%v", captured)
@@ -451,7 +503,7 @@ func TestParseClusterNameFromConfig(t *testing.T) {
 		{
 			name: "top-level scope with inline comment",
 			content: `scope: pg-test # cluster scope
-bootstrap: [broken
+bootstrap: {}
 `,
 			wantCluster: "pg-test",
 		},
@@ -463,25 +515,25 @@ name: pg-test-1
 			wantCluster: "pg-test",
 		},
 		{
-			name: "quoted hash is rejected instead of truncated",
+			name: "quoted hash is preserved",
 			content: `scope: "pg-test#shard1"
 name: pg-test-1
 `,
-			wantErr: errClusterScopeInvalid,
+			wantCluster: "pg-test#shard1",
 		},
 		{
-			name: "unquoted hash is rejected",
+			name: "unquoted hash without comment spacing is preserved",
 			content: `scope: pg-test#shard1
 name: pg-test-1
 `,
-			wantErr: errClusterScopeInvalid,
+			wantCluster: "pg-test#shard1",
 		},
 		{
-			name: "nested scope is ignored",
+			name: "malformed yaml is rejected",
 			content: `bootstrap: [broken
   scope: nested
 `,
-			wantErr: errClusterScopeMissing,
+			wantErr: errClusterScopeInvalid,
 		},
 		{
 			name: "valid yaml with nested scope reports top-level missing",
@@ -513,16 +565,16 @@ name: pg-test-1
 			wantErr: errClusterScopeInvalid,
 		},
 		{
-			name: "anchor scope is rejected",
+			name: "yaml anchor scope is accepted",
 			content: `scope: &anchor pg-test
 `,
-			wantErr: errClusterScopeInvalid,
+			wantCluster: "pg-test",
 		},
 		{
-			name: "internal whitespace is rejected",
+			name: "internal whitespace is preserved",
 			content: `scope: pg test
 `,
-			wantErr: errClusterScopeInvalid,
+			wantCluster: "pg test",
 		},
 	}
 
@@ -565,6 +617,12 @@ func TestIsConfigNotFound(t *testing.T) {
 			name:   "generic config not found",
 			errMsg: "config not found",
 			output: "",
+			want:   true,
+		},
+		{
+			name:   "patronictl 4.1 explicit config unavailable",
+			errMsg: "exit status 1",
+			output: "Provided config file /missing.yml not existing or no read rights. Check the -c/--config-file parameter",
 			want:   true,
 		},
 		{

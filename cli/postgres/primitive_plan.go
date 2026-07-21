@@ -47,8 +47,8 @@ func BuildPromotePlan(cfg *Config, opts *PromoteOptions) *output.Plan {
 			{Name: "status", Status: "manual", Detail: "pig pg status"},
 		},
 		NextActions: []output.NextAction{
-			{Command: "pig pt switchover --plan", Reason: "planned Patroni-managed leadership transfer", Required: false},
-			{Command: "pig pt failover --plan", Reason: "Patroni-managed emergency leadership transfer", Required: false},
+			{Command: "pig pt switchover --help", Reason: "review native Patroni switchover syntax", Required: false},
+			{Command: "pig pt failover --help", Reason: "review native Patroni failover syntax", Required: false},
 			{Command: "pig pg promote --yes", Reason: "execute local-only promotion after explicit confirmation", Required: true},
 		},
 	}

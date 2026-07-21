@@ -402,6 +402,30 @@ func TestBuildStopPlanCommandIncludesTargetOptions(t *testing.T) {
 	}
 }
 
+func TestPatroniNextActionsUseSupportedNativeHelp(t *testing.T) {
+	cfg := &Config{PgVersion: 18, PgData: t.TempDir(), DbSU: config.CurrentUser}
+	plans := map[string]*output.Plan{
+		"restart": BuildRestartPlan(cfg, &RestartOptions{}),
+		"stop":    BuildStopPlan(cfg, &StopOptions{}),
+		"promote": BuildPromotePlan(cfg, &PromoteOptions{}),
+	}
+	for name, plan := range plans {
+		found := false
+		for _, action := range plan.NextActions {
+			if !strings.HasPrefix(action.Command, "pig pt ") {
+				continue
+			}
+			found = true
+			if strings.Contains(action.Command, "--plan") || !strings.HasSuffix(action.Command, " --help") {
+				t.Fatalf("%s plan has unsupported Patroni guidance: %#v", name, action)
+			}
+		}
+		if !found {
+			t.Fatalf("%s plan has no Patroni guidance: %#v", name, plan.NextActions)
+		}
+	}
+}
+
 // ============================================================================
 // Plan Structure Tests
 // ============================================================================

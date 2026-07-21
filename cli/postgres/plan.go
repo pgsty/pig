@@ -54,7 +54,7 @@ func BuildRestartPlan(cfg *Config, opts *RestartOptions) *output.Plan {
 	}
 	plan.NextActions = append(plan.NextActions,
 		restartNext,
-		output.NextAction{Command: "pig pt restart --plan", Reason: "preview Patroni-managed restart when Patroni owns this instance", Required: false},
+		output.NextAction{Command: "pig pt restart --help", Reason: "review native Patroni-managed restart syntax when Patroni owns this instance", Required: false},
 	)
 	return plan
 }
@@ -203,7 +203,7 @@ func BuildStopPlan(cfg *Config, opts *StopOptions) *output.Plan {
 	)
 	plan.NextActions = append(plan.NextActions,
 		output.NextAction{Command: buildStopCommandFor(cfg, opts, false), Reason: "execute stop after reviewing the plan", Required: running},
-		output.NextAction{Command: "pig pt pause --plan", Reason: "preview Patroni-managed lifecycle changes when Patroni owns this instance", Required: false},
+		output.NextAction{Command: "pig pt pause --help", Reason: "review native Patroni pause syntax when Patroni owns this instance", Required: false},
 	)
 	return plan
 }

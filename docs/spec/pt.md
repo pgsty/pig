@@ -1,529 +1,462 @@
 ---
 title: "pig patroni"
-description: "Manage Patroni service and cluster with pig patroni subcommand"
+description: "Run patronictl transparently with Pigsty service and config helpers"
 weight: 170
 icon: fas fa-infinity
 module: [PIG]
 categories: [Reference]
 ---
 
-The `pig patroni` command (alias `pig pt`) manages Patroni service and PostgreSQL HA clusters. It wraps common `patronictl` and `systemctl` operations for simplified cluster management.
+# `pig pt` Design Contract
 
-```bash
-pig pt - Low-level Patroni primitives (patronictl + systemd unit patroni).
-         Orchestrated point-in-time recovery lives in "pig pitr".
+Status: **normative; implemented**
 
-Cluster Operations (via patronictl):
-  pig pt list [cluster]            list cluster members
-  pig pt restart [member]          restart PostgreSQL (rolling restart)
-  pig pt reload                    reload PostgreSQL config
-  pig pt reinit <member>           reinitialize a member
-  pig pt pause                     pause automatic failover
-  pig pt resume                    resume automatic failover
-  pig pt switchover                perform planned switchover
-  pig pt failover [candidate]      perform manual failover
-  pig pt config <action>           manage cluster config (edit|show|set|pg)
+`pig patroni` (alias `pig pt`) is a transparent launcher for the installed
+`patronictl` binary. Pig does not copy Patronictl's command tree, flags,
+argument validation, confirmation policy, output model, or version-specific
+behavior.
 
-Service Management (via systemctl):
-  pig pt status                    show comprehensive patroni status
-  pig pt svc start (pig pt start)  start patroni service
-  pig pt svc stop  (pig pt stop)   stop patroni service
-  pig pt svc restart               restart patroni service
-  pig pt svc reload                reload patroni service
-  pig pt svc status                show patroni service status
+Pig adds only these local workflows:
 
-Logs:
-  pig pt log [-f] [-n 50]          view patroni logs
-  pig pt log tail [-n 50]          follow patroni logs
-  pig pt log show [-n 50]          show patroni log snapshot
-  pig pt log grep <pattern>        search patroni logs
+1. deterministic config-file selection for every Patronictl-backed invocation;
+2. `pt set` as a small PostgreSQL/Patroni configuration sugar;
+3. `pt start`, `pt stop`, and the `pt service` / `pt svc` family;
+4. `pt status` for combined local and cluster status;
+5. `pt log` for local Patroni logs.
+
+Everything else is passed to Patronictl without maintaining an allowlist of
+upstream commands or subcommand flags.
+
+## Boundary and non-goals
+
+The cluster-control path has one implementation and one authority:
+
+```text
+pig pt config selection and local dispatch
+        |
+        v
+installed patronictl + one selected config
+        |
+        +-- Patroni REST API
+        +-- configured DCS
+        +-- PostgreSQL (query)
 ```
 
-> **B03**: `pt start` / `pt stop` are hidden shortcuts for `pt svc start` / `pt svc stop`.
-> `pt service` is the official command name; `pt svc` is the short alias used in operator-facing examples.
-
-## Primitive Contract
-
-`pig pt` is the Patroni and DCS primitive layer. It changes cluster state through `patronictl` and Patroni service operations; it does not call `pig pg` to manage local `pg_ctl` lifecycle and does not run pgBackRest restore. Cross-module recovery and lifecycle choreography belongs in `pig pitr`.
-
-High-risk cluster actions and DCS mutations should present a structured `state -> plan -> precheck -> execute -> verify -> result -> next_actions` contract. In JSON/YAML mode, unsafe execution requires explicit `--yes` confirmation, while read-only commands such as `pt list`, `pt status`, and `pt config show` remain confirmation-free. Plan output is side-effect-free and may include `boundary`, `confirmation`, `preconditions`, `verifications`, and `next_actions` in addition to the existing plan fields.
-
-Pig owns confirmation for cluster operations (B04): `patronictl` always runs with its own `--force` flag and never prompts interactively (this includes `pt reload`, whose underlying `patronictl reload` would otherwise prompt for member confirmation). In text mode, `pt reinit`, `pt switchover`, `pt failover`, and cluster-wide `pt restart` ask a one-line `y/yes` confirmation at the pig layer unless `--yes/-y` is given. In structured (JSON/YAML) mode the same commands are fail-closed through the shared `requireStructuredConfirmation` gate (same envelope as `pg`/`pb`): without `--yes` Pig returns a confirmation-required result whose `data.operation` carries the operation metadata and whose `next_actions` carry replayable `--yes` execute and `--plan` preview commands rendered by the same builders the plans use. `pt restart` uses a conditional tier (D2): an explicit single member and `--pending` (already scoped by a prior config change) execute directly in both modes; only the unscoped cluster-wide rolling restart requires confirmation. `pt restart`, `pt reinit`, `pt switchover`, and `pt failover` all expose `--plan` previews; every `Plan.Command` is the replayable `--plan` preview form, and the first plan next action is the execute form — carrying `--yes` exactly when the scope is gated, so a `confirmation: none` plan never points at a confirmation-flagged command.
-
-Short option contract: `--wait` exposes `-w` whenever the command scope has no local shorthand conflict. This applies to `pt reinit`, `pt pause`, and `pt resume`; `pt list -w` remains the list interval flag because it is a different command scope.
-
-Switch preflight contract: before executing or asking for confirmation for `pt switchover` and `pt failover`, Pig reads the current Patroni topology through the same structured list/config surfaces used by `pig pt list` and `pig pt config show`. The preflight records the cluster name, current leader, observed candidate replicas, and Patroni pause mode. If the cluster is paused, Pig refuses the leader-transfer operation before prompting and returns `CodePtClusterPaused` in structured output with `pig pt resume` as the required next action.
-
-
-## Overview
-
-**Cluster Operations** (patronictl wrapper):
-
-| Command             | Alias | Description                   | Implementation                         |
-|:--------------------|:------|:------------------------------|:---------------------------------------|
-| `pt list [cluster]` | `ls`  | List cluster members          | `patronictl list [cluster] -e -t`      |
-| `pt restart`        | `rs`  | Restart PostgreSQL instance   | `patronictl restart`                   |
-| `pt reload`         | `rl`  | Reload PostgreSQL config      | `patronictl reload <scope> --force`    |
-| `pt reinit`         | `ri`  | Reinitialize member           | `patronictl reinit`                    |
-| `pt switchover`     | `so`  | Planned switchover            | `patronictl switchover`                |
-| `pt failover`       | `fo`  | Manual failover               | `patronictl failover`                  |
-| `pt pause`          | `p`   | Pause auto-failover           | `patronictl pause`                     |
-| `pt resume`         | `r`   | Resume auto-failover          | `patronictl resume`                    |
-| `pt config`         | `c`   | Show or modify cluster config | `patronictl show-config / edit-config` |
-{.full-width}
-
-**Service Management** (systemctl wrapper):
-
-| Command | Alias | Description | Implementation |
-|:--------|:------|:------------|:---------------|
-| `pt start` | `up` | Start Patroni service | `systemctl start patroni` |
-| `pt stop` | `dn` | Stop Patroni service | `systemctl stop patroni` |
-| `pt status` | `st` | Show comprehensive status | `systemctl status` + `ps` + `patronictl list` |
-| `pt log` | `l` | View Patroni logs | `tail` / `grep` local log files |
-{.full-width}
-
-The top-level `pt start` / `pt stop` shortcuts remain hidden (B03), but execute the same actions as
-`pt svc start` / `pt svc stop`. `pt service` is the official command name; `pt svc` is the short alias used in examples.
-
-**Service Subcommand** (`pt service`, alias `pt svc`):
-
-| Command | Alias | Description |
-|:--------|:------|:------------|
-| `pt svc start` | `up` | Start Patroni service |
-| `pt svc stop` | `dn` | Stop Patroni service |
-| `pt svc restart` | `rs` | Restart Patroni service |
-| `pt svc reload` | `rl` | Reload Patroni service |
-| `pt svc status` | `st` | Show service status |
-{.full-width}
-
-
-## Quick Start
-
-```bash
-# Check cluster member status
-pig pt list                    # List default cluster members
-pig pt list pg-meta            # List specific cluster
-pig pt list -W                 # Continuous watch mode
-pig pt list -w 5               # Refresh every 5 seconds
-
-# View and modify cluster config
-pig pt config                  # Show current cluster config (defaults to show)
-pig pt config set ttl=60       # Modify single config item (immediate effect)
-pig pt config set ttl=60 loop_wait=15  # Modify multiple config items
-
-# Cluster operations
-pig pt restart                 # Rolling restart ALL members (asks confirmation)
-pig pt restart pg-test-1       # Restart specific member (direct)
-pig pt restart --pending       # Apply pending restarts (direct)
-pig pt restart -y              # Cluster-wide restart, skip confirmation
-pig pt switchover              # Planned switchover (asks confirmation)
-pig pt pause                   # Pause auto-failover
-pig pt resume                  # Resume auto-failover
-
-# Manage Patroni service
-pig pt status                  # Check service status
-pig pt start                   # Hidden shortcut for pig pt svc start
-pig pt stop                    # Hidden shortcut for pig pt svc stop
-pig pt svc start               # Start service
-pig pt svc stop                # Stop service
-pig pt log -f                  # Real-time log viewing
-```
-
-
-## Global Options
-
-These options apply to all `pig pt` subcommands:
-
-| Option   | Short | Description                                             |
-|:---------|:------|:--------------------------------------------------------|
-| `--dbsu` | `-U`  | Database superuser (default: `$PIG_DBSU` or `postgres`) |
-{.full-width}
-
-
-## Cluster Commands
-
-### pt list
-
-List Patroni cluster member status. Wraps `patronictl list` with `-e` (extended output) and `-t` (show timestamp) flags by default. The optional `cluster` positional is passed through to `patronictl list`; without it, Patroni uses the local config.
-
-```bash
-pig pt list                    # List default cluster members
-pig pt list pg-meta            # List specific cluster
-pig pt list -W                 # Continuous watch mode
-pig pt list -w 5               # Refresh every 5 seconds
-pig pt list pg-test -W -w 3    # Watch pg-test cluster, 3s refresh
-```
-
-**Options:**
-
-| Option       | Short | Description                                                            |
-|:-------------|:------|:-----------------------------------------------------------------------|
-| `--watch`    | `-W`  | Enable continuous watch mode                                           |
-| `--interval` | `-w`  | Watch refresh interval in seconds; decimals such as `0.5` are accepted |
-{.full-width}
-
-Watch mode (`--watch/-W` or a positive `--interval/-w`) is passthrough text output only; structured output returns `CodePtWatchModeUnsupported`.
-
-**Argument policy:** `pt list` accepts at most one optional cluster positional. `pt restart` accepts at most one member positional. `pt reinit` requires exactly one member positional. `pt reload`, `pt switchover`, `pt pause`, and `pt resume` do not accept positionals. `pt reload` resolves the current cluster scope from Patroni config. Switchover target selection uses `--leader/-l` and `--candidate/-c`. `pt failover` accepts at most one optional candidate positional; `pig pt failover <member>` is equivalent to `pig pt failover --candidate <member>`, and a conflicting positional/flag candidate is a parameter error.
-
-
-### pt restart
-
-Restart PostgreSQL instance via Patroni. This triggers a rolling restart of PostgreSQL, not the Patroni daemon itself.
-
-```bash
-pig pt restart                   # Rolling restart ALL members (asks confirmation)
-pig pt restart -y                # Cluster-wide restart, skip confirmation
-pig pt restart pg-test-1         # Restart specific member (direct execution)
-pig pt restart --role=replica    # Restart replicas only (asks confirmation)
-pig pt restart --pending         # Apply pending restarts (direct execution)
-pig pt restart --plan            # Preview restart plan without executing
-```
-
-**Options:**
-
-| Option      | Short | Description                                    |
-|:------------|:------|:-----------------------------------------------|
-| `--yes`     | `-y`  | Skip confirmation prompt                       |
-| `--role`    | `-r`  | Filter by role (leader/replica/any, validated) |
-| `--pending` | `-p`  | Restart only pending members                   |
-| `--plan`    |       | Preview restart plan without executing         |
-{.full-width}
-
-**Confirmation tier (D2, conditional):** an explicit single member executes directly in both output modes, and so does `--pending` — it only restarts members already flagged by a prior (operator-initiated) config change, making it the friction-free follow-up that `pt config pg` suggests in `next_actions`. An unscoped cluster-wide rolling restart (no member, no `--pending`, with or without `--role`) is T2: text mode asks a pig-level confirmation unless `--yes`; JSON/YAML mode is fail-closed and returns a confirmation-required result without `--yes`. `patronictl restart` always receives `--force` and never prompts (B04).
-
-
-### pt reload
-
-Reload PostgreSQL configuration via Patroni. Triggers config reload on all members.
-
-`pig pt reload` does not accept a cluster positional. It reads `scope:` from
-`/etc/patroni/patroni.yml` and executes `patronictl reload <scope> --force`
-internally, because `patronictl reload` requires `CLUSTER_NAME` even when `-c`
-points at the Patroni config file, and because it would otherwise prompt its own
-interactive member confirmation (B04: pig owns confirmation; reload is a
-low-risk primitive that runs without one).
-
-```bash
-pig pt reload
-```
-
-
-### pt reinit
-
-Reinitialize cluster member. This re-syncs data from the primary.
-
-```bash
-pig pt reinit pg-test-1          # Reinit specific member (asks confirmation)
-pig pt reinit pg-test-1 -y       # Skip confirmation
-pig pt reinit pg-test-1 -w       # Wait for completion
-pig pt reinit pg-test-1 --plan   # Preview reinit plan
-```
-
-**Options:**
-
-| Option   | Short | Description                           |
-|:---------|:------|:--------------------------------------|
-| `--yes`  | `-y`  | Skip confirmation prompt              |
-| `--wait` | `-w`  | Wait for reinit completion            |
-| `--plan` |       | Preview reinit plan without executing |
-{.full-width}
-
-**Warning:** This operation deletes all data on the target member and re-syncs from primary. Text mode asks a pig-level confirmation ("This will WIPE and rebuild member ...") unless `--yes`; JSON/YAML execution is fail-closed and requires `--yes`. `patronictl reinit` always receives `--force` (B04).
-
-
-### pt switchover
-
-Perform planned primary-replica switchover. (alias `so`)
-
-```bash
-pig pt switchover                 # Planned switchover (asks confirmation)
-pig pt switchover -y              # Skip confirmation
-pig pt switchover --plan          # Show switchover plan without running
-pig pt switchover -l pg-1 -c pg-2 # Specify current and new primary
-pig pt switchover -s "2026-07-04T12:00:00" # Schedule switchover
-```
-
-**Options:**
-
-| Option        | Short | Description                             |
-|:--------------|:------|:----------------------------------------|
-| `--yes`       | `-y`  | Skip confirmation prompt                |
-| `--leader`    | `-l`  | Specify current primary                 |
-| `--candidate` | `-c`  | Specify candidate new primary           |
-| `--scheduled` | `-s`  | Scheduled time for switchover           |
-| `--plan`      |       | Show execution plan only, don't execute |
-{.full-width}
-
-Execution preflight reads the current cluster topology before confirmation. If Patroni pause mode is enabled, Pig refuses the switchover and tells the operator to run `pig pt resume` first. Otherwise the text confirmation names the cluster, current leader, and observed candidate replicas; without `--candidate/-c` it states that Patroni will choose the most eligible replica and suggests `pig pt switchover -c <instance>` for an explicit target. JSON/YAML execution is fail-closed and requires `--yes`. `patronictl switchover` always receives `--force` (B04).
-
-
-### pt failover
-
-Perform manual failover. Used when primary is unavailable. A candidate is
-required: Patroni's REST API only performs failover to an explicit candidate,
-so pig fails fast (structured mode returns a parameter error) instead of
-leaving the rejection to patronictl. The candidate can be provided either as
-`--candidate/-c <member>` or as the single positional `pig pt failover <member>`.
-
-```bash
-pig pt failover --candidate pg-2   # Manual failover (asks confirmation)
-pig pt failover pg-2               # Same candidate, positional form
-pig pt failover -c pg-2 -y         # Skip confirmation
-pig pt failover -c pg-2 --plan     # Preview failover plan
-```
-
-**Options:**
-
-| Option | Short | Description |
-|:-------|:------|:------------|
-| `--yes` | `-y` | Skip confirmation prompt |
-| `--candidate` | `-c` | Candidate new primary (required unless positional candidate is used) |
-| `--plan` | | Show execution plan only, don't execute |
-{.full-width}
-
-Execution preflight reads the current cluster topology before confirmation. If Patroni pause mode is enabled, Pig refuses the failover and tells the operator to run `pig pt resume` first. Otherwise the text confirmation names the cluster, current leader, requested candidate, and observed candidate replicas, while still warning that failover can lose data. JSON/YAML execution is fail-closed and requires `--yes`. `patronictl failover` always receives `--force` (B04).
-
-
-### pt pause
-
-Pause Patroni's automatic failover.
-
-```bash
-pig pt pause                      # Pause auto-failover
-pig pt pause -w                   # Wait for confirmation
-```
-
-**Options:**
-
-| Option | Short | Description |
-|:-------|:------|:------------|
-| `--wait` | `-w` | Wait for operation completion |
-{.full-width}
-
-**Use case:** Pause auto-failover during maintenance operations (e.g., major version upgrade, storage migration) to prevent accidental triggers.
-
-
-### pt resume
-
-Resume Patroni's automatic failover.
-
-```bash
-pig pt resume                     # Resume auto-failover
-pig pt resume -w                  # Wait for confirmation
-```
-
-**Options:**
-
-| Option | Short | Description |
-|:-------|:------|:------------|
-| `--wait` | `-w` | Wait for operation completion |
-{.full-width}
-
-
-### pt config
-
-Show or modify cluster configuration. Without an action it defaults to `show`
-in both output modes; modifications go through the explicit `set` (Patroni
-config) and `pg` (PostgreSQL parameters) actions with `key=value` pairs.
-
-```bash
-pig pt config                           # Show current cluster config
-pig pt config show                      # Show config (explicit)
-pig pt config edit                      # Interactive config edit
-pig pt config set ttl=60                # Set TTL to 60 seconds
-pig pt config set ttl=60 loop_wait=15   # Modify multiple config items
-pig pt config set ttl=60 --plan         # Preview DCS config change
-pig pt config pg max_connections=200    # Modify PostgreSQL parameter
-pig pt config pg shared_buffers=4GB --plan  # Preview PostgreSQL parameter change
-```
-
-**Subcommands:**
-
-| Subcommand | Description |
-|:-----------|:------------|
-| `show` (default) | Show current config |
-| `edit` | Interactive config edit |
-| `set key=value` | Directly set config item |
-| `pg key=value` | Set PostgreSQL parameter |
-{.full-width}
-
-**Options:**
-
-| Option | Short | Description |
-|:-------|:------|:------------|
-| `--plan` | | Preview `set` or `pg` config changes without executing |
-{.full-width}
-
-`set` and `pg` reject non-`key=value` tokens instead of silently dropping them. `edit` is interactive and is not supported in structured output. `pg` changes analyze known postmaster-context parameters and include `pig pt list` plus `pig pt restart --pending` next actions when a PostgreSQL restart is required.
-
-**Common config items:**
-
-| Config | Description | Default |
-|:-------|:------------|:--------|
-| `ttl` | Leader lock time-to-live (seconds) | 30 |
-| `loop_wait` | Main loop sleep time (seconds) | 10 |
-| `retry_timeout` | DCS and PostgreSQL operation timeout (seconds) | 10 |
-| `maximum_lag_on_failover` | Maximum lag allowed during failover (bytes) | 1048576 |
-{.full-width}
-
-**Note:** This command modifies dynamic cluster config stored in DCS (e.g., etcd), not local config file `/etc/patroni/patroni.yml`.
-
-
-## Service Commands
-
-### pt start / pt stop (hidden shortcuts, B03)
-
-The top-level `pt start` / `pt stop` shortcuts are hidden from help, but execute the same service
-actions as `pt svc start` / `pt svc stop`:
-
-```bash
-pig pt start                     # Hidden shortcut for pig pt svc start
-pig pt stop                      # Hidden shortcut for pig pt svc stop
-pig pt svc start                 # Start Patroni service
-pig pt svc stop                  # Stop Patroni service
-```
-
-The aliases stay minimal and aligned with the `pt svc` commands: `up` routes to start, and
-`dn` routes to stop.
-
-**Note:** Stopping Patroni service will also stop the PostgreSQL instance on this node (depending on Patroni configuration).
-
-
-### pt status
-
-Show Patroni service comprehensive status, including:
-- systemd service status
-- Patroni process info
-- Cluster member status
-
-```bash
+Pig does not:
+
+- embed `go-patroni`, a DCS client, another REST control engine, or `etcdctl`;
+- gate behavior on the installed Patronictl version;
+- maintain a Patronictl command inventory or per-command option structs;
+- parse or normalize forwarded native-command output into command-specific
+  DTOs;
+- add confirmation, `--force`, preflight checks, retries, or post-state reads to
+  forwarded commands;
+- validate Patroni dynamic-configuration relationships;
+- retain Pig aliases for upstream commands such as `ls`, `so`, or `fo`;
+- register a special `pt config` command.
+
+## Command grammar
+
+```text
+pig pt [PIG_PT_OPTIONS] <native-command> [native-arguments...]
+pig pt set <key=value>... [--yes] [--plan]
+pig pt start|stop
+pig pt service|svc <start|stop|restart|reload|status>
 pig pt status
+pig pt log ...
+pig pt -- <native-command> [native-arguments...]
 ```
 
+The first command token determines dispatch:
 
-### pt log
+- `set`, `start`/`up`, `stop`/`dn`, `service`/`svc`, `status`/`st`, and
+  `log`/`l` select Pig's local implementation;
+- every other token selects transparent Patronictl forwarding;
+- a leading `--` after `pt` disables local-name recognition and provides a
+  collision escape hatch, for example `pig pt -- set ...`;
+- `pig pt` with no command prints Pig's `pt` help and does not run Patronictl;
+- `pig pt --help` prints Pig help;
+- native help uses `pig pt <native-command> --help`; Patronictl root help uses
+  `pig pt -- --help`.
 
-View the current Patroni local log file. Pig resolves the log directory from `log.dir` in `/etc/patroni/patroni.yml`; if the config cannot provide it, Pig falls back to `/pg/log/patroni`. `pt log` only reads the active `patroni.log` file in that directory; it does not list or inspect rotated log files. Use `--log-dir` to override the directory for non-standard deployments.
-
-Use `-o json` with `pt log` or `pt log show` for JSONL log records; `yaml` and `json-pretty` are not supported for log snapshots. JSONL mode wraps each raw log line as a JSONL record whose `message` field preserves the original file content. Structured output is not supported for follow/tail or grep mode.
+`pt` is a runnable Cobra parent with `cobra.ArbitraryArgs`. Its flag set uses
+non-interspersed parsing. Pig/PT options before the first native command token
+are consumed; the native command and every subsequent token are retained
+verbatim and in order:
 
 ```bash
-pig pt log                     # Show last 50 log lines
-pig pt log -f                  # Real-time log following
-pig pt log tail                # Real-time log following
-pig pt log show                # Show last 50 log lines from patroni.log
-pig pt log grep ERROR          # Search patroni.log, case-insensitive
-pig pt log grep -n 500 ERROR   # Search only the last 500 lines
-pig pt log -n 100              # Show last 100 log lines
-pig pt log -f -n 200           # Show last 200 lines and follow
+pig pt list pg-test --watch 5 --format json
+pig pt query pg-test -c 'select now()' -d postgres -U dbuser
 ```
 
-**Subcommands:**
+This design must not use Cobra/pflag's unknown-flag allowlist. That mode drops
+unknown flags and, in some forms, their following values.
 
-| Subcommand | Aliases | Description |
-|:---|:---|:---|
-| `tail` | `t`, `f`, `follow` | Real-time follow `patroni.log` |
-| `show` | `cat`, `c`, `s` | Show `patroni.log` |
-| `grep <pattern>` | `g`, `search` | Case-insensitive search of `patroni.log` |
-{.full-width}
-
-**Options:**
-
-| Option | Short | Default | Description |
-|:-------|:------|:--------|:------------|
-| `--follow` | `-f` | false | Real-time log following |
-| `--lines` | `-n` | 50 for show/tail, unset for grep | Number of log lines to show, or grep search range when explicitly supplied |
-| `--log-dir` | | resolved from config, else `/pg/log/patroni` | Patroni log directory |
-{.full-width}
-
-`pt log tail` also accepts `--follow/-f` as a documented no-op (B16): tail always follows.
-
-Log file reads execute as the configured database superuser (`--dbsu`, default `postgres`). If the current user is the DBSU, Pig runs file tools directly. If the current user is root, Pig uses `su - <dbsu> -c ...`. Other users use `sudo -inu <dbsu> -- ...`.
-
-Text snapshot mode is equivalent to `tail -n N <log-dir>/patroni.log`. Follow mode is equivalent to `tail -n N -f <log-dir>/patroni.log`. JSONL mode is equivalent to `tail -n N <log-dir>/patroni.log` followed by JSONL wrapping. Grep mode is case-insensitive by default; without `-n`, it searches the whole `patroni.log`; with `-n N`, it searches only the last N lines.
-
-
-## pt service Subcommand
-
-`pt service` is the official command group for operating on the Patroni daemon. `pt svc` is the short alias used in operator-facing examples. Hidden top-level
-`pt start` / `pt stop` shortcuts map to its start/stop actions:
+Pig models the small Patronictl root-option surface listed below because those
+options precede the command token. Native subcommand options are never modeled.
+If a future Patronictl release adds an unknown root option, callers can pass the
+entire native form through the collision escape hatch:
 
 ```bash
-pig pt svc start                 # Start Patroni service
-pig pt svc stop                  # Stop Patroni service
-pig pt svc restart               # Restart Patroni service
-pig pt svc reload                # Reload Patroni service
-pig pt svc status                # Show service status
+pig pt -- --future-root-option VALUE native-command ...
 ```
 
-**Alias Reference:**
+Shell completion covers Pig's local commands and wrapper options only. Pig does
+not copy Patronictl's dynamic completion inventory.
 
-| Command | Alias |
-|:--------|:------|
-| `pt service` | `svc` |
-| `pt svc start` | `up` |
-| `pt svc stop` | `dn` |
-| `pt svc restart` | `rs` |
-| `pt svc reload` | `rl` |
-| `pt svc status` | `st` |
-{.full-width}
+## Pig/PT options
 
+| Option | Meaning |
+|:--|:--|
+| `-c`, `--config-file PATH` | Explicit Patronictl configuration file |
+| `--dbsu USER` | OS user used to execute Patronictl |
+| `-d URL`, `--dcs-url URL`, `--dcs URL` | Patronictl root DCS override |
+| `-k`, `--insecure` | Patronictl root TLS-verification override |
 
-## Design Notes
+These options must precede the native command. This prevents Pig from stealing
+same-named native subcommand flags:
 
-**Relationship with patronictl:**
+```bash
+pig pt -c /path/patroni.yml list   # wrapper/root config option
+pig pt query -c 'select 1'         # native query SQL option
+```
 
-`pig pt` wraps common `patronictl` operations:
-- Cluster queries: `list`, `config show`
-- Cluster management: `restart`, `reload`, `reinit`, `switchover`, `failover`, `pause`, `resume`
-- Config modification: `config set`, `config edit`
-- Service commands (start/stop/restart/reload/status) call `systemctl`
-- Log commands read local Patroni log files under the resolved `log.dir`
+Normal Pig root options also belong before the native command. Once the native
+command token is encountered, remaining tokens belong exclusively to
+Patronictl.
 
-**Default Config Paths:**
+## Config-file resolution
 
-| Config | Default |
-|:-------|:--------|
-| Patroni config file | `/etc/patroni/patroni.yml` |
-| Service name | `patroni` |
-| Patroni log directory | `log.dir` from Patroni config, else `/pg/log/patroni` |
-| Patroni log file | `patroni.log` |
-{.full-width}
+Every Patronictl invocation receives exactly one Pig-selected root `-c PATH`.
+The precedence is normative:
 
-**Cluster Scope Resolution:**
+1. explicit `-c/--config-file` supplied before the command;
+2. non-empty `PATRONICTL_CONFIG_FILE`;
+3. `/etc/patroni/patroni.yml`, when it exists and is readable;
+4. `/infra/conf/patronictl.yml`, when it exists and is readable;
+5. `/etc/patroni/patroni.yml` without claiming it exists, so Patronictl's error
+   names the conventional target.
 
-`patronictl reload`, `restart`, `reinit`, `switchover`, and `failover` require a `CLUSTER_NAME` positional argument. `pig pt` reads `scope:` from `/etc/patroni/patroni.yml` and prepends it before member/candidate flags for those subcommands. If the config is not directly readable, `pig pt` retries the read as the configured DBSU.
+Explicit and environment paths are authoritative. Pig does not silently
+replace them when they are missing or unreadable. Relative explicit and
+environment paths are converted to absolute paths before changing OS user.
 
-**Structured Output Error Codes:**
+The two conventional candidates are checked for actual readability as the
+resolved DBSU, because that is the identity that consumes the selected file.
+When Pig already runs as DBSU it can check directly. Otherwise one fixed,
+read-only DBSU probe checks `/etc` first and `/infra` second; Pig must not infer
+access from Unix mode bits. Failure to start the DBSU probe is an execution
+error, not evidence that both files are unreadable.
 
-| Code | Meaning |
-|:-----|:--------|
-| `CodePtConfigNotFound` | Patroni config file was not found |
-| `CodePtPermDenied` | Permission denied reading the Patroni config or running `patronictl` |
-| `CodePtScopeMissing` | `scope:` is missing or empty in the Patroni config |
-| `CodePtConfigResolveFailed` | Cluster scope resolution failed for an unclassified reason |
-| `CodePtConfigReadFailed` | Patroni config exists or was attempted but could not be read for a non-permission, non-not-found reason |
-| `CodePtClusterPaused` | `pt switchover` / `pt failover` preflight found the cluster in Patroni pause mode; run `pig pt resume` before retrying |
-| `CodePtConfirmationRequired` | Structured cluster-wide `pt restart` / `pt reinit` / `pt switchover` / `pt failover` invoked without `--yes` |
-| `CodePtWatchModeUnsupported` | `pt list --watch/-W` is incompatible with structured output |
-| `150199` (generic param error) | Invalid parameters rejected by the cmd envelope: bad `--role`, `failover` without `--candidate`, non-`key=value` config args, unsupported log modes |
-| `150899` (generic op failure) | A wrapped patronictl/systemctl operation failed without a more specific classification |
-{.full-width}
+Resolution is lazy. Pure systemd operations such as `pt svc start` do not
+resolve Patronictl, switch to DBSU, or probe either config file. Native
+forwarding, `set`, `status`, and config-aware log operations resolve only when
+they consume the selected config.
 
-`NN=99` is reserved in every module's param/operation category for these
-generic envelope codes (`output.GenericParamError` / `output.GenericOpFailed`),
-so they can never collide with named `CodePt*` constants.
+| State | Selected path |
+|:--|:--|
+| explicit path present | explicit path |
+| no explicit, environment non-empty | environment path |
+| both conventional files readable | `/etc/patroni/patroni.yml` |
+| only `/etc` readable | `/etc/patroni/patroni.yml` |
+| only `/infra` readable | `/infra/conf/patronictl.yml` |
+| neither readable | `/etc/patroni/patroni.yml` fallback |
 
-**Permission Handling:**
+The resulting logical invocation is:
 
-- If current user is DBSU: execute commands directly
-- If current user is root: use `su - postgres -c "..."` to execute
-- Other users: use `sudo -inu postgres -- ...` to execute
-- systemctl actions escalate via sudo for non-root users, except the read-only
-  `status` action, which runs unprivileged (with `--no-pager -l`) so it works
-  without sudo rights
+```text
+patronictl -c SELECTED_PATH [--dcs-url URL] [--insecure] <native argv...>
+```
 
-**Platform Support:**
+## Transparent execution
 
-This command is designed for Linux systems, depends on `systemctl` for service operations and standard local file tools such as `tail` and `grep` for log operations.
+For a forwarded native command Pig must:
+
+- resolve `patronictl` from `PATH` before changing OS user;
+- execute as explicit `--dbsu`, then `$PIG_DBSU`, then `postgres`;
+- preserve native argv spelling and order after the command token;
+- directly inherit stdin, stdout, stderr, and terminal file descriptors;
+- preserve native prompts, editor behavior, streaming output, and exit status,
+  including Click usage exit status `2`;
+- avoid output capture, duplicate error rendering, command hints, full-argv
+  logging, success-text inspection, and retries;
+- avoid reading cluster or DCS state before or after execution.
+
+The forwarding path therefore uses a dedicated DBSU execution primitive. It
+must not reuse a helper that inserts capture buffers or changes terminal
+identity. Pig may prepend only the selected config and explicit wrapper-level
+DCS/TLS options.
+
+If `patronictl` cannot be resolved, Pig returns `CodePtNotFound`. Once the
+binary starts, Patronictl owns its diagnostics and exit status.
+
+### Output modes
+
+Transparent forwarding supports Pig's `text` output mode only. A Pig root
+`-o json`, `-o yaml`, or `-o json-pretty` placed before the native command is
+rejected before execution, with guidance to use Patronictl's native output
+option for that command.
+
+Pig's early output-mode scan must stop at the native command token. Therefore:
+
+```bash
+pig -o json pt list             # rejected: Pig structured output requested
+pig pt -o json list             # rejected: Pig structured output requested
+pig pt list --format json       # forwarded unchanged
+pig pt list -o json             # forwarded unchanged; Patronictl validates it
+```
+
+Local `set`, service, status, and log workflows retain their documented Pig
+output behavior. The native forwarding path never creates a generic Pig
+command envelope.
+
+## `pig pt set`
+
+`set` edits the cluster selected by the resolved configuration:
+
+```text
+pig pt set KEY=VALUE [KEY=VALUE ...] [--yes] [--plan]
+```
+
+It accepts one or more complete `key=value` tokens. The key is the non-empty,
+trimmed substring before the first `=`. The remaining value is preserved,
+including additional `=` characters. Shell quoting remains the caller's
+responsibility.
+
+### Key classification
+
+The following scalar Patroni dynamic keys become repeated native `--set`
+arguments:
+
+```text
+loop_wait
+ttl
+retry_timeout
+primary_race_backoff
+maximum_lag_on_failover
+maximum_lag_on_syncnode
+max_timelines_history
+primary_start_timeout
+primary_stop_timeout
+synchronous_mode
+synchronous_mode_strict
+synchronous_node_count
+failsafe_mode
+check_timeline
+member_slots_ttl
+```
+
+This small list covers Pigsty's RTO/RPO and synchronous-replication controls,
+plus Patroni's documented top-level scalar controls. `pause` is deliberately
+excluded because `patronictl pause` and `resume` own that workflow.
+
+Every other key is treated as a PostgreSQL parameter and becomes a native
+`--pg` argument. This includes custom GUCs containing dots, such as
+`timescaledb.telemetry_level`.
+
+To prevent known structural Patroni paths from being silently written as
+PostgreSQL GUCs, `set` rejects dotted keys beginning with these namespaces:
+
+```text
+postgresql.
+standby_cluster.
+slots.
+ignore_slots.
+```
+
+The error points to native `pig pt edit-config --set`. Pig does not attempt to
+support structural, list, map, version-specific, Citus-group, or non-default
+cluster Patroni configuration through this sugar.
+
+Classification uses the exact trimmed key and never rewrites the caller's
+token.
+
+### Translation and execution
+
+All pairs are translated into one native `edit-config` call, preserving input
+order:
+
+```bash
+pig pt set ttl=60 max_connections=200 synchronous_mode=on
+
+# logical native invocation
+patronictl -c SELECTED edit-config \
+  --set ttl=60 \
+  --pg max_connections=200 \
+  --set synchronous_mode=on
+```
+
+This produces one Patronictl diff, confirmation, concurrency check, and DCS
+update. Pig does not pre-read the DCS or reimplement relationships such as:
+
+```text
+loop_wait + 2 * retry_timeout <= ttl
+```
+
+Patronictl parses values as YAML. Consequently both `KEY=null` and `KEY=`
+remove a key; Pig passes either spelling unchanged.
+
+`--yes/-y` appends native `--force`. Without it Patronictl displays the diff
+and owns confirmation. `--plan` runs no Patronictl mutation and renders the
+selected config plus the translated, shell-quoted native argv. If `--yes` is
+also present it has no effect on the plan.
+
+In structured Pig output, execution requires `--yes` because hidden prompts
+are forbidden. The result uses the existing generic local-command envelope;
+`--plan` remains side-effect-free.
+
+After Patronictl returns success, Pig analyzes only keys routed through `--pg`.
+Patronictl also returns success when an interactive change is declined or the
+configuration is already unchanged, so Pig phrases all follow-up guidance
+conditionally. Known postmaster-context parameters retain the current restart
+warning and first direct the operator to inspect members. Because native
+`patronictl restart` requires an explicit cluster, Pig describes the follow-up
+syntax but does not emit it as an incomplete replayable command:
+
+```text
+pig pt list
+pig pt restart CLUSTER --pending
+```
+
+Advanced configuration remains available transparently:
+
+```bash
+pig pt edit-config --set postgresql.use_pg_rewind=true
+pig pt edit-config --set standby_cluster.host=10.0.0.1
+pig pt edit-config pg-other --group 1 --set ttl=60
+```
+
+### Migration from `pt config`
+
+`pt config` is removed immediately and has no hidden compatibility alias:
+
+```text
+pt config pg K=V   -> pt set K=V
+pt config set K=V  -> pt set K=V for one of the Patroni scalar keys
+pt config show     -> pt show-config
+pt config edit     -> pt edit-config
+```
+
+An unrecognized `pig pt config ...` invocation is forwarded to Patronictl, so
+native behavior remains authoritative if Patronictl ever adds that command.
+
+## Local service workflow
+
+`pt service` is the canonical local namespace and `pt svc` is its alias:
+
+```bash
+pig pt svc start
+pig pt svc stop
+pig pt svc restart
+pig pt svc reload
+pig pt svc status
+```
+
+Hidden top-level `pt start` and `pt stop` shortcuts call the same local
+implementation. Top-level `pt restart` is never a daemon shortcut; it is
+forwarded to `patronictl restart`.
+
+The existing local aliases remain: `start`/`up`, `stop`/`dn`, and service-child
+aliases `up`, `dn`, `rs`, `rl`, and `st`. Service helpers operate the local
+`patroni` systemd unit and retain their existing structured local-command
+results.
+
+## Local status and logs
+
+`pt status` retains the existing combined local workflow: systemd service
+state, Patroni processes, and cluster members from Patronictl. Its local alias
+is `pt st`.
+
+`pt log` retains the v1.5.1-style local log workflow:
+
+```bash
+pig pt log -n 100
+pig pt log -f
+pig pt log show -o json
+pig pt log tail -n 100
+pig pt log grep -n 500 ERROR
+```
+
+The log directory comes from `log.dir` in the selected config and falls back
+to `/pg/log/patroni`. Follow/tail and grep remain terminal streams; structured
+output supports bounded snapshots only. Service and log helpers are
+Linux/systemd workflows, not Patronictl emulation.
+
+The existing local log aliases remain: top-level `log`/`l`, `show`/`cat`/`c`/`s`,
+`tail`/`t`/`f`/`follow`, and `grep`/`g`/`search`.
+
+## Debug logging and sensitive data
+
+At debug level Pig records config-selection decisions to stderr or the selected
+log sink:
+
+```text
+patronictl config selected: source=explicit path=/path/patroni.yml
+patronictl config candidate skipped: path=/etc/patroni/patroni.yml reason=not-readable
+patronictl config selected: source=infra path=/infra/conf/patronictl.yml
+patronictl config fallback: path=/etc/patroni/patroni.yml reason=no-readable-candidate
+```
+
+Normal output does not announce the injected config. Logs and hints must not
+contain full native argv, SQL, DCS URLs, or `set` values. `set --plan` is the
+explicit exception: it displays caller-supplied configuration values and must
+warn that plans may contain sensitive data.
+
+## Compatibility consequences
+
+This contract intentionally changes the current implementation:
+
+- newly installed Patronictl commands and subcommand flags work without a Pig
+  release;
+- native help, validation, confirmation, output, and errors are authoritative;
+- command-specific DTOs and safety gates for forwarded Patronictl commands,
+  Pig aliases, automatic target/scope selection, and rewritten flags are
+  removed;
+- Pig structured output is unavailable for forwarded native commands;
+- scripts must use native Patronictl syntax, output options, and exit behavior;
+- `pt config` is replaced by `set`, `show-config`, and `edit-config`;
+- config selection adds a readable `/infra/conf/patronictl.yml` fallback while
+  preserving `/etc/patroni/patroni.yml` priority;
+- local `start`, `stop`, `service/svc`, `status`, and `log` remain stable.
+
+## Acceptance tests
+
+Implementation is acceptable only when tests prove:
+
+1. unknown native commands and native subcommand flags reach the runner
+   unchanged;
+2. native argument order, spaces, quotes, and additional `=` characters survive
+   both direct and `su -c` execution;
+3. native `query -c SQL` is not consumed as the wrapper config option;
+4. wrapper `-c/--config-file` works before the native command;
+5. a future unknown native root option works through the leading `--` escape;
+6. `--` bypasses every local-name and alias collision, including `pt -- set`
+   and `pt -- st`;
+7. `pt` with no args, Pig help, native subcommand help, and native root help
+   follow this contract;
+8. config resolution covers explicit, environment, both-readable, etc-only,
+   infra-only, and neither-readable cases in the normative order;
+9. conventional readability is evaluated as DBSU, and probe-launch failure is
+   not treated as an unreadable candidate;
+10. relative explicit/environment paths become absolute before DBSU execution;
+11. debug logs describe selection without logging native argv or values;
+12. native stdin/stdout/stderr, TTY behavior, and exit codes `1` and `2` are
+    preserved without duplicate diagnostics;
+13. Pig non-text `-o` before a native command is rejected, while output-looking
+    flags after the command are forwarded unchanged;
+14. `set` rejects zero pairs, empty keys, and malformed tokens before execution;
+15. every scalar Patroni key maps to `--set`, while ordinary and dotted custom
+    GUCs map to `--pg`;
+16. `postgresql.use_pg_rewind`, `standby_cluster.host`, `slots.*`, and
+    `ignore_slots.*` are rejected with native `edit-config --set` guidance;
+17. mixed keys produce one ordered `edit-config` invocation;
+18. only `--yes` adds `--force`; default text execution leaves confirmation to
+    Patronictl;
+19. `--plan` does not mutate and renders the same translated logical argv;
+20. `null`, empty values, and values containing `=` are passed unchanged;
+21. restart hints analyze only PG-routed keys, require an explicit `CLUSTER`,
+    and never emit the invalid `pig pt restart --pending` command;
+22. `start`, `stop`, `service/svc`, `status`, and `log` select local code, while
+    top-level `restart` forwards to Patronictl;
+23. `pt config` is not registered locally and therefore follows passthrough
+    behavior.

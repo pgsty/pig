@@ -8,11 +8,12 @@ package patroni
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
 	"pig/internal/output"
+
+	"gopkg.in/yaml.v3"
 )
 
 // PtListResultData contains Patroni cluster member list in a simplified, agent-friendly format.
@@ -24,14 +25,22 @@ type PtListResultData struct {
 
 // PtMemberSummary represents a single Patroni cluster member.
 type PtMemberSummary struct {
+	Cluster              string `json:"cluster,omitempty" yaml:"cluster,omitempty"`
+	Group                *int   `json:"group,omitempty" yaml:"group,omitempty"`
 	Member               string `json:"member" yaml:"member"`
 	Host                 string `json:"host" yaml:"host"`
 	Role                 string `json:"role" yaml:"role"`
 	State                string `json:"state" yaml:"state"`
 	TL                   int    `json:"tl" yaml:"tl"`
 	Lag                  *int   `json:"lag" yaml:"lag"` // null for leader
+	ReceiveLSN           string `json:"receive_lsn,omitempty" yaml:"receive_lsn,omitempty"`
+	ReceiveLag           *int   `json:"receive_lag,omitempty" yaml:"receive_lag,omitempty"`
+	ReplayLSN            string `json:"replay_lsn,omitempty" yaml:"replay_lsn,omitempty"`
+	ReplayLag            *int   `json:"replay_lag,omitempty" yaml:"replay_lag,omitempty"`
 	PendingRestart       bool   `json:"pending_restart,omitempty" yaml:"pending_restart,omitempty"`
 	PendingRestartReason string `json:"pending_restart_reason,omitempty" yaml:"pending_restart_reason,omitempty"`
+	ScheduledRestart     string `json:"scheduled_restart,omitempty" yaml:"scheduled_restart,omitempty"`
+	Tags                 any    `json:"tags,omitempty" yaml:"tags,omitempty"`
 }
 
 // Text returns a human-readable representation of the list result data.
@@ -64,34 +73,36 @@ func (d *PtListResultData) Text() string {
 }
 
 // PatroniListEntry represents the raw JSON output from patronictl list -f json.
-// Note: patronictl uses PascalCase keys and "Lag in MB" with spaces. Lag and
-// pending restart are loosely typed: patronictl renders them as numbers,
-// booleans, or strings ("unknown", "*") depending on member state.
+// Patronictl renders several fields as either numbers or empty/sentinel strings;
+// interface fields keep parsing compatible with both 4.1 and older output.
 type PatroniListEntry struct {
 	Cluster              string      `json:"Cluster"`
+	Group                interface{} `json:"Group"`
 	Member               string      `json:"Member"`
 	Host                 string      `json:"Host"`
 	Role                 string      `json:"Role"`
 	State                string      `json:"State"`
-	TL                   int         `json:"TL"`
+	TL                   interface{} `json:"TL"`
 	LagInMB              interface{} `json:"Lag in MB"`
+	ReceiveLSN           interface{} `json:"Receive LSN"`
+	ReceiveLag           interface{} `json:"Receive Lag"`
+	ReplayLSN            interface{} `json:"Replay LSN"`
+	ReplayLag            interface{} `json:"Replay Lag"`
 	PendingRestart       interface{} `json:"Pending restart"`
 	PendingRestartReason string      `json:"Pending restart reason"`
+	ScheduledRestart     interface{} `json:"Scheduled restart"`
+	Tags                 interface{} `json:"Tags"`
 }
 
 // ListResult creates a structured result for pt list command.
 // It executes patronictl list -f json and returns parsed cluster member data.
-func ListResult(dbsu string, cluster string) *output.Result {
+func ListResult(dbsu string, group *int, clusters ...string) *output.Result {
 	binPath, err := patroniLookPath("patronictl")
 	if err != nil {
 		return output.Fail(output.CodePtNotFound, "patronictl not found in PATH")
 	}
-	if _, err := patroniStat(DefaultConfigPath); err != nil && os.IsNotExist(err) {
-		return output.Fail(output.CodePtConfigNotFound,
-			fmt.Sprintf("Patroni config not found: %s", DefaultConfigPath))
-	}
-
-	args := buildListResultArgs(binPath, cluster)
+	clusters = nonEmptyStrings(clusters)
+	args := buildListResultArgs(binPath, group, clusters...)
 	jsonOutput, err := patroniDBSUCommandStdout(dbsu, args)
 	if err != nil {
 		if isPermissionDenied(err, jsonOutput) {
@@ -100,11 +111,7 @@ func ListResult(dbsu string, cluster string) *output.Result {
 		}
 		if isConfigNotFound(err, jsonOutput) {
 			return output.Fail(output.CodePtConfigNotFound,
-				fmt.Sprintf("Patroni config not found: %s", DefaultConfigPath)).
-				WithDetail(commandErrorDetail(jsonOutput, err))
-		}
-		if !isServiceRunning() {
-			return output.Fail(output.CodePtNotRunning, "Patroni service is not running").
+				fmt.Sprintf("Patroni config not found: %s", configFile())).
 				WithDetail(commandErrorDetail(jsonOutput, err))
 		}
 		return output.Fail(output.CodePtListFailed, "Failed to execute patronictl list").
@@ -119,21 +126,32 @@ func ListResult(dbsu string, cluster string) *output.Result {
 
 	// Prefer the explicit argument, then the Cluster column parsed from the
 	// patronictl JSON; only fall back to reading the Patroni config file.
-	if cluster != "" {
-		data.Cluster = cluster
-	} else if data.Cluster == "" {
+	if len(clusters) == 1 {
+		data.Cluster = clusters[0]
+	} else if len(clusters) == 0 && data.Cluster == "" {
 		data.Cluster = getClusterName(dbsu)
 	}
 
 	return output.OK("Patroni cluster members retrieved", data)
 }
 
-func buildListResultArgs(binPath string, cluster string) []string {
-	args := []string{binPath, "-c", DefaultConfigPath, "list"}
-	if cluster != "" {
-		args = append(args, cluster)
+func buildListResultArgs(binPath string, group *int, clusters ...string) []string {
+	args := patronictlArgs(binPath, "list")
+	args = append(args, nonEmptyStrings(clusters)...)
+	if group != nil {
+		args = append(args, "--group", fmt.Sprint(*group))
 	}
 	return append(args, "-f", "json")
+}
+
+func nonEmptyStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 // parsePatroniListJSON parses the JSON output from patronictl list -f json.
@@ -146,39 +164,106 @@ func parsePatroniListJSON(jsonStr string) (*PtListResultData, error) {
 	data := &PtListResultData{
 		Members: make([]PtMemberSummary, 0, len(entries)),
 	}
+	clusters := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.Cluster != "" {
+			clusters[entry.Cluster] = struct{}{}
+		}
+	}
+	multipleClusters := len(clusters) > 1
 
 	for _, e := range entries {
-		if data.Cluster == "" {
+		if data.Cluster == "" && !multipleClusters {
 			data.Cluster = e.Cluster
 		}
+		receiveLag := parseLagMB(e.ReceiveLag)
+		replayLag := parseLagMB(e.ReplayLag)
 		data.Members = append(data.Members, PtMemberSummary{
+			Cluster:              mapCluster(e.Cluster, multipleClusters),
+			Group:                parseLagMB(e.Group),
 			Member:               e.Member,
 			Host:                 e.Host,
 			Role:                 normalizeRole(e.Role),
 			State:                e.State,
-			TL:                   e.TL,
-			Lag:                  parseLagMB(e.LagInMB),
+			TL:                   parseInt(e.TL),
+			Lag:                  firstLag(replayLag, receiveLag, parseLagMB(e.LagInMB)),
+			ReceiveLSN:           parseString(e.ReceiveLSN),
+			ReceiveLag:           receiveLag,
+			ReplayLSN:            parseString(e.ReplayLSN),
+			ReplayLag:            replayLag,
 			PendingRestart:       parsePendingRestart(e.PendingRestart),
 			PendingRestartReason: e.PendingRestartReason,
+			ScheduledRestart:     parseString(e.ScheduledRestart),
+			Tags:                 nonEmptyValue(e.Tags),
 		})
 	}
 
 	return data, nil
 }
 
+func mapCluster(cluster string, multiple bool) string {
+	if multiple {
+		return cluster
+	}
+	return ""
+}
+
 // parseLagMB tolerates the loose lag typing of patronictl JSON: numeric lag is
 // returned as MB, anything unparseable (leader, "unknown") becomes nil.
 func parseLagMB(value interface{}) *int {
+	if n, ok := parseNumber(value); ok {
+		return &n
+	}
+	return nil
+}
+
+func parseInt(value interface{}) int {
+	n, _ := parseNumber(value)
+	return n
+}
+
+func parseNumber(value interface{}) (int, bool) {
 	switch v := value.(type) {
 	case float64:
-		n := int(v)
-		return &n
+		return int(v), true
 	case string:
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-			return &n
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+func firstLag(values ...*int) *int {
+	for _, value := range values {
+		if value != nil {
+			return value
 		}
 	}
 	return nil
+}
+
+func parseString(value interface{}) string {
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return ""
+}
+
+func nonEmptyValue(value interface{}) interface{} {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+	case map[string]interface{}:
+		if len(v) == 0 {
+			return nil
+		}
+	}
+	return value
 }
 
 func parsePendingRestart(value interface{}) bool {
@@ -205,53 +290,31 @@ func getClusterName(dbsu string) string {
 	return cluster
 }
 
-// parseClusterNameFromConfig extracts a simple top-level `scope:` scalar.
-// It intentionally does not implement full YAML; uncommon forms such as block
-// scalars and anchors are rejected by validateResolvedClusterName.
+// parseClusterNameFromConfig extracts and validates the top-level YAML scope.
 func parseClusterNameFromConfig(content string) (string, error) {
 	if strings.TrimSpace(content) == "" {
-		return "", fmt.Errorf("%w in %s", errClusterScopeMissing, DefaultConfigPath)
+		return "", fmt.Errorf("%w in %s", errClusterScopeMissing, configFile())
 	}
-
-	for _, line := range strings.Split(content, "\n") {
-		if !strings.HasPrefix(line, "scope:") {
-			continue
-		}
-		cluster := cleanScopeValue(strings.TrimPrefix(line, "scope:"))
-		if cluster == "" {
-			return "", fmt.Errorf("%w in %s", errClusterScopeEmpty, DefaultConfigPath)
-		}
-		if err := validateResolvedClusterName(cluster); err != nil {
-			return "", err
-		}
-		return cluster, nil
+	var config map[string]interface{}
+	if err := yaml.Unmarshal([]byte(content), &config); err != nil {
+		return "", fmt.Errorf("%w in %s: %v", errClusterScopeInvalid, configFile(), err)
 	}
-	return "", fmt.Errorf("%w in %s", errClusterScopeMissing, DefaultConfigPath)
-}
-
-func cleanScopeValue(raw string) string {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return ""
+	value, ok := config["scope"]
+	if !ok {
+		return "", fmt.Errorf("%w in %s", errClusterScopeMissing, configFile())
 	}
-
-	quote := value[0]
-	if quote == '"' || quote == '\'' {
-		if end := strings.IndexByte(value[1:], quote); end >= 0 {
-			end++
-			inner := value[1:end]
-			rest := strings.TrimSpace(value[end+1:])
-			if rest == "" || strings.HasPrefix(rest, "#") {
-				return inner
-			}
+	cluster, ok := value.(string)
+	if !ok {
+		if value == nil {
+			return "", fmt.Errorf("%w in %s", errClusterScopeEmpty, configFile())
 		}
-		return value
+		return "", fmt.Errorf("%w in %s", errClusterScopeInvalid, configFile())
 	}
-
-	for i := 1; i < len(value); i++ {
-		if value[i] == '#' && (value[i-1] == ' ' || value[i-1] == '\t') {
-			return strings.TrimSpace(value[:i])
-		}
+	if cluster == "" {
+		return "", fmt.Errorf("%w in %s", errClusterScopeEmpty, configFile())
 	}
-	return value
+	if err := validateResolvedClusterName(cluster); err != nil {
+		return "", err
+	}
+	return cluster, nil
 }

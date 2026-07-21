@@ -55,48 +55,31 @@ func (d *PtStatusResultData) Text() string {
 // StatusResult creates a structured result for pt status command.
 // It collects comprehensive cluster status: service state, cluster name, members, leader, timeline.
 func StatusResult(dbsu string) *output.Result {
-	statusData := &PtStatusResultData{}
-
-	// 1. Check patronictl existence
-	binPath, err := patroniLookPath("patronictl")
-	if err != nil {
-		return output.Fail(output.CodePtNotFound, "patronictl not found in PATH").
-			WithData(statusData)
-	}
-
-	// 2. Check service status
-	statusData.ServiceRunning = isServiceRunning()
-
-	// 3. Get cluster name (graceful degradation)
+	statusData := &PtStatusResultData{ServiceRunning: isServiceRunning()}
 	statusData.Cluster = getClusterName(dbsu)
 
-	// 4. Get cluster member information
-	args := []string{binPath, "-c", DefaultConfigPath, "list", "-f", "json"}
-	jsonOutput, err := patroniDBSUCommandStdout(dbsu, args)
-	if err != nil {
-		if isPermissionDenied(err, jsonOutput) {
-			return output.Fail(output.CodePtPermDenied, "Permission denied executing patronictl list").
-				WithData(statusData).WithDetail(commandErrorDetail(jsonOutput, err))
+	listResult := ListResult(dbsu, nil)
+	if !listResult.Success {
+		listResult.Data = statusData
+		if listResult.Code == output.CodePtListFailed {
+			if !statusData.ServiceRunning {
+				listResult.Code = output.CodePtNotRunning
+				listResult.Message = "Patroni service is not running"
+			} else {
+				listResult.Code = output.CodePtStatusFailed
+				listResult.Message = "Failed to get cluster status"
+			}
 		}
-		if !statusData.ServiceRunning {
-			return output.Fail(output.CodePtNotRunning, "Patroni service is not running").
-				WithData(statusData).WithDetail(commandErrorDetail(jsonOutput, err))
-		}
-		return output.Fail(output.CodePtStatusFailed, "Failed to get cluster status").
-			WithData(statusData).WithDetail(commandErrorDetail(jsonOutput, err))
+		return listResult
 	}
-
-	// 5. Parse JSON — reuse parsePatroniListJSON from list_result.go
-	listData, err := parsePatroniListJSON(jsonOutput)
-	if err != nil {
-		return output.Fail(output.CodePtParseFailed, "Failed to parse patronictl output").
-			WithData(statusData).WithDetail(err.Error())
+	listData, ok := listResult.Data.(*PtListResultData)
+	if !ok || listData == nil {
+		return output.Fail(output.CodePtParseFailed, "Failed to parse patronictl output").WithData(statusData)
 	}
 	if statusData.Cluster == "" {
 		statusData.Cluster = listData.Cluster
 	}
 
-	// 6. Build complete status data
 	statusData.Members = listData.Members
 	statusData.MemberCount = len(listData.Members)
 	statusData.Leader, statusData.Timeline = extractLeaderAndTimeline(listData.Members)

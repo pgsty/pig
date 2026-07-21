@@ -2,641 +2,367 @@ package patroni
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"pig/internal/config"
+	"pig/internal/output"
 	"pig/internal/utils"
+
+	"github.com/sirupsen/logrus"
 )
 
-// argsHas reports whether `want` appears at args[i] for any i. argsHasInOrder
-// is the stricter variant: returns true only if every want appears in args
-// in the given order (possibly non-contiguous).
-func argsHas(args []string, want string) bool {
-	for _, a := range args {
-		if a == want {
-			return true
-		}
-	}
-	return false
-}
+func TestResolveConfigFileExplicitAndEnvironmentAreAuthoritative(t *testing.T) {
+	oldUser := config.CurrentUser
+	t.Cleanup(func() { config.CurrentUser = oldUser })
+	config.CurrentUser = "nobody"
+	t.Chdir(t.TempDir())
 
-func withPatroniStdout(t *testing.T, w io.Writer, fn func()) {
-	t.Helper()
-	old := os.Stdout
-	r, pipeW, err := os.Pipe()
+	t.Setenv("PATRONICTL_CONFIG_FILE", "env/patronictl.yml")
+	got, err := ResolveConfigFile("explicit/patroni.yml", "postgres")
 	if err != nil {
-		t.Fatalf("pipe: %v", err)
+		t.Fatal(err)
 	}
-	os.Stdout = pipeW
-	done := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(w, r)
-		close(done)
-	}()
-
-	fn()
-
-	_ = pipeW.Close()
-	os.Stdout = old
-	<-done
-	_ = r.Close()
-}
-
-func argsHasInOrder(args []string, wants ...string) bool {
-	i := 0
-	for _, a := range args {
-		if i < len(wants) && a == wants[i] {
-			i++
-		}
-	}
-	return i == len(wants)
-}
-
-func TestLogRejectsNonPositiveLines(t *testing.T) {
-	for _, n := range []int{0, -1} {
-		if err := LogCat("", "", n); err == nil || !strings.Contains(err.Error(), "lines must be positive") {
-			t.Fatalf("LogCat(%d) = %v, want positive line count error", n, err)
-		}
-		if err := LogTail("", "", n); err == nil || !strings.Contains(err.Error(), "lines must be positive") {
-			t.Fatalf("LogTail(%d) = %v, want positive line count error", n, err)
-		}
-		if err := LogShowJSONL("", "", n); err == nil || !strings.Contains(err.Error(), "lines must be positive") {
-			t.Fatalf("LogShowJSONL(%d) = %v, want positive line count error", n, err)
-		}
-	}
-}
-
-func TestLogDirUsesPatroniConfigLogDir(t *testing.T) {
-	origRead := patroniReadFile
-	defer func() { patroniReadFile = origRead }()
-
-	patroniReadFile = func(path string) ([]byte, error) {
-		if path != DefaultConfigPath {
-			t.Fatalf("read path = %q, want %q", path, DefaultConfigPath)
-		}
-		return []byte("scope: pg-meta\nlog:\n  dir: /custom/patroni\n"), nil
-	}
-
-	if got := LogDir("", "postgres"); got != "/custom/patroni" {
-		t.Fatalf("LogDir() = %q, want custom Patroni log dir", got)
-	}
-}
-
-func TestLogDirOverrideWinsOverConfig(t *testing.T) {
-	if got := LogDir("/tmp/patroni-log", "postgres"); got != "/tmp/patroni-log" {
-		t.Fatalf("LogDir(override) = %q, want override", got)
-	}
-}
-
-func TestLogShowJSONLReadsLocalFileThroughDBSU(t *testing.T) {
-	origOutput := patroniDBSUCommandStdout
-	defer func() { patroniDBSUCommandStdout = origOutput }()
-
-	var gotDBSU string
-	var gotArgs []string
-	patroniDBSUCommandStdout = func(dbsu string, args []string) (string, error) {
-		gotDBSU = dbsu
-		gotArgs = append([]string(nil), args...)
-		return "patroni started\nleader lock acquired\n", nil
-	}
-
-	var out bytes.Buffer
-	withPatroniStdout(t, &out, func() {
-		if err := LogShowJSONL("/pg/log/patroni", "postgres", 2); err != nil {
-			t.Fatalf("LogShowJSONL returned error: %v", err)
-		}
-	})
-
-	if gotDBSU != "postgres" {
-		t.Fatalf("dbsu = %q, want postgres", gotDBSU)
-	}
-	wantArgs := []string{"tail", "-n", "2", filepath.Join("/pg/log/patroni", DefaultLogFile)}
-	if strings.Join(gotArgs, "\x00") != strings.Join(wantArgs, "\x00") {
-		t.Fatalf("tail args = %v, want %v", gotArgs, wantArgs)
-	}
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected two JSONL lines, got %d: %q", len(lines), out.String())
-	}
-	var row map[string]string
-	if err := json.Unmarshal([]byte(lines[0]), &row); err != nil {
-		t.Fatalf("invalid JSONL row: %v", err)
-	}
-	if row["component"] != "patroni" || row["message"] != "patroni started" {
-		t.Fatalf("unexpected JSONL row: %v", row)
-	}
-}
-
-func TestLogGrepUsesDBSUAndSilencesNoMatch(t *testing.T) {
-	origCommand := patroniDBSUCommand
-	defer func() { patroniDBSUCommand = origCommand }()
-
-	var gotArgs []string
-	patroniDBSUCommand = func(_ string, args []string) error {
-		gotArgs = append([]string(nil), args...)
-		return &utils.ExitCodeError{Code: 1, Err: errors.New("grep no match")}
-	}
-
-	err := LogGrep("/pg/log/patroni", "postgres", "ERROR", 0)
-
-	var exitErr *utils.ExitCodeError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("LogGrep returned %T, want ExitCodeError", err)
-	}
-	if exitErr.Code != 1 || !exitErr.Silent {
-		t.Fatalf("grep no-match exit = code %d silent %v, want silent code 1", exitErr.Code, exitErr.Silent)
-	}
-	wantArgs := []string{"grep", "--color=auto", "-i", "--", "ERROR", filepath.Join("/pg/log/patroni", DefaultLogFile)}
-	if strings.Join(gotArgs, "\x00") != strings.Join(wantArgs, "\x00") {
-		t.Fatalf("grep args = %v, want %v", gotArgs, wantArgs)
-	}
-}
-
-func TestLogGrepLimitsSearchToRecentLines(t *testing.T) {
-	origCommand := patroniDBSUCommand
-	origOutput := patroniDBSUCommandStdout
-	defer func() {
-		patroniDBSUCommand = origCommand
-		patroniDBSUCommandStdout = origOutput
-	}()
-
-	var testArgs []string
-	patroniDBSUCommandStdout = func(_ string, args []string) (string, error) {
-		testArgs = append([]string(nil), args...)
-		return "", nil
-	}
-
-	var grepArgs []string
-	patroniDBSUCommand = func(_ string, args []string) error {
-		grepArgs = append([]string(nil), args...)
-		return nil
-	}
-
-	if err := LogGrep("/pg/log/patroni", "postgres", "ERROR", 500); err != nil {
-		t.Fatalf("LogGrep returned error: %v", err)
-	}
-
-	logFile := filepath.Join("/pg/log/patroni", DefaultLogFile)
-	wantTest := []string{"test", "-r", logFile}
-	if strings.Join(testArgs, "\x00") != strings.Join(wantTest, "\x00") {
-		t.Fatalf("readability test args = %v, want %v", testArgs, wantTest)
-	}
-	wantGrep := []string{"bash", "-o", "pipefail", "-c", `tail -n "$1" "$2" | grep --color=auto -i -- "$3"`, "bash", "500", logFile, "ERROR"}
-	if strings.Join(grepArgs, "\x00") != strings.Join(wantGrep, "\x00") {
-		t.Fatalf("limited grep args = %v, want %v", grepArgs, wantGrep)
-	}
-}
-
-func TestBuildRestartArgs(t *testing.T) {
-	const cluster = "pg-nms"
-
-	tests := []struct {
-		name        string
-		opts        *RestartOptions
-		wantPrefix  []string // first N args, in order
-		wantInOrder []string // must appear in args in this order
-		notWant     []string // must NOT appear anywhere
-	}{
-		{
-			name:       "nil opts → just restart + cluster",
-			opts:       nil,
-			wantPrefix: []string{"restart", cluster},
-			notWant:    []string{"--force", "--pending", "--role"},
-		},
-		{
-			name:       "pending + force, no member",
-			opts:       &RestartOptions{Pending: true, Force: true},
-			wantPrefix: []string{"restart", cluster},
-			wantInOrder: []string{
-				"restart", cluster, "--force", "--pending",
-			},
-			notWant: []string{"--role"},
-		},
-		{
-			name:       "specific member + force",
-			opts:       &RestartOptions{Member: "pg-nms-1", Force: true},
-			wantPrefix: []string{"restart", cluster},
-			wantInOrder: []string{
-				"restart", cluster, "pg-nms-1", "--force",
-			},
-		},
-		{
-			name:       "role filter",
-			opts:       &RestartOptions{Role: "replica", Force: true},
-			wantPrefix: []string{"restart", cluster},
-			wantInOrder: []string{
-				"restart", cluster, "--role", "replica", "--force",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := buildRestartArgs(cluster, tt.opts)
-
-			for i, w := range tt.wantPrefix {
-				if i >= len(got) || got[i] != w {
-					t.Errorf("prefix mismatch at %d: want %q, got args=%v", i, w, got)
-				}
-			}
-			if len(tt.wantInOrder) > 0 && !argsHasInOrder(got, tt.wantInOrder...) {
-				t.Errorf("want subsequence %v in args, got %v", tt.wantInOrder, got)
-			}
-			for _, n := range tt.notWant {
-				if argsHas(got, n) {
-					t.Errorf("did not want %q in args, got %v", n, got)
-				}
-			}
-		})
-	}
-}
-
-func TestBuildReloadArgs(t *testing.T) {
-	const cluster = "pg-nms"
-
-	// --force is mandatory (B04): patronictl reload prompts without it.
-	got := buildReloadArgs(cluster)
-	if len(got) != 3 || got[0] != "reload" || got[1] != cluster || got[2] != "--force" {
-		t.Errorf("want [reload %s --force], got %v", cluster, got)
-	}
-}
-
-func TestBuildReinitArgs(t *testing.T) {
-	const cluster = "pg-nms"
-
-	got := buildReinitArgs(cluster, &ReinitOptions{Member: "pg-nms-2", Force: true, Wait: true})
-	if !argsHasInOrder(got, "reinit", cluster, "pg-nms-2", "--force", "--wait") {
-		t.Errorf("want reinit %s pg-nms-2 --force --wait in order, got %v", cluster, got)
-	}
-
-	got = buildReinitArgs(cluster, nil)
-	if len(got) != 2 || got[0] != "reinit" || got[1] != cluster {
-		t.Errorf("nil opts: want [reinit %s], got %v", cluster, got)
-	}
-}
-
-func TestBuildSwitchoverArgs(t *testing.T) {
-	const cluster = "pg-nms"
-
-	got := buildSwitchoverArgs(cluster, &SwitchoverOptions{
-		Leader:    "pg-nms-1",
-		Candidate: "pg-nms-2",
-		Force:     true,
-		Scheduled: "2026-05-13T16:30:00",
-	})
-	if !argsHasInOrder(got, "switchover", cluster, "--leader", "pg-nms-1", "--candidate", "pg-nms-2") {
-		t.Errorf("want switchover %s --leader pg-nms-1 --candidate pg-nms-2 in order, got %v", cluster, got)
-	}
-	if !argsHas(got, "--force") || !argsHas(got, "--scheduled") {
-		t.Errorf("want --force and --scheduled in args, got %v", got)
-	}
-
-	got = buildSwitchoverArgs(cluster, nil)
-	if len(got) != 2 || got[0] != "switchover" || got[1] != cluster {
-		t.Errorf("nil opts: want [switchover %s], got %v", cluster, got)
-	}
-}
-
-func TestBuildFailoverArgs(t *testing.T) {
-	const cluster = "pg-nms"
-
-	got := buildFailoverArgs(cluster, &FailoverOptions{Candidate: "pg-nms-2", Force: true})
-	if !argsHasInOrder(got, "failover", cluster, "--candidate", "pg-nms-2", "--force") {
-		t.Errorf("want failover %s --candidate pg-nms-2 --force in order, got %v", cluster, got)
-	}
-
-	got = buildFailoverArgs(cluster, nil)
-	if len(got) != 2 || got[0] != "failover" || got[1] != cluster {
-		t.Errorf("nil opts: want [failover %s], got %v", cluster, got)
-	}
-}
-
-// TestPatronictlPositionalContract documents the constraint that motivated the
-// CLUSTER_NAME prepend across Reload / Restart / Reinit / Switchover / Failover.
-// Unlike pause / resume / list, these patronictl subcommands require
-// CLUSTER_NAME as the first positional argument; `-c <config>` does NOT supply
-// scope to them. If a future refactor drops the prepend, this test fails fast.
-func TestPatronictlPositionalContract(t *testing.T) {
-	const cluster = "scope-name"
-
-	for name, args := range map[string][]string{
-		"reload":     buildReloadArgs(cluster),
-		"restart":    buildRestartArgs(cluster, nil),
-		"reinit":     buildReinitArgs(cluster, nil),
-		"switchover": buildSwitchoverArgs(cluster, nil),
-		"failover":   buildFailoverArgs(cluster, nil),
-	} {
-		if len(args) < 2 || args[1] != cluster {
-			t.Errorf("%s: cluster name must appear at args[1], got %v", name, args)
-		}
-	}
-}
-
-func TestPatroniOperationWrappersUseResolvedClusterName(t *testing.T) {
-	patroniTestDepsMu.Lock()
-	oldGetClusterName := patroniGetClusterName
-	oldRunPatronictl := patroniRunPatronictl
-	t.Cleanup(func() {
-		patroniGetClusterName = oldGetClusterName
-		patroniRunPatronictl = oldRunPatronictl
-		patroniTestDepsMu.Unlock()
-	})
-
-	var gotResolveDBSU string
-	patroniGetClusterName = func(dbsu string) (string, error) {
-		gotResolveDBSU = dbsu
-		return "pg-nms", nil
-	}
-
-	tests := []struct {
-		name string
-		run  func() error
-		want []string
-	}{
-		{
-			name: "reload",
-			run:  func() error { return Reload("postgres") },
-			want: []string{"reload", "pg-nms"},
-		},
-		{
-			name: "restart",
-			run:  func() error { return Restart("postgres", &RestartOptions{Member: "pg-nms-1", Force: true}) },
-			want: []string{"restart", "pg-nms", "pg-nms-1", "--force"},
-		},
-		{
-			name: "reinit",
-			run:  func() error { return Reinit("postgres", &ReinitOptions{Member: "pg-nms-2", Force: true}) },
-			want: []string{"reinit", "pg-nms", "pg-nms-2", "--force"},
-		},
-		{
-			name: "switchover",
-			run:  func() error { return Switchover("postgres", &SwitchoverOptions{Candidate: "pg-nms-2", Force: true}) },
-			want: []string{"switchover", "pg-nms", "--candidate", "pg-nms-2", "--force"},
-		},
-		{
-			name: "failover",
-			run:  func() error { return Failover("postgres", &FailoverOptions{Candidate: "pg-nms-2", Force: true}) },
-			want: []string{"failover", "pg-nms", "--candidate", "pg-nms-2", "--force"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var got []string
-			var gotRunDBSU string
-			gotResolveDBSU = ""
-			patroniRunPatronictl = func(dbsu string, args []string) error {
-				gotRunDBSU = dbsu
-				got = append([]string(nil), args...)
-				return nil
-			}
-			if err := tt.run(); err != nil {
-				t.Fatalf("%s returned error: %v", tt.name, err)
-			}
-			if gotResolveDBSU != "postgres" {
-				t.Fatalf("%s resolved cluster with dbsu=%q, want postgres", tt.name, gotResolveDBSU)
-			}
-			if gotRunDBSU != "postgres" {
-				t.Fatalf("%s ran patronictl with dbsu=%q, want postgres", tt.name, gotRunDBSU)
-			}
-			if !argsHasInOrder(got, tt.want...) {
-				t.Fatalf("%s args = %v, want subsequence %v", tt.name, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestListWrapperUsesOptionalCluster(t *testing.T) {
-	patroniTestDepsMu.Lock()
-	oldRunPatronictl := patroniRunPatronictl
-	t.Cleanup(func() {
-		patroniRunPatronictl = oldRunPatronictl
-		patroniTestDepsMu.Unlock()
-	})
-
-	var captured []string
-	patroniRunPatronictl = func(dbsu string, args []string) error {
-		captured = append([]string(nil), args...)
-		return nil
-	}
-
-	if err := List("postgres", "pg-meta", true, 3); err != nil {
-		t.Fatalf("List returned error: %v", err)
-	}
-	if !argsHasInOrder(captured, "list", "pg-meta", "-e", "-t", "-W", "-w", "3") {
-		t.Fatalf("captured args = %v, want list pg-meta -e -t -W -w 3", captured)
-	}
-}
-
-func TestGetClusterNameUsesDBSUFallbackHook(t *testing.T) {
-	patroniTestDepsMu.Lock()
-	oldReadFile := patroniReadFile
-	oldDBSUCommandStdout := patroniDBSUCommandStdout
-	t.Cleanup(func() {
-		patroniReadFile = oldReadFile
-		patroniDBSUCommandStdout = oldDBSUCommandStdout
-		patroniTestDepsMu.Unlock()
-	})
-
-	var gotDBSU string
-	var gotArgs []string
-	patroniReadFile = func(name string) ([]byte, error) {
-		return nil, errors.New("permission denied")
-	}
-	patroniDBSUCommandStdout = func(dbsu string, args []string) (string, error) {
-		gotDBSU = dbsu
-		gotArgs = append([]string(nil), args...)
-		return "scope: pg-fallback\n", nil
-	}
-
-	cluster, err := GetClusterName("dba")
-	if err != nil {
-		t.Fatalf("GetClusterName returned error: %v", err)
-	}
-	if cluster != "pg-fallback" {
-		t.Fatalf("cluster = %q, want pg-fallback", cluster)
-	}
-	if gotDBSU != "dba" {
-		t.Fatalf("DBSU fallback dbsu = %q, want dba", gotDBSU)
-	}
-	if !argsHasInOrder(gotArgs, "cat", DefaultConfigPath) {
-		t.Fatalf("DBSU fallback args = %v, want cat %s", gotArgs, DefaultConfigPath)
-	}
-}
-
-func TestBuildSwitchoverPlan(t *testing.T) {
-	opts := &SwitchoverOptions{
-		Leader:    "pg-1",
-		Candidate: "pg-2",
-		Scheduled: "2026-02-03T12:00:00",
-	}
-
-	plan := BuildSwitchoverPlan(opts)
-	if plan == nil {
-		t.Fatal("BuildSwitchoverPlan returned nil")
-	}
-	if !strings.Contains(plan.Command, "switchover") {
-		t.Errorf("plan.Command missing switchover: %q", plan.Command)
-	}
-	if !strings.Contains(plan.Command, "--candidate") {
-		t.Errorf("plan.Command missing candidate: %q", plan.Command)
-	}
-
-	if len(plan.Actions) == 0 {
-		t.Error("plan.Actions should not be empty")
-	}
-	if len(plan.Affects) == 0 {
-		t.Error("plan.Affects should not be empty")
-	}
-	if plan.Expected == "" {
-		t.Error("plan.Expected should not be empty")
-	}
-	if len(plan.Risks) == 0 {
-		t.Error("plan.Risks should not be empty")
-	}
-}
-
-func TestBuildSwitchoverPlanNilOpts(t *testing.T) {
-	plan := BuildSwitchoverPlan(nil)
-	if plan == nil {
-		t.Fatal("BuildSwitchoverPlan(nil) should not return nil")
-	}
-	if !strings.Contains(plan.Command, "switchover") {
-		t.Errorf("plan.Command missing switchover: %q", plan.Command)
-	}
-	if len(plan.Actions) == 0 {
-		t.Error("plan.Actions should not be empty even with nil opts")
-	}
-	if plan.Expected == "" {
-		t.Error("plan.Expected should not be empty")
-	}
-}
-
-func TestBuildSwitchoverPlanEmptyOpts(t *testing.T) {
-	opts := &SwitchoverOptions{}
-	plan := BuildSwitchoverPlan(opts)
-	if plan == nil {
-		t.Fatal("BuildSwitchoverPlan returned nil")
-	}
-	// Should not include optional flags when not set
-	if strings.Contains(plan.Command, "--leader") {
-		t.Errorf("plan.Command should not include --leader when empty: %q", plan.Command)
-	}
-	if strings.Contains(plan.Command, "--candidate") {
-		t.Errorf("plan.Command should not include --candidate when empty: %q", plan.Command)
-	}
-}
-
-// TestBuildSwitchoverPlanCommandForms: plan.Command is the replayable preview
-// form (--plan), the first next action is the --yes execute form.
-func TestBuildSwitchoverPlanCommandForms(t *testing.T) {
-	plan := BuildSwitchoverPlan(&SwitchoverOptions{Candidate: "pg-2", Force: true})
-	if plan == nil {
-		t.Fatal("BuildSwitchoverPlan returned nil")
-	}
-	if !strings.HasSuffix(plan.Command, "--plan") || strings.Contains(plan.Command, "--yes") {
-		t.Errorf("plan.Command should be the --plan preview form: %q", plan.Command)
-	}
-	if len(plan.NextActions) == 0 {
-		t.Fatal("plan should carry next actions")
-	}
-	execute := plan.NextActions[0]
-	if !execute.Required || !strings.Contains(execute.Command, "--yes") || strings.Contains(execute.Command, "--plan") {
-		t.Errorf("first next action should be the required --yes execute form: %+v", execute)
-	}
-}
-
-func TestSwitchoverCommand(t *testing.T) {
-	if got := SwitchoverCommand(nil, false, false); got != "pig pt switchover" {
-		t.Errorf("nil opts = %q, want %q", got, "pig pt switchover")
-	}
-
-	opts := &SwitchoverOptions{Leader: "pg-1", Candidate: "pg-2", Scheduled: "2026-02-03T12:00:00"}
-	got := SwitchoverCommand(opts, false, true)
-	want := "pig pt switchover --leader pg-1 --candidate pg-2 --scheduled 2026-02-03T12:00:00 --yes"
+	want := filepath.Join(mustGetwd(t), "explicit", "patroni.yml")
 	if got != want {
-		t.Errorf("execute form = %q, want %q", got, want)
-	}
-	if got := SwitchoverCommand(opts, true, false); !strings.HasSuffix(got, "--plan") || strings.Contains(got, "--yes") {
-		t.Errorf("plan form should end with --plan and omit --yes: %q", got)
+		t.Fatalf("explicit path = %q, want %q", got, want)
 	}
 
-	// Force never leaks into rendered commands; --yes is an explicit marker.
-	if got := SwitchoverCommand(&SwitchoverOptions{Force: true}, false, false); strings.Contains(got, "--yes") || strings.Contains(got, "--force") {
-		t.Errorf("Force option must not leak into command: %q", got)
+	got, err = ResolveConfigFile("", "postgres")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// Values with spaces stay shell-safe (copy-paste replayable).
-	quoted := SwitchoverCommand(&SwitchoverOptions{Scheduled: "2026-02-03 12:00:00"}, false, true)
-	if !strings.Contains(quoted, "'2026-02-03 12:00:00'") {
-		t.Errorf("scheduled value with spaces should be quoted: %q", quoted)
+	want = filepath.Join(mustGetwd(t), "env", "patronictl.yml")
+	if got != want {
+		t.Fatalf("environment path = %q, want %q", got, want)
 	}
 }
 
-func TestRestartCommand(t *testing.T) {
-	if got := RestartCommand(nil, false, false); got != "pig pt restart" {
-		t.Errorf("nil opts = %q, want %q", got, "pig pt restart")
-	}
-	opts := &RestartOptions{Member: "pg-1", Role: "replica", Pending: true, Force: true}
-	if got, want := RestartCommand(opts, false, true), "pig pt restart pg-1 --role replica --pending --yes"; got != want {
-		t.Errorf("execute form = %q, want %q", got, want)
-	}
-	if got, want := RestartCommand(&RestartOptions{}, true, false), "pig pt restart --plan"; got != want {
-		t.Errorf("plan form = %q, want %q", got, want)
-	}
-}
+func TestResolveConfigFileDirectConventionalMatrix(t *testing.T) {
+	oldReadable := patroniConfigReadable
+	oldUser := config.CurrentUser
+	t.Cleanup(func() {
+		patroniConfigReadable = oldReadable
+		config.CurrentUser = oldUser
+	})
+	t.Setenv("PATRONICTL_CONFIG_FILE", "")
+	config.CurrentUser = "postgres"
 
-func TestReinitCommand(t *testing.T) {
-	opts := &ReinitOptions{Member: "pg-2", Wait: true, Force: true}
-	if got, want := ReinitCommand(opts, false, true), "pig pt reinit pg-2 --wait --yes"; got != want {
-		t.Errorf("execute form = %q, want %q", got, want)
-	}
-	if got, want := ReinitCommand(opts, true, false), "pig pt reinit pg-2 --wait --plan"; got != want {
-		t.Errorf("plan form = %q, want %q", got, want)
-	}
-}
-
-// TestBuildRestartPlanConfirmationTiers mirrors the D2 conditional tier: an
-// unscoped rolling restart needs consent, a pinned member or pending apply
-// executes directly.
-func TestBuildRestartPlanConfirmationTiers(t *testing.T) {
 	tests := []struct {
-		name    string
-		opts    *RestartOptions
-		confirm string
+		name     string
+		readable map[string]bool
+		want     string
 	}{
-		{name: "cluster-wide", opts: nil, confirm: "required"},
-		{name: "role filtered", opts: &RestartOptions{Role: "replica"}, confirm: "required"},
-		{name: "explicit member", opts: &RestartOptions{Member: "pg-1"}, confirm: "none"},
-		{name: "pending apply", opts: &RestartOptions{Pending: true}, confirm: "none"},
+		{"both", map[string]bool{DefaultConfigPath: true, InfraConfigPath: true}, DefaultConfigPath},
+		{"etc only", map[string]bool{DefaultConfigPath: true}, DefaultConfigPath},
+		{"infra only", map[string]bool{InfraConfigPath: true}, InfraConfigPath},
+		{"neither", map[string]bool{}, DefaultConfigPath},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan := BuildRestartPlan(tt.opts)
-			if plan == nil {
-				t.Fatal("BuildRestartPlan returned nil")
+			patroniConfigReadable = func(path string) bool { return tt.readable[path] }
+			got, err := ResolveConfigFile("", "postgres")
+			if err != nil {
+				t.Fatal(err)
 			}
-			if plan.Confirmation != tt.confirm {
-				t.Fatalf("confirmation = %q, want %q", plan.Confirmation, tt.confirm)
-			}
-			if !strings.HasSuffix(plan.Command, "--plan") {
-				t.Fatalf("plan.Command should be the preview form: %q", plan.Command)
-			}
-			if len(plan.NextActions) == 0 || !plan.NextActions[0].Required {
-				t.Fatalf("first next action should be the required execute form: %+v", plan.NextActions)
-			}
-			// The execute action carries --yes exactly when the scope is gated:
-			// a confirmation-free plan must not point at a --yes command.
-			hasYes := strings.Contains(plan.NextActions[0].Command, "--yes")
-			if gated := tt.confirm == "required"; hasYes != gated {
-				t.Fatalf("execute action --yes = %v, want %v (confirmation=%q): %+v",
-					hasYes, gated, tt.confirm, plan.NextActions[0])
+			if got != tt.want {
+				t.Fatalf("ResolveConfigFile() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResolveConfigFileUsesOneDBSUProbe(t *testing.T) {
+	oldProbe := patroniDBSUCommandStdout
+	oldUser := config.CurrentUser
+	t.Cleanup(func() {
+		patroniDBSUCommandStdout = oldProbe
+		config.CurrentUser = oldUser
+	})
+	t.Setenv("PATRONICTL_CONFIG_FILE", "")
+	config.CurrentUser = "root"
+
+	calls := 0
+	patroniDBSUCommandStdout = func(dbsu string, args []string) (string, error) {
+		calls++
+		if dbsu != "postgres" {
+			t.Fatalf("dbsu = %q", dbsu)
+		}
+		want := []string{"sh", "-c", conventionalConfigProbe}
+		if !reflect.DeepEqual(args, want) {
+			t.Fatalf("probe args = %#v, want %#v", args, want)
+		}
+		return "infra", nil
+	}
+	got, err := ResolveConfigFile("", "postgres")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != InfraConfigPath || calls != 1 {
+		t.Fatalf("got path=%q calls=%d", got, calls)
+	}
+
+	wantErr := errors.New("cannot launch su")
+	patroniDBSUCommandStdout = func(string, []string) (string, error) { return "", wantErr }
+	if _, err := ResolveConfigFile("", "postgres"); !errors.Is(err, wantErr) {
+		t.Fatalf("probe failure = %v, want wrapped %v", err, wantErr)
+	}
+}
+
+func TestPassthroughPrependsOnlyRootOptionsAndDoesNotLogValues(t *testing.T) {
+	preservePatroniCommandOptions(t)
+	oldLookPath := patroniLookPath
+	oldExec := patroniPassthroughDBSUCommand
+	oldOut := logrus.StandardLogger().Out
+	oldLevel := logrus.GetLevel()
+	t.Cleanup(func() {
+		patroniLookPath = oldLookPath
+		patroniPassthroughDBSUCommand = oldExec
+		logrus.SetOutput(oldOut)
+		logrus.SetLevel(oldLevel)
+	})
+
+	var logs bytes.Buffer
+	logrus.SetOutput(&logs)
+	logrus.SetLevel(logrus.DebugLevel)
+	patroniLookPath = func(string) (string, error) { return "/opt/bin/patronictl", nil }
+	var gotDBSU string
+	var gotArgs []string
+	patroniPassthroughDBSUCommand = func(dbsu string, args []string) error {
+		gotDBSU = dbsu
+		gotArgs = append([]string(nil), args...)
+		return nil
+	}
+
+	SetCommandOptions(CommandOptions{ConfigFile: "/secret/config.yml", DCSURL: "https://secret-dcs", Insecure: true})
+	if err := ResolveCommandOptions("alice"); err != nil {
+		t.Fatal(err)
+	}
+	native := []string{"query", "-c", "select 'secret sql'", "ttl=secret=value"}
+	if err := Passthrough("alice", native); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"/opt/bin/patronictl", "-c", "/secret/config.yml",
+		"--dcs-url", "https://secret-dcs", "--insecure",
+		"query", "-c", "select 'secret sql'", "ttl=secret=value",
+	}
+	if gotDBSU != "alice" || !reflect.DeepEqual(gotArgs, want) {
+		t.Fatalf("dbsu=%q args=%#v, want dbsu=alice args=%#v", gotDBSU, gotArgs, want)
+	}
+	if !strings.Contains(logs.String(), "patronictl config selected: source=explicit path=/secret/config.yml") {
+		t.Fatalf("debug log missed config selection: %s", logs.String())
+	}
+	for _, secret := range []string{"secret-dcs", "secret sql", "ttl=secret"} {
+		if strings.Contains(logs.String(), secret) {
+			t.Fatalf("debug log leaked %q: %s", secret, logs.String())
+		}
+	}
+}
+
+func TestPassthroughNotFoundIsCoded(t *testing.T) {
+	oldLookPath := patroniLookPath
+	t.Cleanup(func() { patroniLookPath = oldLookPath })
+	patroniLookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	err := Passthrough("postgres", []string{"list"})
+	var coded interface{ StatusCode() int }
+	if !errors.As(err, &coded) || coded.StatusCode() != output.CodePtNotFound {
+		t.Fatalf("error = %#v, want CodePtNotFound", err)
+	}
+	if got := utils.ExitCode(err); got != 4 {
+		t.Fatalf("exit code = %d, want dependency exit 4", got)
+	}
+}
+
+func TestPassthroughResolvesBinaryBeforeDBSUConfigProbe(t *testing.T) {
+	preservePatroniCommandOptions(t)
+	oldLookPath := patroniLookPath
+	oldProbe := patroniDBSUCommandStdout
+	oldExec := patroniPassthroughDBSUCommand
+	oldUser := config.CurrentUser
+	t.Cleanup(func() {
+		patroniLookPath = oldLookPath
+		patroniDBSUCommandStdout = oldProbe
+		patroniPassthroughDBSUCommand = oldExec
+		config.CurrentUser = oldUser
+	})
+	t.Setenv("PATRONICTL_CONFIG_FILE", "")
+	config.CurrentUser = "root"
+	SetCommandOptions(CommandOptions{})
+
+	var events []string
+	patroniLookPath = func(string) (string, error) {
+		events = append(events, "lookup")
+		return "/bin/patronictl", nil
+	}
+	patroniDBSUCommandStdout = func(string, []string) (string, error) {
+		events = append(events, "probe")
+		return "fallback", nil
+	}
+	patroniPassthroughDBSUCommand = func(string, []string) error {
+		events = append(events, "exec")
+		return nil
+	}
+	if err := Passthrough("postgres", []string{"list"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"lookup", "probe", "exec"}; !reflect.DeepEqual(events, want) {
+		t.Fatalf("events = %#v, want %#v", events, want)
+	}
+}
+
+func TestParseSetPairsClassificationAndPreservation(t *testing.T) {
+	scalarKeys := []string{
+		"loop_wait", "ttl", "retry_timeout", "primary_race_backoff",
+		"maximum_lag_on_failover", "maximum_lag_on_syncnode", "max_timelines_history",
+		"primary_start_timeout", "primary_stop_timeout", "synchronous_mode",
+		"synchronous_mode_strict", "synchronous_node_count", "failsafe_mode",
+		"check_timeline", "member_slots_ttl",
+	}
+	for _, key := range scalarKeys {
+		pairs, err := ParseSetPairs([]string{key + "=1"})
+		if err != nil {
+			t.Fatalf("%s: %v", key, err)
+		}
+		if pairs[0].Route != SetRoutePatroni {
+			t.Fatalf("%s routed to %q", key, pairs[0].Route)
+		}
+	}
+
+	tokens := []string{"max_connections=200", "timescaledb.telemetry_level=off", "work_mem=a=b", "empty=", "delete=null"}
+	pairs, err := ParseSetPairs(tokens)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, pair := range pairs {
+		if pair.Route != SetRoutePostgreSQL || pair.Token != tokens[i] {
+			t.Fatalf("pair[%d] = %#v", i, pair)
+		}
+	}
+}
+
+func TestParseSetPairsRejectsMalformedAndStructuralPaths(t *testing.T) {
+	for _, tokens := range [][]string{nil, {}, {"missing"}, {"=value"}, {"  =value"}} {
+		if _, err := ParseSetPairs(tokens); err == nil {
+			t.Fatalf("ParseSetPairs(%#v) succeeded", tokens)
+		}
+	}
+	for _, token := range []string{
+		"postgresql.use_pg_rewind=true",
+		"standby_cluster.host=10.0.0.1",
+		"slots.replica=physical",
+		"ignore_slots.foo=bar",
+	} {
+		_, err := ParseSetPairs([]string{token})
+		if err == nil || !strings.Contains(err.Error(), "pig pt edit-config --set") {
+			t.Fatalf("ParseSetPairs(%q) error = %v", token, err)
+		}
+	}
+}
+
+func TestBuildSetArgsMixedOrderAndForce(t *testing.T) {
+	pairs, err := ParseSetPairs([]string{"ttl=60", "work_mem=a=b", "synchronous_mode=on", "custom.key="})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"edit-config",
+		"--set", "ttl=60",
+		"--pg", "work_mem=a=b",
+		"--set", "synchronous_mode=on",
+		"--pg", "custom.key=",
+	}
+	if got := BuildSetArgs(pairs, false); !reflect.DeepEqual(got, want) {
+		t.Fatalf("BuildSetArgs(false) = %#v, want %#v", got, want)
+	}
+	want = append(want, "--force")
+	if got := BuildSetArgs(pairs, true); !reflect.DeepEqual(got, want) {
+		t.Fatalf("BuildSetArgs(true) = %#v, want %#v", got, want)
+	}
+}
+
+func TestApplySetUsesOnePassthroughInvocation(t *testing.T) {
+	preservePatroniCommandOptions(t)
+	oldLookPath := patroniLookPath
+	oldExec := patroniPassthroughDBSUCommand
+	t.Cleanup(func() {
+		patroniLookPath = oldLookPath
+		patroniPassthroughDBSUCommand = oldExec
+	})
+	patroniLookPath = func(string) (string, error) { return "bin/patronictl", nil }
+	SetCommandOptions(CommandOptions{ConfigFile: "/etc/test.yml"})
+	if err := ResolveCommandOptions("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	pairs, _ := ParseSetPairs([]string{"ttl=60", "max_connections=200"})
+	calls := 0
+	var got []string
+	patroniPassthroughDBSUCommand = func(_ string, args []string) error {
+		calls++
+		got = append([]string(nil), args...)
+		return nil
+	}
+	if err := ApplySet("postgres", pairs, false); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(mustGetwd(t), "bin", "patronictl"), "-c", "/etc/test.yml", "edit-config", "--set", "ttl=60", "--pg", "max_connections=200"}
+	if calls != 1 || !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls=%d args=%#v, want %#v", calls, got, want)
+	}
+}
+
+func TestSetNextActionsOnlyAnalyzePostgreSQLPairs(t *testing.T) {
+	pairs, _ := ParseSetPairs([]string{"ttl=60", "shared_buffers=4GB"})
+	pg := PostgreSQLSetTokens(pairs)
+	if !reflect.DeepEqual(pg, []string{"shared_buffers=4GB"}) {
+		t.Fatalf("PostgreSQLSetTokens() = %#v", pg)
+	}
+	actions := SetNextActions(pg)
+	if len(actions) != 1 || actions[0].Command != "pig pt list" {
+		t.Fatalf("SetNextActions() = %#v", actions)
+	}
+	if !strings.Contains(actions[0].Reason, "pig pt restart CLUSTER --pending") ||
+		strings.Contains(actions[0].Reason, "pig pt restart --pending") {
+		t.Fatalf("restart guidance must require an explicit cluster: %#v", actions)
+	}
+	if got := SetNextActions(PostgreSQLSetTokens(pairs[:1])); len(got) != 0 {
+		t.Fatalf("Patroni-only actions = %#v", got)
+	}
+}
+
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
+}
+
+func preservePatroniCommandOptions(t *testing.T) {
+	t.Helper()
+	oldOptions := commandOptions
+	oldResolved := commandOptionsResolved
+	t.Cleanup(func() {
+		commandOptions = oldOptions
+		commandOptionsResolved = oldResolved
+	})
+}
+
+func TestDBSUSelectionPriority(t *testing.T) {
+	t.Setenv("PIG_DBSU", "env-user")
+	if got := utils.GetDBSU("explicit-user"); got != "explicit-user" {
+		t.Fatalf("explicit DBSU = %q", got)
+	}
+	if got := utils.GetDBSU(""); got != "env-user" {
+		t.Fatalf("environment DBSU = %q", got)
+	}
+	t.Setenv("PIG_DBSU", "")
+	if got := utils.GetDBSU(""); got != "postgres" {
+		t.Fatalf("default DBSU = %q", got)
 	}
 }

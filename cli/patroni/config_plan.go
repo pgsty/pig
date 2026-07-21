@@ -4,99 +4,68 @@ import (
 	"strings"
 
 	"pig/internal/output"
+	"pig/internal/utils"
 )
 
-// BuildConfigPlan returns a side-effect-free primitive plan for Patroni DCS config changes.
-func BuildConfigPlan(action string, kvPairs []string) *output.Plan {
-	scope := "patroni"
-	setFlag := "-s"
-	analysis := PGConfigAnalysis{}
-	if action == "pg" {
-		scope = "postgresql.parameters"
-		setFlag = "-p"
+// BuildSetPlan renders the exact logical Patronictl argv without executing it.
+// --yes deliberately has no representation here: a plan never mutates state.
+func BuildSetPlan(pairs []SetPair) *output.Plan {
+	nativeCommand := utils.ShellQuoteArgs(patronictlArgs("patronictl", BuildSetArgs(pairs, false)...))
+	pairTokens := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		pairTokens = append(pairTokens, pair.Token)
 	}
+	executeParts := append([]string{"pig", "pt", "set"}, pairTokens...)
+	executeParts = append(executeParts, "--yes")
 
-	normalized := normalizeConfigPairs(kvPairs)
-	if action == "pg" {
-		analysis = AnalyzePGConfigPairs(normalized)
-	}
-	pairDetail := strings.Join(normalized, ", ")
-	if pairDetail == "" {
-		pairDetail = "no key=value pairs provided"
-	}
-	nextActions := configPlanNextActions(action, analysis)
-	risks := []string{"DCS configuration mistakes can affect every cluster member."}
-	if action == "pg" {
-		if analysis.RequiresRestart {
-			risks = append(risks, "PostgreSQL restart is required for: "+strings.Join(analysis.RestartParams, ", "))
-		} else {
-			risks = append(risks, "Some PostgreSQL parameters require reload or restart before they take effect.")
-		}
-	} else {
-		risks = append(risks, "Patroni dynamic configuration changes cluster behavior on every member.")
-	}
+	pgPairs := PostgreSQLSetTokens(pairs)
+	nextActions := []output.NextAction{{
+		Command:  utils.ShellQuoteArgs(executeParts),
+		Reason:   "apply the reviewed Patroni configuration change",
+		Required: true,
+	}}
+	nextActions = append(nextActions, SetNextActions(pgPairs)...)
 
 	return &output.Plan{
-		Command:      buildConfigCommand(action, normalized),
+		Command:      nativeCommand,
 		Boundary:     "pt:dcs-config",
-		Confirmation: "recommended",
+		Confirmation: "patronictl",
 		Actions: []output.Action{
-			{Step: 1, Description: "Validate key=value pairs for Patroni dynamic configuration"},
-			{Step: 2, Description: "Apply DCS config changes with patronictl edit-config --force"},
-			{Step: 3, Description: "Report whether PostgreSQL reload or restart should be considered"},
+			{Step: 1, Description: "Use the selected Patronictl configuration"},
+			{Step: 2, Description: "Run one ordered patronictl edit-config operation"},
 		},
-		Affects: []output.Resource{
-			{Type: "dcs_config", Name: scope, Impact: "update", Detail: pairDetail},
+		Affects: []output.Resource{{
+			Type:   "dcs_config",
+			Name:   "patroni",
+			Impact: "update",
+			Detail: strings.Join(pairTokens, ", "),
+		}},
+		Expected: "Patronictl displays and applies one dynamic-configuration diff",
+		Risks: []string{
+			"DCS configuration mistakes can affect every cluster member.",
+			"This plan contains caller-supplied configuration values and may contain sensitive data.",
 		},
-		Expected: "Patroni dynamic configuration is updated in DCS; members apply changes according to Patroni/PostgreSQL rules",
-		Risks:    risks,
 		Preconditions: []output.Check{
-			{Name: "config pairs", Status: "planned", Detail: pairDetail},
-			{Name: "patroni config", Status: "required", Detail: DefaultConfigPath},
-			{Name: "patronictl command", Status: "planned", Detail: "edit-config --force " + setFlag},
+			{Name: "patroni config", Status: "selected", Detail: ConfigFile()},
+			{Name: "patronictl command", Status: "planned", Detail: nativeCommand},
 		},
-		Verifications: []output.Check{
-			{Name: "show config", Status: "manual", Detail: "pig pt config show"},
-			{Name: "member state", Status: "manual", Detail: "pig pt list"},
-		},
+		Verifications: []output.Check{{
+			Name: "cluster members", Status: "manual", Detail: "pig pt list",
+		}},
 		NextActions: nextActions,
 	}
 }
 
-// ConfigPGNextActions returns machine-readable follow-up commands for a
-// PostgreSQL DCS parameter change.
-func ConfigPGNextActions(kvPairs []string) []output.NextAction {
-	return configPlanNextActions("pg", AnalyzePGConfigPairs(normalizeConfigPairs(kvPairs)))
-}
-
-func configPlanNextActions(action string, analysis PGConfigAnalysis) []output.NextAction {
-	if action == "pg" && analysis.RequiresRestart {
-		return []output.NextAction{
-			{Command: "pig pt list", Reason: "check members and pending restart state after config change", Required: false},
-			{Command: "pig pt restart --pending", Reason: "apply PostgreSQL postmaster parameters: " + strings.Join(analysis.RestartParams, ", "), Required: true},
-		}
-	}
-	return []output.NextAction{
-		{Command: "pig pt list", Reason: "check cluster member state after config change", Required: false},
-		{Command: "pig pt config show", Reason: "verify DCS config after change", Required: false},
-	}
-}
-
-func buildConfigCommand(action string, kvPairs []string) string {
-	parts := append([]string{"pig", "pt", "config", action}, kvPairs...)
-	return renderCommand(parts, true, false)
-}
-
-func normalizeConfigPairs(kvPairs []string) []string {
-	if len(kvPairs) == 0 {
+// SetNextActions analyzes only PostgreSQL-routed pairs.
+func SetNextActions(pgPairs []string) []output.NextAction {
+	if len(pgPairs) == 0 {
 		return nil
 	}
-	pairs := make([]string, 0, len(kvPairs))
-	for _, pair := range kvPairs {
-		pair = strings.TrimSpace(pair)
-		if pair != "" {
-			pairs = append(pairs, pair)
-		}
+	analysis := AnalyzePGConfigPairs(pgPairs)
+	reason := "check cluster members after the configuration change"
+	if analysis.RequiresRestart {
+		reason = "identify CLUSTER before applying pending PostgreSQL restart parameters with " +
+			"pig pt restart CLUSTER --pending: " + strings.Join(analysis.RestartParams, ", ")
 	}
-	return pairs
+	return []output.NextAction{{Command: "pig pt list", Reason: reason, Required: false}}
 }

@@ -14,6 +14,7 @@ import (
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 )
 
 type testStatusError struct {
@@ -40,7 +41,7 @@ func TestRunLegacyStructuredCapturesCommandOutput(t *testing.T) {
 	os.Stdout = w
 
 	runErr := runLegacyStructured(990000, "test command", []string{"arg1"}, map[string]interface{}{"k": "v"}, func() error {
-		fmt.Println("legacy text output")
+		fmt.Printf("%slegacy text output%s\n", utils.ColorBlue, utils.ColorReset)
 		return nil
 	})
 
@@ -69,8 +70,8 @@ func TestRunLegacyStructuredCapturesCommandOutput(t *testing.T) {
 	if cmd, _ := data["command"].(string); cmd != "test command" {
 		t.Fatalf("expected command 'test command', got %q", cmd)
 	}
-	if captured, _ := data["captured_output"].(string); !strings.Contains(captured, "legacy text output") {
-		t.Fatalf("expected captured output, got %q", captured)
+	if captured, _ := data["captured_output"].(string); !strings.Contains(captured, "legacy text output") || strings.Contains(captured, "\x1b[") {
+		t.Fatalf("expected plain captured output, got %q", captured)
 	}
 }
 
@@ -93,6 +94,41 @@ func TestRunLegacyStructuredUsesExecutorStatusCode(t *testing.T) {
 	}
 	if payload.Code != output.CodeStyDeployDependencyMissing || payload.Detail != "missing dependency" {
 		t.Fatalf("structured result = %+v", payload)
+	}
+}
+
+func TestRuntimeCommandErrorSuppressesOnlyDuplicateOutput(t *testing.T) {
+	origFormat := config.OutputFormat
+	config.OutputFormat = config.OUTPUT_TEXT
+	t.Cleanup(func() { config.OutputFormat = origFormat })
+
+	command := &cobra.Command{}
+	plain := errors.New("patronictl not found")
+	var got error
+	stderr := captureStderr(t, func() { got = runtimeCommandError(command, plain) })
+	if !errors.Is(got, plain) || !utils.IsSilentExit(got) {
+		t.Fatalf("runtimeCommandError() = %v, want wrapped silent error", got)
+	}
+	if !strings.Contains(stderr, "Error: patronictl not found") {
+		t.Fatalf("plain runtime stderr = %q, want one error line", stderr)
+	}
+	if !command.SilenceUsage || !command.SilenceErrors {
+		t.Fatalf("plain runtime error flags = usage:%v errors:%v, want both",
+			command.SilenceUsage, command.SilenceErrors)
+	}
+
+	command = &cobra.Command{}
+	silent := &utils.ExitCodeError{Code: 1, Err: errors.New("already printed"), Silent: true}
+	stderr = captureStderr(t, func() { got = runtimeCommandError(command, silent) })
+	if got != silent {
+		t.Fatalf("runtimeCommandError() = %v, want silent error", got)
+	}
+	if stderr != "" {
+		t.Fatalf("already-printed runtime stderr = %q, want no duplicate", stderr)
+	}
+	if !command.SilenceUsage || !command.SilenceErrors {
+		t.Fatalf("silent runtime error flags = usage:%v errors:%v, want both",
+			command.SilenceUsage, command.SilenceErrors)
 	}
 }
 

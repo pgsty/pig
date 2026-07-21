@@ -4,7 +4,10 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"os/user"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -198,5 +201,100 @@ func TestDBSUCommandFailedAfterStreamingOutputIsSilent(t *testing.T) {
 	}
 	if string(stderr) != "Error: No candidates found to switchover to\n" {
 		t.Fatalf("stderr = %q, want raw command stderr", string(stderr))
+	}
+}
+
+func TestDBSUCommandPassthroughPreservesStreamsAndExitCodes(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalUser := config.CurrentUser
+	t.Cleanup(func() { config.CurrentUser = originalUser })
+	config.CurrentUser = current.Username
+
+	for _, exitCode := range []int{1, 2} {
+		t.Run(string(rune('0'+exitCode)), func(t *testing.T) {
+			stdinR, stdinW, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdoutR, stdoutW, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stderrR, stderrW, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = stdinW.WriteString("native input\n")
+			_ = stdinW.Close()
+
+			oldStdin, oldStdout, oldStderr := os.Stdin, os.Stdout, os.Stderr
+			os.Stdin, os.Stdout, os.Stderr = stdinR, stdoutW, stderrW
+			runErr := DBSUCommandPassthrough(current.Username, []string{
+				"sh", "-c", "IFS= read -r line; printf 'out:%s' \"$line\"; printf 'err:%s' \"$line\" >&2; exit " + string(rune('0'+exitCode)),
+			})
+			os.Stdin, os.Stdout, os.Stderr = oldStdin, oldStdout, oldStderr
+			_ = stdinR.Close()
+			_ = stdoutW.Close()
+			_ = stderrW.Close()
+			stdout, _ := io.ReadAll(stdoutR)
+			stderr, _ := io.ReadAll(stderrR)
+			_ = stdoutR.Close()
+			_ = stderrR.Close()
+
+			var exitErr *ExitCodeError
+			if !errors.As(runErr, &exitErr) || exitErr.Code != exitCode || !exitErr.Silent {
+				t.Fatalf("error = %#v, want silent exit %d", runErr, exitCode)
+			}
+			if string(stdout) != "out:native input" || string(stderr) != "err:native input" {
+				t.Fatalf("stdout=%q stderr=%q", stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestShellQuoteArgsPreservesArgumentsThroughShell(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "print args.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nfor arg do printf '%s\\n' \"$arg\"; done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"plain", "with space", "single'quote", `double"quote`, "dollar$sign", "x=y=z", ""}
+	command := ShellQuoteArgs(append([]string{script}, want...))
+	out, err := exec.Command("sh", "-c", command).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round trip = %#v, want %#v; command=%s", got, want, command)
+	}
+}
+
+func TestBuildDBSUCommandSuPayloadPreservesArguments(t *testing.T) {
+	originalUser := config.CurrentUser
+	t.Cleanup(func() { config.CurrentUser = originalUser })
+	config.CurrentUser = "root"
+
+	script := filepath.Join(t.TempDir(), "su payload args.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nfor arg do printf '%s\\n' \"$arg\"; done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"with space", "single'quote", `double"quote`, "x=y=z", ""}
+	cmd, err := BuildDBSUCommand("postgres", append([]string{script}, want...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cmd.Args) != 5 || cmd.Args[0] != "su" || cmd.Args[1] != "-" || cmd.Args[2] != "postgres" || cmd.Args[3] != "-c" {
+		t.Fatalf("su command = %#v", cmd.Args)
+	}
+	out, err := exec.Command("sh", "-c", cmd.Args[4]).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("su payload round trip = %#v, want %#v; payload=%s", got, want, cmd.Args[4])
 	}
 }

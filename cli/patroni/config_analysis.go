@@ -6,7 +6,7 @@ import (
 )
 
 // pgRestartParams is the union of PostgreSQL 14-19 core parameters known to
-// use postmaster context. It is intentionally static: pt config must not query
+// use postmaster context. It is intentionally static: pt set must not query
 // pg_settings at runtime. Extra entries are acceptable because the UX rule is
 // to prefer warning about a restart over missing one.
 var pgRestartParams = map[string]struct{}{
@@ -78,7 +78,7 @@ var pgRestartParams = map[string]struct{}{
 	"wal_log_hints":                       {},
 }
 
-// PGConfigAnalysis describes static impact classification for pt config pg.
+// PGConfigAnalysis describes static impact classification for pt set --pg pairs.
 type PGConfigAnalysis struct {
 	RestartParams   []string
 	RequiresRestart bool

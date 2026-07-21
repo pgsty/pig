@@ -1122,6 +1122,47 @@ func TestPgPromoteTextRequiresConfirmationBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestPgPromoteStructuredConfirmationUsesSupportedPatroniGuidance(t *testing.T) {
+	origFormat := config.OutputFormat
+	origYes := pgPromoteYes
+	origPlan := pgPromotePlan
+	origExec := pgPromoteCommandExec
+	defer func() {
+		config.OutputFormat = origFormat
+		pgPromoteYes = origYes
+		pgPromotePlan = origPlan
+		pgPromoteCommandExec = origExec
+	}()
+
+	config.OutputFormat = config.OUTPUT_JSON
+	pgPromoteYes = false
+	pgPromotePlan = false
+	executed := false
+	pgPromoteCommandExec = func(*postgrescli.Config, *postgrescli.PromoteOptions) error {
+		executed = true
+		return nil
+	}
+
+	var runErr error
+	raw := capturePgStdout(t, func() {
+		runErr = pgPromoteCmd.RunE(pgPromoteCmd, nil)
+	})
+	if runErr == nil {
+		t.Fatal("structured pg promote should require explicit confirmation")
+	}
+	if executed {
+		t.Fatal("structured pg promote executed without confirmation")
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(pgBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if !pgResultDataHasNextAction(payload, "pig pt switchover --help") ||
+		pgResultDataHasNextAction(payload, "pig pt switchover --plan") {
+		t.Fatalf("structured promote has unsupported Patroni guidance: %v", payload["next_actions"])
+	}
+}
+
 func TestPgVacuumFullTextRequiresConfirmationBeforeExecution(t *testing.T) {
 	origFormat := config.OutputFormat
 	origFull := pgMaintFull

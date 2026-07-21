@@ -102,28 +102,16 @@ func visitOwnShorthands(c *cobra.Command, seen map[*pflag.Flag]bool, fn func(f *
 // the R3 conflict rule (cross-family reuse only when misuse fails validation
 // before any side effect) and a matching Appendix A + breaking-change entry.
 var shorthandPermitTable = map[string]string{
-	"patroni -U":             "dbsu",
-	"patroni failover -y":    "yes",
-	"patroni list -W":        "watch",
-	"patroni list -w":        "interval",
+	"patroni -c":             "config-file",
+	"patroni -d":             "dcs-url",
+	"patroni -k":             "insecure",
+	"patroni set -y":         "yes",
 	"patroni log -f":         "follow",
 	"patroni log -n":         "lines",
 	"patroni log grep -n":    "lines",
 	"patroni log show -n":    "lines",
 	"patroni log tail -f":    "follow",
 	"patroni log tail -n":    "lines",
-	"patroni pause -w":       "wait",
-	"patroni reinit -w":      "wait",
-	"patroni reinit -y":      "yes",
-	"patroni resume -w":      "wait",
-	"patroni restart -p":     "pending",
-	"patroni restart -r":     "role",
-	"patroni restart -y":     "yes",
-	"patroni switchover -c":  "candidate",
-	"patroni switchover -l":  "leader",
-	"patroni switchover -s":  "scheduled",
-	"patroni switchover -y":  "yes",
-	"patroni failover -c":    "candidate",
 	"pgbackrest -U":          "dbsu",
 	"pgbackrest -c":          "config",
 	"pgbackrest -r":          "repo",
@@ -288,10 +276,7 @@ func TestT2GateFlagLint(t *testing.T) {
 		{[]string{"pgbackrest", "expire"}, "yes"},
 		{[]string{"pgbackrest", "delete"}, "yes"}, // B05: --yes is the gate
 		{[]string{"pitr"}, "yes"},
-		{[]string{"patroni", "restart"}, "yes"}, // B04: pig owns confirmation
-		{[]string{"patroni", "reinit"}, "yes"},
-		{[]string{"patroni", "switchover"}, "yes"},
-		{[]string{"patroni", "failover"}, "yes"},
+		{[]string{"patroni", "set"}, "yes"},
 	}
 	for _, g := range gates {
 		cmd, _, err := rootCmd.Find(g.path)

@@ -289,6 +289,11 @@ func reorderOutputBeforeHelp(args []string) []string {
 	if len(args) < 3 {
 		return args
 	}
+	// Native pt argv is an opaque boundary. In particular, do not move an
+	// output-looking Patronictl argument around native --help.
+	if _, native := patroniNativeBoundary(args); native {
+		return args
+	}
 
 	helpIdx := -1
 	for i, arg := range args {
@@ -348,6 +353,9 @@ func isStructuredOutputRequested(args []string) bool {
 }
 
 func outputFormatFromArgs(args []string) string {
+	if boundary, native := patroniNativeBoundary(args); native {
+		args = args[:boundary]
+	}
 	format := config.OUTPUT_TEXT
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -364,6 +372,108 @@ func outputFormatFromArgs(args []string) string {
 		}
 	}
 	return format
+}
+
+// patroniNativeBoundary returns the full-argv index of the first token owned
+// by Patronictl. It is intentionally a small early-scan parser, not a second
+// command parser: Cobra remains authoritative for actual dispatch.
+func patroniNativeBoundary(args []string) (int, bool) {
+	commandIndex := topLevelCommandIndex(args)
+	if commandIndex < 0 || (args[commandIndex] != "pt" && args[commandIndex] != "patroni") {
+		return 0, false
+	}
+
+	valueFlags := map[string]bool{
+		"-c": true, "--config-file": true,
+		"--dbsu": true, "-d": true, "--dcs-url": true, "--dcs": true,
+		"-o": true, "--output": true,
+		"-i": true, "--inventory": true,
+		"-H": true, "--home": true,
+		"--log-level": true, "--log-path": true,
+	}
+	localCommands := map[string]bool{
+		"set":   true,
+		"start": true, "up": true,
+		"stop": true, "dn": true,
+		"service": true, "svc": true,
+		"status": true, "st": true,
+		"log": true, "l": true,
+	}
+
+	for i := commandIndex + 1; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return i, true
+		}
+		if valueFlags[arg] {
+			i++
+			continue
+		}
+		if ptOptionWithInlineValue(arg) || strings.HasPrefix(arg, "-") {
+			continue
+		}
+		if localCommands[arg] {
+			return 0, false
+		}
+		return i, true
+	}
+	return 0, false
+}
+
+func topLevelCommandIndex(args []string) int {
+	valueFlags := map[string]bool{
+		"-o": true, "--output": true,
+		"-i": true, "--inventory": true,
+		"-H": true, "--home": true,
+		"--log-level": true, "--log-path": true,
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			if i+1 < len(args) {
+				return i + 1
+			}
+			return -1
+		}
+		if valueFlags[arg] {
+			i++
+			continue
+		}
+		if rootOptionWithInlineValue(arg) || strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+func rootOptionWithInlineValue(arg string) bool {
+	for _, prefix := range []string{
+		"--output=", "-o=", "-o",
+		"--inventory=", "-i=", "-i",
+		"--home=", "-H=", "-H",
+		"--log-level=", "--log-path=",
+	} {
+		if strings.HasPrefix(arg, prefix) && arg != strings.TrimSuffix(prefix, "=") {
+			return true
+		}
+	}
+	return false
+}
+
+func ptOptionWithInlineValue(arg string) bool {
+	if rootOptionWithInlineValue(arg) {
+		return true
+	}
+	for _, prefix := range []string{
+		"--config-file=", "-c=", "-c",
+		"--dbsu=", "--dcs-url=", "-d=", "-d", "--dcs=",
+	} {
+		if strings.HasPrefix(arg, prefix) && arg != strings.TrimSuffix(prefix, "=") {
+			return true
+		}
+	}
+	return false
 }
 
 func init() {

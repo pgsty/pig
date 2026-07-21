@@ -808,8 +808,13 @@ func checkFileExistsAsDBSU(dbsu, path string) (bool, error) {
 
 // collectPatroniContext collects Patroni cluster information
 func collectPatroniContext() *PatroniContext {
-	result := patroni.StatusResult(utils.GetDBSU(""))
 	ctx := &PatroniContext{}
+	dbsu := utils.GetDBSU("")
+	patroni.SetCommandOptions(patroni.CommandOptions{})
+	if err := patroni.ResolveCommandOptions(dbsu); err != nil {
+		return ctx
+	}
+	result := patroni.StatusResult(dbsu)
 	if result == nil {
 		return ctx
 	}

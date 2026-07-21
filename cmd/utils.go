@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -18,6 +19,8 @@ import (
 )
 
 const legacyOutputCaptureLimit = 64 * 1024
+
+var ansiColorSequence = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func showCommandHelp(command *cobra.Command, _ []string) error { return command.Help() }
 
@@ -161,7 +164,7 @@ func runLegacyStructuredContract(module int, command, kind string, args []string
 	}
 
 	captured, truncated, err := captureLegacyOutput(fn, legacyOutputCaptureLimit)
-	if outputText := strings.TrimSpace(captured); outputText != "" {
+	if outputText := strings.TrimSpace(ansiColorSequence.ReplaceAllString(captured, "")); outputText != "" {
 		data.CapturedOutput = outputText
 	}
 	if truncated {
@@ -202,6 +205,18 @@ func silenceCobraOnSilentExit(cmd *cobra.Command, err error) error {
 		cmd.SilenceUsage = true
 	}
 	return err
+}
+
+// runtimeCommandError prints one plain execution error when needed, then
+// suppresses Cobra's duplicate Error, Usage, and root logger output.
+func runtimeCommandError(cmd *cobra.Command, err error) error {
+	if err == nil {
+		return nil
+	}
+	if !config.IsStructuredOutput() && !utils.IsSilentExit(err) {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	}
+	return silentRuntimeError(cmd, err)
 }
 
 func silentRuntimeError(cmd *cobra.Command, err error) error {
@@ -262,10 +277,18 @@ func structuredParamError(module int, command, message, detail string, args []st
 // per-command OpSpec table that also derives cobra annotations).
 // extraActions appends command-specific routing (e.g. "pig pt switchover").
 func requireStructuredConfirmation(module string, code int, message, command, boundary, risk, executeCommand, planCommand string, extraActions ...output.NextAction) error {
-	actions := []output.NextAction{
-		{Command: executeCommand, Reason: "execute after explicit confirmation", Required: true},
-	}
 	detail := "structured output mode does not prompt interactively; rerun with --yes to execute"
+	actions := make([]output.NextAction, 0, 2+len(extraActions))
+	if strings.TrimSpace(executeCommand) == "" {
+		detail = "structured output mode does not prompt interactively; mutation arguments are intentionally omitted; rerun the original invocation with --yes to execute"
+		actions = append(actions, output.NextAction{
+			Reason: "rerun the original invocation with --yes", Required: true,
+		})
+	} else {
+		actions = append(actions, output.NextAction{
+			Command: executeCommand, Reason: "execute after explicit confirmation", Required: true,
+		})
+	}
 	if planCommand != "" { // not every gated command offers --plan (e.g. pg init)
 		actions = append(actions, output.NextAction{Command: planCommand, Reason: "preview the operation without executing", Required: false})
 		detail += " or --plan to preview"

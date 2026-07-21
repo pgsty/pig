@@ -472,7 +472,7 @@ var pgPromoteCmd = &cobra.Command{
 					[]output.NextAction{
 						{Command: "pig pg promote --yes", Reason: "execute local-only promotion after explicit confirmation", Required: true},
 						{Command: "pig pg promote --plan", Reason: "preview local-only promotion", Required: false},
-						{Command: "pig pt switchover --plan", Reason: "use Patroni-managed planned leadership transfer", Required: false},
+						{Command: "pig pt switchover --help", Reason: "review native Patroni-managed switchover syntax", Required: false},
 					},
 				)
 			}

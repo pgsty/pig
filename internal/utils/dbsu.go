@@ -89,6 +89,27 @@ func DBSUCommandPreserveStdout(dbsu string, args []string) error {
 	return runDBSUCommand(dbsu, args, true)
 }
 
+// DBSUCommandPassthrough executes a command with the child's stdin, stdout,
+// and stderr attached directly to the current process. Unlike the shared
+// streaming helper it adds no capture writers, preserving terminal identity,
+// interactive prompts, editors, and native diagnostics.
+func DBSUCommandPassthrough(dbsu string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no command specified")
+	}
+	cmd := buildDBSUCmd(dbsu, args)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return &ExitCodeError{Code: exitErr.ExitCode(), Err: err, Silent: true}
+		}
+		return fmt.Errorf("command failed: %w", err)
+	}
+	return nil
+}
+
 // BuildDBSUCommand creates a command that runs as the database superuser.
 // Callers that need custom pipes or long-lived subprocesses can use this
 // instead of DBSUCommand.
@@ -102,6 +123,18 @@ func BuildDBSUCommand(dbsu string, args []string) (*exec.Cmd, error) {
 func runDBSUCommand(dbsu string, args []string, preserveStdout bool) error {
 	stdout, stderr := commandWriters(config.IsStructuredOutput(), preserveStdout)
 	result, err := executeDBSUCommand(dbsu, args, os.Stdin, stdout, stderr)
+	return dbsuCommandError(result, err)
+}
+
+// StreamDBSUCommand executes a command as DBSU while streaming and retaining
+// its output. It is intended for thin wrappers that must inspect a successful
+// command's text without changing its terminal behavior.
+func StreamDBSUCommand(dbsu string, args []string) (DBSUCommandResult, error) {
+	result, err := executeDBSUCommand(dbsu, args, os.Stdin, os.Stdout, os.Stderr)
+	return result, dbsuCommandError(result, err)
+}
+
+func dbsuCommandError(result DBSUCommandResult, err error) error {
 	if err != nil {
 		outStr := strings.TrimSpace(result.CombinedOutput())
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -224,13 +257,13 @@ func DBSUCommandStdout(dbsu string, args []string) (string, error) {
 // buildDBSUCmd creates an exec.Cmd for running a command as DBSU.
 func buildDBSUCmd(dbsu string, args []string) *exec.Cmd {
 	if IsDBSU(dbsu) {
-		logrus.Debugf("executing as %s: %v", dbsu, args)
+		logrus.Debugf("executing as %s: %s", dbsu, args[0])
 		return exec.Command(args[0], args[1:]...)
 	}
 
 	if config.CurrentUser == "root" {
 		cmdStr := ShellQuoteArgs(args)
-		logrus.Debugf("executing via su: su - %s -c %q", dbsu, cmdStr)
+		logrus.Debugf("executing via su as %s: %s", dbsu, args[0])
 		return exec.Command("su", "-", dbsu, "-c", cmdStr)
 	}
 
@@ -239,7 +272,7 @@ func buildDBSUCmd(dbsu string, args []string) *exec.Cmd {
 		sudoArgs = []string{"-n", "-inu", dbsu, "--"}
 	}
 	sudoArgs = append(sudoArgs, args...)
-	logrus.Debugf("executing via sudo: sudo %v", sudoArgs)
+	logrus.Debugf("executing via sudo as %s: %s", dbsu, args[0])
 	return exec.Command("sudo", sudoArgs...)
 }
 
@@ -249,7 +282,7 @@ func ShellQuoteArgs(args []string) string {
 	quoted := make([]string, len(args))
 	for i, arg := range args {
 		// Wrap in single quotes and escape existing single quotes
-		if strings.ContainsAny(arg, " \t\n'\"\\$`!*?[]{}()<>|&;#~") {
+		if arg == "" || strings.ContainsAny(arg, " \t\n'\"\\$`!*?[]{}()<>|&;#~") {
 			quoted[i] = "'" + strings.ReplaceAll(arg, "'", "'\"'\"'") + "'"
 		} else {
 			quoted[i] = arg
