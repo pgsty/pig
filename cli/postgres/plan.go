@@ -99,22 +99,24 @@ func buildRestartActions(running bool, mode string) []output.Action {
 }
 
 func buildRestartAffects(dataDir string, running bool, pid int) []output.Resource {
+	return buildLifecycleAffects("restart", dataDir, running, pid)
+}
+
+func buildLifecycleAffects(impact, dataDir string, running bool, pid int) []output.Resource {
 	affects := []output.Resource{}
 
-	// Data directory is always affected
 	affects = append(affects, output.Resource{
 		Type:   "directory",
 		Name:   dataDir,
-		Impact: "restart",
+		Impact: impact,
 		Detail: "data directory",
 	})
 
-	// Active connections will be interrupted
 	if running {
 		affects = append(affects, output.Resource{
 			Type:   "service",
 			Name:   "postgresql",
-			Impact: "restart",
+			Impact: impact,
 			Detail: fmt.Sprintf("PID %d will be terminated", pid),
 		})
 		affects = append(affects, output.Resource{
@@ -240,32 +242,7 @@ func buildStopActions(running bool, mode string) []output.Action {
 }
 
 func buildStopAffects(dataDir string, running bool, pid int) []output.Resource {
-	affects := []output.Resource{}
-
-	// Data directory
-	affects = append(affects, output.Resource{
-		Type:   "directory",
-		Name:   dataDir,
-		Impact: "stop",
-		Detail: "data directory",
-	})
-
-	if running {
-		affects = append(affects, output.Resource{
-			Type:   "service",
-			Name:   "postgresql",
-			Impact: "stop",
-			Detail: fmt.Sprintf("PID %d will be terminated", pid),
-		})
-		affects = append(affects, output.Resource{
-			Type:   "connection",
-			Name:   "active sessions",
-			Impact: "terminate",
-			Detail: "all client connections will be disconnected",
-		})
-	}
-
-	return affects
+	return buildLifecycleAffects("stop", dataDir, running, pid)
 }
 
 func buildStopExpected(dataDir string, running bool) string {

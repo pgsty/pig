@@ -57,17 +57,6 @@ func patroniConfigError(err error) error {
 	return &codedPatroniError{code: code, err: err}
 }
 
-func patroniOperationError(code int, err error) error {
-	if err == nil {
-		return nil
-	}
-	var coded interface{ StatusCode() int }
-	if errors.As(err, &coded) {
-		return err
-	}
-	return &codedPatroniError{code: code, err: err}
-}
-
 var (
 	errClusterScopeMissing = errors.New("patroni cluster scope missing")
 	errClusterScopeEmpty   = errors.New("patroni cluster scope empty")

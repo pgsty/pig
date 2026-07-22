@@ -1868,7 +1868,7 @@ func instanceResult(opts *Options, state *State, elapsed time.Duration) ResultDa
 }
 
 func EscapeSQLString(value string) string {
-	return strings.ReplaceAll(value, `'`, `''`)
+	return utils.EscapeSQLString(value)
 }
 
 func quoteArg(value string) string {

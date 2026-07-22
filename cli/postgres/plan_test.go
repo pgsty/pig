@@ -123,6 +123,9 @@ func TestBuildRestartAffects(t *testing.T) {
 	if !found {
 		t.Error("Service resource should include PID in detail")
 	}
+	if affects[0].Impact != "restart" || affects[1].Impact != "restart" || affects[2].Impact != "terminate" {
+		t.Fatalf("restart impacts changed: %#v", affects)
+	}
 
 	// Not running instance
 	affects = buildRestartAffects("/pg/data", false, 0)
@@ -306,6 +309,9 @@ func TestBuildStopAffects(t *testing.T) {
 	affects := buildStopAffects("/pg/data", true, 12345)
 	if len(affects) != 3 {
 		t.Errorf("Expected 3 resources for running instance, got %d", len(affects))
+	}
+	if affects[0].Impact != "stop" || affects[1].Impact != "stop" || affects[2].Impact != "terminate" {
+		t.Fatalf("stop impacts changed: %#v", affects)
 	}
 
 	// Not running instance

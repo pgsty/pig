@@ -212,7 +212,7 @@ func restoreNextActions(cfg *Config, opts *RestoreOptions) []output.NextAction {
 				Command: fmt.Sprintf("pg_ctl -D %s promote", quotedDataDir), Reason: "promote to primary once the restored state is verified", Required: false})
 		}
 		return append(actions, output.NextAction{
-			Command: restoreSideStanzaCreateCommand(cfg, dataDir), Reason: "re-create the pgBackRest stanza if needed", Required: false})
+			Command: SideRestoreStanzaCreateCommand(cfg, dataDir), Reason: "re-create the pgBackRest stanza if needed", Required: false})
 	}
 
 	actions := []output.NextAction{
@@ -255,7 +255,9 @@ func restorePigPgCommand(subcommand string, dataDir string) string {
 	return strings.Join(parts, " ")
 }
 
-func restoreSideStanzaCreateCommand(cfg *Config, dataDir string) string {
+// SideRestoreStanzaCreateCommand builds the replayable stanza-create command
+// used in side-restore next-action guidance.
+func SideRestoreStanzaCreateCommand(cfg *Config, dataDir string) string {
 	parts := []string{"pgbackrest"}
 	if cfg != nil {
 		if cfg.Stanza != "" {

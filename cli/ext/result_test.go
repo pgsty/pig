@@ -4210,18 +4210,9 @@ func TestExtensionAddDataTextWithData(t *testing.T) {
 			{Name: "foo", Error: "not found"},
 		},
 	}
-	text := d.Text()
-	if !strings.Contains(text, "Installed 1 package(s)") {
-		t.Error("expected installed count in output")
-	}
-	if !strings.Contains(text, "postgis") {
-		t.Error("expected package name in output")
-	}
-	if !strings.Contains(text, "Failed 1 package(s)") {
-		t.Error("expected failed count in output")
-	}
-	if !strings.Contains(text, "1234ms") {
-		t.Error("expected duration in output")
+	want := "Installed 1 package(s) for PostgreSQL 17:\n  - postgis (postgis34_17)\nFailed 1 package(s):\n  - foo: not found\nDuration: 1234ms\n"
+	if got := d.Text(); got != want {
+		t.Fatalf("ExtensionAddData.Text() = %q, want %q", got, want)
 	}
 }
 
@@ -4241,18 +4232,9 @@ func TestExtensionRmDataTextWithData(t *testing.T) {
 			{Name: "bar", Error: "permission denied"},
 		},
 	}
-	text := d.Text()
-	if !strings.Contains(text, "Removed 2 package(s)") {
-		t.Error("expected removed count in output")
-	}
-	if !strings.Contains(text, "postgis") {
-		t.Error("expected package name in output")
-	}
-	if !strings.Contains(text, "Failed 1 package(s)") {
-		t.Error("expected failed count in output")
-	}
-	if !strings.Contains(text, "567ms") {
-		t.Error("expected duration in output")
+	want := "Removed 2 package(s) for PostgreSQL 17:\n  - postgis\n  - pg_trgm\nFailed 1 package(s):\n  - bar: permission denied\nDuration: 567ms\n"
+	if got := d.Text(); got != want {
+		t.Fatalf("ExtensionRmData.Text() = %q, want %q", got, want)
 	}
 }
 
@@ -4269,15 +4251,9 @@ func TestExtensionUpdateDataTextWithData(t *testing.T) {
 		DurationMs: 890,
 		Updated:    []string{"postgis"},
 	}
-	text := d.Text()
-	if !strings.Contains(text, "Updated 1 package(s)") {
-		t.Error("expected updated count in output")
-	}
-	if !strings.Contains(text, "postgis") {
-		t.Error("expected package name in output")
-	}
-	if !strings.Contains(text, "890ms") {
-		t.Error("expected duration in output")
+	want := "Updated 1 package(s) for PostgreSQL 17:\n  - postgis\nDuration: 890ms\n"
+	if got := d.Text(); got != want {
+		t.Fatalf("ExtensionUpdateData.Text() = %q, want %q", got, want)
 	}
 }
 

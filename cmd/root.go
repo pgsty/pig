@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"pig/cli/license"
 	"pig/internal/ancs"
 	"pig/internal/config"
 	"pig/internal/output"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // log level parameters
@@ -83,6 +85,10 @@ func initAllForCommand(cmd *cobra.Command) error {
 		return err
 	}
 	config.InitConfigWithOptions(inventory, pigstyHome, commandInitOptions(cmd))
+	license.HomeDir = config.HomeDir
+	if configuredLicense := viper.GetString("license"); configuredLicense != "" {
+		license.InitLicense(configuredLicense)
+	}
 	initOutputFormat()
 	return nil
 }

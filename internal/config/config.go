@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"pig/cli/license"
 	"runtime"
 	"strconv"
 	"strings"
@@ -167,15 +166,6 @@ func InitConfigWithOptions(inventory, pigstyHome string, options InitOptions) {
 	// setup inventory and retain its value-free provenance/status descriptor
 	PigstyInventorySource = resolveInventorySource(inventory, PigstyHome)
 	PigstyConfig = PigstyInventorySource.Path
-
-	// setup license with HomeDir
-	license.HomeDir = HomeDir
-
-	// setup license if provided
-	lic := viper.GetString("license")
-	if lic != "" {
-		license.InitLicense(lic)
-	}
 }
 
 func findPigstyHome(pigstyHome string) string {

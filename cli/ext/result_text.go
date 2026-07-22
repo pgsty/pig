@@ -16,6 +16,31 @@ import (
  * Implement output.Texter interface for text-mode rendering
  ********************/
 
+func writeExtensionPackageAction(sb *strings.Builder, action string, packages []string, pgVersion int) {
+	if len(packages) == 0 {
+		return
+	}
+	sb.WriteString(fmt.Sprintf("%s %d package(s) for PostgreSQL %d:\n", action, len(packages), pgVersion))
+	for _, pkg := range packages {
+		sb.WriteString(fmt.Sprintf("  - %s\n", pkg))
+	}
+}
+
+func writeFailedAndDuration(sb *strings.Builder, failed []*FailedExtItem, durationMs int64) {
+	if len(failed) > 0 {
+		sb.WriteString(fmt.Sprintf("Failed %d package(s):\n", len(failed)))
+		for _, item := range failed {
+			if item == nil {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("  - %s: %s\n", item.Name, item.Error))
+		}
+	}
+	if durationMs > 0 {
+		sb.WriteString(fmt.Sprintf("Duration: %dms\n", durationMs))
+	}
+}
+
 // Text returns a human-readable tabulated extension list.
 // Matches output quality of TabulteCommon/TabulteVersion.
 func (d *ExtensionListData) Text() string {
@@ -432,18 +457,7 @@ func (d *ExtensionAddData) Text() string {
 			sb.WriteString(fmt.Sprintf("  - %s (%s)\n", item.Name, item.Package))
 		}
 	}
-	if len(d.Failed) > 0 {
-		sb.WriteString(fmt.Sprintf("Failed %d package(s):\n", len(d.Failed)))
-		for _, item := range d.Failed {
-			if item == nil {
-				continue
-			}
-			sb.WriteString(fmt.Sprintf("  - %s: %s\n", item.Name, item.Error))
-		}
-	}
-	if d.DurationMs > 0 {
-		sb.WriteString(fmt.Sprintf("Duration: %dms\n", d.DurationMs))
-	}
+	writeFailedAndDuration(&sb, d.Failed, d.DurationMs)
 	return sb.String()
 }
 
@@ -453,24 +467,8 @@ func (d *ExtensionRmData) Text() string {
 		return ""
 	}
 	var sb strings.Builder
-	if len(d.Removed) > 0 {
-		sb.WriteString(fmt.Sprintf("Removed %d package(s) for PostgreSQL %d:\n", len(d.Removed), d.PgVersion))
-		for _, pkg := range d.Removed {
-			sb.WriteString(fmt.Sprintf("  - %s\n", pkg))
-		}
-	}
-	if len(d.Failed) > 0 {
-		sb.WriteString(fmt.Sprintf("Failed %d package(s):\n", len(d.Failed)))
-		for _, item := range d.Failed {
-			if item == nil {
-				continue
-			}
-			sb.WriteString(fmt.Sprintf("  - %s: %s\n", item.Name, item.Error))
-		}
-	}
-	if d.DurationMs > 0 {
-		sb.WriteString(fmt.Sprintf("Duration: %dms\n", d.DurationMs))
-	}
+	writeExtensionPackageAction(&sb, "Removed", d.Removed, d.PgVersion)
+	writeFailedAndDuration(&sb, d.Failed, d.DurationMs)
 	return sb.String()
 }
 
@@ -480,24 +478,8 @@ func (d *ExtensionUpdateData) Text() string {
 		return ""
 	}
 	var sb strings.Builder
-	if len(d.Updated) > 0 {
-		sb.WriteString(fmt.Sprintf("Updated %d package(s) for PostgreSQL %d:\n", len(d.Updated), d.PgVersion))
-		for _, pkg := range d.Updated {
-			sb.WriteString(fmt.Sprintf("  - %s\n", pkg))
-		}
-	}
-	if len(d.Failed) > 0 {
-		sb.WriteString(fmt.Sprintf("Failed %d package(s):\n", len(d.Failed)))
-		for _, item := range d.Failed {
-			if item == nil {
-				continue
-			}
-			sb.WriteString(fmt.Sprintf("  - %s: %s\n", item.Name, item.Error))
-		}
-	}
-	if d.DurationMs > 0 {
-		sb.WriteString(fmt.Sprintf("Duration: %dms\n", d.DurationMs))
-	}
+	writeExtensionPackageAction(&sb, "Updated", d.Updated, d.PgVersion)
+	writeFailedAndDuration(&sb, d.Failed, d.DurationMs)
 	return sb.String()
 }
 

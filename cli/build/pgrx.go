@@ -128,43 +128,27 @@ func pgrxVersionStringsContain(versions []string, target string) bool {
 }
 
 func buildELPgrxArgs(cargoBin string, versions []string, includeBeta bool) []string {
-	args := []string{cargoBin, "pgrx", "init"}
-
-	// If versions are specified, use them
-	if len(versions) > 0 {
-		for _, ver := range versions {
-			pgConfig := fmt.Sprintf("/usr/pgsql-%s/bin/pg_config", ver)
-			args = append(args, fmt.Sprintf("--pg%s=%s", ver, pgConfig))
-		}
-	} else {
-		// Auto-detect installed versions
-		logrus.Info("Auto-detecting PostgreSQL installations for EL-based system")
-		for _, ver := range pgrxAutoDetectVersionStrings(includeBeta) {
-			pgConfig := fmt.Sprintf("/usr/pgsql-%s/bin/pg_config", ver)
-			if _, err := os.Stat(pgConfig); err == nil {
-				args = append(args, fmt.Sprintf("--pg%s=%s", ver, pgConfig))
-				logrus.Debugf("Found PostgreSQL %s at %s", ver, pgConfig)
-			}
-		}
-	}
-
-	return args
+	return buildLinuxPgrxArgs(cargoBin, versions, includeBeta, "EL-based", "/usr/pgsql-%s/bin/pg_config")
 }
 
 func buildDEBPgrxArgs(cargoBin string, versions []string, includeBeta bool) []string {
+	return buildLinuxPgrxArgs(cargoBin, versions, includeBeta, "DEB-based", "/usr/lib/postgresql/%s/bin/pg_config")
+}
+
+func buildLinuxPgrxArgs(cargoBin string, versions []string, includeBeta bool, systemLabel, pgConfigPattern string) []string {
 	args := []string{cargoBin, "pgrx", "init"}
 
 	// If versions are specified, use them
 	if len(versions) > 0 {
 		for _, ver := range versions {
-			pgConfig := fmt.Sprintf("/usr/lib/postgresql/%s/bin/pg_config", ver)
+			pgConfig := fmt.Sprintf(pgConfigPattern, ver)
 			args = append(args, fmt.Sprintf("--pg%s=%s", ver, pgConfig))
 		}
 	} else {
 		// Auto-detect installed versions
-		logrus.Info("Auto-detecting PostgreSQL installations for DEB-based system")
+		logrus.Infof("Auto-detecting PostgreSQL installations for %s system", systemLabel)
 		for _, ver := range pgrxAutoDetectVersionStrings(includeBeta) {
-			pgConfig := fmt.Sprintf("/usr/lib/postgresql/%s/bin/pg_config", ver)
+			pgConfig := fmt.Sprintf(pgConfigPattern, ver)
 			if _, err := os.Stat(pgConfig); err == nil {
 				args = append(args, fmt.Sprintf("--pg%s=%s", ver, pgConfig))
 				logrus.Debugf("Found PostgreSQL %s at %s", ver, pgConfig)

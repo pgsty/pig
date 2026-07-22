@@ -110,23 +110,7 @@ func (r *commandReadCloser) Close() error {
 }
 
 func resolveRequestedLogFile(logDir string, file string) (string, error) {
-	if file == "" {
-		return "", fmt.Errorf("invalid log file name: empty")
-	}
-	if file == "." || file == ".." {
-		return "", fmt.Errorf("invalid log file name: %s", file)
-	}
-	if file != filepath.Base(file) || strings.Contains(file, string(os.PathSeparator)) || strings.Contains(file, "\\") {
-		return "", fmt.Errorf("invalid log file name: only file basename is allowed")
-	}
-
-	cleanDir := filepath.Clean(logDir)
-	logPath := filepath.Clean(filepath.Join(cleanDir, file))
-	rel, err := filepath.Rel(cleanDir, logPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("invalid log file path")
-	}
-	return logPath, nil
+	return utils.ResolveLogFilePath(logDir, file)
 }
 
 // getLatestLogFile finds the latest CSV log file in the log directory

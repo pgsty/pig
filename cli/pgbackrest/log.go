@@ -77,24 +77,12 @@ func logDirForCommand(configPath, dbsu string) (string, error) {
 }
 
 func resolveRequestedLogFile(logDir string, file string) (string, error) {
-	if file == "" {
-		return "", fmt.Errorf("invalid log file name: empty")
-	}
-	if file == "." || file == ".." {
-		return "", fmt.Errorf("invalid log file name: %s", file)
-	}
-	if file != filepath.Base(file) || strings.Contains(file, string(os.PathSeparator)) || strings.Contains(file, "\\") {
-		return "", fmt.Errorf("invalid log file name: only file basename is allowed")
+	logPath, err := utils.ResolveLogFilePath(logDir, file)
+	if err != nil {
+		return "", err
 	}
 	if !strings.HasSuffix(file, ".log") {
 		return "", fmt.Errorf("invalid log file: %s (must end with .log)", file)
-	}
-
-	cleanDir := filepath.Clean(logDir)
-	logPath := filepath.Clean(filepath.Join(cleanDir, file))
-	rel, err := filepath.Rel(cleanDir, logPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("invalid log file path")
 	}
 	return logPath, nil
 }

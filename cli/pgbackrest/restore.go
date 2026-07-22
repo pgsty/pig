@@ -558,7 +558,7 @@ func printPostRestoreHints(cfg *Config, opts *RestoreOptions) {
 		}
 
 		fmt.Fprintf(os.Stderr, "%d. Re-create stanza if needed:\n", nextStep)
-		fmt.Fprintf(os.Stderr, "   %s\n", restoreSideStanzaCreateCommand(cfg, dataDir))
+		fmt.Fprintf(os.Stderr, "   %s\n", SideRestoreStanzaCreateCommand(cfg, dataDir))
 	} else {
 		// Detailed hints for default data directory
 		fmt.Fprintln(os.Stderr, "1. Start PostgreSQL:")

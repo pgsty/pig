@@ -393,7 +393,7 @@ func QuoteIdentifier(value string) string {
 }
 
 func EscapeDatabaseString(value string) string {
-	return strings.ReplaceAll(value, `'`, `''`)
+	return utils.EscapeSQLString(value)
 }
 
 func executePreparedClone(opts *CloneOptions) (CloneResult, error) {

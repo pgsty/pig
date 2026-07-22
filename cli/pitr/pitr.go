@@ -1629,7 +1629,7 @@ func buildSideRestoreNextActions(dataDir string, pbConfig *pgbackrest.Config, op
 		actions = append(actions,
 			output.NextAction{Command: fmt.Sprintf("pg_ctl -D %s status", quotedDataDir), Reason: "Verify recovery shutdown", Required: false},
 			postgresLogInspectAction(dataDir, true),
-			output.NextAction{Command: sideRestoreStanzaCreateCommand(pbConfig, dataDir), Reason: "Only if converting this side directory into a managed cluster, re-create pgBackRest stanza", Required: false},
+			output.NextAction{Command: pgbackrest.SideRestoreStanzaCreateCommand(pbConfig, dataDir), Reason: "Only if converting this side directory into a managed cluster, re-create pgBackRest stanza", Required: false},
 		)
 		return actions
 	}
@@ -1650,7 +1650,7 @@ func buildSideRestoreNextActions(dataDir string, pbConfig *pgbackrest.Config, op
 		})
 	}
 	actions = append(actions, output.NextAction{
-		Command: sideRestoreStanzaCreateCommand(pbConfig, dataDir), Reason: "Only if converting this side directory into a managed cluster, re-create pgBackRest stanza", Required: false,
+		Command: pgbackrest.SideRestoreStanzaCreateCommand(pbConfig, dataDir), Reason: "Only if converting this side directory into a managed cluster, re-create pgBackRest stanza", Required: false,
 	})
 	return actions
 }
@@ -1770,20 +1770,6 @@ func pitrPBRestorePlanCommand(opts *Options) string {
 		opts = &Options{}
 	}
 	return pgbackrest.RestoreCommand(pgbackrestConfigFromPITR(opts), restoreOptionsFromPITR(opts), true, false)
-}
-
-func sideRestoreStanzaCreateCommand(cfg *pgbackrest.Config, dataDir string) string {
-	parts := []string{"pgbackrest"}
-	if cfg != nil {
-		if cfg.Stanza != "" {
-			parts = append(parts, "--stanza="+pgbackrest.QuoteShellArg(cfg.Stanza))
-		}
-		if cfg.ConfigPath != "" && cfg.ConfigPath != pgbackrest.DefaultConfigPath {
-			parts = append(parts, "--config="+pgbackrest.QuoteShellArg(cfg.ConfigPath))
-		}
-	}
-	parts = append(parts, "--pg1-path="+pgbackrest.QuoteShellArg(dataDir), "stanza-create")
-	return strings.Join(parts, " ")
 }
 
 func isDefaultManagedDataDir(dataDir string) bool {
