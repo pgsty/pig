@@ -77,7 +77,10 @@ The first command token determines dispatch:
 - `pig pt` with no command prints Pig's `pt` help and does not run Patronictl;
 - `pig pt --help` prints Pig help;
 - native help uses `pig pt <native-command> --help`; Patronictl root help uses
-  `pig pt -- --help`.
+  `pig pt -- --help`;
+- native `-h`/`--help` in the canonical forms above is a config-independent
+  fast path: Pig resolves the executable and execution user, but does not probe
+  a config or inject its config, DCS, or TLS root options.
 
 `pt` is a runnable Cobra parent with `cobra.ArbitraryArgs`. Its flag set uses
 non-interspersed parsing. Pig/PT options before the first native command token
@@ -127,8 +130,11 @@ Patronictl.
 
 ## Config-file resolution
 
-Every Patronictl invocation receives exactly one Pig-selected root `-c PATH`.
-The precedence is normative:
+Every config-aware Patronictl invocation receives exactly one Pig-selected
+root `-c PATH`. Native `-h`/`--help` is the sole forwarding exception: its
+native argv is launched directly without config resolution or any Pig-injected
+Patronictl root option. For config-aware invocations, the precedence is
+normative:
 
 1. explicit `-c/--config-file` supplied before the command;
 2. non-empty `PATRONICTL_CONFIG_FILE`;
@@ -432,8 +438,8 @@ Implementation is acceptable only when tests prove:
 5. a future unknown native root option works through the leading `--` escape;
 6. `--` bypasses every local-name and alias collision, including `pt -- set`
    and `pt -- st`;
-7. `pt` with no args, Pig help, native subcommand help, and native root help
-   follow this contract;
+7. `pt` with no args and Pig help stay local, while native subcommand/root help
+   skips config resolution and injected Patronictl root options;
 8. config resolution covers explicit, environment, both-readable, etc-only,
    infra-only, and neither-readable cases in the normative order;
 9. conventional readability is evaluated as DBSU, and probe-launch failure is

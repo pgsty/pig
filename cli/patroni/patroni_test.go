@@ -178,6 +178,84 @@ func TestPassthroughNotFoundIsCoded(t *testing.T) {
 	}
 }
 
+func TestPassthroughNativeHelpSkipsConfigResolutionAndRootInjection(t *testing.T) {
+	preservePatroniCommandOptions(t)
+	oldLookPath := patroniLookPath
+	oldProbe := patroniDBSUCommandStdout
+	oldExec := patroniPassthroughDBSUCommand
+	oldUser := config.CurrentUser
+	t.Cleanup(func() {
+		patroniLookPath = oldLookPath
+		patroniDBSUCommandStdout = oldProbe
+		patroniPassthroughDBSUCommand = oldExec
+		config.CurrentUser = oldUser
+	})
+	t.Setenv("PATRONICTL_CONFIG_FILE", "")
+	config.CurrentUser = "root"
+	patroniLookPath = func(string) (string, error) { return "/opt/bin/patronictl", nil }
+
+	probes := 0
+	patroniDBSUCommandStdout = func(string, []string) (string, error) {
+		probes++
+		return "", errors.New("config probe must not run for native help")
+	}
+
+	tests := [][]string{
+		{"--help"},
+		{"list", "--help"},
+		{"restart", "-h"},
+	}
+	var calls [][]string
+	patroniPassthroughDBSUCommand = func(dbsu string, args []string) error {
+		if dbsu != "postgres" {
+			t.Fatalf("dbsu = %q, want postgres", dbsu)
+		}
+		calls = append(calls, append([]string(nil), args...))
+		return nil
+	}
+	for _, native := range tests {
+		SetCommandOptions(CommandOptions{
+			DCSURL:   "https://must-not-be-injected",
+			Insecure: true,
+		})
+		if err := Passthrough("postgres", native); err != nil {
+			t.Fatalf("Passthrough(%v): %v", native, err)
+		}
+	}
+	if probes != 0 {
+		t.Fatalf("native help performed %d config probes", probes)
+	}
+	want := make([][]string, 0, len(tests))
+	for _, native := range tests {
+		want = append(want, append([]string{"/opt/bin/patronictl"}, native...))
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("native help calls = %#v, want %#v", calls, want)
+	}
+}
+
+func TestPatronictlHelpRequestedRecognizesOnlyCanonicalHelpForms(t *testing.T) {
+	tests := []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"--help"}, true},
+		{[]string{"list", "--help"}, true},
+		{[]string{"restart", "-h"}, true},
+		{[]string{"query", "-c", "select '--help'"}, false},
+		{[]string{"query", "-c", "--help"}, false},
+		{[]string{"restart", "pg-meta", "--help"}, false},
+		{[]string{"query", "--", "--help"}, false},
+		{[]string{"--future-root-option", "--help"}, false},
+		{[]string{"list", "--helper"}, false},
+	}
+	for _, tt := range tests {
+		if got := patronictlHelpRequested(tt.args); got != tt.want {
+			t.Errorf("patronictlHelpRequested(%v) = %v, want %v", tt.args, got, tt.want)
+		}
+	}
+}
+
 func TestPassthroughResolvesBinaryBeforeDBSUConfigProbe(t *testing.T) {
 	preservePatroniCommandOptions(t)
 	oldLookPath := patroniLookPath

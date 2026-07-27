@@ -136,10 +136,13 @@ func TestPatroniHelpBoundary(t *testing.T) {
 	if err := executePtTest(t, "pt", "list", "--help"); err != nil {
 		t.Fatal(err)
 	}
+	if err := executePtTest(t, "pt", "restart", "-h"); err != nil {
+		t.Fatal(err)
+	}
 	if err := executePtTest(t, "pt", "--", "--help"); err != nil {
 		t.Fatal(err)
 	}
-	want := [][]string{{"list", "--help"}, {"--help"}}
+	want := [][]string{{"list", "--help"}, {"restart", "-h"}, {"--help"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("native help calls = %#v, want %#v", got, want)
 	}

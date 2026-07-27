@@ -161,8 +161,23 @@ func patronictlArgs(binPath string, args ...string) []string {
 	return append(result, args...)
 }
 
-// Passthrough launches Patronictl with direct terminal file descriptors. It
-// prepends only Pig's selected root options and never inspects native output.
+func patronictlHelpRequested(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	isHelpFlag := func(arg string) bool { return arg == "-h" || arg == "--help" }
+	if isHelpFlag(args[0]) {
+		return true
+	}
+	// Deliberately recognize only the canonical COMMAND --help form. Scanning
+	// arbitrary argv would misclassify a literal help-looking option value,
+	// such as `query -c --help`, and would change a normal invocation.
+	return len(args) > 1 && !strings.HasPrefix(args[0], "-") && isHelpFlag(args[1])
+}
+
+// Passthrough launches Patronictl with direct terminal file descriptors. For
+// config-aware commands it prepends only Pig's selected root options. It never
+// inspects native output.
 func Passthrough(dbsu string, args []string) error {
 	binPath, err := patroniLookPath("patronictl")
 	if err != nil {
@@ -176,6 +191,13 @@ func Passthrough(dbsu string, args []string) error {
 		if err != nil {
 			return fmt.Errorf("resolve patronictl executable path: %w", err)
 		}
+	}
+	// Native help is config-independent. Launch it without probing a config or
+	// injecting Pig-owned Patronictl root options, so help also works before a
+	// node has been configured.
+	if patronictlHelpRequested(args) {
+		logrus.Debug("starting patronictl native help passthrough")
+		return patroniPassthroughDBSUCommand(dbsu, append([]string{binPath}, args...))
 	}
 	// Resolve the binary in the caller's PATH before a conventional config
 	// probe or the native command changes OS identity.
