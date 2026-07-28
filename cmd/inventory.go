@@ -206,13 +206,16 @@ func inventoryCMDBAnnotations(name, typ, volatility, parallel string, idempotent
 
 var inventoryCMDBCmd = &cobra.Command{
 	Use:         "cmdb",
-	Short:       "Exchange Inventory with Pigsty's existing PostgreSQL CMDB",
+	Short:       "Exchange Inventory with Pigsty's existing PostgreSQL CMDB (experimental)",
 	Annotations: inventoryCMDBAnnotations("pig inventory cmdb", "query", "volatile", "restricted", true, "low", "none", 100),
 	Long: `Use the existing files/cmdb.sql schema and Inventory projections.
 
+This command group is EXPERIMENTAL: interfaces and behavior may change.
+
 Check is read-only. Init, load, and dump are the data primitives. Enable and
 disable only guard and switch the [defaults] inventory directive between
-inventory.sh and pigsty.yml.`,
+inventory.sh and pigsty.yml. Init applies the cmdb.sql baseline directly, may
+replace the existing pigsty and pglog schemas, and does not take a backup first.`,
 }
 
 var inventoryCMDBCheckCmd = &cobra.Command{

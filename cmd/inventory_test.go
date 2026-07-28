@@ -187,6 +187,18 @@ func TestInventoryCMDBCommandOptions(t *testing.T) {
 	}
 }
 
+func TestInventoryCMDBHelpExposesExperimentalSafetyBoundary(t *testing.T) {
+	help := strings.Join(strings.Fields(strings.ToLower(inventoryCMDBCmd.Short+"\n"+inventoryCMDBCmd.Long)), " ")
+	for _, want := range []string{"experimental", "may replace", "does not take a backup"} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("inventory cmdb help does not disclose %q", want)
+		}
+	}
+	if inventoryCMDBCmd.Annotations["maturity"] != "experimental" {
+		t.Fatalf("inventory cmdb maturity = %q, want experimental", inventoryCMDBCmd.Annotations["maturity"])
+	}
+}
+
 func TestInventoryCMDBCommandsDelegate(t *testing.T) {
 	originalCheck := inventoryCMDBCheckExec
 	originalInit, originalLoad := inventoryCMDBInitExec, inventoryCMDBLoadExec
