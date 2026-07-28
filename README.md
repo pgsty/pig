@@ -623,7 +623,7 @@ $ pig build pkg timescaledb  # now you can build extension with pig!
 | **el10** | RHEL 10 / Rocky10 / Alma10  / ... | PG 18 - 14 | PG 18 - 14 |
 | **el9**  | RHEL 9 / Rocky9 / Alma9  / ...    | PG 18 - 14 | PG 18 - 14 |
 | **el8**  | RHEL 8 / Rocky8 / Alma8 / ...     | PG 18 - 14 | PG 18 - 14 |
-| **u22**  | Ubuntu 26.04 (`resolute`)         | PG 18 - 14 | PG 18 - 14 |
+| **u26**  | Ubuntu 26.04 (`resolute`)         | PG 18 - 14 | PG 18 - 14 |
 | **u24**  | Ubuntu 24.04 (`noble`)            | PG 18 - 14 | PG 18 - 14 |
 | **u22**  | Ubuntu 22.04 (`jammy`)            | PG 18 - 14 | PG 18 - 14 |
 | **d13**  | Debian 13 (`trixie`)              | PG 18 - 14 | PG 18 - 14 |
