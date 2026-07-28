@@ -5,15 +5,15 @@
 [![Version: v1.6.0](https://img.shields.io/badge/version-v1.6.0-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.6.0)
 [![Pigsty: v4.5.0](https://img.shields.io/badge/Pigsty-v4.5.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 555](https://img.shields.io/badge/extensions-555-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
+[![Extensions: 562](https://img.shields.io/badge/extensions-562-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pgsty/pig)
 
 [**pig**](https://pigsty.io/docs/pig) is an open-source PostgreSQL (& Extension) Package Manager for [mainstream](https://pigsty.io/ext/os/) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 14 ~ 18 along with [555 extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager
+Install PostgreSQL 14 ~ 18 along with [562 packaged extensions](https://pigsty.io/ext/list) on (`amd64` / `arm64`) with native OS package manager.
 
 All commands support structured output (`-o yaml/json`) with self-describing schema, making it an **Agent-Friendly** PostgreSQL CLI tool.
-Also check the [**Pigsty Extension Catalog**](https://pigsty.io/ext/) to get details about the available extensions.
+Also explore the full [**PGEXT.CLOUD directory**](https://pgext.cloud/) of 2,230 catalogued PostgreSQL extensions.
 
 [![PostgreSQL Extension Ecosystem](https://pigsty.io/img/pigsty/ecosystem.jpg)](https://medium.com/@fengruohang/postgres-is-eating-the-database-world-157c204dcfc4)
 
@@ -42,7 +42,7 @@ $ pig ext install pg18              # install PostgreSQL 18 kernels with native 
 $ pig ext install pg_duckdb -v 18   # install the pg_duckdb extension (for current pg18)
 ```
 
-That's it. All set! Check the [advanced usage](#advanced-usage) for details and the [full list of 555 available extensions](https://pigsty.io/ext/list/).
+That's it. All set! Check the [advanced usage](#advanced-usage) for details and the [full list of 562 packaged extensions](https://pigsty.io/ext/list/).
 
 [![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
 
@@ -357,10 +357,10 @@ $ pig ext avail                      # show all packages availability on current
 
 ```bash
 vagrant@meta:~$ pig ext avail
-✓ Found 297 packages available on u24.arm64
+✓ Found 402 packages available on u24.arm64
 
 Extension Availability on u24.aarch64 : https://pigsty.io/ext/os/u24.aarch64
-Showing 340 packages with 555 extensions  (green = PIGSTY, blue = PGDG)
+Showing 405 packages with 562 extensions  (green = PIGSTY, blue = PGDG)
 
 Pkg                     18          17          16          15          14      
 timescaledb             2.26.4      2.26.4      2.26.4      2.26.4      2.26.4
