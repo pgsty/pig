@@ -159,6 +159,34 @@ func TestUbuntuRepoReleasePolicy(t *testing.T) {
 	}
 }
 
+func TestPerconaTDERepoContract(t *testing.T) {
+	var repos []Repository
+	if err := yaml.Unmarshal(embedRepoData, &repos); err != nil {
+		t.Fatalf("failed to parse embedded repo catalog: %v", err)
+	}
+
+	want := map[string]string{
+		"rpm": "https://repo.percona.com/ppg-18.4/yum/release/$releasever/RPMS/$basearch",
+		"deb": "https://repo.percona.com/ppg-18.4/apt ${distro_codename} main",
+	}
+	seen := make(map[string]bool)
+	for _, r := range repos {
+		if r.Name != "percona" || r.Description != "Percona TDE" {
+			continue
+		}
+		distro := r.InferOS()
+		if r.BaseURL["default"] != want[distro] {
+			t.Fatalf("percona %s repository = %q, want %q", distro, r.BaseURL["default"], want[distro])
+		}
+		seen[distro] = true
+	}
+	for _, distro := range []string{"rpm", "deb"} {
+		if !seen[distro] {
+			t.Fatalf("percona %s repository not found", distro)
+		}
+	}
+}
+
 func TestPXB84ChinaMirrorContract(t *testing.T) {
 	var repos []Repository
 	if err := yaml.Unmarshal(embedRepoData, &repos); err != nil {
