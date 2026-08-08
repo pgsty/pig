@@ -123,6 +123,62 @@ func TestClientDashboardBootstrapRoutes(t *testing.T) {
 	}
 }
 
+func TestClientUpsertsDashboardV2ResourceWithoutLegacyAPIRoundTrip(t *testing.T) {
+	const collection = "/ui/apis/dashboard.grafana.app/v2/namespaces/default/dashboards"
+	const item = collection + "/minio-instance"
+	var routes []string
+	var stored map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		routes = append(routes, request.Method+" "+request.URL.Path)
+		username, password, ok := request.BasicAuth()
+		if !ok || username != "admin" || password != "secret" {
+			writer.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == item:
+			if stored == nil {
+				writer.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(writer).Encode(stored)
+		case request.Method == http.MethodPost && request.URL.Path == collection:
+			_ = json.NewDecoder(request.Body).Decode(&stored)
+			writer.WriteHeader(http.StatusCreated)
+		case request.Method == http.MethodPut && request.URL.Path == item:
+			_ = json.NewDecoder(request.Body).Decode(&stored)
+			writer.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	client, err := NewClient(Config{Endpoint: server.URL + "/ui", Username: "admin", Password: "secret", HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := map[string]interface{}{
+		"apiVersion": "dashboard.grafana.app/v2", "kind": "Dashboard",
+		"metadata": map[string]interface{}{"name": "minio-instance", "namespace": "default"},
+		"spec":     map[string]interface{}{"title": "MinIO Instance", "layout": map[string]interface{}{"kind": "TabsLayout"}},
+	}
+	if err := client.UpsertDashboardResource(context.Background(), resource, "default", "minio-instance"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.UpsertDashboardResource(context.Background(), resource, "default", "minio-instance"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"GET " + item, "POST " + collection, "GET " + item, "PUT " + item}
+	if fmt.Sprint(routes) != fmt.Sprint(want) {
+		t.Fatalf("routes = %v, want %v", routes, want)
+	}
+	spec, _ := stored["spec"].(map[string]interface{})
+	layout, _ := spec["layout"].(map[string]interface{})
+	if layout["kind"] != "TabsLayout" {
+		t.Fatalf("stored resource lost schema v2 layout: %#v", stored)
+	}
+}
+
 func TestClientErrorsNeverCopyResponseBodiesOrCredentials(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusUnauthorized)

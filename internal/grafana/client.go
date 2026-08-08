@@ -208,12 +208,51 @@ func (c *Client) GetDashboard(ctx context.Context, uid string) (DashboardEnvelop
 	return result, err
 }
 
+// GetDashboardResource returns the native dashboard schema v2 resource. The
+// resource API is intentionally kept separate from Grafana's legacy /api
+// surface because schema v2 layouts (for example tabs and section variables)
+// cannot round-trip through /api/dashboards/db.
+func (c *Client) GetDashboardResource(ctx context.Context, namespace, name string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.doResource(ctx, http.MethodGet, dashboardResourceRoute(namespace, name), nil, nil, &result)
+	return result, err
+}
+
 func (c *Client) UpsertDashboard(ctx context.Context, dashboard map[string]interface{}, folderUID string) error {
 	payload := map[string]interface{}{
 		"dashboard": dashboard, "folderUid": folderUID, "overwrite": true,
 		"message": "managed by pig sty grafana",
 	}
 	return c.do(ctx, http.MethodPost, "dashboards/db", nil, payload, nil)
+}
+
+// UpsertDashboardResource creates or replaces one native dashboard schema v2
+// resource. Grafana uses POST on the collection for creation and PUT on the
+// named item for replacement, so a bounded existence check selects the method.
+func (c *Client) UpsertDashboardResource(ctx context.Context, resource map[string]interface{}, namespace, name string) error {
+	collection := dashboardResourceRoute(namespace, "")
+	item := dashboardResourceRoute(namespace, name)
+	var current map[string]interface{}
+	err := c.doResource(ctx, http.MethodGet, item, nil, nil, &current)
+	if err == nil {
+		return c.doResource(ctx, http.MethodPut, item, nil, resource, nil)
+	}
+	if !IsNotFound(err) {
+		return err
+	}
+	err = c.doResource(ctx, http.MethodPost, collection, nil, resource, nil)
+	if status := StatusCode(err); status == http.StatusConflict || status == http.StatusPreconditionFailed {
+		return c.doResource(ctx, http.MethodPut, item, nil, resource, nil)
+	}
+	return err
+}
+
+func dashboardResourceRoute(namespace, name string) string {
+	route := "apis/dashboard.grafana.app/v2/namespaces/" + url.PathEscape(namespace) + "/dashboards"
+	if name != "" {
+		route += "/" + url.PathEscape(name)
+	}
+	return route
 }
 
 func (c *Client) DeleteDashboard(ctx context.Context, uid string) error {
@@ -269,6 +308,18 @@ func (c *Client) do(ctx context.Context, method, route string, query url.Values,
 }
 
 func (c *Client) doWithAuth(ctx context.Context, method, route string, query url.Values, payload, destination interface{}, authenticate bool) error {
+	apiRoute := path.Join("api", route)
+	if strings.HasSuffix(route, "/") {
+		apiRoute += "/"
+	}
+	return c.doRouteWithAuth(ctx, method, apiRoute, query, payload, destination, authenticate)
+}
+
+func (c *Client) doResource(ctx context.Context, method, route string, query url.Values, payload, destination interface{}) error {
+	return c.doRouteWithAuth(ctx, method, route, query, payload, destination, true)
+}
+
+func (c *Client) doRouteWithAuth(ctx context.Context, method, route string, query url.Values, payload, destination interface{}, authenticate bool) error {
 	if c == nil || c.base == nil || c.httpClient == nil {
 		return errors.New("Grafana client is not initialized")
 	}
@@ -276,7 +327,7 @@ func (c *Client) doWithAuth(ctx context.Context, method, route string, query url
 		ctx = context.Background()
 	}
 	requestURL := *c.base
-	requestURL.Path = path.Join(c.base.Path, "api", route)
+	requestURL.Path = path.Join(c.base.Path, route)
 	if strings.HasSuffix(route, "/") {
 		requestURL.Path += "/"
 	}
@@ -306,12 +357,12 @@ func (c *Client) doWithAuth(ctx context.Context, method, route string, query url
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return &RequestError{Method: method, Route: "api/" + route, Err: err}
+		return &RequestError{Method: method, Route: route, Err: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxResponseBytes))
-		return &APIError{Method: method, Route: "api/" + route, Status: response.StatusCode}
+		return &APIError{Method: method, Route: route, Status: response.StatusCode}
 	}
 	if destination == nil {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxResponseBytes))
@@ -320,7 +371,7 @@ func (c *Client) doWithAuth(ctx context.Context, method, route string, query url
 	limited := io.LimitReader(response.Body, maxResponseBytes+1)
 	raw, err := io.ReadAll(limited)
 	if err != nil {
-		return &RequestError{Method: method, Route: "api/" + route, Err: err}
+		return &RequestError{Method: method, Route: route, Err: err}
 	}
 	if len(raw) > maxResponseBytes {
 		return fmt.Errorf("Grafana response exceeds %d bytes", maxResponseBytes)

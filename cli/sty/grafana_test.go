@@ -24,6 +24,7 @@ type fakeGrafanaServer struct {
 	server                  *httptest.Server
 	organization            string
 	dashboards              map[string]fakeGrafanaDashboard
+	resources               map[string]map[string]interface{}
 	folders                 map[string]string
 	nextID                  int64
 	starCalls               int
@@ -40,7 +41,7 @@ func newFakeGrafanaServer(t *testing.T) *fakeGrafanaServer {
 	t.Helper()
 	fake := &fakeGrafanaServer{
 		organization: "Main Org.", dashboards: make(map[string]fakeGrafanaDashboard),
-		folders: make(map[string]string), nextID: 10,
+		resources: make(map[string]map[string]interface{}), folders: make(map[string]string), nextID: 10,
 		organizationPreferences: map[string]interface{}{"theme": "dark", "language": "zh-Hans", "timezone": "utc"},
 		userPreferences:         map[string]interface{}{"theme": "light", "language": "en-US", "weekStart": "monday"},
 		upsertFailures:          make(map[string]int),
@@ -62,6 +63,31 @@ func newFakeGrafanaServer(t *testing.T) *fakeGrafanaServer {
 			return
 		}
 		switch {
+		case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/apis/dashboard.grafana.app/v2/namespaces/default/dashboards/"):
+			uid := strings.TrimPrefix(request.URL.Path, "/apis/dashboard.grafana.app/v2/namespaces/default/dashboards/")
+			resource, exists := fake.resources[uid]
+			if !exists {
+				writer.WriteHeader(http.StatusNotFound)
+				return
+			}
+			writeFakeGrafanaJSON(writer, resource)
+		case request.Method == http.MethodPost && request.URL.Path == "/apis/dashboard.grafana.app/v2/namespaces/default/dashboards":
+			var resource map[string]interface{}
+			_ = json.NewDecoder(request.Body).Decode(&resource)
+			metadata, _ := resource["metadata"].(map[string]interface{})
+			uid, _ := metadata["name"].(string)
+			if _, exists := fake.resources[uid]; exists {
+				writer.WriteHeader(http.StatusConflict)
+				return
+			}
+			fake.resources[uid] = resource
+			writer.WriteHeader(http.StatusCreated)
+		case request.Method == http.MethodPut && strings.HasPrefix(request.URL.Path, "/apis/dashboard.grafana.app/v2/namespaces/default/dashboards/"):
+			uid := strings.TrimPrefix(request.URL.Path, "/apis/dashboard.grafana.app/v2/namespaces/default/dashboards/")
+			var resource map[string]interface{}
+			_ = json.NewDecoder(request.Body).Decode(&resource)
+			fake.resources[uid] = resource
+			writer.WriteHeader(http.StatusOK)
 		case request.Method == http.MethodGet && path == "org":
 			writeFakeGrafanaJSON(writer, map[string]interface{}{"id": 1, "name": fake.organization})
 		case request.Method == http.MethodPut && path == "org":
@@ -130,8 +156,21 @@ func newFakeGrafanaServer(t *testing.T) *fakeGrafanaServer {
 			uid := strings.TrimPrefix(path, "dashboards/uid/")
 			dashboard, exists := fake.dashboards[uid]
 			if !exists {
-				writer.WriteHeader(http.StatusNotFound)
-				return
+				resource, resourceExists := fake.resources[uid]
+				if !resourceExists {
+					writer.WriteHeader(http.StatusNotFound)
+					return
+				}
+				metadata, _ := resource["metadata"].(map[string]interface{})
+				annotations, _ := metadata["annotations"].(map[string]interface{})
+				spec, _ := resource["spec"].(map[string]interface{})
+				folder, _ := annotations["grafana.app/folder"].(string)
+				dashboard = fakeGrafanaDashboard{
+					value: map[string]interface{}{
+						"id": fake.nextID, "uid": uid, "title": spec["title"], "version": json.Number("1"),
+					},
+					folder: folder,
+				}
 			}
 			writeFakeGrafanaJSON(writer, map[string]interface{}{
 				"dashboard": dashboard.value,
@@ -177,7 +216,7 @@ func newFakeGrafanaServer(t *testing.T) *fakeGrafanaServer {
 }
 
 func (f *fakeGrafanaServer) search() []map[string]interface{} {
-	items := make([]map[string]interface{}, 0, len(f.folders)+len(f.dashboards))
+	items := make([]map[string]interface{}, 0, len(f.folders)+len(f.dashboards)+len(f.resources))
 	folders := make([]string, 0, len(f.folders))
 	for uid := range f.folders {
 		folders = append(folders, uid)
@@ -196,6 +235,24 @@ func (f *fakeGrafanaServer) search() []map[string]interface{} {
 		items = append(items, map[string]interface{}{
 			"uid": uid, "title": fmt.Sprint(item.value["title"]), "type": "dash-db",
 			"folderUid": item.folder, "folderTitle": f.folders[item.folder], "url": "/d/" + uid,
+		})
+	}
+	resources := make([]string, 0, len(f.resources))
+	for uid := range f.resources {
+		if _, exists := f.dashboards[uid]; !exists {
+			resources = append(resources, uid)
+		}
+	}
+	sort.Strings(resources)
+	for _, uid := range resources {
+		resource := f.resources[uid]
+		metadata, _ := resource["metadata"].(map[string]interface{})
+		annotations, _ := metadata["annotations"].(map[string]interface{})
+		spec, _ := resource["spec"].(map[string]interface{})
+		folder, _ := annotations["grafana.app/folder"].(string)
+		items = append(items, map[string]interface{}{
+			"uid": uid, "title": fmt.Sprint(spec["title"]), "type": "dash-db",
+			"folderUid": folder, "folderTitle": f.folders[folder], "url": "/d/" + uid,
 		})
 	}
 	return items
@@ -286,6 +343,48 @@ func TestGrafanaListReturnsAllDashboardsInStableOrder(t *testing.T) {
 	text := data.Text()
 	if !strings.Contains(text, "dashboards: 3") || !strings.Contains(text, "General") || !strings.Contains(text, "PGSQL") {
 		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestGrafanaInitLoadsDashboardV2Resource(t *testing.T) {
+	fake := newFakeGrafanaServer(t)
+	root := filepathForGrafanaTest(t)
+	writeGrafanaTestDashboard(t, filepath.Join(root, "pigsty.json"), "pigsty")
+	filename := filepath.Join(root, "minio", "minio-instance.json")
+	if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{
+		"apiVersion":"dashboard.grafana.app/v2","kind":"Dashboard",
+		"metadata":{"name":"minio-instance","namespace":"default","annotations":{"grafana.app/message":"tabs"},"generation":7},
+		"spec":{"title":"MinIO Instance","layout":{"kind":"TabsLayout"}},
+		"status":{"operatorStates":{"conversion":{"state":"success"}}}
+	}`)
+	if err := os.WriteFile(filename, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	result := GrafanaInit(grafanaFakeOptions(t, fake, root))
+	if !result.Success {
+		t.Fatalf("result = %+v", result)
+	}
+	resource, exists := fake.resources["minio-instance"]
+	if !exists {
+		t.Fatalf("schema v2 resource was not loaded; requests = %v", fake.requests)
+	}
+	if _, exists := resource["status"]; exists {
+		t.Fatalf("server-managed status was sent: %#v", resource)
+	}
+	metadata := resource["metadata"].(map[string]interface{})
+	annotations := metadata["annotations"].(map[string]interface{})
+	spec := resource["spec"].(map[string]interface{})
+	layout := spec["layout"].(map[string]interface{})
+	if annotations["grafana.app/folder"] != "minio" || layout["kind"] != "TabsLayout" {
+		t.Fatalf("resource = %#v", resource)
+	}
+	requests := strings.Join(fake.requests, "\n")
+	if !strings.Contains(requests, "GET /apis/dashboard.grafana.app/v2/namespaces/default/dashboards/minio-instance") ||
+		!strings.Contains(requests, "POST /apis/dashboard.grafana.app/v2/namespaces/default/dashboards") {
+		t.Fatalf("schema v2 resource routes were not used: %v", fake.requests)
 	}
 }
 
@@ -469,6 +568,73 @@ func TestGrafanaDumpDirectoryIsCanonicalFixedPoint(t *testing.T) {
 	folderSecond, _ := os.ReadFile(folderFile)
 	if !bytes.Equal(rootFirst, rootSecond) || !bytes.Equal(folderFirst, folderSecond) {
 		t.Fatal("repeated dump changed canonical dashboard bytes")
+	}
+}
+
+func TestGrafanaDumpPreservesExistingDashboardV2Resource(t *testing.T) {
+	fake := newFakeGrafanaServer(t)
+	fake.folders["minio"] = "MINIO"
+	fake.resources["minio-instance"] = map[string]interface{}{
+		"apiVersion": grafanaDashboardV2API,
+		"kind":       "Dashboard",
+		"metadata": map[string]interface{}{
+			"name": "minio-instance", "namespace": "default", "generation": json.Number("12"),
+			"annotations": map[string]interface{}{"grafana.app/folder": "minio", "grafana.app/message": "tabs", "grafana.app/createdBy": "server"},
+		},
+		"spec": map[string]interface{}{
+			"title": "MinIO Instance",
+			"layout": map[string]interface{}{"kind": "TabsLayout", "spec": map[string]interface{}{
+				"tabs": []interface{}{map[string]interface{}{"kind": "Tab", "spec": map[string]interface{}{"title": "Overview"}}},
+			}},
+		},
+		"status": map[string]interface{}{"conversion": map[string]interface{}{"failed": false}},
+	}
+	root := filepath.Join(t.TempDir(), "grafana")
+	target := filepath.Join(root, "minio", "minio-instance.json")
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		t.Fatal(err)
+	}
+	local := []byte(`{"apiVersion":"dashboard.grafana.app/v2","kind":"Dashboard","metadata":{"name":"minio-instance","namespace":"default"},"spec":{"title":"stale","layout":{"kind":"TabsLayout"}}}`)
+	if err := os.WriteFile(target, local, 0644); err != nil {
+		t.Fatal(err)
+	}
+	options := grafanaFakeOptions(t, fake, target)
+	first := GrafanaDump(options)
+	if !first.Success {
+		t.Fatalf("first dump = %+v", first)
+	}
+	firstRaw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource, err := decodeGrafanaDashboard(firstRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	format, uid, namespace, err := grafanaDashboardIdentity(resource)
+	if err != nil || format != grafanaDashboardV2 || uid != "minio-instance" || namespace != "default" {
+		t.Fatalf("dumped identity format=%v uid=%q namespace=%q err=%v", format, uid, namespace, err)
+	}
+	if _, exists := resource["status"]; exists {
+		t.Fatalf("dump retained server status: %#v", resource)
+	}
+	spec := resource["spec"].(map[string]interface{})
+	layout := spec["layout"].(map[string]interface{})
+	if spec["title"] != "MinIO Instance" || layout["kind"] != "TabsLayout" {
+		t.Fatalf("dump flattened dashboard resource: %#v", resource)
+	}
+
+	second := GrafanaDump(options)
+	if !second.Success {
+		t.Fatalf("second dump = %+v", second)
+	}
+	data := second.Data.(*GrafanaActionData)
+	if len(data.Results) != 1 || data.Results[0].Status != "unchanged" {
+		t.Fatalf("second dump results = %+v", data.Results)
+	}
+	secondRaw, _ := os.ReadFile(target)
+	if !bytes.Equal(firstRaw, secondRaw) {
+		t.Fatal("repeated schema v2 dump changed canonical bytes")
 	}
 }
 

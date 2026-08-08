@@ -221,7 +221,9 @@ type grafanaAPI interface {
 	CurrentOrganization(context.Context) (grafana.Organization, error)
 	Search(context.Context) ([]grafana.SearchItem, error)
 	GetDashboard(context.Context, string) (grafana.DashboardEnvelope, error)
+	GetDashboardResource(context.Context, string, string) (map[string]interface{}, error)
 	UpsertDashboard(context.Context, map[string]interface{}, string) error
+	UpsertDashboardResource(context.Context, map[string]interface{}, string, string) error
 	DeleteDashboard(context.Context, string) error
 	CreateFolder(context.Context, string, string) error
 	UpdateFolder(context.Context, string, string) error
@@ -239,6 +241,7 @@ type grafanaLoadAPI interface {
 	CreateFolder(context.Context, string, string) error
 	UpdateFolder(context.Context, string, string) error
 	UpsertDashboard(context.Context, map[string]interface{}, string) error
+	UpsertDashboardResource(context.Context, map[string]interface{}, string, string) error
 }
 
 type grafanaPrepared struct {
@@ -607,8 +610,17 @@ func applyGrafanaLoad(ctx context.Context, client grafanaLoadAPI, state *grafana
 			})
 			continue
 		}
-		dashboard := dashboardForGrafanaInit(asset.Dashboard)
-		mutationErr := client.UpsertDashboard(ctx, dashboard, asset.FolderUID)
+		var mutationErr error
+		if asset.Format == grafanaDashboardV2 {
+			var resource map[string]interface{}
+			resource, mutationErr = dashboardResourceForGrafanaInit(asset.Dashboard, asset.Namespace, asset.UID, asset.FolderUID)
+			if mutationErr == nil {
+				mutationErr = client.UpsertDashboardResource(ctx, resource, asset.Namespace, asset.UID)
+			}
+		} else {
+			dashboard := dashboardForGrafanaInit(asset.Dashboard)
+			mutationErr = client.UpsertDashboard(ctx, dashboard, asset.FolderUID)
+		}
 		data.Results = append(data.Results, withGrafanaPhase(grafanaMutationResult("dashboard", asset.UID, asset.FolderUID, "upsert", mutationErr), phase))
 	}
 }
@@ -892,14 +904,6 @@ func GrafanaDump(options GrafanaOptions) *output.Result {
 		if scope.Kind == grafanaScopeFile && remoteFolder != scope.FolderUID {
 			return grafanaSetupFailure("Grafana dump target folder does not match the live dashboard", fmt.Errorf("dashboard %s is in folder %q", item.UID, remoteFolder)).WithData(data)
 		}
-		dashboard, normalizeErr := dashboardForGrafanaDump(envelope.Dashboard)
-		if normalizeErr != nil {
-			return grafanaSetupFailure("Grafana dashboard could not be normalized for dump", normalizeErr).WithData(data)
-		}
-		uid, _ := dashboard["uid"].(string)
-		if uid != item.UID {
-			return grafanaSetupFailure("Grafana dump returned inconsistent dashboard identity", fmt.Errorf("search UID %q differs from dashboard UID %q", item.UID, uid)).WithData(data)
-		}
 		target := grafanaDumpTarget(scope, item.UID, remoteFolder)
 		if !pathWithin(scope.Root, target) {
 			return grafanaSetupFailure("Grafana dump target escapes its root", errors.New("unsafe dump target")).WithData(data)
@@ -910,6 +914,46 @@ func GrafanaDump(options GrafanaOptions) *output.Result {
 		targets[target] = item.UID
 		if err := rejectGrafanaSymlinkPath(scope.Root, target); err != nil {
 			return grafanaSetupFailure("Grafana dump target is unsafe", err).WithData(data)
+		}
+
+		var dashboard map[string]interface{}
+		localFormat := grafanaDashboardLegacy
+		localNamespace := ""
+		if _, statErr := os.Lstat(target); statErr == nil {
+			localAsset, readErr := readGrafanaAsset(target, remoteFolder)
+			if readErr != nil {
+				return grafanaSetupFailure("Grafana dump target is invalid", readErr).WithData(data)
+			}
+			localFormat, localNamespace = localAsset.Format, localAsset.Namespace
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return grafanaSetupFailure("Grafana dump target could not be inspected", statErr).WithData(data)
+		}
+		if localFormat == grafanaDashboardV2 {
+			resource, resourceErr := prepared.client.GetDashboardResource(ctx, localNamespace, item.UID)
+			if resourceErr != nil {
+				return grafanaAPIFailure("Grafana dashboard resource could not be fetched for dump", prepared.client, resourceErr).WithData(data)
+			}
+			format, uid, namespace, identityErr := grafanaDashboardIdentity(resource)
+			if identityErr != nil || format != grafanaDashboardV2 || uid != item.UID || namespace != localNamespace {
+				if identityErr == nil {
+					identityErr = fmt.Errorf("resource identity %q/%q differs from expected %q/%q", namespace, uid, localNamespace, item.UID)
+				}
+				return grafanaSetupFailure("Grafana dump returned inconsistent dashboard resource identity", identityErr).WithData(data)
+			}
+			dashboard, resourceErr = dashboardResourceForGrafanaInit(resource, localNamespace, item.UID, remoteFolder)
+			if resourceErr != nil {
+				return grafanaSetupFailure("Grafana dashboard resource could not be normalized for dump", resourceErr).WithData(data)
+			}
+		} else {
+			var normalizeErr error
+			dashboard, normalizeErr = dashboardForGrafanaDump(envelope.Dashboard)
+			if normalizeErr != nil {
+				return grafanaSetupFailure("Grafana dashboard could not be normalized for dump", normalizeErr).WithData(data)
+			}
+			uid, _ := dashboard["uid"].(string)
+			if uid != item.UID {
+				return grafanaSetupFailure("Grafana dump returned inconsistent dashboard identity", fmt.Errorf("search UID %q differs from dashboard UID %q", item.UID, uid)).WithData(data)
+			}
 		}
 		remoteUIDs[item.UID] = struct{}{}
 		raw, marshalErr := marshalGrafanaDashboard(dashboard)

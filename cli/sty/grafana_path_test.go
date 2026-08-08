@@ -175,6 +175,72 @@ func TestLoadGrafanaScopeAssetsIsDeterministicAndStrict(t *testing.T) {
 	}
 }
 
+func TestLoadGrafanaScopeAcceptsDashboardV2Resource(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "grafana")
+	filename := filepath.Join(root, "minio", "minio-instance.json")
+	if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{
+		"apiVersion":"dashboard.grafana.app/v2",
+		"kind":"Dashboard",
+		"metadata":{"name":"minio-instance","annotations":{"grafana.app/message":"tabs","grafana.app/createdBy":"server"},"generation":9},
+		"spec":{"title":"MinIO Instance","layout":{"kind":"TabsLayout"}},
+		"status":{"operatorStates":{"conversion":{"state":"success"}}}
+	}`)
+	if err := os.WriteFile(filename, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	scope, err := resolveGrafanaScope(GrafanaOptions{Path: root}, grafanaActionLoad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loadGrafanaScopeAssets(scope); err != nil {
+		t.Fatal(err)
+	}
+	if len(scope.Assets) != 1 {
+		t.Fatalf("assets = %+v", scope.Assets)
+	}
+	asset := scope.Assets[0]
+	if asset.UID != "minio-instance" || asset.FolderUID != "minio" || asset.Namespace != "default" || asset.Format != grafanaDashboardV2 {
+		t.Fatalf("asset = %+v", asset)
+	}
+	resource, err := dashboardResourceForGrafanaInit(asset.Dashboard, asset.Namespace, asset.UID, asset.FolderUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := resource["status"]; exists {
+		t.Fatalf("server-managed status was retained: %#v", resource)
+	}
+	metadata := resource["metadata"].(map[string]interface{})
+	annotations := metadata["annotations"].(map[string]interface{})
+	if metadata["name"] != "minio-instance" || metadata["namespace"] != "default" ||
+		annotations["grafana.app/folder"] != "minio" || annotations["grafana.app/message"] != "tabs" {
+		t.Fatalf("normalized metadata = %#v", metadata)
+	}
+	if _, exists := annotations["grafana.app/createdBy"]; exists {
+		t.Fatalf("server-managed annotation was retained: %#v", annotations)
+	}
+}
+
+func TestLoadGrafanaScopeRejectsUnsupportedDashboardResourceVersion(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "grafana")
+	filename := filepath.Join(root, "minio-instance.json")
+	if err := os.MkdirAll(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filename, []byte(`{"apiVersion":"dashboard.grafana.app/v1beta1","kind":"Dashboard","metadata":{"name":"minio-instance"},"spec":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	scope, err := resolveGrafanaScope(GrafanaOptions{Path: root}, grafanaActionLoad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loadGrafanaScopeAssets(scope); err == nil || !strings.Contains(err.Error(), "unsupported Grafana dashboard resource") {
+		t.Fatalf("unsupported resource error = %v", err)
+	}
+}
+
 func writeGrafanaTestDashboard(t *testing.T, filename, uid string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {

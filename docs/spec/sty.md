@@ -650,6 +650,17 @@ scans are one level deep, select non-hidden `*.json`, and execute in bytewise
 name order. A directory name is the stable `folderUid`; its uppercase form is
 only the display title.
 
+Dashboard files may use either the legacy dashboard document (`uid` at the
+root) or Grafana's native `dashboard.grafana.app/v2` `Dashboard` resource
+(`metadata.name` as the UID). The filename MUST match the identity field for
+its format. Schema-v2 resources are loaded through Grafana's resource API so
+tab layouts and section variables never pass through the lossy legacy
+`/api/dashboards/db` conversion. Pig strips server-managed resource metadata
+and status, applies the directory folder UID as `grafana.app/folder`, and
+rejects unsupported dashboard resource versions before network mutation.
+Dump preserves schema v2 when the existing destination file is schema v2; a
+new dump destination retains the legacy format for backward compatibility.
+
 ### 12.2 Load, boot, and init composition
 
 `load` validates the complete selected local scope before contacting Grafana.

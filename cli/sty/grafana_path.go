@@ -21,9 +21,12 @@ const (
 	maxGrafanaInlineDepth    = 10
 	grafanaDashboardAuthor   = "Ruohang Feng (rh@vonng.com)"
 	grafanaDashboardLicense  = "https://pigsty.io/docs/about/license/"
+	grafanaDashboardV2API    = "dashboard.grafana.app/v2"
+	defaultGrafanaNamespace  = "default"
 )
 
 var grafanaUIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
+var grafanaNamespacePattern = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$`)
 
 type grafanaAction uint8
 
@@ -41,10 +44,19 @@ const (
 	grafanaScopeFile   grafanaScopeKind = "file"
 )
 
+type grafanaDashboardFormat uint8
+
+const (
+	grafanaDashboardLegacy grafanaDashboardFormat = iota + 1
+	grafanaDashboardV2
+)
+
 type grafanaAsset struct {
 	Path      string
 	UID       string
 	FolderUID string
+	Namespace string
+	Format    grafanaDashboardFormat
 	Dashboard map[string]interface{}
 }
 
@@ -409,7 +421,10 @@ func readGrafanaAsset(path, folderUID string) (grafanaAsset, error) {
 	if err != nil {
 		return grafanaAsset{}, fmt.Errorf("parse dashboard %s: %w", path, err)
 	}
-	uid, _ := dashboard["uid"].(string)
+	format, uid, namespace, err := grafanaDashboardIdentity(dashboard)
+	if err != nil {
+		return grafanaAsset{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := validateGrafanaUID("dashboard", uid); err != nil {
 		return grafanaAsset{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -417,7 +432,39 @@ func readGrafanaAsset(path, folderUID string) (grafanaAsset, error) {
 	if filenameUID != uid {
 		return grafanaAsset{}, fmt.Errorf("dashboard filename UID %q does not match JSON UID %q: %s", filenameUID, uid, path)
 	}
-	return grafanaAsset{Path: path, UID: uid, FolderUID: folderUID, Dashboard: dashboard}, nil
+	return grafanaAsset{
+		Path: path, UID: uid, FolderUID: folderUID, Namespace: namespace,
+		Format: format, Dashboard: dashboard,
+	}, nil
+}
+
+func grafanaDashboardIdentity(dashboard map[string]interface{}) (grafanaDashboardFormat, string, string, error) {
+	apiVersion, _ := dashboard["apiVersion"].(string)
+	kind, _ := dashboard["kind"].(string)
+	isDashboardResource := strings.HasPrefix(apiVersion, "dashboard.grafana.app/") || (apiVersion != "" && kind == "Dashboard")
+	if !isDashboardResource {
+		uid, _ := dashboard["uid"].(string)
+		return grafanaDashboardLegacy, uid, "", nil
+	}
+	if apiVersion != grafanaDashboardV2API || kind != "Dashboard" {
+		return 0, "", "", fmt.Errorf("unsupported Grafana dashboard resource %q kind %q", apiVersion, kind)
+	}
+	metadata, ok := dashboard["metadata"].(map[string]interface{})
+	if !ok {
+		return 0, "", "", errors.New("Grafana dashboard resource metadata must be an object")
+	}
+	uid, _ := metadata["name"].(string)
+	namespace, _ := metadata["namespace"].(string)
+	if namespace == "" {
+		namespace = defaultGrafanaNamespace
+	}
+	if !grafanaNamespacePattern.MatchString(namespace) {
+		return 0, "", "", fmt.Errorf("unsafe Grafana namespace %q", namespace)
+	}
+	if _, ok := dashboard["spec"].(map[string]interface{}); !ok {
+		return 0, "", "", errors.New("Grafana dashboard resource spec must be an object")
+	}
+	return grafanaDashboardV2, uid, namespace, nil
 }
 
 func decodeGrafanaDashboard(raw []byte) (map[string]interface{}, error) {
@@ -449,6 +496,36 @@ func dashboardForGrafanaInit(value map[string]interface{}) map[string]interface{
 	clone := maps.Clone(value)
 	clone["id"] = nil
 	return clone
+}
+
+func dashboardResourceForGrafanaInit(value map[string]interface{}, namespace, name, folderUID string) (map[string]interface{}, error) {
+	clone, err := cloneGrafanaDashboard(value)
+	if err != nil {
+		return nil, err
+	}
+	spec, ok := clone["spec"].(map[string]interface{})
+	if !ok {
+		return nil, errors.New("Grafana dashboard resource spec must be an object")
+	}
+	annotations := make(map[string]interface{})
+	if metadata, ok := clone["metadata"].(map[string]interface{}); ok {
+		if source, ok := metadata["annotations"].(map[string]interface{}); ok {
+			if message, exists := source["grafana.app/message"]; exists {
+				annotations["grafana.app/message"] = message
+			}
+		}
+	}
+	if folderUID != "" {
+		annotations["grafana.app/folder"] = folderUID
+	}
+	return map[string]interface{}{
+		"apiVersion": grafanaDashboardV2API,
+		"kind":       "Dashboard",
+		"metadata": map[string]interface{}{
+			"name": name, "namespace": namespace, "annotations": annotations,
+		},
+		"spec": spec,
+	}, nil
 }
 
 func dashboardForGrafanaDump(value map[string]interface{}) (map[string]interface{}, error) {
