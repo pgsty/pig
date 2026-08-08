@@ -147,12 +147,12 @@ const (
 	ansibleComboEL10 = "ansible sshpass"
 	ansibleComboDEB  = "ansible sshpass python3-jmespath"
 
-	nodeBootstrapComboEL7  = "ansible python3 python36-requests python36-idna yum-utils createrepo_c sshpass"
-	nodeBootstrapComboEL8  = "ansible python3 python3-requests python3.12-jmespath python3-cryptography dnf-utils modulemd-tools createrepo_c sshpass"
-	nodeBootstrapComboEL9  = "ansible python3 python3-requests python3-jmespath python3-cryptography dnf-utils modulemd-tools createrepo_c sshpass"
-	nodeBootstrapComboEL10 = "ansible python3 python3-requests python3-jmespath python3-cryptography dnf-utils createrepo_c sshpass crypto-policies-scripts"
-	nodeBootstrapComboD12  = "ansible python3 python3-requests python3-jmespath dpkg-dev sshpass tnftp linux-perf"
-	nodeBootstrapComboU22  = "ansible python3 python3-requests python3-jmespath dpkg-dev sshpass ftp linux-tools-generic"
+	nodeBootstrapComboEL7  = "ansible python3 python36-requests python36-idna yum-utils sow sshpass"
+	nodeBootstrapComboEL8  = "ansible python3 python3-requests python3.12-jmespath python3-cryptography dnf-utils sow sshpass"
+	nodeBootstrapComboEL9  = "ansible python3 python3-requests python3-jmespath python3-cryptography dnf-utils sow sshpass"
+	nodeBootstrapComboEL10 = "ansible python3 python3-requests python3-jmespath python3-cryptography dnf-utils sow sshpass crypto-policies-scripts"
+	nodeBootstrapComboD12  = "ansible python3 python3-requests python3-jmespath sow sshpass tnftp linux-perf"
+	nodeBootstrapComboU22  = "ansible python3 python3-requests python3-jmespath sow sshpass ftp linux-tools-generic"
 )
 
 // OSAliasOverride contains package name overrides for specific OS code combinations

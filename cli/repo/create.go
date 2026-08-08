@@ -1,7 +1,9 @@
 package repo
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,20 +17,56 @@ import (
 
 // CreateRepoEL will create a local YUM repository in the specified directory
 func CreateRepoEL(dir string) error {
+	dir, err := absoluteRepoDir(dir)
+	if err != nil {
+		return err
+	}
 	logrus.Infof("create %s %s repo in %s", config.OSVendor, config.OSCode, dir)
+	if _, err := exec.LookPath("sow"); err == nil {
+		return createRepoWithSow(dir, "el")
+	}
+	return createRepoWithCreaterepo(dir)
+}
 
-	// check createrepo_c exists, if not, hint to install it and exit
+// CreateRepoDEB will create a local APT repository in the specified directory
+func CreateRepoDEB(dir string) error {
+	dir, err := absoluteRepoDir(dir)
+	if err != nil {
+		return err
+	}
+	logrus.Infof("create %s %s repo in %s", config.OSVendor, config.OSCode, dir)
+	if _, err := exec.LookPath("sow"); err == nil {
+		return createRepoWithSow(dir, "deb")
+	}
+	return createRepoWithDpkg(dir)
+}
+
+func absoluteRepoDir(dir string) (string, error) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve repository path %q: %w", dir, err)
+	}
+	return absDir, nil
+}
+
+func createRepoWithSow(dir, repoType string) error {
+	logrus.Infof("use sow to create %s repository metadata", repoType)
+	// --timeout limits SOW's lock wait, not repository indexing time.
+	if err := utils.SudoCommand([]string{"sow", "create", "--pigsty", "--timeout", "10m", "--", dir}); err != nil {
+		return fmt.Errorf("failed to create %s repo with sow: %w", repoType, err)
+	}
+	return verifyRepoComplete(dir)
+}
+
+func createRepoWithCreaterepo(dir string) error {
 	if _, err := exec.LookPath("createrepo_c"); err != nil {
-		return fmt.Errorf("createrepo_c not found, please install it first: yum install -y createrepo_c")
+		return fmt.Errorf("neither sow nor createrepo_c found; install sow from the Pigsty INFRA repository or run: yum install -y createrepo_c")
 	}
 
-	// generate the create repo script to tmp dir, and run it with sudo command
 	script := createRepoCmdEL(dir)
 	if config.OSMajor == 7 {
 		script = createRepoCmdEL7(dir)
 	}
-
-	// write repo script to unique temp file
 	scriptPath, err := writeTempRepoScript(script)
 	if err != nil {
 		return err
@@ -36,41 +74,43 @@ func CreateRepoEL(dir string) error {
 	logrus.Debugf("generate create el repo tmp script: %s", scriptPath)
 	defer os.Remove(scriptPath)
 
-	// run the script with sudo
 	if err = utils.SudoCommand([]string{"sh", scriptPath}); err != nil {
-		return fmt.Errorf("failed to create el repo: %v", err)
-	} else {
-		logrus.Infof("repo created, check %s", filepath.Join(dir, "repo_complete"))
+		return fmt.Errorf("failed to create el repo with createrepo_c: %w", err)
 	}
-	return nil
+	return verifyRepoComplete(dir)
 }
 
-// CreateRepoDEB will create a local APT repository in the specified directory
-func CreateRepoDEB(dir string) error {
-	logrus.Infof("create %s %s repo in %s", config.OSVendor, config.OSCode, dir)
-
-	// check dpkg-scanpackages exists, if not, hint to install it and exit
+func createRepoWithDpkg(dir string) error {
 	if _, err := exec.LookPath("dpkg-scanpackages"); err != nil {
-		return fmt.Errorf("dpkg-scanpackages not found, please install it first: apt install -y dpkg-dev")
+		return fmt.Errorf("neither sow nor dpkg-scanpackages found; install sow from the Pigsty INFRA repository or run: apt install -y dpkg-dev")
 	}
 
-	// generate the create repo script to tmp dir, and run it with sudo command
-	script := createRepoCmdDEB(dir)
-
-	// write repo script to unique temp file
-	scriptPath, err := writeTempRepoScript(script)
+	scriptPath, err := writeTempRepoScript(createRepoCmdDEB(dir))
 	if err != nil {
 		return err
 	}
 	logrus.Debugf("generate create deb repo tmp script: %s", scriptPath)
 	defer os.Remove(scriptPath)
 
-	// run the script with sudo
 	if err = utils.SudoCommand([]string{"sh", scriptPath}); err != nil {
-		return fmt.Errorf("failed to create deb repo: %v", err)
-	} else {
-		logrus.Infof("repo created, check %s", filepath.Join(dir, "repo_complete"))
+		return fmt.Errorf("failed to create deb repo with dpkg-scanpackages: %w", err)
 	}
+	return verifyRepoComplete(dir)
+}
+
+func verifyRepoComplete(dir string) error {
+	completePath := filepath.Join(dir, "repo_complete")
+	info, err := os.Lstat(completePath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("repository backend completed without completion marker %s", completePath)
+		}
+		return fmt.Errorf("failed to inspect repository completion marker %s: %w", completePath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("repository completion marker is not a regular file: %s", completePath)
+	}
+	logrus.Infof("repo created, check %s", completePath)
 	return nil
 }
 

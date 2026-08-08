@@ -62,6 +62,34 @@ func TestLoadAliasMapRequestedAliasesEL9(t *testing.T) {
 	}
 }
 
+func TestNodeBootstrapUsesSowWithoutLegacyRepoTools(t *testing.T) {
+	tests := []struct {
+		name      string
+		combo     string
+		forbidden []string
+	}{
+		{name: "el7", combo: nodeBootstrapComboEL7, forbidden: []string{"createrepo_c"}},
+		{name: "el8", combo: nodeBootstrapComboEL8, forbidden: []string{"createrepo_c", "modulemd-tools"}},
+		{name: "el9", combo: nodeBootstrapComboEL9, forbidden: []string{"createrepo_c", "modulemd-tools"}},
+		{name: "el10", combo: nodeBootstrapComboEL10, forbidden: []string{"createrepo_c"}},
+		{name: "debian", combo: nodeBootstrapComboD12, forbidden: []string{"dpkg-dev"}},
+		{name: "ubuntu", combo: nodeBootstrapComboU22, forbidden: []string{"dpkg-dev"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			packages := " " + tt.combo + " "
+			if !strings.Contains(packages, " sow ") {
+				t.Fatalf("node-bootstrap %q does not contain sow", tt.combo)
+			}
+			for _, forbidden := range tt.forbidden {
+				if strings.Contains(packages, " "+forbidden+" ") {
+					t.Fatalf("node-bootstrap %q still contains %q", tt.combo, forbidden)
+				}
+			}
+		})
+	}
+}
+
 func TestLoadAliasMapNormalizesLegacyInfraPackageNames(t *testing.T) {
 	legacy := map[string]string{
 		"blackbox_exporter":   "blackbox-exporter",
