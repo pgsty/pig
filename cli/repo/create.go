@@ -23,7 +23,7 @@ func CreateRepoEL(dir string) error {
 	}
 	logrus.Infof("create %s %s repo in %s", config.OSVendor, config.OSCode, dir)
 	if _, err := exec.LookPath("sow"); err == nil {
-		return createRepoWithSow(dir, "el")
+		return createRepoWithSow(dir, "el", true)
 	}
 	return createRepoWithCreaterepo(dir)
 }
@@ -36,9 +36,22 @@ func CreateRepoDEB(dir string) error {
 	}
 	logrus.Infof("create %s %s repo in %s", config.OSVendor, config.OSCode, dir)
 	if _, err := exec.LookPath("sow"); err == nil {
-		return createRepoWithSow(dir, "deb")
+		return createRepoWithSow(dir, "deb", true)
 	}
 	return createRepoWithDpkg(dir)
+}
+
+// CreateRepoMAC creates a local RPM/DEB repository with SOW on macOS.
+func CreateRepoMAC(dir string) error {
+	dir, err := absoluteRepoDir(dir)
+	if err != nil {
+		return err
+	}
+	logrus.Infof("create %s repo in %s", config.OSVendor, dir)
+	if _, err := exec.LookPath("sow"); err != nil {
+		return fmt.Errorf("sow not found; repository creation on macOS requires sow in PATH")
+	}
+	return createRepoWithSow(dir, "macos", false)
 }
 
 func absoluteRepoDir(dir string) (string, error) {
@@ -49,10 +62,15 @@ func absoluteRepoDir(dir string) (string, error) {
 	return absDir, nil
 }
 
-func createRepoWithSow(dir, repoType string) error {
+func createRepoWithSow(dir, repoType string, useSudo bool) error {
 	logrus.Infof("use sow to create %s repository metadata", repoType)
 	// --timeout limits SOW's lock wait, not repository indexing time.
-	if err := utils.SudoCommand([]string{"sow", "create", "--pigsty", "--timeout", "10m", "--", dir}); err != nil {
+	args := []string{"sow", "create", "--pigsty", "--timeout", "10m", "--", dir}
+	run := utils.Command
+	if useSudo {
+		run = utils.SudoCommand
+	}
+	if err := run(args); err != nil {
 		return fmt.Errorf("failed to create %s repo with sow: %w", repoType, err)
 	}
 	return verifyRepoComplete(dir)
@@ -174,20 +192,21 @@ func writeTempRepoScript(script string) (string, error) {
 	return tmp.Name(), nil
 }
 
-// CreateReposWithResult creates local YUM/APT repositories and returns a structured Result
+// CreateReposWithResult creates local RPM/DEB repositories and returns a structured Result
 // This function is used for YAML/JSON output modes
 func CreateReposWithResult(repos []string) *output.Result {
 	startTime := time.Now()
 
 	// Check OS support
-	if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
+	if config.OSType != config.DistroEL && config.OSType != config.DistroDEB && config.OSType != config.DistroMAC {
 		return output.Fail(output.CodeRepoUnsupportedOS,
 			fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
 	}
 
-	// Use default if no repos specified
+	// Linux keeps the historical /www/pigsty default. macOS defaults to the
+	// current directory so local repository creation does not require sudo.
 	if len(repos) == 0 {
-		repos = []string{"/www/pigsty"}
+		repos = []string{defaultCreateRepoDir()}
 	}
 
 	// Build OS environment info
@@ -242,13 +261,18 @@ func CreateReposWithResult(repos []string) *output.Result {
 // createRepoWithItem creates a single local repo and returns CreatedRepoItem
 func createRepoWithItem(dirPath string) (*CreatedRepoItem, error) {
 	if dirPath == "" {
-		dirPath = "/www/pigsty"
+		dirPath = defaultCreateRepoDir()
 	}
 
 	// Check if source directory exists, create if not
 	if _, err := os.Stat(dirPath); err != nil {
 		if os.IsNotExist(err) {
-			if err = utils.SudoCommand([]string{"mkdir", "-p", dirPath}); err != nil {
+			if config.OSType == config.DistroMAC {
+				err = os.MkdirAll(dirPath, 0o755)
+			} else {
+				err = utils.SudoCommand([]string{"mkdir", "-p", dirPath})
+			}
+			if err != nil {
 				return nil, fmt.Errorf("failed to create repo dir %s: %v", dirPath, err)
 			}
 		} else {
@@ -266,6 +290,9 @@ func createRepoWithItem(dirPath string) (*CreatedRepoItem, error) {
 	case config.DistroDEB:
 		repoType = "apt"
 		err = CreateRepoDEB(dirPath)
+	case config.DistroMAC:
+		repoType = "rpm/deb"
+		err = CreateRepoMAC(dirPath)
 	default:
 		return nil, fmt.Errorf("unsupported OS type: %s", config.OSType)
 	}
@@ -279,4 +306,11 @@ func createRepoWithItem(dirPath string) (*CreatedRepoItem, error) {
 		RepoType:     repoType,
 		CompleteFile: filepath.Join(dirPath, "repo_complete"),
 	}, nil
+}
+
+func defaultCreateRepoDir() string {
+	if config.OSType == config.DistroMAC {
+		return "."
+	}
+	return "/www/pigsty"
 }

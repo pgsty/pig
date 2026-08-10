@@ -25,6 +25,7 @@ func TestCreateRepoPrefersSow(t *testing.T) {
 	}{
 		{name: "el", create: CreateRepoEL, legacyTool: "createrepo_c"},
 		{name: "deb", create: CreateRepoDEB, legacyTool: "dpkg-scanpackages"},
+		{name: "macos", create: CreateRepoMAC, legacyTool: "createrepo_c"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -74,30 +75,43 @@ printf 'called\n' > "$LEGACY_TEST_LOG"
 }
 
 func TestCreateRepoReportsSowFailureWithoutFallback(t *testing.T) {
-	binDir := t.TempDir()
-	testDir := t.TempDir()
-	legacyLog := filepath.Join(testDir, "legacy-called")
-	repoDir := filepath.Join(testDir, "repo")
-	if err := os.Mkdir(repoDir, 0o755); err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name       string
+		create     func(string) error
+		legacyTool string
+	}{
+		{name: "el", create: CreateRepoEL, legacyTool: "createrepo_c"},
+		{name: "deb", create: CreateRepoDEB, legacyTool: "dpkg-scanpackages"},
+		{name: "macos", create: CreateRepoMAC, legacyTool: "createrepo_c"},
 	}
-	writeRepoTestCommand(t, binDir, "sow", "#!/bin/sh\nexit 23\n")
-	writeRepoTestCommand(t, binDir, "dpkg-scanpackages", "#!/bin/sh\nexit 0\n")
-	writeRepoTestCommand(t, binDir, "sh", `#!/bin/sh
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			testDir := t.TempDir()
+			legacyLog := filepath.Join(testDir, "legacy-called")
+			repoDir := filepath.Join(testDir, "repo")
+			if err := os.Mkdir(repoDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeRepoTestCommand(t, binDir, "sow", "#!/bin/sh\nexit 23\n")
+			writeRepoTestCommand(t, binDir, tt.legacyTool, "#!/bin/sh\nexit 0\n")
+			writeRepoTestCommand(t, binDir, "sh", `#!/bin/sh
 printf 'called\n' > "$LEGACY_TEST_LOG"
 : > "$REPO_COMPLETE"
 `)
-	t.Setenv("PATH", binDir)
-	t.Setenv("PIG_NO_SUDO", "1")
-	t.Setenv("LEGACY_TEST_LOG", legacyLog)
-	t.Setenv("REPO_COMPLETE", filepath.Join(repoDir, "repo_complete"))
+			t.Setenv("PATH", binDir)
+			t.Setenv("PIG_NO_SUDO", "1")
+			t.Setenv("LEGACY_TEST_LOG", legacyLog)
+			t.Setenv("REPO_COMPLETE", filepath.Join(repoDir, "repo_complete"))
 
-	err := CreateRepoDEB(repoDir)
-	if err == nil || !strings.Contains(err.Error(), "failed to create deb repo with sow") {
-		t.Fatalf("error = %v, want sow failure", err)
-	}
-	if _, err := os.Stat(legacyLog); !os.IsNotExist(err) {
-		t.Fatalf("legacy tool was called after sow failed: %v", err)
+			err := tt.create(repoDir)
+			if err == nil || !strings.Contains(err.Error(), "failed to create "+tt.name+" repo with sow") {
+				t.Fatalf("error = %v, want sow failure", err)
+			}
+			if _, err := os.Stat(legacyLog); !os.IsNotExist(err) {
+				t.Fatalf("legacy tool was called after sow failed: %v", err)
+			}
+		})
 	}
 }
 
@@ -186,6 +200,137 @@ func TestCreateRepoFailsWithoutAnyBackend(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCreateRepoMACRequiresSow(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("PIG_NO_SUDO", "1")
+
+	err := CreateRepoMAC(t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "macOS requires sow in PATH") {
+		t.Fatalf("error = %v, want missing sow error", err)
+	}
+}
+
+func TestCreateReposWithResultUsesSowOnMAC(t *testing.T) {
+	oldType := config.OSType
+	oldVendor := config.OSVendor
+	oldUser := config.CurrentUser
+	config.OSType = config.DistroMAC
+	config.OSVendor = "macos"
+	config.CurrentUser = "repo-test-user"
+	t.Cleanup(func() {
+		config.OSType = oldType
+		config.OSVendor = oldVendor
+		config.CurrentUser = oldUser
+	})
+
+	binDir := t.TempDir()
+	repoDir := t.TempDir()
+	t.Chdir(repoDir)
+	logPath := filepath.Join(t.TempDir(), "sow-args")
+	sudoLog := filepath.Join(t.TempDir(), "sudo-called")
+	writeRepoTestCommand(t, binDir, "sow", `#!/bin/sh
+printf '%s\n' "$@" > "$SOW_TEST_LOG"
+repo_dir=
+for arg in "$@"; do repo_dir=$arg; done
+: > "$repo_dir/repo_complete"
+`)
+	writeRepoTestCommand(t, binDir, "sudo", `#!/bin/sh
+printf 'called\n' > "$SUDO_TEST_LOG"
+exit 99
+`)
+	t.Setenv("PATH", binDir)
+	t.Setenv("PIG_NO_SUDO", "")
+	t.Setenv("SOW_TEST_LOG", logPath)
+	t.Setenv("SUDO_TEST_LOG", sudoLog)
+
+	result := CreateReposWithResult(nil)
+	if !result.Success {
+		t.Fatalf("result = %#v, want macOS success", result)
+	}
+	data, ok := result.Data.(*RepoCreateData)
+	if !ok || len(data.CreatedRepos) != 1 {
+		t.Fatalf("data = %#v, want one created repo", result.Data)
+	}
+	if len(data.RepoDirs) != 1 || data.RepoDirs[0] != "." {
+		t.Fatalf("repo dirs = %#v, want current directory", data.RepoDirs)
+	}
+	if data.CreatedRepos[0].Path != "." {
+		t.Fatalf("created path = %q, want current directory", data.CreatedRepos[0].Path)
+	}
+	if data.CreatedRepos[0].RepoType != "rpm/deb" {
+		t.Fatalf("repo type = %q, want rpm/deb", data.CreatedRepos[0].RepoType)
+	}
+	got, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "create\n--pigsty\n--timeout\n10m\n--\n" + repoDir + "\n"
+	if string(got) != want {
+		t.Fatalf("sow args = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(sudoLog); !os.IsNotExist(err) {
+		t.Fatalf("sudo was called on macOS: %v", err)
+	}
+}
+
+func TestCreateReposWithResultCreatesMACDirWithoutSudo(t *testing.T) {
+	oldType := config.OSType
+	oldVendor := config.OSVendor
+	oldUser := config.CurrentUser
+	config.OSType = config.DistroMAC
+	config.OSVendor = "macos"
+	config.CurrentUser = "repo-test-user"
+	t.Cleanup(func() {
+		config.OSType = oldType
+		config.OSVendor = oldVendor
+		config.CurrentUser = oldUser
+	})
+
+	binDir := t.TempDir()
+	repoDir := filepath.Join(t.TempDir(), "new", "repo")
+	sudoLog := filepath.Join(t.TempDir(), "sudo-called")
+	writeRepoTestCommand(t, binDir, "sow", `#!/bin/sh
+repo_dir=
+for arg in "$@"; do repo_dir=$arg; done
+: > "$repo_dir/repo_complete"
+`)
+	writeRepoTestCommand(t, binDir, "sudo", `#!/bin/sh
+printf 'called\n' > "$SUDO_TEST_LOG"
+exit 99
+`)
+	t.Setenv("PATH", binDir)
+	t.Setenv("PIG_NO_SUDO", "")
+	t.Setenv("SUDO_TEST_LOG", sudoLog)
+
+	result := CreateReposWithResult([]string{repoDir})
+	if !result.Success {
+		t.Fatalf("result = %#v, want macOS success", result)
+	}
+	if info, err := os.Stat(repoDir); err != nil || !info.IsDir() {
+		t.Fatalf("repo dir was not created by current user: info=%v err=%v", info, err)
+	}
+	if _, err := os.Stat(sudoLog); !os.IsNotExist(err) {
+		t.Fatalf("sudo was called while creating macOS repo dir: %v", err)
+	}
+}
+
+func TestDefaultCreateRepoDir(t *testing.T) {
+	oldType := config.OSType
+	t.Cleanup(func() { config.OSType = oldType })
+
+	config.OSType = config.DistroMAC
+	if got := defaultCreateRepoDir(); got != "." {
+		t.Fatalf("macOS default repo dir = %q, want current directory", got)
+	}
+
+	for _, osType := range []string{config.DistroEL, config.DistroDEB} {
+		config.OSType = osType
+		if got := defaultCreateRepoDir(); got != "/www/pigsty" {
+			t.Fatalf("%s default repo dir = %q, want /www/pigsty", osType, got)
+		}
 	}
 }
 

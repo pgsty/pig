@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"pig/internal/config"
@@ -10,6 +11,20 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
+
+func TestRepoCreateDocumentsMacOSPrivilegeException(t *testing.T) {
+	if got := repoCreateCmd.Annotations["os_user"]; got != "root" {
+		t.Fatalf("repo create os_user = %q, want root", got)
+	}
+	for _, want := range []string{
+		"Linux defaults to /www/pigsty and requires sudo/root",
+		"macOS defaults to the current directory and runs as the current user",
+	} {
+		if !strings.Contains(repoCreateCmd.Example, want) {
+			t.Fatalf("repo create example does not document %q:\n%s", want, repoCreateCmd.Example)
+		}
+	}
+}
 
 func TestRepoSetDoesNotMutateGlobalFlags(t *testing.T) {
 	origType := config.OSType

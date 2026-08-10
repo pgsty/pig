@@ -49,7 +49,7 @@ var repoCmd = &cobra.Command{
   pig repo add all                 # all = node + pgdg + pigsty
   pig repo add all extra           # extra module has non-free and some 3rd repo for certain extensions
   pig repo update                  # update repo cache
-  pig repo create                  # update local repo /www/pigsty meta
+  pig repo create                  # update local repository metadata
   pig repo boot                    # extract /tmp/pkg.tgz to /www/pigsty
   pig repo cache                   # cache /www/pigsty into /tmp/pkg.tgz
 `,
@@ -246,23 +246,20 @@ var repoCacheCmd = &cobra.Command{
 
 var repoCreateCmd = &cobra.Command{
 	Use:          "create [path...]",
-	Short:        "create local YUM/APT repository",
+	Short:        "create local RPM/DEB repository",
 	Aliases:      []string{"cr"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo create", "action", "stable", "restricted", true, "low", "none", "root", 5000),
 	Args:         cobra.ArbitraryArgs,
 	Example: `
-  pig repo create                    # create repo on /www/pigsty
+  pig repo create                    # current dir on macOS, /www/pigsty on Linux
   pig repo create /www/pigsty /www/b # create repo on multiple locations
 
-  (Beware that system repo management require sudo/root privilege)
+  (Linux defaults to /www/pigsty and requires sudo/root.
+   macOS defaults to the current directory and runs as the current user.)
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		repos := []string{"/www/pigsty"}
-		if len(args) > 0 {
-			repos = args
-		}
-		result := repo.CreateReposWithResult(repos)
+		result := repo.CreateReposWithResult(args)
 		return handleAuxResult(result)
 	},
 }

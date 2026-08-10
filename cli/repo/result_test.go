@@ -6,6 +6,7 @@ package repo
 import (
 	"encoding/json"
 	"os"
+	"pig/internal/config"
 	"pig/internal/output"
 	"strings"
 	"testing"
@@ -1914,19 +1915,24 @@ func TestRepoReloadDataText(t *testing.T) {
 }
 
 func TestCreateReposWithResultUnsupportedOS(t *testing.T) {
-	// On macOS, this should return unsupported OS error
+	oldType := config.OSType
+	oldVendor := config.OSVendor
+	oldVersion := config.OSVersionFull
+	config.OSType = "unknown"
+	config.OSVendor = "unknown"
+	config.OSVersionFull = "0"
+	t.Cleanup(func() {
+		config.OSType = oldType
+		config.OSVendor = oldVendor
+		config.OSVersionFull = oldVersion
+	})
+
 	result := CreateReposWithResult([]string{"/www/pigsty"})
 	if result == nil {
 		t.Fatal("CreateReposWithResult should not return nil")
 	}
-
-	// On non-Linux systems, expect unsupported OS error
-	if !result.Success {
-		if result.Code == output.CodeRepoUnsupportedOS {
-			t.Log("CreateReposWithResult correctly returns unsupported OS error on non-Linux")
-		} else {
-			t.Logf("CreateReposWithResult returned unexpected error code: %d - %s", result.Code, result.Message)
-		}
+	if result.Success || result.Code != output.CodeRepoUnsupportedOS {
+		t.Fatalf("result = %#v, want unsupported OS error", result)
 	}
 }
 
