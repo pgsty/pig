@@ -2,7 +2,7 @@
 
 [![Website: pigsty.io/ext](https://img.shields.io/badge/Website-pigsty.io%2Fext-slategray?style=flat&logo=cilium&logoColor=white)](https://pigsty.io/ext/)
 [![Doc: pig](https://img.shields.io/badge/Docs-pig-slategray?style=flat)](https://pigsty.io/docs/pig)
-[![Version: v1.6.1](https://img.shields.io/badge/version-v1.6.1-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.6.1)
+[![Version: v1.6.2](https://img.shields.io/badge/version-v1.6.2-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.6.2)
 [![Pigsty: v4.5.0](https://img.shields.io/badge/Pigsty-v4.5.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 572](https://img.shields.io/badge/extensions-572-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)

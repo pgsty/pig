@@ -138,10 +138,10 @@ func NewClient(config Config) (*Client, error) {
 		return nil, fmt.Errorf("parse Grafana endpoint: %w", err)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, errors.New("Grafana endpoint must use http or https")
+		return nil, errors.New("grafana endpoint must use http or https")
 	}
 	if parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return nil, errors.New("Grafana endpoint must be an origin and optional path prefix without credentials, query, or fragment")
+		return nil, errors.New("grafana endpoint must be an origin and optional path prefix without credentials, query, or fragment")
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
 	parsed.RawPath = ""
@@ -157,7 +157,7 @@ func NewClient(config Config) (*Client, error) {
 		}
 	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return errors.New("Grafana API redirects are refused")
+		return errors.New("grafana API redirects are refused")
 	}
 	return &Client{
 		base: parsed, endpoint: parsed.String(), username: config.Username,
@@ -199,7 +199,7 @@ func (c *Client) Search(ctx context.Context) ([]SearchItem, error) {
 			return result, nil
 		}
 	}
-	return nil, errors.New("Grafana search pagination exceeded the safety limit")
+	return nil, errors.New("grafana search pagination exceeded the safety limit")
 }
 
 func (c *Client) GetDashboard(ctx context.Context, uid string) (DashboardEnvelope, error) {
@@ -321,7 +321,7 @@ func (c *Client) doResource(ctx context.Context, method, route string, query url
 
 func (c *Client) doRouteWithAuth(ctx context.Context, method, route string, query url.Values, payload, destination interface{}, authenticate bool) error {
 	if c == nil || c.base == nil || c.httpClient == nil {
-		return errors.New("Grafana client is not initialized")
+		return errors.New("grafana client is not initialized")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -340,7 +340,7 @@ func (c *Client) doRouteWithAuth(ctx context.Context, method, route string, quer
 			return fmt.Errorf("encode Grafana request: %w", err)
 		}
 		if len(encoded) > maxRequestBytes {
-			return fmt.Errorf("Grafana request exceeds %d bytes", maxRequestBytes)
+			return fmt.Errorf("grafana request exceeds %d bytes", maxRequestBytes)
 		}
 		body = bytes.NewReader(encoded)
 	}
@@ -374,7 +374,7 @@ func (c *Client) doRouteWithAuth(ctx context.Context, method, route string, quer
 		return &RequestError{Method: method, Route: route, Err: err}
 	}
 	if len(raw) > maxResponseBytes {
-		return fmt.Errorf("Grafana response exceeds %d bytes", maxResponseBytes)
+		return fmt.Errorf("grafana response exceeds %d bytes", maxResponseBytes)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()

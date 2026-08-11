@@ -85,7 +85,7 @@ func resolveGrafanaScope(options GrafanaOptions, action grafanaAction) (*grafana
 	root := ""
 	if selectedText == "" {
 		if homeRoot == "" {
-			return nil, errors.New("Grafana path is required because Pigsty home could not be resolved")
+			return nil, errors.New("grafana path is required because Pigsty home could not be resolved")
 		}
 		selected, root = homeRoot, homeRoot
 	} else {
@@ -106,7 +106,7 @@ func resolveGrafanaScope(options GrafanaOptions, action grafanaAction) (*grafana
 
 	relative, err := filepath.Rel(root, selected)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) || filepath.IsAbs(relative) {
-		return nil, errors.New("Grafana path escapes its root")
+		return nil, errors.New("grafana path escapes its root")
 	}
 	scope := &grafanaScope{Root: root, Path: selected}
 	parts := splitGrafanaRelative(relative)
@@ -141,7 +141,7 @@ func resolveGrafanaScope(options GrafanaOptions, action grafanaAction) (*grafana
 			return nil, err
 		}
 	default:
-		return nil, errors.New("Grafana paths may contain only one folder layer")
+		return nil, errors.New("grafana paths may contain only one folder layer")
 	}
 
 	if err := inspectGrafanaScopePath(scope, action); err != nil {
@@ -223,7 +223,7 @@ func validateGrafanaUID(kind, uid string) error {
 
 func inspectGrafanaScopePath(scope *grafanaScope, action grafanaAction) error {
 	if scope == nil {
-		return errors.New("Grafana scope is nil")
+		return errors.New("grafana scope is nil")
 	}
 	if err := rejectGrafanaSymlink(scope.Root); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -234,13 +234,13 @@ func inspectGrafanaScopePath(scope *grafanaScope, action grafanaAction) error {
 	info, err := os.Lstat(scope.Path)
 	if err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("Grafana scope must not be a symlink: %s", scope.Path)
+			return fmt.Errorf("grafana scope must not be a symlink: %s", scope.Path)
 		}
 		if scope.Kind == grafanaScopeFile && !info.Mode().IsRegular() {
-			return fmt.Errorf("Grafana dashboard must be a regular file: %s", scope.Path)
+			return fmt.Errorf("grafana dashboard must be a regular file: %s", scope.Path)
 		}
 		if scope.Kind != grafanaScopeFile && !info.IsDir() {
-			return fmt.Errorf("Grafana scope must be a directory: %s", scope.Path)
+			return fmt.Errorf("grafana scope must be a directory: %s", scope.Path)
 		}
 		return nil
 	}
@@ -248,7 +248,7 @@ func inspectGrafanaScopePath(scope *grafanaScope, action grafanaAction) error {
 		return fmt.Errorf("inspect Grafana scope: %w", err)
 	}
 	if action != grafanaActionDump {
-		return fmt.Errorf("Grafana scope does not exist: %s", scope.Path)
+		return fmt.Errorf("grafana scope does not exist: %s", scope.Path)
 	}
 	parent := filepath.Dir(scope.Path)
 	if scope.Kind == grafanaScopeRoot {
@@ -256,14 +256,14 @@ func inspectGrafanaScopePath(scope *grafanaScope, action grafanaAction) error {
 	}
 	parentInfo, parentErr := os.Stat(parent)
 	if parentErr != nil || !parentInfo.IsDir() {
-		return fmt.Errorf("Grafana scope parent is unavailable: %s", parent)
+		return fmt.Errorf("grafana scope parent is unavailable: %s", parent)
 	}
 	return nil
 }
 
 func rejectGrafanaSymlinkPath(root, selected string) error {
 	if !pathWithin(root, selected) {
-		return errors.New("Grafana path escapes its root")
+		return errors.New("grafana path escapes its root")
 	}
 	current := root
 	if err := rejectGrafanaSymlink(current); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -288,14 +288,14 @@ func rejectGrafanaSymlink(path string) error {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("Grafana paths must not contain symlinks: %s", path)
+		return fmt.Errorf("grafana paths must not contain symlinks: %s", path)
 	}
 	return nil
 }
 
 func loadGrafanaScopeAssets(scope *grafanaScope) error {
 	if scope == nil {
-		return errors.New("Grafana scope is nil")
+		return errors.New("grafana scope is nil")
 	}
 	assets := make([]grafanaAsset, 0)
 	folders := make([]string, 0)
@@ -326,7 +326,7 @@ func loadGrafanaScopeAssets(scope *grafanaScope) error {
 			}
 			path := filepath.Join(scope.Root, name)
 			if entry.Type()&os.ModeSymlink != 0 {
-				return fmt.Errorf("Grafana corpus must not contain symlinks: %s", path)
+				return fmt.Errorf("grafana corpus must not contain symlinks: %s", path)
 			}
 			if entry.IsDir() {
 				if err := validateGrafanaUID("folder", name); err != nil {
@@ -385,10 +385,10 @@ func readGrafanaDirectory(directory, folderUID string) ([]grafanaAsset, error) {
 		}
 		path := filepath.Join(directory, name)
 		if entry.Type()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("Grafana corpus must not contain symlinks: %s", path)
+			return nil, fmt.Errorf("grafana corpus must not contain symlinks: %s", path)
 		}
 		if entry.IsDir() {
-			return nil, fmt.Errorf("Grafana corpus may contain only one folder layer: %s", path)
+			return nil, fmt.Errorf("grafana corpus may contain only one folder layer: %s", path)
 		}
 		if !strings.EqualFold(filepath.Ext(name), ".json") {
 			continue
@@ -451,7 +451,7 @@ func grafanaDashboardIdentity(dashboard map[string]interface{}) (grafanaDashboar
 	}
 	metadata, ok := dashboard["metadata"].(map[string]interface{})
 	if !ok {
-		return 0, "", "", errors.New("Grafana dashboard resource metadata must be an object")
+		return 0, "", "", errors.New("grafana dashboard resource metadata must be an object")
 	}
 	uid, _ := metadata["name"].(string)
 	namespace, _ := metadata["namespace"].(string)
@@ -462,7 +462,7 @@ func grafanaDashboardIdentity(dashboard map[string]interface{}) (grafanaDashboar
 		return 0, "", "", fmt.Errorf("unsafe Grafana namespace %q", namespace)
 	}
 	if _, ok := dashboard["spec"].(map[string]interface{}); !ok {
-		return 0, "", "", errors.New("Grafana dashboard resource spec must be an object")
+		return 0, "", "", errors.New("grafana dashboard resource spec must be an object")
 	}
 	return grafanaDashboardV2, uid, namespace, nil
 }
@@ -505,7 +505,7 @@ func dashboardResourceForGrafanaInit(value map[string]interface{}, namespace, na
 	}
 	spec, ok := clone["spec"].(map[string]interface{})
 	if !ok {
-		return nil, errors.New("Grafana dashboard resource spec must be an object")
+		return nil, errors.New("grafana dashboard resource spec must be an object")
 	}
 	annotations := make(map[string]interface{})
 	if metadata, ok := clone["metadata"].(map[string]interface{}); ok {
@@ -670,7 +670,7 @@ func writeAtomicGrafanaFile(filename string, raw []byte) error {
 	mode := os.FileMode(0644)
 	if info, statErr := os.Lstat(filename); statErr == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			return fmt.Errorf("Grafana dump target must be a regular non-symlink file: %s", filename)
+			return fmt.Errorf("grafana dump target must be a regular non-symlink file: %s", filename)
 		}
 		mode = info.Mode().Perm()
 	} else if !errors.Is(statErr, os.ErrNotExist) {

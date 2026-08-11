@@ -330,7 +330,7 @@ func prepareGrafanaConnection(options GrafanaOptions, requireAuthentication bool
 	}
 	credentialConfigured := password != ""
 	if requireAuthentication && !credentialConfigured {
-		return nil, errors.New("Grafana password is not available from --password, --password-file, GRAFANA_PASSWORD, or all.vars.grafana_admin_password")
+		return nil, errors.New("grafana password is not available from --password, --password-file, GRAFANA_PASSWORD, or all.vars.grafana_admin_password")
 	}
 	client, err := grafana.NewClient(grafana.Config{
 		Endpoint: endpoint, Username: username, Password: password, HTTPClient: options.HTTPClient,
@@ -368,17 +368,17 @@ func grafanaAPIPassword(password, passwordFile string, doc *inventory.Document) 
 		}
 		info, err := os.Lstat(absolute)
 		if err != nil {
-			return "", errors.New("Grafana password file is unavailable")
+			return "", errors.New("grafana password file is unavailable")
 		}
 		if !info.Mode().IsRegular() || info.Size() > maxGrafanaPasswordBytes {
-			return "", errors.New("Grafana password file must be one bounded regular file")
+			return "", errors.New("grafana password file must be one bounded regular file")
 		}
 		if runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
-			return "", errors.New("Grafana password file must be owner-only")
+			return "", errors.New("grafana password file must be owner-only")
 		}
 		raw, err := os.ReadFile(absolute)
 		if err != nil {
-			return "", errors.New("Grafana password file could not be read")
+			return "", errors.New("grafana password file could not be read")
 		}
 		password := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r")
 		return validateGrafanaPassword(password, "Grafana password file")
@@ -1015,7 +1015,7 @@ func preflightGrafanaOrganization(ctx context.Context, client grafanaAPI) (grafa
 		return grafana.Organization{}, err
 	}
 	if !strings.EqualFold(strings.TrimSpace(health.Database), "ok") {
-		return grafana.Organization{}, errors.New("Grafana database health is not ok")
+		return grafana.Organization{}, errors.New("grafana database health is not ok")
 	}
 	return client.CurrentOrganization(ctx)
 }
