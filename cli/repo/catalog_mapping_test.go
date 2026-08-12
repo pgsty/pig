@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -143,7 +144,8 @@ func TestUbuntuRepoReleasePolicy(t *testing.T) {
 	assertReleases("base", "Ubuntu Basic", "deb", "aarch64", []int{22, 24, 26})
 	assertReleases("pgdg", "PGDG", "deb", "x86_64", []int{11, 12, 13, 22, 24, 26})
 	assertReleases("haproxyu", "Haproxy Ubuntu", "deb", "x86_64", []int{24, 26})
-	assertReleases("timescaledb", "TimescaleDB", "deb", "x86_64", []int{11, 12, 13, 22, 24})
+	assertReleases("timescaledb", "TimescaleDB", "deb", "x86_64", []int{11, 12, 13, 22, 24, 26})
+	assertReleases("redis", "Redis", "deb", "x86_64", []int{11, 12, 22, 24, 26})
 	assertReleases("clickhouse", "ClickHouse", "deb", "x86_64", []int{11, 12, 13, 22, 24, 26})
 	assertReleases("mysql", "MySQL 8.4 LTS", "deb", "x86_64", []int{12, 13, 22, 24})
 
@@ -155,6 +157,57 @@ func TestUbuntuRepoReleasePolicy(t *testing.T) {
 			if _, ok := r.BaseURL["origin"]; ok {
 				t.Fatalf("percona deb repo should not carry origin mirror metadata anymore: %+v", r.BaseURL)
 			}
+		}
+	}
+}
+
+func TestCurrentThirdPartyRepoPolicy(t *testing.T) {
+	var repos []Repository
+	if err := yaml.Unmarshal(embedRepoData, &repos); err != nil {
+		t.Fatalf("failed to parse embedded repo catalog: %v", err)
+	}
+
+	assertRepo := func(name, desc, distro, arch string, wantReleases []int, wantURL string) {
+		t.Helper()
+		for _, r := range repos {
+			if r.Name != name || r.Description != desc || r.InferOS() != distro || !slicesContains(r.Arch, arch) {
+				continue
+			}
+			if compactIntArray(r.Releases) != compactIntArray(wantReleases) {
+				t.Fatalf("%s/%s/%s/%s releases = %v, want %v", name, desc, distro, arch, r.Releases, wantReleases)
+			}
+			if wantURL != "" && r.BaseURL["default"] != wantURL {
+				t.Fatalf("%s/%s default URL = %q, want %q", name, desc, r.BaseURL["default"], wantURL)
+			}
+			return
+		}
+		t.Fatalf("repo %s/%s/%s/%s not found", name, desc, distro, arch)
+	}
+
+	assertRepo("timescaledb", "TimescaleDB", "rpm", "aarch64", []int{7, 8, 9, 10}, "")
+	assertRepo("pigsty-pgsql", "Pigsty PGSQL EL7", "rpm", "x86_64", []int{7}, "")
+	assertRepo("pigsty-pgsql", "Pigsty PGSQL", "rpm", "aarch64", []int{8, 9, 10}, "")
+	assertRepo("pgdg19-beta", "PostgreSQL 19b", "rpm", "x86_64", []int{8, 9, 10}, "")
+	assertRepo("pgdg19-beta", "PostgreSQL 19b", "rpm", "aarch64", []int{9, 10}, "")
+	assertRepo("mongo", "MongoDB", "rpm", "x86_64", []int{8, 9, 10}, "")
+	assertRepo("gitlab-ee", "Gitlab EE", "rpm", "x86_64", []int{8, 9, 10}, "")
+	assertRepo("gitlab-ce", "Gitlab CE", "rpm", "aarch64", []int{8, 9, 10}, "")
+	assertRepo("kubernetes", "Kubernetes Legacy", "rpm", "x86_64", []int{7}, "https://pkgs.k8s.io/core:/stable:/v1.31/rpm/")
+	assertRepo("kubernetes", "Kubernetes", "rpm", "aarch64", []int{8, 9, 10}, "https://pkgs.k8s.io/core:/stable:/v1.36/rpm/")
+	assertRepo("kubernetes", "Kubernetes", "deb", "aarch64", []int{11, 12, 13, 22, 24, 26}, "https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /")
+
+	for _, r := range repos {
+		if r.Name == "grafana" && r.InferOS() == "rpm" && r.BaseURL["china"] != "https://mirrors.aliyun.com/grafana/yum/rpm/" {
+			t.Fatalf("Grafana RPM China mirror = %q", r.BaseURL["china"])
+		}
+		if r.Name == "kubernetes" && r.InferOS() == "rpm" && slices.Contains(r.Releases, 7) && r.Description != "Kubernetes Legacy" {
+			t.Fatalf("EL7 must not inherit the current Kubernetes repository: %+v", r)
+		}
+		if r.Name == "pigsty-pgsql" && slices.Contains(r.Releases, 7) && slicesContains(r.Arch, "aarch64") {
+			t.Fatalf("pigsty-pgsql must not advertise unavailable EL7 aarch64 metadata: %+v", r)
+		}
+		if r.Name == "pgdg19-beta" && slices.Contains(r.Releases, 8) && slicesContains(r.Arch, "aarch64") {
+			t.Fatalf("pgdg19-beta must not advertise unavailable EL8 aarch64 metadata: %+v", r)
 		}
 	}
 }
@@ -184,6 +237,43 @@ func TestPerconaTDERepoContract(t *testing.T) {
 		if !seen[distro] {
 			t.Fatalf("percona %s repository not found", distro)
 		}
+	}
+}
+
+func TestPGDGChinaMirrorContract(t *testing.T) {
+	var repos []Repository
+	if err := yaml.Unmarshal(embedRepoData, &repos); err != nil {
+		t.Fatalf("failed to parse embedded repo catalog: %v", err)
+	}
+
+	var yumCount int
+	var aptStable, aptBeta bool
+	for _, r := range repos {
+		defaultURL := r.BaseURL["default"]
+		chinaURL := r.BaseURL["china"]
+		switch {
+		case strings.HasPrefix(defaultURL, "https://download.postgresql.org/pub/repos/yum/"):
+			if !strings.HasPrefix(chinaURL, "https://repo.pigsty.cc/yum/pgdg/") {
+				t.Fatalf("%s China mirror = %q, want repo.pigsty.cc PGDG mirror", r.Name, chinaURL)
+			}
+			yumCount++
+		case r.Name == "pgdg" && strings.Contains(defaultURL, "apt.postgresql.org"):
+			want := "https://repo.pigsty.cc/apt/pgdg/ ${distro_codename}-pgdg main"
+			if chinaURL != want {
+				t.Fatalf("PGDG APT China mirror = %q, want %q", chinaURL, want)
+			}
+			aptStable = true
+		case r.Name == "pgdg-beta" && strings.Contains(defaultURL, "apt.postgresql.org"):
+			want := "https://repo.pigsty.cc/apt/pgdg/ ${distro_codename}-pgdg-testing main 19"
+			if chinaURL != want {
+				t.Fatalf("PGDG beta APT China mirror = %q, want %q", chinaURL, want)
+			}
+			aptBeta = true
+		}
+	}
+
+	if yumCount == 0 || !aptStable || !aptBeta {
+		t.Fatalf("incomplete PGDG mirror coverage: yum=%d apt-stable=%t apt-beta=%t", yumCount, aptStable, aptBeta)
 	}
 }
 

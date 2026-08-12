@@ -125,9 +125,10 @@ func (m *Manager) LoadData(data []byte) error {
 		repo.Distro = repo.InferOS()
 		switch repo.Distro {
 		case config.DistroEL:
-			// Intentionally permissive default for compatibility with offline/mirror repos.
+			// Preserve native DNF module filtering by default. Repositories that
+			// intentionally override module streams must opt in via repo.Meta.
 			// See config.PigstyGPGCheck for opt-in signature enforcement.
-			meta := map[string]string{"enabled": "1", "gpgcheck": "0", "module_hotfixes": "1"}
+			meta := map[string]string{"enabled": "1", "gpgcheck": "0"}
 			if repo.Meta != nil {
 				for k, v := range repo.Meta {
 					meta[k] = v

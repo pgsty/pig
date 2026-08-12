@@ -8,12 +8,16 @@ var pgdgProxyPrefixReplacements = []struct {
 	from string
 	to   string
 }{
+	{"https://repo.pigsty.cc/yum/pgdg/", pgdgProxyURLPrefix + "/yum/pgdg/"},
+	{"http://repo.pigsty.cc/yum/pgdg/", pgdgProxyURLPrefix + "/yum/pgdg/"},
 	{"https://download.postgresql.org/pub/repos/yum/", pgdgProxyURLPrefix + "/yum/pgdg/"},
 	{"http://download.postgresql.org/pub/repos/yum/", pgdgProxyURLPrefix + "/yum/pgdg/"},
 	{"https://mirrors.aliyun.com/postgresql/repos/yum/", pgdgProxyURLPrefix + "/yum/pgdg/"},
 	{"http://mirrors.aliyun.com/postgresql/repos/yum/", pgdgProxyURLPrefix + "/yum/pgdg/"},
 	{"https://mirrors.xtom.de/postgresql/repos/yum/", pgdgProxyURLPrefix + "/yum/pgdg/"},
 	{"http://mirrors.xtom.de/postgresql/repos/yum/", pgdgProxyURLPrefix + "/yum/pgdg/"},
+	{"https://repo.pigsty.cc/apt/pgdg/", pgdgProxyURLPrefix + "/apt/pgdg/"},
+	{"http://repo.pigsty.cc/apt/pgdg/", pgdgProxyURLPrefix + "/apt/pgdg/"},
 	{"https://apt.postgresql.org/pub/repos/apt/", pgdgProxyURLPrefix + "/apt/pgdg/"},
 	{"http://apt.postgresql.org/pub/repos/apt/", pgdgProxyURLPrefix + "/apt/pgdg/"},
 	{"https://mirrors.aliyun.com/postgresql/repos/apt/", pgdgProxyURLPrefix + "/apt/pgdg/"},

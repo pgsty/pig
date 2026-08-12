@@ -7,14 +7,21 @@ func TestApplyPGDGProxyRouteRewritesOnlyPGDGProxyURLs(t *testing.T) {
 		Name: "pgdg18",
 		BaseURL: map[string]string{
 			"default": "https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-$releasever-$basearch",
-			"china":   "https://mirrors.aliyun.com/postgresql/repos/yum/18/redhat/rhel-$releasever-$basearch",
+			"china":   "https://repo.pigsty.cc/yum/pgdg/18/redhat/rhel-$releasever-$basearch",
 		},
 	}
 	pgdgApt := &Repository{
 		Name: "pgdg",
 		BaseURL: map[string]string{
 			"default": "http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg main",
-			"china":   "https://mirrors.aliyun.com/postgresql/repos/apt/ ${distro_codename}-pgdg main",
+			"china":   "https://repo.pigsty.cc/apt/pgdg/ ${distro_codename}-pgdg main",
+		},
+	}
+	pgdgBetaApt := &Repository{
+		Name: "pgdg-beta",
+		BaseURL: map[string]string{
+			"default": "http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg-testing main 19",
+			"china":   "https://repo.pigsty.cc/apt/pgdg/ ${distro_codename}-pgdg-testing main 19",
 		},
 	}
 	docker := &Repository{
@@ -26,7 +33,7 @@ func TestApplyPGDGProxyRouteRewritesOnlyPGDGProxyURLs(t *testing.T) {
 	}
 	m := &Manager{
 		Region: "default",
-		Data:   []*Repository{pgdgYum, pgdgApt, docker},
+		Data:   []*Repository{pgdgYum, pgdgApt, pgdgBetaApt, docker},
 	}
 
 	applyPGDGProxyRoute(m)
@@ -39,6 +46,9 @@ func TestApplyPGDGProxyRouteRewritesOnlyPGDGProxyURLs(t *testing.T) {
 	}
 	if got, want := pgdgApt.BaseURL["china"], "http://beta.pigsty.cc/apt/pgdg/ ${distro_codename}-pgdg main"; got != want {
 		t.Fatalf("pgdg apt proxy URL = %q, want %q", got, want)
+	}
+	if got, want := pgdgBetaApt.BaseURL["china"], "http://beta.pigsty.cc/apt/pgdg/ ${distro_codename}-pgdg-testing main 19"; got != want {
+		t.Fatalf("pgdg beta apt proxy URL = %q, want %q", got, want)
 	}
 	if got, want := docker.BaseURL["china"], "https://mirrors.aliyun.com/docker-ce/linux/centos/$releasever/$basearch/stable"; got != want {
 		t.Fatalf("non-PGDG proxy URL = %q, want unchanged %q", got, want)
