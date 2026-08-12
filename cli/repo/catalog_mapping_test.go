@@ -184,27 +184,22 @@ func TestCurrentThirdPartyRepoPolicy(t *testing.T) {
 		t.Fatalf("repo %s/%s/%s/%s not found", name, desc, distro, arch)
 	}
 
-	assertRepo("timescaledb", "TimescaleDB", "rpm", "aarch64", []int{7, 8, 9, 10}, "")
-	assertRepo("pigsty-pgsql", "Pigsty PGSQL EL7", "rpm", "x86_64", []int{7}, "")
+	assertRepo("timescaledb", "TimescaleDB", "rpm", "aarch64", []int{8, 9, 10}, "")
 	assertRepo("pigsty-pgsql", "Pigsty PGSQL", "rpm", "aarch64", []int{8, 9, 10}, "")
 	assertRepo("pgdg19-beta", "PostgreSQL 19b", "rpm", "x86_64", []int{8, 9, 10}, "")
 	assertRepo("pgdg19-beta", "PostgreSQL 19b", "rpm", "aarch64", []int{9, 10}, "")
 	assertRepo("mongo", "MongoDB", "rpm", "x86_64", []int{8, 9, 10}, "")
 	assertRepo("gitlab-ee", "Gitlab EE", "rpm", "x86_64", []int{8, 9, 10}, "")
 	assertRepo("gitlab-ce", "Gitlab CE", "rpm", "aarch64", []int{8, 9, 10}, "")
-	assertRepo("kubernetes", "Kubernetes Legacy", "rpm", "x86_64", []int{7}, "https://pkgs.k8s.io/core:/stable:/v1.31/rpm/")
 	assertRepo("kubernetes", "Kubernetes", "rpm", "aarch64", []int{8, 9, 10}, "https://pkgs.k8s.io/core:/stable:/v1.36/rpm/")
 	assertRepo("kubernetes", "Kubernetes", "deb", "aarch64", []int{11, 12, 13, 22, 24, 26}, "https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /")
 
 	for _, r := range repos {
-		if r.Name == "grafana" && r.InferOS() == "rpm" && r.BaseURL["china"] != "https://mirrors.aliyun.com/grafana/yum/rpm/" {
+		if r.Name == "grafana" && r.InferOS() == "rpm" && r.BaseURL["china"] != "https://mirrors.cloud.tencent.com/grafana/yum/rpm/" {
 			t.Fatalf("Grafana RPM China mirror = %q", r.BaseURL["china"])
 		}
-		if r.Name == "kubernetes" && r.InferOS() == "rpm" && slices.Contains(r.Releases, 7) && r.Description != "Kubernetes Legacy" {
-			t.Fatalf("EL7 must not inherit the current Kubernetes repository: %+v", r)
-		}
-		if r.Name == "pigsty-pgsql" && slices.Contains(r.Releases, 7) && slicesContains(r.Arch, "aarch64") {
-			t.Fatalf("pigsty-pgsql must not advertise unavailable EL7 aarch64 metadata: %+v", r)
+		if slices.Contains(r.Releases, 7) {
+			t.Fatalf("embedded repository catalog must not advertise EL7: %+v", r)
 		}
 		if r.Name == "pgdg19-beta" && slices.Contains(r.Releases, 8) && slicesContains(r.Arch, "aarch64") {
 			t.Fatalf("pgdg19-beta must not advertise unavailable EL8 aarch64 metadata: %+v", r)
@@ -253,18 +248,30 @@ func TestPGDGChinaMirrorContract(t *testing.T) {
 		chinaURL := r.BaseURL["china"]
 		switch {
 		case strings.HasPrefix(defaultURL, "https://download.postgresql.org/pub/repos/yum/"):
-			if !strings.HasPrefix(chinaURL, "https://repo.pigsty.cc/yum/pgdg/") {
-				t.Fatalf("%s China mirror = %q, want repo.pigsty.cc PGDG mirror", r.Name, chinaURL)
+			// China RPM entries are an ordered failover list: Tencent first,
+			// repo.pigsty.cc as the compatibility fallback.
+			path := strings.TrimPrefix(defaultURL, "https://download.postgresql.org/pub/repos/yum/")
+			candidates := strings.Fields(chinaURL)
+			if len(candidates) != 2 {
+				t.Fatalf("%s China mirror = %q, want 2 failover candidates", r.Name, chinaURL)
+			}
+			wantPrimary := "https://mirrors.cloud.tencent.com/postgresql/repos/yum/" + path
+			if candidates[0] != wantPrimary {
+				t.Fatalf("%s China primary = %q, want %q", r.Name, candidates[0], wantPrimary)
+			}
+			wantFallback := "https://repo.pigsty.cc/yum/pgdg/" + path
+			if candidates[1] != wantFallback {
+				t.Fatalf("%s China fallback = %q, want %q", r.Name, candidates[1], wantFallback)
 			}
 			yumCount++
 		case r.Name == "pgdg" && strings.Contains(defaultURL, "apt.postgresql.org"):
-			want := "https://repo.pigsty.cc/apt/pgdg/ ${distro_codename}-pgdg main"
+			want := "https://mirrors.cloud.tencent.com/postgresql/repos/apt/ ${distro_codename}-pgdg main"
 			if chinaURL != want {
 				t.Fatalf("PGDG APT China mirror = %q, want %q", chinaURL, want)
 			}
 			aptStable = true
 		case r.Name == "pgdg-beta" && strings.Contains(defaultURL, "apt.postgresql.org"):
-			want := "https://repo.pigsty.cc/apt/pgdg/ ${distro_codename}-pgdg-testing main 19"
+			want := "https://mirrors.cloud.tencent.com/postgresql/repos/apt/ ${distro_codename}-pgdg-testing main 19"
 			if chinaURL != want {
 				t.Fatalf("PGDG beta APT China mirror = %q, want %q", chinaURL, want)
 			}
@@ -275,6 +282,18 @@ func TestPGDGChinaMirrorContract(t *testing.T) {
 	if yumCount == 0 || !aptStable || !aptBeta {
 		t.Fatalf("incomplete PGDG mirror coverage: yum=%d apt-stable=%t apt-beta=%t", yumCount, aptStable, aptBeta)
 	}
+}
+
+func TestPGDGMirrorRouteSelectsChinaDefinitions(t *testing.T) {
+	m := &Manager{Region: "default"}
+	applyPGDGMirrorRoute(m)
+	if m.Region != "china" {
+		t.Fatalf("PGDG mirror route region = %q, want china", m.Region)
+	}
+
+	// The selector only changes the region; catalog definitions remain the
+	// authoritative source for Tencent-first ordering and compatibility fallbacks.
+	applyPGDGMirrorRoute(nil)
 }
 
 func TestPXB84ChinaMirrorContract(t *testing.T) {

@@ -281,9 +281,9 @@ func init() {
 	repoAddCmd.Flags().StringVar(&repoAddRegion, "region", "", "region code")
 	repoAddCmd.Flags().BoolVarP(&repoAddUpdate, "update", "u", false, "run apt update or dnf makecache")
 	repoAddCmd.Flags().BoolVarP(&repoAddRemove, "remove", "r", false, "remove existing repo")
-	repoAddCmd.Flags().BoolVarP(&repoAddMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
+	repoAddCmd.Flags().BoolVarP(&repoAddMirror, "mirror", "m", false, "prefer China mirrors")
 	repoSetCmd.Flags().StringVar(&repoSetRegion, "region", "", "region code")
-	repoSetCmd.Flags().BoolVarP(&repoSetMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
+	repoSetCmd.Flags().BoolVarP(&repoSetMirror, "mirror", "m", false, "prefer China mirrors")
 	repoRmCmd.Flags().BoolVarP(&repoRmUpdate, "update", "u", false, "run apt update or dnf makecache")
 
 	// boot command flags

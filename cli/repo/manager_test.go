@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"pig/internal/config"
+	"pig/internal/output"
 )
 
 func withELConfig(t *testing.T, major int, version, versionFull string) {
@@ -112,20 +113,22 @@ func TestEmbeddedELCatalogModuleHotfixPolicy(t *testing.T) {
 	}
 }
 
-func TestEmbeddedEL7CatalogDoesNotUseModuleHotfixes(t *testing.T) {
+func TestEmbeddedCatalogDoesNotAdvertiseEL7(t *testing.T) {
 	withELConfig(t, 7, "7", "7.9")
 	m := newELManager("7")
 	if err := m.LoadData(nil); err != nil {
 		t.Fatalf("LoadData returned error: %v", err)
 	}
 
-	for _, name := range []string{"pigsty-local", "pigsty-infra", "pigsty-pgsql", "pgdg-common", "pgdg14", "pgdg15", "pgdg-extras"} {
-		repository := m.Map[name]
-		if repository == nil {
-			t.Fatalf("EL7 repository %s not loaded", name)
-		}
-		if _, ok := repository.Meta["module_hotfixes"]; ok {
-			t.Errorf("EL7 repository %s unexpectedly enables module_hotfixes", name)
-		}
+	if len(m.List) != 0 || len(m.Map) != 0 {
+		t.Fatalf("EL7 repositories loaded from embedded catalog: list=%d map=%v", len(m.List), m.Map)
+	}
+}
+
+func TestAddReposRejectsPlatformWithoutAvailableRepos(t *testing.T) {
+	withELConfig(t, 7, "7", "7.9")
+	result := AddReposWithOptions([]string{"all"}, AddOptions{Remove: true})
+	if result.Success || result.Code != output.CodeRepoUnsupportedOS {
+		t.Fatalf("result = %#v, want unsupported platform", result)
 	}
 }

@@ -278,7 +278,7 @@ var buildPkgCmd = &cobra.Command{
 
 func init() {
 	// Parse build flags
-	buildRepoCmd.Flags().BoolVarP(&buildRepoMirror, "mirror", "m", false, "use mirror and proxy for postgres repos")
+	buildRepoCmd.Flags().BoolVarP(&buildRepoMirror, "mirror", "m", false, "prefer China mirrors")
 	buildRepoCmd.Flags().BoolVarP(&buildRepoBeta, "beta", "b", false, "include PostgreSQL beta repository")
 	buildToolCmd.Flags().BoolVarP(&buildToolBeta, "beta", "b", false, "include PostgreSQL beta build packages")
 	buildPgrxCmd.PersistentFlags().StringVarP(&buildPgrxVer, "pgrx", "v", build.DefaultPgrxVersion, "pgrx version to install")

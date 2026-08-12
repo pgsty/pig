@@ -153,6 +153,10 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 	if err != nil {
 		return output.Fail(output.CodeRepoManagerError, fmt.Sprintf("failed to get repo manager: %v", err))
 	}
+	if len(manager.List) == 0 {
+		return output.Fail(output.CodeRepoUnsupportedOS,
+			fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
+	}
 
 	// Build OS environment info
 	osEnv := &OSEnvironment{
@@ -205,9 +209,9 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 		data.BackupInfo = backupInfo
 	}
 
-	// PGDG proxy is a route override; skip auto-detection when enabled.
+	// The explicit mirror route uses China-region repositories
 	if opts.Mirror {
-		applyPGDGProxyRoute(manager)
+		applyPGDGMirrorRoute(manager)
 	} else {
 		manager.DetectRegion(opts.Region)
 	}
@@ -365,4 +369,13 @@ func countRepos(items []*AddedRepoItem) int {
 		}
 	}
 	return count
+}
+
+func applyPGDGMirrorRoute(m *Manager) {
+	if m == nil {
+		return
+	}
+	// The bundled China definitions are authoritative: PGDG uses Tencent Cloud
+	// first, with any deliberately declared fallback retained for compatibility.
+	m.Region = "china"
 }
