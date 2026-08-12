@@ -134,6 +134,11 @@ func (m *Manager) LoadData(data []byte) error {
 					meta[k] = v
 				}
 			}
+			// EL7 uses yum without DNF modules. Shared EL7/8/9/10 catalog rows may
+			// opt in for newer EL releases, but must not render this DNF-only key.
+			if GetMajorVersionFromCode(m.OsDistroCode) == 7 {
+				delete(meta, "module_hotfixes")
+			}
 			repo.Meta = meta
 		case config.DistroDEB:
 			// Intentionally permissive default for compatibility with offline/mirror repos.

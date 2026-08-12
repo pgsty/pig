@@ -184,8 +184,12 @@ func TestCurrentThirdPartyRepoPolicy(t *testing.T) {
 		t.Fatalf("repo %s/%s/%s/%s not found", name, desc, distro, arch)
 	}
 
-	assertRepo("timescaledb", "TimescaleDB", "rpm", "aarch64", []int{8, 9, 10}, "")
-	assertRepo("pigsty-pgsql", "Pigsty PGSQL", "rpm", "aarch64", []int{8, 9, 10}, "")
+	assertRepo("nginx", "Nginx Repo", "rpm", "x86_64", []int{7, 8, 9, 10}, "")
+	assertRepo("docker-ce", "Docker CE", "rpm", "x86_64", []int{7, 8, 9, 10}, "")
+	assertRepo("timescaledb", "TimescaleDB", "rpm", "aarch64", []int{7, 8, 9, 10}, "")
+	assertRepo("grafana", "Grafana", "rpm", "x86_64", []int{7, 8, 9, 10}, "")
+	assertRepo("pigsty-pgsql", "Pigsty PGSQL", "rpm", "aarch64", []int{7, 8, 9, 10}, "")
+	assertRepo("base", "EL 7 Base", "rpm", "x86_64", []int{7}, "https://archive.kernel.org/centos-vault/7.9.2009/os/$basearch/")
 	assertRepo("pgdg19-beta", "PostgreSQL 19b", "rpm", "x86_64", []int{8, 9, 10}, "")
 	assertRepo("pgdg19-beta", "PostgreSQL 19b", "rpm", "aarch64", []int{9, 10}, "")
 	assertRepo("mongo", "MongoDB", "rpm", "x86_64", []int{8, 9, 10}, "")
@@ -198,11 +202,127 @@ func TestCurrentThirdPartyRepoPolicy(t *testing.T) {
 		if r.Name == "grafana" && r.InferOS() == "rpm" && r.BaseURL["china"] != "https://mirrors.cloud.tencent.com/grafana/yum/rpm/" {
 			t.Fatalf("Grafana RPM China mirror = %q", r.BaseURL["china"])
 		}
-		if slices.Contains(r.Releases, 7) {
-			t.Fatalf("embedded repository catalog must not advertise EL7: %+v", r)
+		if slices.Contains([]string{"mysql", "redis", "kubernetes"}, r.Name) && slices.Contains(r.Releases, 7) {
+			t.Fatalf("removed optional repository %s must not advertise EL7: %+v", r.Name, r)
 		}
 		if r.Name == "pgdg19-beta" && slices.Contains(r.Releases, 8) && slicesContains(r.Arch, "aarch64") {
 			t.Fatalf("pgdg19-beta must not advertise unavailable EL8 aarch64 metadata: %+v", r)
+		}
+	}
+}
+
+func TestEmbeddedEL7SpecialGroupBetweenELAndDEB(t *testing.T) {
+	catalog := string(embedRepoData)
+	elStart := strings.Index(catalog, "# EL REPOS (7/8/9/10)")
+	specialStart := strings.Index(catalog, "# EL 7 SPECIAL REPOS (VIRTUAL GROUP)")
+	debStart := strings.Index(catalog, "# DEB 11/12/13 Ubuntu 22/24/26 REPOS")
+	if elStart < 0 || specialStart < 0 || debStart < 0 || !(elStart < specialStart && specialStart < debStart) {
+		t.Fatalf("repository group order must be shared EL, special EL7, then DEB: el=%d special=%d deb=%d", elStart, specialStart, debStart)
+	}
+
+	var special []Repository
+	if err := yaml.Unmarshal([]byte(catalog[specialStart:debStart]), &special); err != nil {
+		t.Fatalf("failed to parse special EL7 group: %v", err)
+	}
+	if len(special) != 6 {
+		t.Fatalf("special EL7 group contains %d repositories, want 6", len(special))
+	}
+	for _, r := range special {
+		if len(r.Releases) != 1 || r.Releases[0] != 7 {
+			t.Fatalf("special group contains a non-EL7 repository: %+v", r)
+		}
+		if _, ok := r.Meta["module_hotfixes"]; ok {
+			t.Fatalf("EL7 repository must not use module_hotfixes: %+v", r)
+		}
+	}
+
+	var shared []Repository
+	if err := yaml.Unmarshal([]byte(catalog[elStart:specialStart]), &shared); err != nil {
+		t.Fatalf("failed to parse shared EL group: %v", err)
+	}
+	sharedEL7 := make(map[string]bool)
+	for _, r := range shared {
+		if slices.Contains(r.Releases, 7) {
+			sharedEL7[r.Name] = true
+			if !slices.Equal(r.Releases, []int{7, 8, 9, 10}) {
+				t.Fatalf("shared EL7 repository %s has releases %v, want [7 8 9 10]", r.Name, r.Releases)
+			}
+		}
+	}
+	for _, name := range []string{
+		"pigsty-local", "pigsty-infra", "pigsty-pgsql", "nginx", "docker-ce",
+		"pgdg-common", "pgdg14", "pgdg15", "pgdg-extras", "pgdg14-nonfree", "pgdg15-nonfree",
+		"timescaledb", "grafana",
+	} {
+		if !sharedEL7[name] {
+			t.Errorf("repository %s should advertise EL7 in the shared EL record", name)
+		}
+		delete(sharedEL7, name)
+	}
+	if len(sharedEL7) != 0 {
+		t.Fatalf("unexpected repositories advertise EL7 in the shared EL group: %v", sharedEL7)
+	}
+}
+
+func TestEmbeddedEL7CatalogMatchesSelectedPigstyRepositories(t *testing.T) {
+	var repos []Repository
+	if err := yaml.Unmarshal(embedRepoData, &repos); err != nil {
+		t.Fatalf("failed to parse embedded repo catalog: %v", err)
+	}
+
+	el7 := make(map[string]Repository)
+	for _, r := range repos {
+		if slices.Contains(r.Releases, 7) {
+			el7[r.Name] = r
+		}
+	}
+	want := []struct {
+		name, description, module string
+	}{
+		{"pigsty-local", "Pigsty Local", "local"}, {"pigsty-infra", "Pigsty INFRA", "infra"}, {"pigsty-pgsql", "Pigsty PGSQL", "pgsql"},
+		{"nginx", "Nginx Repo", "nginx"}, {"docker-ce", "Docker CE", "docker"},
+		{"base", "EL 7 Base", "node"}, {"updates", "EL 7 Updates", "node"}, {"extras", "EL 7 Extras", "node"}, {"epel", "EL 7 EPEL", "node"},
+		{"centos-sclo", "EL 7 SCLo", "node"}, {"centos-sclo-rh", "EL 7 SCLo rh", "node"},
+		{"pgdg-common", "PostgreSQL Common", "pgsql"}, {"pgdg14", "PostgreSQL 14", "pgsql"}, {"pgdg15", "PostgreSQL 15", "pgsql"},
+		{"pgdg-extras", "PostgreSQL Extra", "extra"}, {"pgdg14-nonfree", "PostgreSQL 14+", "extra"}, {"pgdg15-nonfree", "PostgreSQL 15+", "extra"},
+		{"timescaledb", "TimescaleDB", "extra"}, {"grafana", "Grafana", "grafana"},
+	}
+	if len(el7) != len(want) {
+		t.Fatalf("EL7 catalog contains %d unique repositories, want %d selected from Pigsty el7.x86_64.yml", len(el7), len(want))
+	}
+	for _, item := range want {
+		r, ok := el7[item.name]
+		if !ok {
+			t.Errorf("Pigsty EL7 repository %s is missing", item.name)
+			continue
+		}
+		if r.Module != item.module {
+			t.Errorf("EL7 repository %s module = %q, want PIG CLI module %q", item.name, r.Module, item.module)
+		}
+		if r.Description != item.description {
+			t.Errorf("EL7 repository %s description = %q, want Pigsty description %q", item.name, r.Description, item.description)
+		}
+		if !slices.Contains(r.Arch, "x86_64") {
+			t.Errorf("EL7 repository %s does not support Pigsty's x86_64 platform: %v", item.name, r.Arch)
+		}
+	}
+
+	// PIG-specific differences from Pigsty's Ansible vars are intentional:
+	// local is a file repo, and nginx/docker remain independently selectable modules.
+	if got := el7["pigsty-local"].BaseURL["default"]; got != "file:///www/pigsty" {
+		t.Errorf("PIG local EL7 repo = %q, want file:///www/pigsty", got)
+	}
+	for _, name := range []string{"base", "updates", "extras", "centos-sclo", "centos-sclo-rh"} {
+		if !strings.HasPrefix(el7[name].BaseURL["default"], "https://archive.kernel.org/centos-vault/7.9.2009/") {
+			t.Errorf("EL7 repository %s must use the reachable CentOS 7.9.2009 archive: %q", name, el7[name].BaseURL["default"])
+		}
+	}
+	if !strings.Contains(el7["epel"].BaseURL["china"], "/epel-archive/") {
+		t.Errorf("EL7 EPEL China mirror must use the archive tree: %q", el7["epel"].BaseURL["china"])
+	}
+	for _, name := range []string{"pgdg14-nonfree", "pgdg15-nonfree"} {
+		if el7[name].Meta["skip_if_unavailable"] != "1" {
+			t.Errorf("EL7 repository %s must preserve Pigsty skip_if_unavailable", name)
 		}
 	}
 }

@@ -1,11 +1,11 @@
 package repo
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"pig/internal/config"
-	"pig/internal/output"
 )
 
 func withELConfig(t *testing.T, major int, version, versionFull string) {
@@ -85,6 +85,37 @@ func TestELRepoModuleHotfixesAreOptIn(t *testing.T) {
 	}
 }
 
+func TestEL7DropsModuleHotfixesFromSharedRepo(t *testing.T) {
+	withELConfig(t, 7, "7", "7.9")
+	m := newELManager("7")
+	data := []byte(`
+- name: shared-hotfix
+  description: Shared Hotfix
+  module: extra
+  releases: [7, 8, 9, 10]
+  arch: [x86_64, aarch64]
+  baseurl: { default: "https://example.com/$releasever/$basearch" }
+  meta: { module_hotfixes: "1", priority: "11" }
+`)
+
+	if err := m.LoadData(data); err != nil {
+		t.Fatalf("LoadData returned error: %v", err)
+	}
+	repository := m.Map["shared-hotfix"]
+	if repository == nil {
+		t.Fatal("shared EL repository not loaded on EL7")
+	}
+	if _, ok := repository.Meta["module_hotfixes"]; ok {
+		t.Fatalf("EL7 repository unexpectedly retains module_hotfixes: %#v", repository.Meta)
+	}
+	if got := repository.Meta["priority"]; got != "11" {
+		t.Fatalf("EL7 repository priority = %q, want 11", got)
+	}
+	if strings.Contains(repository.Content(), "module_hotfixes=") {
+		t.Fatalf("EL7 content unexpectedly renders module_hotfixes:\n%s", repository.Content())
+	}
+}
+
 func TestEmbeddedELCatalogModuleHotfixPolicy(t *testing.T) {
 	withELConfig(t, 9, "9", "9.6")
 	m := newELManager("9")
@@ -113,22 +144,32 @@ func TestEmbeddedELCatalogModuleHotfixPolicy(t *testing.T) {
 	}
 }
 
-func TestEmbeddedCatalogDoesNotAdvertiseEL7(t *testing.T) {
+func TestEmbeddedEL7CatalogIsAvailableWithoutModuleHotfixes(t *testing.T) {
 	withELConfig(t, 7, "7", "7.9")
 	m := newELManager("7")
 	if err := m.LoadData(nil); err != nil {
 		t.Fatalf("LoadData returned error: %v", err)
 	}
 
-	if len(m.List) != 0 || len(m.Map) != 0 {
-		t.Fatalf("EL7 repositories loaded from embedded catalog: list=%d map=%v", len(m.List), m.Map)
+	if len(m.List) != 19 || len(m.Map) != 19 {
+		t.Fatalf("EL7 repository count: list=%d map=%d, want 19", len(m.List), len(m.Map))
 	}
-}
-
-func TestAddReposRejectsPlatformWithoutAvailableRepos(t *testing.T) {
-	withELConfig(t, 7, "7", "7.9")
-	result := AddReposWithOptions([]string{"all"}, AddOptions{Remove: true})
-	if result.Success || result.Code != output.CodeRepoUnsupportedOS {
-		t.Fatalf("result = %#v, want unsupported platform", result)
+	for _, repository := range m.List {
+		if !slices.Contains(repository.Releases, 7) {
+			t.Fatalf("non-EL7 repository loaded for EL7: %+v", repository)
+		}
+		if _, ok := repository.Meta["module_hotfixes"]; ok {
+			t.Errorf("EL7 repository %s unexpectedly enables module_hotfixes", repository.Name)
+		}
+	}
+	for _, name := range []string{"pigsty-local", "pigsty-infra", "pigsty-pgsql", "base", "epel", "pgdg-common", "pgdg14", "pgdg15", "timescaledb", "grafana"} {
+		if m.Map[name] == nil {
+			t.Errorf("EL7 repository %s not loaded", name)
+		}
+	}
+	for _, name := range []string{"mysql", "redis", "kubernetes"} {
+		if m.Map[name] != nil {
+			t.Errorf("removed optional EL7 repository %s unexpectedly loaded", name)
+		}
 	}
 }
