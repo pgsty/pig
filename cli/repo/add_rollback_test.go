@@ -23,14 +23,32 @@ func setupAddRollbackTest(t *testing.T) (*Manager, string) {
 	manager.BackupDir = filepath.Join(repoDir, "backup")
 	manager.UpdateCmd = []string{"cache-update"}
 
-	origManager, origRun, origAdd := newAddRepoManager, runAddRepoCommand, addRepoModule
+	origManager, origRun, origSummary, origAdd := newAddRepoManager, runAddRepoCommand, runAddRepoCommandSummary, addRepoModule
 	t.Cleanup(func() {
-		newAddRepoManager, runAddRepoCommand, addRepoModule = origManager, origRun, origAdd
+		newAddRepoManager, runAddRepoCommand, runAddRepoCommandSummary, addRepoModule = origManager, origRun, origSummary, origAdd
 	})
 	newAddRepoManager = func(...string) (*Manager, error) { return manager, nil }
 	runAddRepoCommand = runRepoTestCommand
 	addRepoModule = func(manager *Manager, module string) error { return manager.AddModule(module) }
 	return manager, repoDir
+}
+
+func TestAddReposQuietUsesSummaryRunnerForCacheUpdate(t *testing.T) {
+	setupAddRollbackTest(t)
+	runAddRepoCommand = func([]string) error {
+		t.Fatal("quiet cache update used streaming command runner")
+		return nil
+	}
+	var call []string
+	runAddRepoCommandSummary = func(args []string) error {
+		call = append([]string(nil), args...)
+		return nil
+	}
+
+	result := AddReposWithOptions([]string{"node"}, AddOptions{Update: true, Quiet: true})
+	if !result.Success || len(call) != 1 || call[0] != "cache-update" {
+		t.Fatalf("quiet cache update result = %+v call=%v", result, call)
+	}
 }
 
 func runRepoTestCommand(args []string) error {

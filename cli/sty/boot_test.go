@@ -1,8 +1,10 @@
 package sty
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,26 +21,37 @@ func setupBootTest(t *testing.T) {
 	t.Helper()
 	origInstall, origRepos, origReset, origRepo := bootInstall, bootRepos, bootResetRepos, bootRepo
 	origAddLocal, origRestore, origLocalRepo, origLookPath := bootAddLocal, bootRestoreRepos, bootLocalRepo, bootLookPath
-	origEUID, origLocale, origVerify, origEnsureSSH, origEnsurePigsty, origDownload := bootEUID, bootEnsureLocale, bootVerify, bootEnsureSSH, bootEnsurePigsty, bootDownload
-	origAuto, origRepoDir := bootAutoPkg, bootRepoDir
+	origEUID, origRepairLocale, origVerify := bootEUID, bootRepairLocale, bootVerifyAnsible
+	origEnsureSSH, origEnsurePigsty, origDownload := bootEnsureSSH, bootEnsurePigsty, bootDownload
+	origAuto, origRepoDir, origProgress := bootAutoPkg, bootRepoDir, bootProgressOut
 	origType, origCode, origVendor, origVersion := config.OSType, config.OSCode, config.OSVendor, config.OSVersion
 	t.Cleanup(func() {
 		bootInstall, bootRepos, bootResetRepos, bootRepo = origInstall, origRepos, origReset, origRepo
 		bootAddLocal, bootRestoreRepos, bootLocalRepo, bootLookPath = origAddLocal, origRestore, origLocalRepo, origLookPath
-		bootEUID, bootEnsureLocale, bootVerify, bootEnsureSSH, bootEnsurePigsty, bootDownload = origEUID, origLocale, origVerify, origEnsureSSH, origEnsurePigsty, origDownload
-		bootAutoPkg, bootRepoDir = origAuto, origRepoDir
+		bootEUID, bootRepairLocale, bootVerifyAnsible = origEUID, origRepairLocale, origVerify
+		bootEnsureSSH, bootEnsurePigsty, bootDownload = origEnsureSSH, origEnsurePigsty, origDownload
+		bootAutoPkg, bootRepoDir, bootProgressOut = origAuto, origRepoDir, origProgress
 		config.OSType, config.OSCode, config.OSVendor, config.OSVersion = origType, origCode, origVendor, origVersion
 	})
 	config.OSType, config.OSCode, config.OSVendor, config.OSVersion = config.DistroEL, "el10", "rocky", "10"
 	bootEUID = func() int { return 0 }
 	bootLookPath = func(string) (string, error) { return "/usr/bin/dnf", nil }
-	bootEnsureLocale = func(context.Context) error { return nil }
+	verifyCalls := 0
+	bootVerifyAnsible = func(context.Context) error {
+		verifyCalls++
+		if verifyCalls == 1 {
+			return errors.New("ansible unavailable")
+		}
+		return nil
+	}
+	bootRepairLocale = func(context.Context) (bool, error) { return false, nil }
 	bootEnsureSSH = func(context.Context) (string, error) { return "ok", nil }
 	bootEnsurePigsty = func(context.Context, string) (pigstyInitOutcome, error) {
 		return pigstyInitOutcome{Path: "/home/admin/pigsty", Status: pigstyInitExisting}, nil
 	}
 	bootAutoPkg = filepath.Join(t.TempDir(), "missing.tgz")
 	bootRepoDir = filepath.Join(t.TempDir(), "pigsty")
+	bootProgressOut = io.Discard
 	bootResetRepos = func([]string, bool) *output.Result {
 		return output.OK("backed up", &repo.RepoRmData{BackupInfo: &repo.BackupInfo{BackupDir: "/fixture/repo-backup"}})
 	}
@@ -46,16 +59,36 @@ func setupBootTest(t *testing.T) {
 	bootLocalRepo = func() string { return "/fixture/local.repo" }
 }
 
-func TestBootstrapNativeReadyStillConvergesRepositoriesAndPackages(t *testing.T) {
+func TestBootOKUsesLegacyStyleAndSuppressesStructuredOutput(t *testing.T) {
+	origOut, origFormat := bootProgressOut, config.OutputFormat
+	t.Cleanup(func() {
+		bootProgressOut, config.OutputFormat = origOut, origFormat
+	})
+	t.Setenv("NO_COLOR", "1")
+	var buffer bytes.Buffer
+	bootProgressOut = &buffer
+	config.OutputFormat = config.OUTPUT_TEXT
+	writeBootStatus("ssh", "ok")
+	if got := buffer.String(); got != "[ OK ] ssh     = ok\n" {
+		t.Fatalf("Bootstrap progress = %q", got)
+	}
+
+	buffer.Reset()
+	config.OutputFormat = config.OUTPUT_JSON
+	writeBootOK("hidden")
+	if buffer.Len() != 0 {
+		t.Fatalf("structured Bootstrap emitted progress: %q", buffer.String())
+	}
+}
+
+func TestBootstrapNativeReadySkipsRepositoryAndPackageBootstrap(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
+	bootVerifyAnsible = func(context.Context) error { return nil }
 	repoCalls, installCalls := 0, 0
 	bootRepos = func(modules []string, opts repo.AddOptions) *output.Result {
 		repoCalls++
-		if len(modules) != 2 || modules[0] != "node" || modules[1] != "pigsty" || !opts.Remove || !opts.Update || !opts.GPGCheck {
-			t.Fatalf("bootstrap repo request = %v %+v", modules, opts)
-		}
-		return successfulBootstrapRepoResult()
+		t.Fatalf("ready Ansible configured repositories: %v %+v", modules, opts)
+		return nil
 	}
 	bootInstall = func(int, []string, install.PackageOptions) error {
 		installCalls++
@@ -63,8 +96,57 @@ func TestBootstrapNativeReadyStillConvergesRepositoriesAndPackages(t *testing.T)
 	}
 	result := BootstrapNative(context.Background(), NativeBootstrapOptions{})
 	data := result.Data.(*BootData)
-	if !result.Success || !data.Changed || data.Mode != "online" || data.RepositoryPolicy != "overwrite" || repoCalls != 1 || installCalls != 1 {
+	if !result.Success || data.Changed || data.Ansible != "ready" || data.Mode != "ready" || repoCalls != 0 || installCalls != 0 {
 		t.Fatalf("unexpected ready result: %+v %+v", result, data)
+	}
+}
+
+func TestBootstrapNativeReadyOutputReportsResultsOnly(t *testing.T) {
+	setupBootTest(t)
+	config.OSType, config.OSCode, config.OSVendor, config.OSVersion = config.DistroDEB, "d12", "debian", "12"
+	origFormat := config.OutputFormat
+	t.Cleanup(func() { config.OutputFormat = origFormat })
+	t.Setenv("NO_COLOR", "1")
+	config.OutputFormat = config.OUTPUT_TEXT
+	var progress bytes.Buffer
+	bootProgressOut = &progress
+	bootVerifyAnsible = func(context.Context) error { return nil }
+
+	result := BootstrapNative(context.Background(), NativeBootstrapOptions{})
+	gotProgress := progress.String()
+	for _, unwanted := range []string{"[HINT]", "checking"} {
+		if strings.Contains(gotProgress, unwanted) {
+			t.Fatalf("quiet Bootstrap progress contains %q: %q", unwanted, gotProgress)
+		}
+	}
+	wantProgress := "[ OK ] locale  = ready\n" +
+		"[ OK ] ansible = ready\n" +
+		"[ OK ] ssh     = ok\n" +
+		"[ OK ] pigsty  = exists\n" +
+		"[ OK ] bootstrap complete\n"
+	if gotProgress != wantProgress {
+		t.Fatalf("quiet Bootstrap progress:\nwant: %q\n got: %q", wantProgress, gotProgress)
+	}
+
+	text := result.Data.(*BootData).Text()
+	wantText := "proceed with:\n" +
+		"    pig sty conf -g   # generate config with random passwords\n" +
+		"    pig inv edit      # edit the inventory, [OPTIONAL]\n" +
+		"    pig sty deploy    # run the actual deployment"
+	if text != wantText {
+		t.Fatalf("Bootstrap next steps:\nwant: %q\n got: %q", wantText, text)
+	}
+}
+
+func TestBootstrapNativeFailsWhenAnsibleIsStillUnavailableAfterBootstrap(t *testing.T) {
+	setupBootTest(t)
+	bootVerifyAnsible = func(context.Context) error { return errors.New("ansible-playbook unavailable") }
+	bootRepos = func([]string, repo.AddOptions) *output.Result { return successfulBootstrapRepoResult() }
+	bootInstall = func(int, []string, install.PackageOptions) error { return nil }
+	result := BootstrapNative(context.Background(), NativeBootstrapOptions{})
+	data := result.Data.(*BootData)
+	if result.Success || data.Ansible != "failed" || !strings.Contains(result.Message, "ansible bootstrap verification failed") {
+		t.Fatalf("final Ansible verification result = %+v %+v", result, data)
 	}
 }
 
@@ -79,10 +161,9 @@ func TestBootstrapNativeRequiresRootWithPermissionCode(t *testing.T) {
 
 func TestBootstrapNativeKeepPreservesOnlineRepos(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	bootInstall = func(_ int, _ []string, _ install.PackageOptions) error { return nil }
 	bootRepos = func(modules []string, opts repo.AddOptions) *output.Result {
-		if len(modules) != 2 || modules[0] != "node" || modules[1] != "pigsty" || opts.Remove || !opts.Update || !opts.GPGCheck {
+		if len(modules) != 2 || modules[0] != "node" || modules[1] != "pigsty" || opts.Remove || !opts.Update || !opts.GPGCheck || !opts.Quiet {
 			t.Fatalf("keep repo request = %v %+v", modules, opts)
 		}
 		return successfulBootstrapRepoResult()
@@ -96,7 +177,6 @@ func TestBootstrapNativeKeepPreservesOnlineRepos(t *testing.T) {
 
 func TestBootstrapNativeOfflineUsesStrictLocalScope(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	pkg := filepath.Join(t.TempDir(), "pkg.tgz")
 	if err := writeTinyFile(pkg); err != nil {
 		t.Fatal(err)
@@ -110,7 +190,7 @@ func TestBootstrapNativeOfflineUsesStrictLocalScope(t *testing.T) {
 	installCalls := 0
 	bootInstall = func(_ int, names []string, opts install.PackageOptions) error {
 		installCalls++
-		if !opts.LocalOnly || !opts.NoTranslation || !containsPackage(names, "sow") ||
+		if !opts.LocalOnly || !opts.NoTranslation || !opts.Quiet || !containsPackage(names, "sow") ||
 			!containsPackage(names, "ca-certificates") || containsPackage(names, "tar") || containsPackage(names, "gzip") {
 			t.Fatalf("offline install %d = %v %+v", installCalls, names, opts)
 		}
@@ -125,7 +205,6 @@ func TestBootstrapNativeOfflineUsesStrictLocalScope(t *testing.T) {
 
 func TestBootstrapNativeOfflineOrdersExtractBackupAndLocalDefinition(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	pkg := filepath.Join(t.TempDir(), "pkg.tgz")
 	if err := writeTinyFile(pkg); err != nil {
 		t.Fatal(err)
@@ -157,7 +236,6 @@ func TestBootstrapNativeOfflineOrdersExtractBackupAndLocalDefinition(t *testing.
 
 func TestBootstrapNativeOfflineRestoresReposAfterLocalInstallFailure(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	if err := os.MkdirAll(bootRepoDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +268,6 @@ func TestBootstrapNativeOfflineRestoresReposAfterLocalInstallFailure(t *testing.
 
 func TestBootstrapNativeReportsSelectedPackageWhenCommittedRepoIsReused(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	if err := os.MkdirAll(bootRepoDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -246,6 +323,42 @@ func TestResolveBootPackageProtectsAutomaticTmpPackage(t *testing.T) {
 	}
 }
 
+func TestBootstrapNativeIgnoresUnsafeAutomaticPackageAndUsesCommittedRepo(t *testing.T) {
+	setupBootTest(t)
+	if err := writeTinyFile(bootAutoPkg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(bootAutoPkg, 0o622); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(bootRepoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeTinyFile(filepath.Join(bootRepoDir, "repo_complete")); err != nil {
+		t.Fatal(err)
+	}
+	bootRepo = func(string, string) *output.Result {
+		t.Fatal("unsafe automatic package was unpacked")
+		return nil
+	}
+	bootInstall = func(_ int, _ []string, opts install.PackageOptions) error {
+		if !opts.LocalOnly || !opts.Quiet {
+			t.Fatalf("committed repository install options = %+v", opts)
+		}
+		return nil
+	}
+
+	result := BootstrapNative(context.Background(), NativeBootstrapOptions{})
+	data := result.Data.(*BootData)
+	if !result.Success || data.Mode != "offline" || data.PackagePath != "" || len(data.Warnings) != 1 ||
+		!strings.Contains(data.Warnings[0], "ignored unsafe") {
+		t.Fatalf("unsafe automatic package result = %+v %+v", result, data)
+	}
+	if _, err := os.Stat(bootAutoPkg); err != nil {
+		t.Fatalf("unsafe automatic package was removed: %v", err)
+	}
+}
+
 func TestPrepareBootstrapArgsResolvesCompactPathBeforeSudo(t *testing.T) {
 	setupBootTest(t)
 	pkg := filepath.Join(t.TempDir(), "pkg.tgz")
@@ -273,7 +386,6 @@ func TestPrepareBootstrapArgsResolvesCompactPathBeforeSudo(t *testing.T) {
 
 func TestBootstrapNativeAddsPigstyReposBeforeControllerPackages(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	var requests [][]string
 	reposAdded := false
 	bootInstall = func(_ int, names []string, _ install.PackageOptions) error {
@@ -284,7 +396,7 @@ func TestBootstrapNativeAddsPigstyReposBeforeControllerPackages(t *testing.T) {
 		return nil
 	}
 	bootRepos = func(modules []string, opts repo.AddOptions) *output.Result {
-		if len(modules) != 2 || modules[0] != "node" || modules[1] != "pigsty" || !opts.Remove || !opts.Update || !opts.GPGCheck {
+		if len(modules) != 2 || modules[0] != "node" || modules[1] != "pigsty" || !opts.Remove || !opts.Update || !opts.GPGCheck || !opts.Quiet {
 			t.Fatalf("bootstrap repo request = %v %+v", modules, opts)
 		}
 		reposAdded = true
@@ -299,12 +411,11 @@ func TestBootstrapNativeAddsPigstyReposBeforeControllerPackages(t *testing.T) {
 
 func TestBootstrapNativeDefaultsToReplacingOnlineRepos(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	bootInstall = func(_ int, _ []string, _ install.PackageOptions) error { return nil }
 	reposCalled := 0
 	bootRepos = func(modules []string, opts repo.AddOptions) *output.Result {
 		reposCalled++
-		if len(modules) != 2 || modules[0] != "node" || modules[1] != "pigsty" || !opts.Remove || !opts.Update || !opts.GPGCheck {
+		if len(modules) != 2 || modules[0] != "node" || modules[1] != "pigsty" || !opts.Remove || !opts.Update || !opts.GPGCheck || !opts.Quiet {
 			t.Fatalf("overwrite repo request = %v %+v", modules, opts)
 		}
 		return successfulBootstrapRepoResult()
@@ -318,7 +429,6 @@ func TestBootstrapNativeDefaultsToReplacingOnlineRepos(t *testing.T) {
 
 func TestBootstrapNativeDefaultsToResettingOfflineRepos(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	if err := os.MkdirAll(bootRepoDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +460,6 @@ func TestBootstrapNativeDefaultsToResettingOfflineRepos(t *testing.T) {
 
 func TestBootstrapNativeKeepPreservesOfflineRepos(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	if err := os.MkdirAll(bootRepoDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +491,6 @@ func TestBootstrapNativeKeepPreservesOfflineRepos(t *testing.T) {
 
 func TestBootstrapNativeDefaultCacheFailureIsFatal(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	bootRepos = func([]string, repo.AddOptions) *output.Result {
 		return output.Fail(output.CodeRepoCacheUpdateFailed, "cache update failed").WithData(&repo.RepoAddData{
 			AddedRepos:   []*repo.AddedRepoItem{{Module: "node"}, {Module: "pigsty"}},
@@ -404,7 +512,6 @@ func TestBootstrapNativeDefaultCacheFailureIsFatal(t *testing.T) {
 
 func TestBootstrapNativeKeepCanFallBackToExistingRepos(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	bootRepos = func(_ []string, opts repo.AddOptions) *output.Result {
 		if opts.Remove {
 			t.Fatal("--keep requested repository removal")
@@ -426,7 +533,6 @@ func TestBootstrapNativeKeepCanFallBackToExistingRepos(t *testing.T) {
 
 func TestBootstrapNativeRejectsPartialBootstrapRepositories(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	bootRepos = func([]string, repo.AddOptions) *output.Result {
 		return output.OK("partially added", &repo.RepoAddData{
 			AddedRepos: []*repo.AddedRepoItem{{Module: "node"}},
@@ -452,7 +558,6 @@ func TestMissingBootstrapRepoModulesFailsClosedWithoutDetails(t *testing.T) {
 
 func TestBootstrapNativeLocalSSHFailureIsWarning(t *testing.T) {
 	setupBootTest(t)
-	bootVerify = func(context.Context) error { return nil }
 	bootRepos = func([]string, repo.AddOptions) *output.Result { return successfulBootstrapRepoResult() }
 	bootInstall = func(int, []string, install.PackageOptions) error { return nil }
 	bootEnsureSSH = func(context.Context) (string, error) {
@@ -463,45 +568,51 @@ func TestBootstrapNativeLocalSSHFailureIsWarning(t *testing.T) {
 	if !result.Success || data.LocalSSH != "warning" || len(data.Warnings) != 1 {
 		t.Fatalf("non-fatal SSH result = %+v %+v", result, data)
 	}
-	if text := data.Text(); !strings.Contains(text, "warning: localhost SSH") {
+	if text := data.Text(); !strings.Contains(text, "[WARN] localhost SSH") {
 		t.Fatalf("text output omitted SSH warning: %q", text)
 	}
 }
 
-func TestBootstrapNativeConfiguresLocaleAfterPackages(t *testing.T) {
+func TestBootstrapNativePreparesLocaleBeforeAnsibleAndSSH(t *testing.T) {
 	setupBootTest(t)
+	config.OSType, config.OSCode, config.OSVendor, config.OSVersion = config.DistroDEB, "d12", "debian", "12"
+	origFormat := config.OutputFormat
+	t.Cleanup(func() { config.OutputFormat = origFormat })
+	t.Setenv("NO_COLOR", "1")
+	config.OutputFormat = config.OUTPUT_TEXT
+	var progress bytes.Buffer
+	bootProgressOut = &progress
 	order := make([]string, 0, 3)
-	bootRepos = func([]string, repo.AddOptions) *output.Result { return successfulBootstrapRepoResult() }
-	bootInstall = func(int, []string, install.PackageOptions) error {
-		order = append(order, "install")
-		return nil
-	}
-	bootEnsureLocale = func(context.Context) error {
+	bootRepairLocale = func(context.Context) (bool, error) {
 		order = append(order, "locale")
+		return true, nil
+	}
+	bootVerifyAnsible = func(context.Context) error {
+		order = append(order, "ansible")
 		return nil
 	}
-	bootVerify = func(context.Context) error {
-		order = append(order, "verify")
-		return nil
+	bootEnsureSSH = func(context.Context) (string, error) {
+		order = append(order, "ssh")
+		return "ready", nil
 	}
 	result := BootstrapNative(context.Background(), NativeBootstrapOptions{})
-	if !result.Success || strings.Join(order, ",") != "install,locale,verify" {
+	data := result.Data.(*BootData)
+	if !result.Success || strings.Join(order, ",") != "locale,ansible,ssh" || data.Locale != "repaired" || !data.Changed ||
+		!strings.Contains(progress.String(), "[ OK ] locale  = ready") {
 		t.Fatalf("bootstrap order = %v, result=%+v", order, result)
 	}
 }
 
-func TestBootstrapNativeLocaleFailureIsFatal(t *testing.T) {
+func TestBootstrapNativeLocaleFailureIsWarning(t *testing.T) {
 	setupBootTest(t)
-	bootRepos = func([]string, repo.AddOptions) *output.Result { return successfulBootstrapRepoResult() }
-	bootInstall = func(int, []string, install.PackageOptions) error { return nil }
-	bootEnsureLocale = func(context.Context) error { return errors.New("locale-gen failed") }
-	bootVerify = func(context.Context) error {
-		t.Fatal("controller verification ran after locale failure")
-		return nil
-	}
+	config.OSType, config.OSCode, config.OSVendor, config.OSVersion = config.DistroDEB, "d12", "debian", "12"
+	bootVerifyAnsible = func(context.Context) error { return nil }
+	bootRepairLocale = func(context.Context) (bool, error) { return false, errors.New("locale-gen failed") }
 	result := BootstrapNative(context.Background(), NativeBootstrapOptions{})
-	if result.Success || !strings.Contains(result.Message, "locale configuration failed") {
-		t.Fatalf("locale failure result = %+v", result)
+	data := result.Data.(*BootData)
+	if !result.Success || data.Locale != "warning" || len(data.Warnings) != 1 ||
+		!strings.Contains(data.Warnings[0], "locale-gen failed") {
+		t.Fatalf("locale warning result = %+v %+v", result, data)
 	}
 }
 
@@ -509,7 +620,6 @@ func TestBootstrapNativeInitializesMissingDefaultPigsty(t *testing.T) {
 	setupBootTest(t)
 	bootRepos = func([]string, repo.AddOptions) *output.Result { return successfulBootstrapRepoResult() }
 	bootInstall = func(int, []string, install.PackageOptions) error { return nil }
-	bootVerify = func(context.Context) error { return nil }
 	bootEnsurePigsty = func(_ context.Context, region string) (pigstyInitOutcome, error) {
 		if region != "china" {
 			t.Fatalf("auto-init region = %q", region)
@@ -521,31 +631,28 @@ func TestBootstrapNativeInitializesMissingDefaultPigsty(t *testing.T) {
 	if !result.Success || data.PigstyHome != "/home/admin/pigsty" || data.PigstyInit != pigstyInitInitialized {
 		t.Fatalf("auto-init result = %+v %+v", result, data)
 	}
-	if text := data.Text(); !strings.Contains(text, "pigsty_init=initialized") {
-		t.Fatalf("auto-init status missing from text: %q", text)
+	if text := data.Text(); strings.Contains(text, "pigsty_init=") || !strings.Contains(text, "proceed with:") {
+		t.Fatalf("auto-init text was not concise: %q", text)
 	}
 }
 
-func TestBootstrapNativePigstyInitFailureIsFatal(t *testing.T) {
+func TestBootstrapNativePigstyInitFailureIsWarning(t *testing.T) {
 	setupBootTest(t)
-	bootRepos = func([]string, repo.AddOptions) *output.Result { return successfulBootstrapRepoResult() }
-	bootInstall = func(int, []string, install.PackageOptions) error { return nil }
-	bootVerify = func(context.Context) error { return nil }
+	bootVerifyAnsible = func(context.Context) error { return nil }
 	bootEnsurePigsty = func(context.Context, string) (pigstyInitOutcome, error) {
 		return pigstyInitOutcome{Path: "/home/admin/pigsty", Status: pigstyInitFailed}, errors.New("download failed")
 	}
 	result := BootstrapNative(context.Background(), NativeBootstrapOptions{})
 	data := result.Data.(*BootData)
-	if result.Success || data.PigstyInit != pigstyInitFailed || !strings.Contains(result.Message, "failed to initialize Pigsty") {
+	if !result.Success || data.PigstyInit != pigstyInitFailed || len(data.Warnings) != 1 ||
+		!strings.Contains(data.Warnings[0], "download failed") {
 		t.Fatalf("auto-init failure result = %+v %+v", result, data)
 	}
 }
 
 func TestBootstrapNativeMissingPigstyWithoutNetworkWarns(t *testing.T) {
 	setupBootTest(t)
-	bootRepos = func([]string, repo.AddOptions) *output.Result { return successfulBootstrapRepoResult() }
-	bootInstall = func(int, []string, install.PackageOptions) error { return nil }
-	bootVerify = func(context.Context) error { return nil }
+	bootVerifyAnsible = func(context.Context) error { return nil }
 	bootEnsurePigsty = func(context.Context, string) (pigstyInitOutcome, error) {
 		return pigstyInitOutcome{
 			Path:    "/home/admin/pigsty",
@@ -558,12 +665,13 @@ func TestBootstrapNativeMissingPigstyWithoutNetworkWarns(t *testing.T) {
 	if !result.Success || data.PigstyInit != pigstyInitUnavailable || len(data.Warnings) != 1 {
 		t.Fatalf("unavailable auto-init result = %+v %+v", result, data)
 	}
-	if len(result.NextActions) < 1 || result.NextActions[0].Command != "pig sty init" {
+	want := []string{"pig sty conf -g", "pig inv edit", "pig sty deploy"}
+	if len(result.NextActions) != len(want) {
 		t.Fatalf("unavailable auto-init next actions = %+v", result.NextActions)
 	}
-	for _, action := range result.NextActions {
-		if action.Command == "pig sty conf" {
-			t.Fatalf("configure was suggested before Pigsty initialization: %+v", result.NextActions)
+	for i := range want {
+		if result.NextActions[i].Command != want[i] {
+			t.Fatalf("next action %d = %q, want %q", i, result.NextActions[i].Command, want[i])
 		}
 	}
 }

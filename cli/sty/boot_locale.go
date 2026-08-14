@@ -29,29 +29,40 @@ func needsDebianBootstrapLocale() bool {
 	return config.OSVersion == "12" || config.OSVersion == "13"
 }
 
-func ensureDebianBootstrapLocale(ctx context.Context) error {
+// repairDebianBootstrapLocale reports whether it changed the locale state.
+// This lets Bootstrap distinguish an existing locale from a successful repair
+// without probing twice or guessing from the absence of an error.
+func repairDebianBootstrapLocale(ctx context.Context) (bool, error) {
 	if !needsDebianBootstrapLocale() {
-		return nil
+		return false, nil
+	}
+	if hasDebianBootstrapLocale(ctx) {
+		return false, nil
 	}
 	if err := enableBootstrapLocale(bootLocaleGenFile); err != nil {
-		return err
+		return false, err
 	}
 	for _, command := range [][]string{
 		{"locale-gen", bootstrapLocale},
 		{"update-locale", "LANG=" + bootstrapLocale, "LC_ALL=" + bootstrapLocale},
 	} {
 		if _, err := runBootstrapLocaleStage(ctx, command[0], command[1:]...); err != nil {
-			return err
+			return false, err
 		}
 	}
 	available, err := runBootstrapLocaleStage(ctx, "locale", "-a")
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !containsBootstrapLocale(string(available)) {
-		return fmt.Errorf("%s was not generated", bootstrapLocale)
+		return false, fmt.Errorf("%s was not generated", bootstrapLocale)
 	}
-	return nil
+	return true, nil
+}
+
+func hasDebianBootstrapLocale(ctx context.Context) bool {
+	available, err := runBootstrapLocaleStage(ctx, "locale", "-a")
+	return err == nil && containsBootstrapLocale(string(available))
 }
 
 func enableBootstrapLocale(path string) error {

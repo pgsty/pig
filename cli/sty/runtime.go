@@ -80,7 +80,6 @@ func Init(opts InitOptions) error {
 		logrus.Errorf("failed to install pigsty src %s: %v", version, err)
 		return commandFailed(output.CodeStyInitFailed, err)
 	}
-	logrus.Infof("proceed with pig boot & pig conf")
 	return nil
 }
 

@@ -103,13 +103,9 @@ func TestStyDeployHasNoInstallAlias(t *testing.T) {
 	}
 }
 
-func TestStyConfHasRawFlagDefaultFalse(t *testing.T) {
-	flag := pigstyConfCmd.Flags().Lookup("raw")
-	if flag == nil {
-		t.Fatal("expected --raw flag on pig sty conf")
-	}
-	if pigstyConfRaw {
-		t.Fatal("--raw should default to false")
+func TestStyConfHasNoRawFlag(t *testing.T) {
+	if flag := pigstyConfCmd.Flags().Lookup("raw"); flag != nil {
+		t.Fatalf("did not expect --raw on pig sty conf, got %+v", flag)
 	}
 }
 
@@ -124,52 +120,6 @@ func TestStyConfDomainFlagDefaultsToPlaceholder(t *testing.T) {
 	ipFlag := pigstyConfCmd.Flags().Lookup("ip")
 	if ipFlag == nil || !strings.Contains(ipFlag.Usage, fmt.Sprintf("%d", stycli.MaxConfigureIPs)) {
 		t.Fatalf("--ip usage does not derive its maximum from MaxConfigureIPs: %+v", ipFlag)
-	}
-}
-
-func TestStyConfRawRejectsNativeOnlyReplacements(t *testing.T) {
-	restore := saveStyConfState(t)
-	defer restore()
-
-	pigstyConfRaw = true
-	pigstyConfDomain = "infra.example.com"
-	if err := pigstyConfCmd.RunE(pigstyConfCmd, nil); err == nil || !strings.Contains(err.Error(), "--domain") {
-		t.Fatalf("custom domain with --raw error = %v", err)
-	}
-
-	pigstyConfDomain = stycli.DefaultConfigureDomain
-	pigstyConfIP = "192.0.2.1,192.0.2.2"
-	if err := pigstyConfCmd.RunE(pigstyConfCmd, nil); err == nil || !strings.Contains(err.Error(), "multiple --ip") {
-		t.Fatalf("multiple IPs with --raw error = %v", err)
-	}
-}
-
-func TestStyConfRawStructuredRejectionUsesParamError(t *testing.T) {
-	restore := saveStyConfState(t)
-	originalFormat := config.OutputFormat
-	defer func() {
-		restore()
-		config.OutputFormat = originalFormat
-	}()
-
-	config.OutputFormat = config.OUTPUT_JSON
-	pigstyConfRaw = true
-	pigstyConfDomain = "infra.example.com"
-	var runErr error
-	raw := captureStdout(t, func() {
-		runErr = pigstyConfCmd.RunE(pigstyConfCmd, nil)
-	})
-	if runErr == nil {
-		t.Fatal("expected structured raw configure rejection")
-	}
-	for _, expected := range []string{
-		`"message":"invalid raw configure options"`,
-		`"command":"pig sty conf"`,
-		`"domain":"infra.example.com"`,
-	} {
-		if !strings.Contains(raw, expected) {
-			t.Fatalf("structured raw rejection omitted %q: %s", expected, raw)
-		}
 	}
 }
 
@@ -614,7 +564,6 @@ func TestStyConfMirrorFlagSetsRegionChina(t *testing.T) {
 	}
 
 	config.PigstyHome = home
-	pigstyConfRaw = false
 	pigstyConfName = "meta"
 	pigstyConfRegion = "europe"
 	pigstyConfSkip = true
@@ -667,7 +616,6 @@ func TestStyConfPositionalModeUsesNativeRoute(t *testing.T) {
 	}
 
 	config.PigstyHome = home
-	pigstyConfRaw = false
 	pigstyConfName = ""
 	pigstyConfDomain = "infra.example.com"
 	pigstyConfRegion = "default"
@@ -680,7 +628,7 @@ func TestStyConfPositionalModeUsesNativeRoute(t *testing.T) {
 	}
 
 	if _, err := os.Stat(filepath.Join(home, "route_raw.txt")); err == nil {
-		t.Fatal("raw configure script should not be called without --raw")
+		t.Fatal("legacy configure script should not be called")
 	}
 	rendered, err := os.ReadFile(filepath.Join(home, "native.yml"))
 	if err != nil {
@@ -688,67 +636,6 @@ func TestStyConfPositionalModeUsesNativeRoute(t *testing.T) {
 	}
 	if !strings.Contains(string(rendered), "home_domain: infra.example.com") {
 		t.Fatalf("native --domain replacement missing:\n%s", rendered)
-	}
-}
-
-func TestStyConfRawFlagUsesRawRoute(t *testing.T) {
-	restore := saveStyConfState(t)
-	defer restore()
-
-	home := t.TempDir()
-	if err := writeExecutable(filepath.Join(home, "configure"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > route_raw.txt\n"); err != nil {
-		t.Fatalf("write configure script: %v", err)
-	}
-
-	config.PigstyHome = home
-	pigstyConfRaw = true
-	pigstyConfName = ""
-
-	if err := pigstyConfCmd.RunE(pigstyConfCmd, []string{"rich"}); err != nil {
-		t.Fatalf("pig sty conf --raw failed: %v", err)
-	}
-
-	got, err := os.ReadFile(filepath.Join(home, "route_raw.txt"))
-	if err != nil {
-		t.Fatalf("expected raw marker file: %v", err)
-	}
-	if fields := strings.Fields(string(got)); strings.Join(fields, " ") != "-c rich" {
-		t.Fatalf("raw configure args = %q, want -c rich", string(got))
-	}
-}
-
-func TestStyConfRawStructuredOutputRetainsGeneratedSecrets(t *testing.T) {
-	restore := saveStyConfState(t)
-	originalFormat := config.OutputFormat
-	defer func() {
-		restore()
-		config.OutputFormat = originalFormat
-	}()
-
-	home := t.TempDir()
-	if err := writeExecutable(filepath.Join(home, "configure"), "#!/bin/sh\nprintf 'generated_password=raw-random-secret\\n'\n"); err != nil {
-		t.Fatal(err)
-	}
-	config.PigstyHome = home
-	config.OutputFormat = config.OUTPUT_JSON
-	pigstyConfRaw = true
-	pigstyConfGenerate = true
-	pigstyConfName = ""
-
-	raw := captureStdout(t, func() {
-		if err := pigstyConfCmd.RunE(pigstyConfCmd, []string{"rich"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	for _, expected := range []string{
-		`"kind":"pig.sty.configure.raw/v1"`,
-		`"conf":"rich"`,
-		`"secret_bearing_output":true`,
-		`generated_password=raw-random-secret`,
-	} {
-		if !strings.Contains(raw, expected) {
-			t.Fatalf("raw structured configure omitted %q: %s", expected, raw)
-		}
 	}
 }
 
@@ -773,7 +660,6 @@ func saveStyConfState(t *testing.T) func() {
 	origNonInteractive := pigstyConfNonInteractive
 	origPort := pigstyConfPort
 	origGenerate := pigstyConfGenerate
-	origRaw := pigstyConfRaw
 	origMirror := pigstyConfMirror
 
 	return func() {
@@ -789,7 +675,6 @@ func saveStyConfState(t *testing.T) func() {
 		pigstyConfNonInteractive = origNonInteractive
 		pigstyConfPort = origPort
 		pigstyConfGenerate = origGenerate
-		pigstyConfRaw = origRaw
 		pigstyConfMirror = origMirror
 	}
 }

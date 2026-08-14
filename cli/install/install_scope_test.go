@@ -81,6 +81,33 @@ func TestInstallPackagesAPTUsesNativeRetries(t *testing.T) {
 	}
 }
 
+func TestInstallPackagesQuietUsesSummaryRunner(t *testing.T) {
+	origRun, origSummary := runPackageInstall, runPackageInstallSummary
+	origType, origCode, origVersion := config.OSType, config.OSCode, config.OSVersion
+	t.Cleanup(func() {
+		runPackageInstall, runPackageInstallSummary = origRun, origSummary
+		config.OSType, config.OSCode, config.OSVersion = origType, origCode, origVersion
+	})
+	runPackageInstall = func([]string) error {
+		t.Fatal("quiet package install used streaming command runner")
+		return nil
+	}
+	var call []string
+	runPackageInstallSummary = func(args []string) error {
+		call = append([]string(nil), args...)
+		return nil
+	}
+	config.OSType, config.OSCode, config.OSVersion = config.DistroDEB, "u24", "24"
+	if err := InstallPackagesWithOptions(0, []string{"tar"}, PackageOptions{Yes: true, NoTranslation: true, Quiet: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"apt-get", "install", "-y", "tar"} {
+		if !slices.Contains(call, want) {
+			t.Fatalf("quiet install argv missing %q: %v", want, call)
+		}
+	}
+}
+
 func TestVerifyLocalPackagesAvailableRejectsMissingAPTArchive(t *testing.T) {
 	origQuery := runPackageQuery
 	origType := config.OSType

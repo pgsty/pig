@@ -1,15 +1,35 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"testing"
 
 	stycli "pig/cli/sty"
+	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
+
+	"github.com/spf13/cobra"
 )
+
+func TestHandlePigstyBootResultUsesBootTextWithoutResultBanner(t *testing.T) {
+	origFormat := config.OutputFormat
+	t.Cleanup(func() { config.OutputFormat = origFormat })
+	config.OutputFormat = config.OUTPUT_TEXT
+	var stdout bytes.Buffer
+	command := &cobra.Command{}
+	command.SetOut(&stdout)
+	result := output.OK("must not be rendered", &stycli.BootData{Warnings: []string{"notice"}})
+	if err := handlePigstyBootResult(command, result); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); got != "[WARN] notice\n" {
+		t.Fatalf("Bootstrap text result = %q", got)
+	}
+}
 
 func TestStyBootDefaultsToNative(t *testing.T) {
 	origNative := pigstyBootNativeExec

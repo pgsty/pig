@@ -131,11 +131,6 @@ func TestInventoryEnvironmentDetectionIsScopedToCMDBLoad(t *testing.T) {
 }
 
 func TestStyInitializationIsSideEffectFreeAndProbeScoped(t *testing.T) {
-	originalRaw := pigstyConfRaw
-	defer func() {
-		pigstyConfRaw = originalRaw
-	}()
-
 	for _, command := range []*cobra.Command{
 		styCmd, pigstyInitCmd, pigstyDeployCmd, pigstyGrafanaCmd,
 		pigstyGrafanaListCmd, pigstyListcmd, pigstyGetcmd,
@@ -149,13 +144,8 @@ func TestStyInitializationIsSideEffectFreeAndProbeScoped(t *testing.T) {
 		}
 	}
 
-	pigstyConfRaw = false
 	if options := commandInitOptions(pigstyConfCmd); options.CreateConfig || options.SkipEnvironment {
-		t.Fatalf("native configure init options = %+v, want no config creation with environment probes", options)
-	}
-	pigstyConfRaw = true
-	if options := commandInitOptions(pigstyConfCmd); options.CreateConfig || !options.SkipEnvironment {
-		t.Fatalf("raw configure init options = %+v, want no config creation or duplicate probes", options)
+		t.Fatalf("configure init options = %+v, want no config creation with environment probes", options)
 	}
 
 	if options := commandInitOptions(pigstyBootCmd); options.CreateConfig || options.SkipEnvironment {

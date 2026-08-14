@@ -160,11 +160,12 @@ func TestReplaceConfigurePlaceholders(t *testing.T) {
 		"domains=i.pigsty i.pigsty",
 		"other=cli.pigsty i.pigsty.cc",
 	}, "\n")
-	got := replaceConfigurePlaceholders(content, mutationOptions{
+	result := replaceConfigurePlaceholdersDetailed(content, mutationOptions{
 		Mode:       "meta",
 		PrimaryIPs: primaryIPs,
 		Domain:     "infra.example.com",
 	})
+	got := result.Content
 	for _, expected := range []string{
 		"ip10=10.10.10.11",
 		"ip11=192.0.2.11",
@@ -178,6 +179,14 @@ func TestReplaceConfigurePlaceholders(t *testing.T) {
 		if !strings.Contains(got, expected) {
 			t.Fatalf("placeholder replacement omitted %q:\n%s", expected, got)
 		}
+	}
+	if len(result.Replacements) != 3 || len(result.DiscardedIPs) != 7 {
+		t.Fatalf("replacement accounting = %d applied, %d discarded; want 3 and 7",
+			len(result.Replacements), len(result.DiscardedIPs))
+	}
+	if result.Replacements[0] != (ConfigureIPReplacement{From: "10.10.10.10", To: "10.10.10.11"}) ||
+		result.Replacements[2] != (ConfigureIPReplacement{From: "10.10.10.19", To: "192.0.2.19"}) {
+		t.Fatalf("unexpected replacement mappings: %+v", result.Replacements)
 	}
 }
 
@@ -1105,6 +1114,66 @@ func TestConfigureNativeMultipleIPsAndDomain(t *testing.T) {
 	}
 }
 
+func TestConfigureNativeReportsAppliedAndDiscardedIPs(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	tmp := t.TempDir()
+	confDir := filepath.Join(tmp, "conf")
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	template := `all:
+  vars:
+    admin_ip: 10.10.10.10
+    second_ip: 10.10.10.11
+    region: default
+    pg_version: 18
+`
+	if err := os.WriteFile(filepath.Join(confDir, "meta.yml"), []byte(template), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	provided := []string{"192.0.2.10", "192.0.2.11", "192.0.2.12"}
+	result := ConfigureNative(ConfigureOptions{
+		PigstyHome:       tmp,
+		Mode:             "meta",
+		PrimaryIP:        strings.Join(provided, ","),
+		Region:           "default",
+		OutputFile:       "partial.yml",
+		DisablePreflight: true,
+	})
+	if result == nil || !result.Success {
+		t.Fatalf("configure failed: %+v", result)
+	}
+	data, ok := result.Data.(*ConfigureData)
+	if !ok {
+		t.Fatalf("configure data type = %T", result.Data)
+	}
+	wantReplacements := []ConfigureIPReplacement{
+		{From: "10.10.10.10", To: "192.0.2.10"},
+		{From: "10.10.10.11", To: "192.0.2.11"},
+	}
+	if !slices.Equal(data.IPReplacements, wantReplacements) || !slices.Equal(data.DiscardedIPs, []string{"192.0.2.12"}) {
+		t.Fatalf("replacement report = %+v discarded=%v", data.IPReplacements, data.DiscardedIPs)
+	}
+	warning := "3 IPs given, only 2 replaced; discard: 192.0.2.12"
+	if !slices.Contains(data.Warnings, warning) {
+		t.Fatalf("missing discard warning %q in %v", warning, data.Warnings)
+	}
+
+	text := data.Text()
+	mapping := strings.Join([]string{
+		"[ OK ] Replace IP placeholder:",
+		"    10.10.10.10  ->  192.0.2.10",
+		"    10.10.10.11  ->  192.0.2.11",
+	}, "\n")
+	if !strings.Contains(text, mapping) || !strings.Contains(text, "[WARN] "+warning) {
+		t.Fatalf("formatted replacement report missing:\n%s", text)
+	}
+	if strings.Contains(text, "10.10.10.12  ->") || strings.Contains(text, "192.0.2.10,192.0.2.11,192.0.2.12") {
+		t.Fatalf("replacement report included an unused mapping or raw IP list:\n%s", text)
+	}
+}
+
 func TestConfigureNativeOutputUsesPrivateFileMode(t *testing.T) {
 	tmp := t.TempDir()
 	confDir := filepath.Join(tmp, "conf")
@@ -1365,9 +1434,9 @@ func TestConfigureDataText(t *testing.T) {
 		"[ OK ] template   = /tmp/conf/meta.yml",
 		"[ OK ] output     = /tmp/pigsty.yml",
 		"[ OK ] region     = default",
-		"[ OK ] primary_ip = 10.10.10.10",
-		"[ OK ] ssh_port   = 2222",
 		"[ OK ] pg_version = 18",
+		"[ OK ] ssh_port   = 2222",
+		"[ OK ] primary_ip = 10.10.10.10",
 		"[WARN] warn-a",
 		"[WARN] don't forget to check it and change passwords!",
 		"proceed with:",

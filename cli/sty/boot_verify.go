@@ -35,10 +35,10 @@ if missing:
     raise ImportError('missing controller Python modules: ' + ', '.join(missing))
 `
 
-// verifyController checks the executable surface as well as Python modules
-// imported by Pigsty playbooks. The Python probe follows ansible-playbook's
-// interpreter rather than assuming that /usr/bin/python3 is the same runtime.
-func verifyController(ctx context.Context) error {
+// verifyAnsible checks the one hard Bootstrap invariant. The Python probe
+// follows ansible-playbook's interpreter rather than assuming that the system
+// python3 is the same runtime.
+func verifyAnsible(ctx context.Context) error {
 	ansiblePath, err := exec.LookPath("ansible-playbook")
 	if err != nil {
 		return fmt.Errorf("ansible-playbook: %w", err)
@@ -54,7 +54,13 @@ func verifyController(ctx context.Context) error {
 	if _, err := runControllerProbe(ctx, python, "-c", controllerPythonProbe); err != nil {
 		return fmt.Errorf("ansible Python dependencies: %w", err)
 	}
+	return nil
+}
 
+// verifyControllerHelpers is advisory. Bootstrap installs these helpers when
+// Ansible needs bootstrapping, but an already usable controller is not failed
+// solely because one optional helper is absent.
+func verifyControllerHelpers(ctx context.Context) error {
 	for _, probe := range [][]string{
 		{"ssh", "-V"},
 		{"sshpass", "-V"},
@@ -72,6 +78,13 @@ func verifyController(ctx context.Context) error {
 		return fmt.Errorf("ssh-keygen: %w", err)
 	}
 	return nil
+}
+
+func verifyController(ctx context.Context) error {
+	if err := verifyAnsible(ctx); err != nil {
+		return err
+	}
+	return verifyControllerHelpers(ctx)
 }
 
 func runControllerProbe(ctx context.Context, name string, args ...string) ([]byte, error) {

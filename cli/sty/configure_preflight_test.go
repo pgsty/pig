@@ -275,6 +275,29 @@ func TestResolvePrimaryIPInteractiveSelectionNumber(t *testing.T) {
 	}
 }
 
+func TestConfigureIPPromptUsesLegacyColors(t *testing.T) {
+	style := configureTextStyle{color: true}
+	var out bytes.Buffer
+	printLocalIPv4Candidates(&out, []localIPv4Candidate{
+		{IP: "10.0.0.2", Interfaces: []string{"eth0"}},
+	}, style)
+	out.WriteString(style.inputPrompt("INPUT primary_ip:"))
+
+	text := out.String()
+	for _, expected := range []string{
+		configureANSIYellow + "WARN",
+		configureANSICyan + "1",
+		configureANSIRed + "10.0.0.2",
+		configureANSIYellow + "eth0",
+		configureANSIMagenta + " IN ",
+		configureANSIMagenta + "INPUT primary_ip:\n=> ",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("colored IP prompt omitted %q: %q", expected, text)
+		}
+	}
+}
+
 func TestConfigureNativePrintsKnownValuesBeforeIPPrompt(t *testing.T) {
 	restore := savePreflightHooks()
 	defer restore()
@@ -314,6 +337,8 @@ func TestConfigureNativePrintsKnownValuesBeforeIPPrompt(t *testing.T) {
 		PigstyHome:       home,
 		Mode:             "meta",
 		Domain:           "infra.example.com",
+		PGVersion:        "17",
+		SSHPort:          "2222",
 		Region:           "default",
 		DisablePreflight: true,
 	})
@@ -324,9 +349,11 @@ func TestConfigureNativePrintsKnownValuesBeforeIPPrompt(t *testing.T) {
 	begin := strings.Index(progress, "configure pigsty")
 	mode := strings.Index(progress, "[ OK ] mode")
 	domain := strings.Index(progress, "[ OK ] domain")
+	pgVersion := strings.Index(progress, "[ OK ] pg_version = 17")
+	sshPort := strings.Index(progress, "[ OK ] ssh_port   = 2222")
 	candidates := strings.Index(progress, "Multiple IP address candidates found:")
 	prompt := strings.Index(progress, "INPUT primary_ip")
-	if begin < 0 || mode < begin || domain < mode || candidates < domain || prompt < candidates {
+	if begin < 0 || mode < begin || domain < mode || pgVersion < domain || sshPort < pgVersion || candidates < sshPort || prompt < candidates {
 		t.Fatalf("known values were not printed before candidate list and prompt:\n%s", progress)
 	}
 
@@ -335,7 +362,8 @@ func TestConfigureNativePrintsKnownValuesBeforeIPPrompt(t *testing.T) {
 		t.Fatalf("configure data type = %T", result.Data)
 	}
 	finalText := data.Text()
-	if strings.Contains(finalText, "configure pigsty") || strings.Contains(finalText, "[ OK ] mode") {
+	if strings.Contains(finalText, "configure pigsty") || strings.Contains(finalText, "[ OK ] mode") ||
+		strings.Contains(finalText, "[ OK ] pg_version") || strings.Contains(finalText, "[ OK ] ssh_port") {
 		t.Fatalf("final output repeated the pre-prompt prelude:\n%s", finalText)
 	}
 	for _, expected := range []string{
@@ -552,7 +580,7 @@ func TestResolvePrimaryIPBranches(t *testing.T) {
 	if err != nil || ip != defaultPrimaryIP || len(warnings) != 0 {
 		t.Fatalf("demo-ip auto selection mismatch: ip=%q warnings=%v err=%v", ip, warnings, err)
 	}
-	if !strings.Contains(demoBuf.String(), "Multiple IP address candidates found:") || !strings.Contains(demoBuf.String(), "AUTO primary_ip") {
+	if !strings.Contains(demoBuf.String(), "Multiple IP address candidates found:") || !strings.Contains(demoBuf.String(), "[ OK ] primary_ip") {
 		t.Fatalf("demo-ip auto selection was not explained: %q", demoBuf.String())
 	}
 

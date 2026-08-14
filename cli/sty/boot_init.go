@@ -1,23 +1,24 @@
 package sty
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"pig/cli/get"
-	"pig/internal/config"
 	"strings"
 	"syscall"
 
-	"github.com/sirupsen/logrus"
+	"pig/cli/get"
+	"pig/internal/config"
+	"pig/internal/utils"
 )
 
 const (
 	pigstyInitExisting    = "existing"
 	pigstyInitInitialized = "initialized"
+	pigstyInitLocal       = "initialized-local"
 	pigstyInitUnavailable = "unavailable"
 	pigstyInitFailed      = "failed"
 )
@@ -28,14 +29,21 @@ type pigstyInitOutcome struct {
 	Warning string
 }
 
+type pigstySourceArchive struct {
+	Path    string
+	Version string
+}
+
 var (
 	bootInitUser              = bootstrapSSHUser
 	bootPigstySourceAvailable = func() bool {
 		get.NetworkCondition()
 		return get.Source != get.ViaNA
 	}
-	bootRunPigstyInit = runDefaultPigstyInit
-	bootExecutable    = os.Executable
+	bootFindLocalPigstySource = findLocalPigstySource
+	bootRunPigstyInit         = runDefaultPigstyInit
+	bootRunLocalPigstyInit    = runLocalPigstyInit
+	bootExecutable            = os.Executable
 )
 
 // ensureDefaultPigsty initializes ~/pigsty for the invoking administrator,
@@ -56,34 +64,65 @@ func ensureDefaultPigsty(ctx context.Context, region string) (pigstyInitOutcome,
 		return outcome, fmt.Errorf("inspect default Pigsty path %s: %w", target, err)
 	}
 
-	if !bootPigstySourceAvailable() {
-		outcome.Status = pigstyInitUnavailable
-		outcome.Warning = fmt.Sprintf("default Pigsty path %s is missing and the Pigsty source repository is unreachable; run pig sty init when network access is available", target)
+	if bootPigstySourceAvailable() {
+		if err := bootRunPigstyInit(ctx, identity, target, region); err != nil {
+			outcome.Status = pigstyInitFailed
+			return outcome, err
+		}
+		outcome.Status = pigstyInitInitialized
 		return outcome, nil
 	}
 
-	logrus.Infof("default Pigsty path is missing; running pig sty init as %s", identity.Name)
-	if err := bootRunPigstyInit(ctx, identity, target, region); err != nil {
+	archive, err := bootFindLocalPigstySource(bootRepoDir)
+	if err != nil {
+		outcome.Status = pigstyInitFailed
+		return outcome, fmt.Errorf("inspect local Pigsty source: %w", err)
+	}
+	if archive == nil {
+		outcome.Status = pigstyInitUnavailable
+		outcome.Warning = "Pigsty source unavailable: network offline and no local source archive"
+		return outcome, nil
+	}
+	if err := bootRunLocalPigstyInit(ctx, identity, target, *archive); err != nil {
 		outcome.Status = pigstyInitFailed
 		return outcome, err
 	}
-	outcome.Status = pigstyInitInitialized
+	outcome.Status = pigstyInitLocal
 	return outcome, nil
+}
+
+func findLocalPigstySource(repoDir string) (*pigstySourceArchive, error) {
+	entries, err := os.ReadDir(repoDir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var selected *pigstySourceArchive
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		version, err := get.GetVerFromName(entry.Name())
+		if err != nil {
+			continue
+		}
+		path := filepath.Join(repoDir, entry.Name())
+		if !regularFile(path) {
+			continue
+		}
+		if selected == nil || get.CompareVersions(version, selected.Version) > 0 {
+			selected = &pigstySourceArchive{Path: path, Version: version}
+		}
+	}
+	return selected, nil
 }
 
 // runDefaultPigstyInit reuses the installed CLI surface instead of duplicating
 // release selection, download, EULA, extraction, and transactional install
 // logic. The child drops root credentials before it creates the target tree.
 func runDefaultPigstyInit(ctx context.Context, identity localSSHUser, target, region string) error {
-	executable, err := bootExecutable()
-	if err != nil {
-		return fmt.Errorf("resolve pig executable: %w", err)
-	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		return fmt.Errorf("resolve pig executable symlinks: %w", err)
-	}
-
 	downloadDir, err := os.MkdirTemp("", "pigsty-init-")
 	if err != nil {
 		return fmt.Errorf("create Pigsty download directory: %w", err)
@@ -97,8 +136,30 @@ func runDefaultPigstyInit(ctx context.Context, identity localSSHUser, target, re
 			return fmt.Errorf("assign Pigsty download directory to %s: %w", identity.Name, err)
 		}
 	}
+	return runPigstyInitCommand(ctx, identity, target, downloadDir, "", region)
+}
+
+func runLocalPigstyInit(ctx context.Context, identity localSSHUser, target string, archive pigstySourceArchive) error {
+	if !regularFile(archive.Path) || archive.Version == "" {
+		return fmt.Errorf("local Pigsty source archive is invalid: %s", archive.Path)
+	}
+	return runPigstyInitCommand(ctx, identity, target, filepath.Dir(archive.Path), archive.Version, "")
+}
+
+func runPigstyInitCommand(ctx context.Context, identity localSSHUser, target, downloadDir, version, region string) error {
+	executable, err := bootExecutable()
+	if err != nil {
+		return fmt.Errorf("resolve pig executable: %w", err)
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return fmt.Errorf("resolve pig executable symlinks: %w", err)
+	}
 
 	args := []string{"sty", "init", "--path", target, "--dir", downloadDir}
+	if version != "" {
+		args = append(args, "--version", version)
+	}
 	if strings.EqualFold(strings.TrimSpace(region), "china") {
 		args = append(args, "--mirror")
 	}
@@ -118,18 +179,14 @@ func runDefaultPigstyInit(ctx context.Context, identity localSSHUser, target, re
 		return fmt.Errorf("cannot run pig sty init as uid %d from uid %d", identity.UID, os.Geteuid())
 	}
 
-	if !config.IsStructuredOutput() {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("pig sty init as %s: %w", identity.Name, err)
-		}
-		return nil
+	stdout := utils.NewTailBuffer(64 * 1024)
+	stderr := utils.NewTailBuffer(64 * 1024)
+	var childStdout io.Writer = stdout
+	if !config.IsStructuredOutput() && bootProgressOut != nil {
+		childStdout = io.MultiWriter(bootProgressOut, stdout)
 	}
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = childStdout
+	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		detail := strings.TrimSpace(stderr.String())
 		if detail == "" {
@@ -151,7 +208,7 @@ func bootstrapUserEnvironment(identity localSSHUser) []string {
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
 		switch key {
-		case "HOME", "USER", "LOGNAME", "PWD", "SUDO_USER", "SUDO_UID", "SUDO_GID":
+		case "HOME", "USER", "LOGNAME", "PWD", "SUDO_USER", "SUDO_UID", "SUDO_GID", "PIG_NON_INTERACTIVE":
 			continue
 		}
 		env = append(env, item)
@@ -160,6 +217,7 @@ func bootstrapUserEnvironment(identity localSSHUser) []string {
 		"HOME="+identity.Home,
 		"USER="+identity.Name,
 		"LOGNAME="+identity.Name,
+		"PIG_NON_INTERACTIVE=1",
 	)
 }
 

@@ -20,11 +20,13 @@ type PackageOptions struct {
 	NoTranslation bool
 	LocalOnly     bool
 	APTSourceList string
+	Quiet         bool
 }
 
 var (
-	runPackageInstall = utils.SudoCommand
-	runPackageQuery   = func(name string, args ...string) ([]byte, error) {
+	runPackageInstall        = utils.SudoCommand
+	runPackageInstallSummary = func(args []string) error { return utils.SudoCommandSummary(args, 4) }
+	runPackageQuery          = func(name string, args ...string) ([]byte, error) {
 		cmd := exec.Command(name, args...)
 		cmd.Env = append(os.Environ(), "LC_ALL=C")
 		return cmd.CombinedOutput()
@@ -58,6 +60,10 @@ func InstallPackagesWithOptions(pgVer int, names []string, opts PackageOptions) 
 		return fmt.Errorf("unsupported OS type: %s", config.OSType)
 	}
 	scopeArgs := []string(nil)
+	runInstall := runPackageInstall
+	if opts.Quiet {
+		runInstall = runPackageInstallSummary
+	}
 	if config.OSType == config.DistroDEB {
 		scopeArgs = append(scopeArgs, "-o", "Acquire::Retries=3")
 	}
@@ -79,7 +85,7 @@ func InstallPackagesWithOptions(pgVer int, names []string, opts PackageOptions) 
 		} else {
 			cacheCmd = append(cacheCmd, "update")
 		}
-		if err := runPackageInstall(cacheCmd); err != nil {
+		if err := runInstall(cacheCmd); err != nil {
 			return fmt.Errorf("failed to refresh local repository: %w", err)
 		}
 	}
@@ -106,9 +112,13 @@ func InstallPackagesWithOptions(pgVer int, names []string, opts PackageOptions) 
 		return fmt.Errorf("no packages to be installed")
 	}
 	installCmds = append(installCmds, pkgNames...)
-	logrus.Infof("installing packages: %s", strings.Join(installCmds, " "))
+	if opts.Quiet {
+		logrus.Debugf("installing packages quietly: %s", strings.Join(installCmds, " "))
+	} else {
+		logrus.Infof("installing packages: %s", strings.Join(installCmds, " "))
+	}
 
-	if err := runPackageInstall(installCmds); err != nil {
+	if err := runInstall(installCmds); err != nil {
 		return err
 	}
 	if opts.LocalOnly {

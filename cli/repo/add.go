@@ -19,9 +19,10 @@ import (
 var moduleNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 var (
-	newAddRepoManager = NewManager
-	runAddRepoCommand = utils.SudoCommand
-	addRepoModule     = func(manager *Manager, module string) error { return manager.AddModule(module) }
+	newAddRepoManager        = NewManager
+	runAddRepoCommand        = utils.SudoCommand
+	runAddRepoCommandSummary = func(args []string) error { return utils.SudoCommandSummary(args, 4) }
+	addRepoModule            = func(manager *Manager, module string) error { return manager.AddModule(module) }
 )
 
 // AddModule handles adding a single module to the system
@@ -135,6 +136,7 @@ type AddOptions struct {
 	Update   bool
 	Mirror   bool
 	GPGCheck bool
+	Quiet    bool
 }
 
 // ConfigureRepos is the shared entry point for CLI workflows that add or set
@@ -289,7 +291,11 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 	// Handle cache update if doUpdate is true
 	if opts.Update {
 		updateCmd := strings.Join(manager.UpdateCmd, " ")
-		err := runAddRepoCommand(manager.UpdateCmd)
+		run := runAddRepoCommand
+		if opts.Quiet {
+			run = runAddRepoCommandSummary
+		}
+		err := run(manager.UpdateCmd)
 		if err != nil {
 			data.UpdateResult = &UpdateCacheResult{
 				Command: updateCmd,

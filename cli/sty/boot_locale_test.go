@@ -68,18 +68,28 @@ func TestEnableBootstrapLocaleUncommentsDefinition(t *testing.T) {
 func TestEnsureDebianBootstrapLocaleMatchesDockerSequence(t *testing.T) {
 	path := setupBootstrapLocaleTest(t)
 	var calls [][]string
+	localeCalls := 0
 	bootLocaleRun = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		call := append([]string{filepath.Base(name)}, args...)
 		calls = append(calls, call)
 		if filepath.Base(name) == "locale" {
+			localeCalls++
+			if localeCalls == 1 {
+				return []byte("C\nC.utf8\n"), nil
+			}
 			return []byte("C\nC.utf8\nen_US.utf8\n"), nil
 		}
 		return nil, nil
 	}
-	if err := ensureDebianBootstrapLocale(context.Background()); err != nil {
+	repaired, err := repairDebianBootstrapLocale(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
+	if !repaired {
+		t.Fatal("missing locale was not reported as repaired")
+	}
 	want := [][]string{
+		{"locale", "-a"},
 		{"locale-gen", "en_US.UTF-8"},
 		{"update-locale", "LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8"},
 		{"locale", "-a"},
@@ -93,6 +103,27 @@ func TestEnsureDebianBootstrapLocaleMatchesDockerSequence(t *testing.T) {
 	}
 }
 
+func TestEnsureDebianBootstrapLocaleSkipsExistingLocale(t *testing.T) {
+	setupBootstrapLocaleTest(t)
+	bootLocaleGenFile = filepath.Join(t.TempDir(), "missing-locale.gen")
+	var calls [][]string
+	bootLocaleRun = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		calls = append(calls, append([]string{filepath.Base(name)}, args...))
+		return []byte("C\nen_US.utf8\n"), nil
+	}
+	repaired, err := repairDebianBootstrapLocale(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired {
+		t.Fatal("existing locale was reported as repaired")
+	}
+	want := [][]string{{"locale", "-a"}}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("locale calls = %v, want %v", calls, want)
+	}
+}
+
 func TestEnsureDebianBootstrapLocaleRequiresGeneratedLocale(t *testing.T) {
 	setupBootstrapLocaleTest(t)
 	bootLocaleRun = func(_ context.Context, name string, _ ...string) ([]byte, error) {
@@ -101,7 +132,7 @@ func TestEnsureDebianBootstrapLocaleRequiresGeneratedLocale(t *testing.T) {
 		}
 		return nil, nil
 	}
-	if err := ensureDebianBootstrapLocale(context.Background()); err == nil || !strings.Contains(err.Error(), "was not generated") {
+	if _, err := repairDebianBootstrapLocale(context.Background()); err == nil || !strings.Contains(err.Error(), "was not generated") {
 		t.Fatalf("missing generated locale error = %v", err)
 	}
 }
@@ -114,7 +145,7 @@ func TestEnsureDebianBootstrapLocaleReportsCommandFailure(t *testing.T) {
 		}
 		return nil, nil
 	}
-	if err := ensureDebianBootstrapLocale(context.Background()); err == nil || !strings.Contains(err.Error(), "generation failed") {
+	if _, err := repairDebianBootstrapLocale(context.Background()); err == nil || !strings.Contains(err.Error(), "generation failed") {
 		t.Fatalf("locale-gen failure = %v", err)
 	}
 }

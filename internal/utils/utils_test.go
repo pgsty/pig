@@ -1,10 +1,13 @@
 package utils
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
-	"pig/internal/config"
+	"strings"
 	"testing"
+
+	"pig/internal/config"
 )
 
 func TestPutFile(t *testing.T) {
@@ -195,6 +198,55 @@ func TestSudoCommand(t *testing.T) {
 	err = SudoCommand([]string{})
 	if err == nil {
 		t.Fatalf("expected error when no command is passed, got nil")
+	}
+}
+
+func TestSudoCommandSummaryReportsOnlyFailureTail(t *testing.T) {
+	t.Setenv("PIG_NO_SUDO", "1")
+	origOut, origFormat := sudoCommandSummaryOut, config.OutputFormat
+	t.Cleanup(func() {
+		sudoCommandSummaryOut, config.OutputFormat = origOut, origFormat
+	})
+	var progress bytes.Buffer
+	sudoCommandSummaryOut = &progress
+	config.OutputFormat = config.OUTPUT_TEXT
+	err := SudoCommandSummary([]string{
+		"sh", "-c", "printf 'one\\ntwo\\nthree\\nfour\\nfive\\n' >&2; exit 7",
+	}, 4)
+	if err == nil {
+		t.Fatal("failing summarized command returned nil")
+	}
+	detail := err.Error()
+	if strings.Contains(detail, "one") || !strings.Contains(detail, "two | three | four | five") {
+		t.Fatalf("summarized command error = %q", detail)
+	}
+	if got := progress.String(); strings.Contains(got, "\n") || !strings.Contains(got, "\rone") || !strings.Contains(got, "\rfive") {
+		t.Fatalf("summarized command progress = %q", got)
+	}
+}
+
+func TestSudoCommandSummarySuppressesStructuredProgress(t *testing.T) {
+	t.Setenv("PIG_NO_SUDO", "1")
+	origOut, origFormat := sudoCommandSummaryOut, config.OutputFormat
+	t.Cleanup(func() {
+		sudoCommandSummaryOut, config.OutputFormat = origOut, origFormat
+	})
+	var progress bytes.Buffer
+	sudoCommandSummaryOut = &progress
+	config.OutputFormat = config.OUTPUT_JSON
+	if err := SudoCommandSummary([]string{"sh", "-c", "printf 'one\\ntwo\\n'"}, 4); err != nil {
+		t.Fatal(err)
+	}
+	if progress.Len() != 0 {
+		t.Fatalf("structured summarized command emitted progress: %q", progress.String())
+	}
+}
+
+func TestCommandOutputTailTreatsCarriageReturnsAsProgressLines(t *testing.T) {
+	long := strings.Repeat("x", 400)
+	got := commandOutputTail("old\r"+long+"\rnew\n", 2)
+	if strings.Contains(got, "old") || !strings.HasSuffix(got, " | new") || len(got) > 330 {
+		t.Fatalf("progress tail = %q", got)
 	}
 }
 

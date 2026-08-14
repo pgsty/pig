@@ -123,10 +123,10 @@ func commandSkipsEnvironment(cmd *cobra.Command) bool {
 		return path != "pig inventory cmdb load"
 	}
 	if path == "pig sty" || strings.HasPrefix(path, "pig sty ") {
-		// Native configure performs CPU and OS-aware tuning; native boot needs
-		// the detected package manager.
+		// Configure performs CPU and OS-aware tuning; native boot needs the
+		// detected package manager.
 		if path == "pig sty conf" {
-			return pigstyConfRaw
+			return false
 		}
 		return path != "pig sty boot"
 	}

@@ -86,31 +86,42 @@ const ConfigureKind = "pig.sty.configure/v1"
 
 // ConfigureData is structured output for native configure execution.
 type ConfigureData struct {
-	Kind                string   `json:"kind" yaml:"kind"`
-	Mode                string   `json:"mode" yaml:"mode"`
-	TemplatePath        string   `json:"template_path" yaml:"template_path"`
-	OutputPath          string   `json:"output_path" yaml:"output_path"`
-	Region              string   `json:"region" yaml:"region"`
-	PrimaryIP           string   `json:"primary_ip" yaml:"primary_ip"`
-	PrimaryIPs          []string `json:"primary_ips,omitempty" yaml:"primary_ips,omitempty"`
-	Domain              string   `json:"domain,omitempty" yaml:"domain,omitempty"`
-	SSHPort             string   `json:"ssh_port,omitempty" yaml:"ssh_port,omitempty"`
-	PGVersion           string   `json:"pg_version,omitempty" yaml:"pg_version,omitempty"` // requested version, retained for compatibility
-	EffectivePGVersion  string   `json:"effective_pg_version,omitempty" yaml:"effective_pg_version,omitempty"`
-	Native              bool     `json:"native" yaml:"native"`
-	GeneratedSecrets    []string `json:"generated_secrets,omitempty" yaml:"generated_secrets,omitempty"`
-	Warnings            []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+	Kind                string                   `json:"kind" yaml:"kind"`
+	Mode                string                   `json:"mode" yaml:"mode"`
+	TemplatePath        string                   `json:"template_path" yaml:"template_path"`
+	OutputPath          string                   `json:"output_path" yaml:"output_path"`
+	Region              string                   `json:"region" yaml:"region"`
+	PrimaryIP           string                   `json:"primary_ip" yaml:"primary_ip"`
+	PrimaryIPs          []string                 `json:"primary_ips,omitempty" yaml:"primary_ips,omitempty"`
+	IPReplacements      []ConfigureIPReplacement `json:"ip_replacements,omitempty" yaml:"ip_replacements,omitempty"`
+	DiscardedIPs        []string                 `json:"discarded_ips,omitempty" yaml:"discarded_ips,omitempty"`
+	Domain              string                   `json:"domain,omitempty" yaml:"domain,omitempty"`
+	SSHPort             string                   `json:"ssh_port,omitempty" yaml:"ssh_port,omitempty"`
+	PGVersion           string                   `json:"pg_version,omitempty" yaml:"pg_version,omitempty"` // requested version, retained for compatibility
+	EffectivePGVersion  string                   `json:"effective_pg_version,omitempty" yaml:"effective_pg_version,omitempty"`
+	Native              bool                     `json:"native" yaml:"native"`
+	GeneratedSecrets    []string                 `json:"generated_secrets,omitempty" yaml:"generated_secrets,omitempty"`
+	Warnings            []string                 `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 	preludePrinted      bool
 	defaultOutputPath   string
 	activeInventoryPath string
 }
 
+// ConfigureIPReplacement records one template placeholder that consumed a
+// user-provided IP address.
+type ConfigureIPReplacement struct {
+	From string `json:"from" yaml:"from"`
+	To   string `json:"to" yaml:"to"`
+}
+
 const (
-	configureANSIReset  = "\033[0m"
-	configureANSIRed    = "\033[0;31m"
-	configureANSIGreen  = "\033[0;32m"
-	configureANSIYellow = "\033[0;33m"
-	configureANSIBlue   = "\033[0;34m"
+	configureANSIReset   = "\033[0m"
+	configureANSIRed     = "\033[0;31m"
+	configureANSIGreen   = "\033[0;32m"
+	configureANSIYellow  = "\033[0;33m"
+	configureANSIBlue    = "\033[0;34m"
+	configureANSIMagenta = "\033[0;35m"
+	configureANSICyan    = "\033[0;36m"
 )
 
 type configureTextStyle struct {
@@ -149,6 +160,14 @@ func (s configureTextStyle) hint(msg string) string {
 	return s.paint(configureANSIBlue, msg)
 }
 
+func (s configureTextStyle) inputPrompt(msg string) string {
+	if !s.color {
+		return "[ IN ] " + msg + "\n=> "
+	}
+	return "[" + s.paint(configureANSIMagenta, " IN ") + "] " +
+		configureANSIMagenta + msg + "\n=> " + configureANSIReset
+}
+
 func formatConfigureKV(key, value string) string {
 	return fmt.Sprintf("%-10s = %s", key, value)
 }
@@ -163,6 +182,38 @@ func configurePreludeLines(style configureTextStyle, d *ConfigureData) []string 
 	}
 	if d.Domain != "" && d.Domain != DefaultConfigureDomain {
 		lines = append(lines, style.ok(formatConfigureKV("domain", d.Domain)))
+	}
+	if pgVersion := configurePGVersion(d); pgVersion != "" {
+		lines = append(lines, style.ok(formatConfigureKV("pg_version", pgVersion)))
+	}
+	if d.SSHPort != "" {
+		lines = append(lines, style.ok(formatConfigureKV("ssh_port", d.SSHPort)))
+	}
+	return lines
+}
+
+func configurePGVersion(d *ConfigureData) string {
+	if d == nil {
+		return ""
+	}
+	if version := strings.TrimSpace(d.EffectivePGVersion); version != "" {
+		return version
+	}
+	return strings.TrimSpace(d.PGVersion)
+}
+
+func configureIPReplacementLines(style configureTextStyle, replacements []ConfigureIPReplacement) []string {
+	if len(replacements) == 0 {
+		return nil
+	}
+	fromWidth := 0
+	for _, replacement := range replacements {
+		fromWidth = max(fromWidth, len(replacement.From))
+	}
+	lines := []string{style.ok("Replace IP placeholder:")}
+	for _, replacement := range replacements {
+		from := fmt.Sprintf("%-*s", fromWidth, replacement.From)
+		lines = append(lines, "    "+style.paint(configureANSICyan, from)+"  ->  "+style.paint(configureANSIGreen, replacement.To))
 	}
 	return lines
 }
@@ -179,20 +230,10 @@ func (d *ConfigureData) Text() string {
 	if !d.preludePrinted {
 		lines = append(lines, configurePreludeLines(style, d)...)
 	}
-	primaryIP := d.PrimaryIP
 	if len(d.PrimaryIPs) > 1 {
-		primaryIP = strings.Join(d.PrimaryIPs, ",")
-	}
-	lines = append(lines, style.ok(formatConfigureKV("primary_ip", primaryIP)))
-	if d.SSHPort != "" {
-		lines = append(lines, style.ok(formatConfigureKV("ssh_port", d.SSHPort)))
-	}
-	pgVersion := strings.TrimSpace(d.EffectivePGVersion)
-	if pgVersion == "" {
-		pgVersion = strings.TrimSpace(d.PGVersion)
-	}
-	if pgVersion != "" {
-		lines = append(lines, style.ok(formatConfigureKV("pg_version", pgVersion)))
+		lines = append(lines, configureIPReplacementLines(style, d.IPReplacements)...)
+	} else {
+		lines = append(lines, style.ok(formatConfigureKV("primary_ip", d.PrimaryIP)))
 	}
 	if len(d.GeneratedSecrets) > 0 {
 		lines = append(lines, style.ok(formatConfigureKV("passwords", fmt.Sprintf("%d generated", len(d.GeneratedSecrets)))))
@@ -255,6 +296,14 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 	if err != nil {
 		return output.Fail(output.CodeStyConfigureInvalidArgs, err.Error())
 	}
+	templateBytes, err := os.ReadFile(templatePath)
+	if err != nil {
+		return output.Fail(output.CodeStyConfigureFailed, fmt.Sprintf("failed to read template: %v", err))
+	}
+	previewPGVersion, err := previewEffectivePGVersion(string(templateBytes), mode, pgVer)
+	if err != nil {
+		return output.Fail(output.CodeStyConfigureFailed, err.Error())
+	}
 
 	region := strings.TrimSpace(strings.ToLower(opts.Region))
 	if region == "" {
@@ -268,11 +317,14 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 
 	outputPath := resolveOutputPath(home, opts.OutputFile)
 	prelude := &ConfigureData{
-		Mode:         mode,
-		TemplatePath: templatePath,
-		OutputPath:   outputPath,
-		Region:       region,
-		Domain:       domain,
+		Mode:               mode,
+		TemplatePath:       templatePath,
+		OutputPath:         outputPath,
+		Region:             region,
+		Domain:             domain,
+		SSHPort:            strings.TrimSpace(opts.SSHPort),
+		PGVersion:          strings.TrimSpace(opts.PGVersion),
+		EffectivePGVersion: formatOptionalPGVersion(previewPGVersion),
 	}
 	preludePrinted := false
 	beforePrompt := func() {
@@ -305,11 +357,6 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 			}
 			warnings = append(warnings, warn)
 		}
-	}
-
-	templateBytes, err := os.ReadFile(templatePath)
-	if err != nil {
-		return output.Fail(output.CodeStyConfigureFailed, fmt.Sprintf("failed to read template: %v", err))
 	}
 
 	cpuCount := opts.CPUCount
@@ -385,6 +432,8 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 		Region:              region,
 		PrimaryIP:           primaryIP,
 		PrimaryIPs:          reportedPrimaryIPs,
+		IPReplacements:      mutationResult.IPReplacements,
+		DiscardedIPs:        mutationResult.DiscardedIPs,
 		Domain:              reportedDomain,
 		SSHPort:             strings.TrimSpace(opts.SSHPort),
 		PGVersion:           strings.TrimSpace(opts.PGVersion),
@@ -462,6 +511,15 @@ func validatePGVersion(ver string) (int, error) {
 	return v, nil
 }
 
+func previewEffectivePGVersion(content, mode string, requested int) (int, error) {
+	doc, err := inventory.Parse(mode+".yml", []byte(content))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse inventory template: %w", err)
+	}
+	templateVersion := configureTemplatePGVersion(doc.Mutate().AllVars(), mode)
+	return chooseEffectivePGVersion(mode, requested, templateVersion), nil
+}
+
 func resolvePrimaryIP(opts ConfigureOptions, mode string) (string, []string, error) {
 	primaryIPs, warnings, err := resolvePrimaryIPs(opts, mode, nil)
 	if err != nil {
@@ -472,6 +530,7 @@ func resolvePrimaryIP(opts ConfigureOptions, mode string) (string, []string, err
 
 func resolvePrimaryIPs(opts ConfigureOptions, mode string, beforePrompt func()) ([]string, []string, error) {
 	var warnings []string
+	style := configureTextStyle{color: output.IsColorEnabled()}
 	if opts.Skip && strings.TrimSpace(opts.PrimaryIP) != "" {
 		return nil, warnings, errors.New("--skip and --ip are mutually exclusive")
 	}
@@ -514,8 +573,8 @@ func resolvePrimaryIPs(opts ConfigureOptions, mode string, beforePrompt func()) 
 			if beforePrompt != nil {
 				beforePrompt()
 			}
-			printLocalIPv4Candidates(errWriter, candidates)
-			fmt.Fprintf(errWriter, "AUTO primary_ip = %s (demo placeholder detected)\n", defaultPrimaryIP)
+			printLocalIPv4Candidates(errWriter, candidates, style)
+			fmt.Fprintln(errWriter, style.ok(formatConfigureKV("primary_ip", defaultPrimaryIP+" (from demo)")))
 		}
 		return []string{defaultPrimaryIP}, warnings, nil
 	}
@@ -526,7 +585,7 @@ func resolvePrimaryIPs(opts ConfigureOptions, mode string, beforePrompt func()) 
 			if beforePrompt != nil {
 				beforePrompt()
 			}
-			printLocalIPv4Candidates(errWriter, candidates)
+			printLocalIPv4Candidates(errWriter, candidates, style)
 		}
 		return nil, warnings, fmt.Errorf("multiple IP candidates found, specify --ip in non-interactive mode")
 	}
@@ -534,9 +593,9 @@ func resolvePrimaryIPs(opts ConfigureOptions, mode string, beforePrompt func()) 
 	if beforePrompt != nil {
 		beforePrompt()
 	}
-	printLocalIPv4Candidates(errWriter, candidates)
+	printLocalIPv4Candidates(errWriter, candidates, style)
 
-	fmt.Fprintf(errWriter, "INPUT primary_ip candidate number [1-%d] or IPv4 address:\n=> ", len(candidates))
+	fmt.Fprint(errWriter, style.inputPrompt(fmt.Sprintf("INPUT primary_ip candidate number [1-%d] or IPv4 address:", len(candidates))))
 	var input string
 	if _, err := fmt.Fscanln(inReader, &input); err != nil {
 		return nil, warnings, fmt.Errorf("failed to read primary ip: %w", err)
@@ -601,14 +660,20 @@ type localIPv4Candidate struct {
 	Interfaces []string
 }
 
-func printLocalIPv4Candidates(w io.Writer, candidates []localIPv4Candidate) {
+func printLocalIPv4Candidates(w io.Writer, candidates []localIPv4Candidate, style configureTextStyle) {
 	if w == nil || len(candidates) == 0 {
 		return
 	}
-	fmt.Fprintln(w, "Multiple IP address candidates found:")
+	fmt.Fprintln(w, style.warn("Multiple IP address candidates found:"))
 	width := len(strconv.Itoa(len(candidates)))
 	for i, candidate := range candidates {
-		fmt.Fprintf(w, "    (%*d) %-15s  %s\n", width, i+1, candidate.IP, strings.Join(candidate.Interfaces, ", "))
+		index := fmt.Sprintf("%*d", width, i+1)
+		ip := fmt.Sprintf("%-15s", candidate.IP)
+		fmt.Fprintf(w, "    (%s) %s  %s\n",
+			style.paint(configureANSICyan, index),
+			style.paint(configureANSIRed, ip),
+			style.paint(configureANSIYellow, strings.Join(candidate.Interfaces, ", ")),
+		)
 	}
 }
 
@@ -1048,20 +1113,35 @@ type templateMutationResult struct {
 	EffectivePGVersion int
 	Generated          []string
 	Warnings           []string
+	IPReplacements     []ConfigureIPReplacement
+	DiscardedIPs       []string
 }
 
 var configurePlaceholderIP = regexp.MustCompile(`\b10\.10\.10\.[0-9]{1,3}\b`)
 
 func replaceConfigurePlaceholders(content string, opts mutationOptions) string {
+	return replaceConfigurePlaceholdersDetailed(content, opts).Content
+}
+
+type configurePlaceholderResult struct {
+	Content      string
+	Provided     int
+	Replacements []ConfigureIPReplacement
+	DiscardedIPs []string
+}
+
+func replaceConfigurePlaceholdersDetailed(content string, opts mutationOptions) configurePlaceholderResult {
 	primaryIPs := opts.PrimaryIPs
 	if len(primaryIPs) == 0 && strings.TrimSpace(opts.PrimaryIP) != "" {
 		primaryIPs = []string{strings.TrimSpace(opts.PrimaryIP)}
 	}
+	result := configurePlaceholderResult{Content: content, Provided: len(primaryIPs)}
 	if len(primaryIPs) > MaxConfigureIPs {
 		primaryIPs = primaryIPs[:MaxConfigureIPs]
 	}
 	if len(primaryIPs) > 0 && !strings.HasPrefix(opts.Mode, "build/") {
-		content = configurePlaceholderIP.ReplaceAllStringFunc(content, func(placeholder string) string {
+		matched := make([]bool, len(primaryIPs))
+		result.Content = configurePlaceholderIP.ReplaceAllStringFunc(result.Content, func(placeholder string) string {
 			lastOctet, err := strconv.Atoi(placeholder[strings.LastIndexByte(placeholder, '.')+1:])
 			if err != nil {
 				return placeholder
@@ -1070,15 +1150,26 @@ func replaceConfigurePlaceholders(content string, opts mutationOptions) string {
 			if index < 0 || index >= len(primaryIPs) {
 				return placeholder
 			}
+			matched[index] = true
 			return primaryIPs[index]
 		})
+		for index, replacement := range primaryIPs {
+			if matched[index] {
+				result.Replacements = append(result.Replacements, ConfigureIPReplacement{
+					From: fmt.Sprintf("10.10.10.%d", index+10),
+					To:   replacement,
+				})
+			} else {
+				result.DiscardedIPs = append(result.DiscardedIPs, replacement)
+			}
+		}
 	}
 
 	domain := strings.TrimSpace(opts.Domain)
 	if domain != "" && domain != DefaultConfigureDomain {
-		content = replaceDomainToken(content, DefaultConfigureDomain, domain)
+		result.Content = replaceDomainToken(result.Content, DefaultConfigureDomain, domain)
 	}
-	return content
+	return result
 }
 
 func replaceDomainToken(content, placeholder, replacement string) string {
@@ -1123,14 +1214,19 @@ func isDomainTokenByte(value byte) bool {
 }
 
 func mutateTemplateDocument(content string, opts mutationOptions) (*templateMutationResult, error) {
-	content = replaceConfigurePlaceholders(content, opts)
-	doc, err := inventory.Parse(opts.Mode+".yml", []byte(content))
+	placeholderResult := replaceConfigurePlaceholdersDetailed(content, opts)
+	doc, err := inventory.Parse(opts.Mode+".yml", []byte(placeholderResult.Content))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse inventory template: %w", err)
 	}
 	mutation := doc.Mutate()
 	globals := mutation.AllVars()
 	var warnings []string
+	if placeholderResult.Provided > 1 && len(placeholderResult.DiscardedIPs) > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"%d IPs given, only %d replaced; discard: %s",
+			placeholderResult.Provided, len(placeholderResult.Replacements), strings.Join(placeholderResult.DiscardedIPs, ", ")))
+	}
 
 	if opts.CPUCount > 0 && opts.CPUCount < 4 {
 		if scalarEquals(globals, "node_tune", "oltp") {
@@ -1167,17 +1263,13 @@ func mutateTemplateDocument(content string, opts mutationOptions) (*templateMuta
 
 	pinnedKernelMode := opts.Mode == "mssql" || opts.Mode == "polar"
 	pgMajorTemplate := pgMajorTemplateMode.MatchString(opts.Mode)
-	templatePGVersion, _ := mappingInteger(globals, "pg_version")
-	if templatePGVersion == 0 && pgMajorTemplate {
-		templatePGVersion, _ = strconv.Atoi(strings.TrimPrefix(opts.Mode, "pg"))
-	}
-	effectivePGVersion := templatePGVersion
+	templatePGVersion := configureTemplatePGVersion(globals, opts.Mode)
+	effectivePGVersion := chooseEffectivePGVersion(opts.Mode, opts.PGVersion, templatePGVersion)
 	if opts.PGVersion > 0 && !pinnedKernelMode && !pgMajorTemplate {
 		insertOptions := insertAfterExisting(globals, "node_repo_modules")
 		if err := globals.Set("pg_version", opts.PGVersion, insertOptions...); err != nil {
 			return nil, err
 		}
-		effectivePGVersion = opts.PGVersion
 		if templatePGVersion > 0 && templatePGVersion != opts.PGVersion {
 			if _, err := mutation.ReplaceAll(fmt.Sprintf("pg%d-", templatePGVersion), fmt.Sprintf("pg%d-", opts.PGVersion),
 				inventory.WithLiteralTargets(inventory.LiteralScalars|inventory.LiteralComments),
@@ -1232,7 +1324,23 @@ func mutateTemplateDocument(content string, opts mutationOptions) (*templateMuta
 	}
 	return &templateMutationResult{
 		Document: committed, EffectivePGVersion: effectivePGVersion, Generated: generated, Warnings: warnings,
+		IPReplacements: placeholderResult.Replacements, DiscardedIPs: placeholderResult.DiscardedIPs,
 	}, nil
+}
+
+func configureTemplatePGVersion(globals *inventory.MappingEditor, mode string) int {
+	templateVersion, _ := mappingInteger(globals, "pg_version")
+	if templateVersion == 0 && pgMajorTemplateMode.MatchString(mode) {
+		templateVersion, _ = strconv.Atoi(strings.TrimPrefix(mode, "pg"))
+	}
+	return templateVersion
+}
+
+func chooseEffectivePGVersion(mode string, requested, templateVersion int) int {
+	if requested > 0 && mode != "mssql" && mode != "polar" && !pgMajorTemplateMode.MatchString(mode) {
+		return requested
+	}
+	return templateVersion
 }
 
 func enableChinaTemplateKey(mutation *inventory.Mutation, key string) error {

@@ -14,6 +14,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var sudoCommandSummaryOut io.Writer = os.Stderr
+
 // configureCmdIO sets stdin/stdout/stderr for external commands.
 // In structured output mode, redirect stdout to stderr to keep stdout clean.
 func configureCmdIO(cmd *exec.Cmd) {
@@ -143,6 +145,73 @@ func QuietSudoCommand(args []string) error {
 		return fmt.Errorf("quiet command failed: %w", err)
 	}
 	return nil
+}
+
+// SudoCommandSummary rolls subprocess output through one terminal line and
+// includes only a short tail when the command fails. Structured output remains
+// silent so stdout and stderr stay machine-readable.
+func SudoCommandSummary(args []string, tailLines int) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no command specified")
+	}
+	args = append([]string(nil), args...)
+	if nosudo := os.Getenv("PIG_NO_SUDO"); nosudo != "1" && nosudo != "true" {
+		if isRoot := os.Geteuid() == 0 || config.CurrentUser == "root"; !isRoot {
+			if _, err := exec.LookPath("sudo"); err == nil {
+				args = append([]string{"sudo"}, args...)
+			}
+		}
+	}
+
+	logrus.Debugf("executing summarized command: %v", args)
+	tail := NewTailBuffer(64 * 1024)
+	var commandOutput io.Writer = tail
+	var progress *rollingLineWriter
+	if !config.IsStructuredOutput() && sudoCommandSummaryOut != nil {
+		progress = newRollingLineWriter(sudoCommandSummaryOut, tail)
+		commandOutput = progress
+		progress.render([]byte(strings.Join(args, " ")))
+	}
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = commandOutput
+	cmd.Stderr = commandOutput
+	err := cmd.Run()
+	if progress != nil {
+		progress.Finish()
+	}
+	if err != nil {
+		detail := commandOutputTail(tail.String(), tailLines)
+		if detail != "" {
+			return fmt.Errorf("command failed: %w: %s", err, detail)
+		}
+		return fmt.Errorf("command failed: %w", err)
+	}
+	return nil
+}
+
+func commandOutputTail(value string, lines int) string {
+	if lines <= 0 {
+		return ""
+	}
+	value = strings.ReplaceAll(value, "\r", "\n")
+	raw := strings.Split(value, "\n")
+	parts := make([]string, 0, len(raw))
+	for _, line := range raw {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		const lineLimit = 320
+		if runes := []rune(line); len(runes) > lineLimit {
+			line = string(runes[:lineLimit-3]) + "..."
+		}
+		parts = append(parts, line)
+	}
+	if len(parts) > lines {
+		parts = parts[len(parts)-lines:]
+	}
+	return strings.Join(parts, " | ")
 }
 
 // PutFile writes content to a file at the specified path with proper permissions.

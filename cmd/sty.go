@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"pig/cli/ext"
 	stycli "pig/cli/sty"
@@ -35,7 +36,6 @@ var (
 	pigstyConfNonInteractive  bool
 	pigstyConfPort            string
 	pigstyConfGenerate        bool
-	pigstyConfRaw             bool
 	pigstyConfMirror          bool
 	pigstyGrafanaEndpoint     string
 	pigstyGrafanaUsername     string
@@ -85,17 +85,15 @@ either positionally or with --conf, not both.
 
 PostgreSQL major versions: %s (beta: %d). --skip uses the placeholder primary
 IP and skips the admin SSH/sudo preflight; it cannot be combined with --ip.
-The native --ip flag accepts up to %d comma-separated IPv4 addresses, replacing
+The --ip flag accepts up to %d comma-separated IPv4 addresses, replacing
 10.10.10.10 through 10.10.10.19 in order. --domain replaces the exact i.pigsty
-placeholder. Use --raw only for the legacy shell workflow, which supports one
-IP and no custom domain; generated passwords remain visible.
+placeholder.
 
 See https://pigsty.io/docs/setup/install/#configure for details.
 `, strings.Join(ext.PostgresActiveVersionStrings(), "|"), ext.PostgresBetaMajorVersion, stycli.MaxConfigureIPs)
 
 const styConfigureExample = `
   pig sty conf                       # native Go configure path (default)
-  pig sty conf --raw                 # raw shell configure path fallback
   pig sty configure                  # same as 'pig sty conf' (alias)
   pig sty conf -g                    # generate with random passwords (RECOMMENDED!)
   pig sty conf rich                  # use conf/rich.yml template (with more extensions)
@@ -160,26 +158,48 @@ var (
 	pigstyBootEUID       = os.Geteuid
 )
 
+func handlePigstyBootResult(cmd *cobra.Command, result *output.Result) error {
+	if result == nil || !result.Success || config.IsStructuredOutput() {
+		return handleAuxResult(result)
+	}
+	data, ok := result.Data.(*stycli.BootData)
+	if !ok || data == nil {
+		return handleAuxResult(result)
+	}
+	text := data.Text()
+	if text == "" {
+		return nil
+	}
+	var writer io.Writer = os.Stdout
+	if cmd != nil {
+		writer = cmd.OutOrStdout()
+	}
+	_, err := fmt.Fprintln(writer, text)
+	return err
+}
+
 var pigstyBootCmd = &cobra.Command{
 	Use:         "boot",
 	Short:       "Bootstrap Pigsty",
 	Annotations: ancsAnn("pig sty boot", "action", "volatile", "unsafe", true, "medium", "none", "root", 60000),
 	Aliases:     []string{"b", "bootstrap"},
 	Args:        cobra.NoArgs,
-	Long: `Bootstrap the local Pigsty controller with native Go orchestration.
+	Long: `Prepare the local environment for Pigsty deployment.
 
-The native path needs only the host package manager (dnf, yum on EL7, or
-apt-get). It downloads and extracts offline tar.gz packages without host
-curl/wget/tar/gzip. By default it backs up and replaces existing repository
-definitions before adding the complete bootstrap repository set; --keep
-preserves existing repositories. Offline package transactions are restricted
-to pigsty-local.
-It verifies Ansible's own Python dependencies, then checks and best-effort
-repairs key-based localhost SSH without making SSH failure fatal. If the
-invoking user's ~/pigsty does not exist and the Pigsty source repository is
-reachable, it runs pig sty init as that user. --mirror is shorthand for
---region china. See
-https://pigsty.io/docs/setup/offline/#bootstrap for details.`,
+On Debian 12 and 13, Bootstrap first performs a best-effort en_US.UTF-8 locale
+check and repair so Ansible can initialize. Pig then verifies Ansible and its
+Python dependencies. If Ansible is unavailable or unusable, Pig installs the
+required controller packages from a committed local repository at /www/pigsty,
+a trusted offline package at /tmp/pkg.tgz, or the configured upstream
+repositories. When repository changes are required, Pig backs up existing
+definitions unless -k or --keep is specified.
+
+After Ansible is ready, Pig performs best-effort checks and repairs for
+key-based localhost SSH and the invoking user's ~/pigsty directory. If ~/pigsty
+is missing, Pig initializes it from an available upstream source or local
+pigsty-v*.tgz archive; online source downloads show a transient progress bar.
+Failures in these best-effort steps are reported as warnings and do not fail the
+command.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		bootRegion := pigstyBootRegion
 		if pigstyBootMirror {
@@ -202,11 +222,12 @@ https://pigsty.io/docs/setup/offline/#bootstrap for details.`,
 			return nil
 		}
 
-		return handleAuxResult(pigstyBootNativeExec(cmd.Context(), stycli.NativeBootstrapOptions{
+		result := pigstyBootNativeExec(cmd.Context(), stycli.NativeBootstrapOptions{
 			Region:      bootRegion,
 			PackagePath: pigstyBootPackage,
 			Keep:        pigstyBootKeep,
-		}))
+		})
+		return handlePigstyBootResult(cmd, result)
 	},
 }
 
@@ -230,31 +251,6 @@ var pigstyConfCmd = &cobra.Command{
 				legacyModuleSty, command, "invalid configuration mode", err.Error(),
 				args, styConfigureParams(confRegion, pigstyConfName),
 			)
-		}
-		if pigstyConfRaw {
-			if strings.Contains(pigstyConfIP, ",") {
-				detail := "multiple --ip addresses are not supported with --raw"
-				return structuredParamError(legacyModuleSty, command, "invalid raw configure options", detail, args, styConfigureParams(confRegion, confMode))
-			}
-			if domain := strings.TrimSpace(pigstyConfDomain); domain != "" && domain != stycli.DefaultConfigureDomain {
-				detail := "--domain is not supported with --raw"
-				return structuredParamError(legacyModuleSty, command, "invalid raw configure options", detail, args, styConfigureParams(confRegion, confMode))
-			}
-			return runLegacyStructuredKind(legacyModuleSty, command, "pig.sty.configure.raw/v1", args, styConfigureParams(confRegion, confMode), func() error {
-				return stycli.ConfigureRaw(stycli.RawConfigureOptions{
-					PigstyHome:     config.PigstyHome,
-					Mode:           confMode,
-					PrimaryIP:      pigstyConfIP,
-					PGVersion:      pigstyConfVer,
-					Region:         confRegion,
-					SSHPort:        pigstyConfPort,
-					OutputFile:     pigstyConfOutput,
-					Skip:           pigstyConfSkip,
-					UseProxy:       pigstyConfProxy,
-					NonInteractive: pigstyConfNonInteractive,
-					Generate:       pigstyConfGenerate,
-				})
-			})
 		}
 		return runPigstyConfigureNative(confRegion, confMode)
 	},
@@ -456,20 +452,18 @@ func resolveStyConfigureMode(flagMode string, args []string) (string, error) {
 
 func styConfigureParams(region, mode string) map[string]interface{} {
 	return map[string]interface{}{
-		"conf":                  mode,
-		"ip":                    pigstyConfIP,
-		"domain":                pigstyConfDomain,
-		"version":               pigstyConfVer,
-		"region":                region,
-		"mirror":                pigstyConfMirror,
-		"output_file":           pigstyConfOutput,
-		"skip":                  pigstyConfSkip,
-		"proxy":                 pigstyConfProxy,
-		"non_interactive":       pigstyConfNonInteractive,
-		"port":                  pigstyConfPort,
-		"generate":              pigstyConfGenerate,
-		"raw":                   pigstyConfRaw,
-		"secret_bearing_output": pigstyConfRaw && pigstyConfGenerate,
+		"conf":            mode,
+		"ip":              pigstyConfIP,
+		"domain":          pigstyConfDomain,
+		"version":         pigstyConfVer,
+		"region":          region,
+		"mirror":          pigstyConfMirror,
+		"output_file":     pigstyConfOutput,
+		"skip":            pigstyConfSkip,
+		"proxy":           pigstyConfProxy,
+		"non_interactive": pigstyConfNonInteractive,
+		"port":            pigstyConfPort,
+		"generate":        pigstyConfGenerate,
 	}
 }
 
@@ -497,7 +491,7 @@ func addStyConfigureFlags(cmd *cobra.Command) {
 	}
 	cmd.Flags().StringVarP(&pigstyConfName, "conf", "c", "", "config template mode (same as positional mode)")
 	cmd.Flags().StringVar(&pigstyConfIP, "ip", "", fmt.Sprintf("up to %d comma-separated IPv4 addresses", stycli.MaxConfigureIPs))
-	cmd.Flags().StringVar(&pigstyConfDomain, "domain", stycli.DefaultConfigureDomain, "replace the i.pigsty placeholder domain (native only)")
+	cmd.Flags().StringVar(&pigstyConfDomain, "domain", stycli.DefaultConfigureDomain, "replace the i.pigsty placeholder domain")
 	cmd.Flags().StringVarP(&pigstyConfVer, "version", "v", "", "postgres major version")
 	cmd.Flags().StringVarP(&pigstyConfRegion, "region", "r", "", "upstream repo region")
 	cmd.Flags().BoolVarP(&pigstyConfMirror, "mirror", "m", false, "same as --region china")
@@ -611,7 +605,6 @@ func init() {
 	addStyConfigureFlags(pigstyConfCmd)
 	pigstyConfCmd.MarkFlagsMutuallyExclusive("mirror", "region")
 	pigstyConfCmd.MarkFlagsMutuallyExclusive("skip", "ip")
-	pigstyConfCmd.Flags().BoolVar(&pigstyConfRaw, "raw", false, "use legacy shell configure; generated passwords remain visible")
 	pigstyGrafanaCmd.PersistentFlags().StringVar(&pigstyGrafanaEndpoint, "endpoint", "", "Grafana origin and optional path prefix (default http://i.pigsty/ui)")
 	pigstyGrafanaCmd.PersistentFlags().StringVar(&pigstyGrafanaUsername, "username", "", "Grafana API username")
 	pigstyGrafanaCmd.PersistentFlags().StringVar(&pigstyGrafanaPassword, "password", "", "Grafana API password (insecure: visible in process arguments and shell history)")

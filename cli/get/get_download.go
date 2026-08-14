@@ -20,6 +20,10 @@ import (
 
 var pigstyVersionRe = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-(?:a|b|c|alpha|beta|rc)\d+)?$`)
 
+var downloadProgressOut io.Writer = os.Stdout
+
+const downloadProgressWidth = 16
+
 type progressReader struct {
 	r        io.Reader
 	total    int64
@@ -27,8 +31,11 @@ type progressReader struct {
 	sizeMiB  float64
 
 	readBytes   int64
+	lastBytes   int64
 	lastPercent int
+	lastWidth   int
 	printed     bool
+	out         io.Writer
 }
 
 func (p *progressReader) Read(buf []byte) (int, error) {
@@ -38,15 +45,58 @@ func (p *progressReader) Read(buf []byte) (int, error) {
 	}
 
 	p.readBytes += int64(n)
+	if p.out == nil || config.IsStructuredOutput() {
+		return n, err
+	}
 	if p.total > 0 {
 		percent := int(float64(p.readBytes) / float64(p.total) * 100)
-		if percent != p.lastPercent {
-			fmt.Printf("\rGet %s %.1f MiB: %d%%", p.filename, p.sizeMiB, percent)
+		percent = min(percent, 100)
+		if percent != p.lastPercent || !p.printed {
+			p.renderDeterminate(percent)
 			p.lastPercent = percent
-			p.printed = true
 		}
+	} else if !p.printed || p.readBytes-p.lastBytes >= 256*1024 {
+		p.renderIndeterminate()
+		p.lastBytes = p.readBytes
 	}
 	return n, err
+}
+
+func (p *progressReader) renderDeterminate(percent int) {
+	filled := percent * downloadProgressWidth / 100
+	bar := strings.Repeat("=", filled)
+	if filled < downloadProgressWidth {
+		bar += ">" + strings.Repeat(" ", downloadProgressWidth-filled-1)
+	}
+	readMiB := float64(p.readBytes) / 1024 / 1024
+	p.render(fmt.Sprintf("download %s [%s] %3d%% %5.1f/%5.1f MiB", p.filename, bar, percent, readMiB, p.sizeMiB))
+}
+
+func (p *progressReader) renderIndeterminate() {
+	position := int((p.readBytes / (256 * 1024)) % downloadProgressWidth)
+	bar := strings.Repeat(" ", position) + ">" + strings.Repeat(" ", downloadProgressWidth-position-1)
+	readMiB := float64(p.readBytes) / 1024 / 1024
+	p.render(fmt.Sprintf("download %s [%s] %5.1f MiB", p.filename, bar, readMiB))
+}
+
+func (p *progressReader) render(line string) {
+	width := len([]rune(line))
+	padding := ""
+	if width < p.lastWidth {
+		padding = strings.Repeat(" ", p.lastWidth-width)
+	}
+	_, _ = io.WriteString(p.out, "\r"+line+padding)
+	p.lastWidth = width
+	p.printed = true
+}
+
+func (p *progressReader) finish() {
+	if !p.printed || p.out == nil {
+		return
+	}
+	_, _ = io.WriteString(p.out, "\r"+strings.Repeat(" ", p.lastWidth)+"\r")
+	p.printed = false
+	p.lastWidth = 0
 }
 
 func ensureTargetDir(targetDir string) (string, error) {
@@ -181,12 +231,11 @@ func downloadToTemp(url, targetDir, filename string) (tempPath, checksum string,
 		total:    size,
 		filename: filename,
 		sizeMiB:  sizeMiB,
+		out:      downloadProgressOut,
 	}
 
 	n, err := io.CopyBuffer(io.MultiWriter(out, h), reader, make([]byte, 32*1024))
-	if reader.printed {
-		fmt.Println() // New line after progress bar.
-	}
+	reader.finish()
 	if err != nil {
 		return "", "", sizeMiB, fmt.Errorf("download error: %w", err)
 	}

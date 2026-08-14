@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/md5"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -51,6 +52,48 @@ func TestIsValidVersion_Invalid(t *testing.T) {
 	}
 	if info := IsValidVersion("bad"); info != nil {
 		t.Fatalf("expected nil for invalid version, got %+v", info)
+	}
+}
+
+func TestProgressReaderRendersAndClearsDownloadBar(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), 1024*1024)
+	var display bytes.Buffer
+	reader := &progressReader{
+		r:        bytes.NewReader(payload),
+		total:    int64(len(payload)),
+		filename: "pigsty-v4.0.0.tgz",
+		sizeMiB:  1,
+		out:      &display,
+	}
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		t.Fatal(err)
+	}
+	reader.finish()
+	got := display.String()
+	if strings.Contains(got, "\n") || !strings.Contains(got, "[================] 100%") ||
+		!strings.Contains(got, "1.0/  1.0 MiB") || !strings.HasSuffix(got, "\r") {
+		t.Fatalf("download progress = %q", got)
+	}
+}
+
+func TestProgressReaderSuppressesStructuredOutput(t *testing.T) {
+	origFormat := config.OutputFormat
+	t.Cleanup(func() { config.OutputFormat = origFormat })
+	config.OutputFormat = config.OUTPUT_JSON
+	var display bytes.Buffer
+	reader := &progressReader{
+		r:        strings.NewReader("payload"),
+		total:    7,
+		filename: "pigsty-v4.0.0.tgz",
+		sizeMiB:  7.0 / 1024 / 1024,
+		out:      &display,
+	}
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		t.Fatal(err)
+	}
+	reader.finish()
+	if display.Len() != 0 {
+		t.Fatalf("structured download emitted progress: %q", display.String())
 	}
 }
 
