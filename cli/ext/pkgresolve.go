@@ -35,10 +35,10 @@ type packageResolveOptions struct {
 func PackageManagerCmd() string {
 	switch config.OSType {
 	case config.DistroEL:
-		if config.OSVersion == "8" || config.OSVersion == "9" || config.OSVersion == "10" {
-			return "dnf"
+		if config.OSVersion == "7" {
+			return "yum"
 		}
-		return "yum"
+		return "dnf"
 	case config.DistroDEB:
 		return "apt-get"
 	default:

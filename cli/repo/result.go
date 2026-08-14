@@ -492,9 +492,13 @@ func getActiveRepos(osType string) ([]string, error) {
 	}
 }
 
-// getActiveReposEL parses `yum repolist` output to get active repo IDs
+// getActiveReposEL parses the EL package manager's repolist output.
 func getActiveReposEL() ([]string, error) {
-	cmd := exec.Command("yum", "repolist", "-q")
+	manager := "dnf"
+	if config.OSMajor == 7 {
+		manager = "yum"
+	}
+	cmd := exec.Command(manager, "repolist", "-q")
 	out, err := cmd.Output()
 	if err != nil {
 		return []string{}, err

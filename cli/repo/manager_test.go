@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -37,6 +38,32 @@ func newELManager(major string) *Manager {
 		OsDistroCode: "el" + major,
 		OsType:       config.DistroEL,
 		OsArch:       "x86_64",
+	}
+}
+
+func TestNewManagerUsesDNFForEL(t *testing.T) {
+	for _, version := range []string{"8", "9", "10"} {
+		t.Run("el"+version, func(t *testing.T) {
+			withELConfig(t, GetMajorVersionFromCode("el"+version), version, version+".0")
+			m, err := NewManager()
+			if err != nil {
+				t.Fatalf("NewManager returned error: %v", err)
+			}
+			if want := []string{"dnf", "makecache"}; !reflect.DeepEqual(m.UpdateCmd, want) {
+				t.Fatalf("EL%s update command = %v, want %v", version, m.UpdateCmd, want)
+			}
+		})
+	}
+}
+
+func TestNewManagerKeepsYumForEL7Maintenance(t *testing.T) {
+	withELConfig(t, 7, "7", "7.9")
+	m, err := NewManager()
+	if err != nil {
+		t.Fatalf("NewManager returned error: %v", err)
+	}
+	if want := []string{"yum", "makecache"}; !reflect.DeepEqual(m.UpdateCmd, want) {
+		t.Fatalf("EL7 update command = %v, want %v", m.UpdateCmd, want)
 	}
 }
 

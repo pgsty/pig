@@ -633,7 +633,7 @@ func checkPackageManagerWarnings() ([]string, error) {
 		}
 		return nil, fmt.Errorf("failed to determine os package manager for deb system")
 	case config.DistroEL:
-		if commandExists("dnf") || commandExists("yum") || commandExists("zypper") || commandExists("brew") {
+		if commandExists("dnf") || (config.OSMajor == 7 && commandExists("yum")) || commandExists("zypper") || commandExists("brew") {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to determine os package manager for rpm system")
@@ -646,7 +646,7 @@ func checkPackageManagerWarnings() ([]string, error) {
 		return nil, fmt.Errorf("failed to determine os package manager for deb system")
 	}
 	if commandExists("rpm") {
-		if commandExists("dnf") || commandExists("yum") || commandExists("zypper") || commandExists("brew") {
+		if commandExists("dnf") || (config.OSMajor == 7 && commandExists("yum")) || commandExists("zypper") || commandExists("brew") {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to determine os package manager for rpm system")

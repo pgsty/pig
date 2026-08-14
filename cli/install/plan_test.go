@@ -117,6 +117,25 @@ func TestBuildInstallPlanResolveAndExecute(t *testing.T) {
 	}
 }
 
+func TestBuildInstallPlanUsesDNFForEL(t *testing.T) {
+	for _, version := range []string{"8", "9", "10"} {
+		t.Run("el"+version, func(t *testing.T) {
+			cleanup := withInstallPlanTestEnv(t, config.DistroEL, version, newInstallPlanCatalog(&ext.Extension{
+				Name:   "postgis",
+				Pkg:    "postgis",
+				Lead:   true,
+				RpmPkg: "postgis_$v",
+			}))
+			defer cleanup()
+
+			plan := BuildInstallPlan(17, []string{"postgis"}, true, false)
+			if !containsInstallAction(plan.Actions, "sudo dnf install -y postgis_17") {
+				t.Fatalf("EL%s plan does not use dnf: %#v", version, plan.Actions)
+			}
+		})
+	}
+}
+
 func TestBuildInstallPlanNoTranslationRisk(t *testing.T) {
 	cleanup := withInstallPlanTestEnv(t, config.DistroDEB, "12", newInstallPlanCatalog(&ext.Extension{
 		Name:   "postgis",

@@ -56,7 +56,10 @@ func NewManager(paths ...string) (m *Manager, err error) {
 		m.RepoDir = "/etc/yum.repos.d"
 		m.BackupDir = "/etc/yum.repos.d/backup"
 		m.RepoPattern = "/etc/yum.repos.d/*.repo"
-		m.UpdateCmd = []string{"yum", "makecache"}
+		m.UpdateCmd = []string{"dnf", "makecache"}
+		if m.OsMajorVersion == 7 {
+			m.UpdateCmd = []string{"yum", "makecache"}
+		}
 	case config.DistroDEB:
 		m.RepoDir = "/etc/apt/sources.list.d"
 		m.BackupDir = "/etc/apt/sources.list.d/backup"
@@ -134,8 +137,8 @@ func (m *Manager) LoadData(data []byte) error {
 					meta[k] = v
 				}
 			}
-			// EL7 uses yum without DNF modules. Shared EL7/8/9/10 catalog rows may
-			// opt in for newer EL releases, but must not render this DNF-only key.
+			// EL7 has no DNF module support. Shared EL7/8/9/10 catalog rows may opt
+			// in for newer EL releases, but must not render this DNF-only key.
 			if GetMajorVersionFromCode(m.OsDistroCode) == 7 {
 				delete(meta, "module_hotfixes")
 			}

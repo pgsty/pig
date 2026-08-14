@@ -83,7 +83,11 @@ func UpdatePig(pigVer, region string) error {
 	// run sudo shell command to remove current package and install the new one
 	switch config.OSType {
 	case config.DistroEL:
-		if err := utils.SudoCommand([]string{"yum", "remove", "-y", "pig"}); err != nil {
+		pkgManager := "dnf"
+		if config.OSMajor == 7 {
+			pkgManager = "yum"
+		}
+		if err := utils.SudoCommand([]string{pkgManager, "remove", "-y", "pig"}); err != nil {
 			logrus.Warnf("failed to remove current package: %v", err)
 		}
 		return utils.SudoCommand([]string{"rpm", "-i", downloadTo})

@@ -28,7 +28,7 @@ Also explore the full [**PGEXT.CLOUD directory**](https://pgext.cloud/) of 2,230
 [![Debian Support: 12/13](https://img.shields.io/badge/Debian-12/13-%23A81D33?style=flat&logo=debian&logoColor=%23A81D33)](https://pigsty.io/docs/ref/linux#debian)
 [![Ubuntu Support: 22/24/26](https://img.shields.io/badge/Ubuntu-22/24/26-%23E95420?style=flat&logo=ubuntu&logoColor=%23E95420)](https://pigsty.io/docs/ref/linux#ubuntu)
 
-[**Install**](https://pigsty.io/docs/pig/install/) the `pig` package first, (you can also use the `apt` / `yum` or just copy the binary)
+[**Install**](https://pigsty.io/docs/pig/install/) the `pig` package first, (you can also use `apt` / `dnf` or just copy the binary)
 
 ```bash
 curl -fsSL https://repo.pigsty.io/pig | bash
@@ -81,7 +81,7 @@ enabled = 1
 gpgcheck = 0
 module_hotfixes=1
 EOF
-sudo yum makecache; sudo yum install -y pig
+sudo dnf makecache; sudo dnf install -y pig
 ```
 
 > For mainland China users: consider replacing `repo.pigsty.io` with `repo.pigsty.cc`.

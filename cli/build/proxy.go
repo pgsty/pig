@@ -186,7 +186,11 @@ func InstallProxy() error {
 	logrus.Debugf("reinstall proxy via package manager")
 	switch config.OSType {
 	case config.DistroEL:
-		_ = utils.QuietSudoCommand([]string{"yum", "remove", "-q", "-y", "vray"})
+		pkgManager := "dnf"
+		if config.OSMajor == 7 {
+			pkgManager = "yum"
+		}
+		_ = utils.QuietSudoCommand([]string{pkgManager, "remove", "-q", "-y", "vray"})
 		return utils.SudoCommand([]string{"rpm", "-i", downloadTo})
 	case config.DistroDEB:
 		_ = utils.QuietSudoCommand([]string{"apt", "remove", "-qq", "-y", "vray"})

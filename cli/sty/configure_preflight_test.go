@@ -31,6 +31,44 @@ func TestCheckPackageManagerWarningsDebWithoutManager(t *testing.T) {
 	}
 }
 
+func TestCheckPackageManagerWarningsEL8RequiresDNF(t *testing.T) {
+	restore := savePreflightHooks()
+	defer restore()
+
+	goosFn = func() string { return "linux" }
+	config.OSType = config.DistroEL
+	config.OSMajor = 8
+	lookPathFn = func(name string) (string, error) {
+		if name == "yum" || name == "rpm" {
+			return "/usr/bin/" + name, nil
+		}
+		return "", exec.ErrNotFound
+	}
+
+	if _, err := checkPackageManagerWarnings(); err == nil {
+		t.Fatal("expected EL8 preflight to reject yum-only environment")
+	}
+}
+
+func TestCheckPackageManagerWarningsEL7AllowsYum(t *testing.T) {
+	restore := savePreflightHooks()
+	defer restore()
+
+	goosFn = func() string { return "linux" }
+	config.OSType = config.DistroEL
+	config.OSMajor = 7
+	lookPathFn = func(name string) (string, error) {
+		if name == "yum" || name == "rpm" {
+			return "/usr/bin/" + name, nil
+		}
+		return "", exec.ErrNotFound
+	}
+
+	if _, err := checkPackageManagerWarnings(); err != nil {
+		t.Fatalf("expected EL7 preflight to allow yum: %v", err)
+	}
+}
+
 func TestCheckLocalSSHWarningsUsesPort(t *testing.T) {
 	restore := savePreflightHooks()
 	defer restore()
@@ -422,6 +460,7 @@ func savePreflightHooks() func() {
 	origConfigGOOS := config.GOOS
 	origConfigGOARCH := config.GOARCH
 	origOSArch := config.OSArch
+	origOSMajor := config.OSMajor
 
 	return func() {
 		lookPathFn = origLookPath
@@ -446,6 +485,7 @@ func savePreflightHooks() func() {
 		config.GOOS = origConfigGOOS
 		config.GOARCH = origConfigGOARCH
 		config.OSArch = origOSArch
+		config.OSMajor = origOSMajor
 	}
 }
 
