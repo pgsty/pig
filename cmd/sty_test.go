@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
@@ -37,6 +38,54 @@ func TestStyConfHasConfigureAlias(t *testing.T) {
 	}
 }
 
+func TestStyConfRunsAsCurrentUser(t *testing.T) {
+	if got := pigstyConfCmd.Annotations["os_user"]; got != "current" {
+		t.Fatalf("pig sty conf os_user = %q, want current", got)
+	}
+}
+
+func TestStyConfAcceptsOptionalModeArgument(t *testing.T) {
+	if err := pigstyConfCmd.ValidateArgs(nil); err != nil {
+		t.Fatalf("pig sty conf rejected zero arguments: %v", err)
+	}
+	if err := pigstyConfCmd.ValidateArgs([]string{"rich"}); err != nil {
+		t.Fatalf("pig sty conf rejected one mode argument: %v", err)
+	}
+	if err := pigstyConfCmd.ValidateArgs([]string{"rich", "extra"}); err == nil {
+		t.Fatal("pig sty conf accepted more than one mode argument")
+	}
+}
+
+func TestResolveStyConfigureMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		flagMode string
+		args     []string
+		want     string
+		wantErr  bool
+	}{
+		{name: "default"},
+		{name: "flag", flagMode: " rich ", want: "rich"},
+		{name: "positional", args: []string{" ha/full "}, want: "ha/full"},
+		{name: "both", flagMode: "rich", args: []string{"meta"}, wantErr: true},
+		{name: "too many", args: []string{"rich", "meta"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveStyConfigureMode(tt.flagMode, tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("resolveStyConfigureMode() = %q, want error", got)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("resolveStyConfigureMode() = %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestStyDeployHasNoInstallAlias(t *testing.T) {
 	if got := strings.Join(pigstyDeployCmd.Aliases, ","); got != "d,de" {
 		t.Fatalf("deploy aliases = %q, want d,de", got)
@@ -61,6 +110,94 @@ func TestStyConfHasRawFlagDefaultFalse(t *testing.T) {
 	}
 	if pigstyConfRaw {
 		t.Fatal("--raw should default to false")
+	}
+}
+
+func TestStyConfDomainFlagDefaultsToPlaceholder(t *testing.T) {
+	flag := pigstyConfCmd.Flags().Lookup("domain")
+	if flag == nil {
+		t.Fatal("expected --domain flag on pig sty conf")
+	}
+	if flag.DefValue != stycli.DefaultConfigureDomain {
+		t.Fatalf("--domain default = %q, want %q", flag.DefValue, stycli.DefaultConfigureDomain)
+	}
+	ipFlag := pigstyConfCmd.Flags().Lookup("ip")
+	if ipFlag == nil || !strings.Contains(ipFlag.Usage, fmt.Sprintf("%d", stycli.MaxConfigureIPs)) {
+		t.Fatalf("--ip usage does not derive its maximum from MaxConfigureIPs: %+v", ipFlag)
+	}
+}
+
+func TestStyConfRawRejectsNativeOnlyReplacements(t *testing.T) {
+	restore := saveStyConfState(t)
+	defer restore()
+
+	pigstyConfRaw = true
+	pigstyConfDomain = "infra.example.com"
+	if err := pigstyConfCmd.RunE(pigstyConfCmd, nil); err == nil || !strings.Contains(err.Error(), "--domain") {
+		t.Fatalf("custom domain with --raw error = %v", err)
+	}
+
+	pigstyConfDomain = stycli.DefaultConfigureDomain
+	pigstyConfIP = "192.0.2.1,192.0.2.2"
+	if err := pigstyConfCmd.RunE(pigstyConfCmd, nil); err == nil || !strings.Contains(err.Error(), "multiple --ip") {
+		t.Fatalf("multiple IPs with --raw error = %v", err)
+	}
+}
+
+func TestStyConfRawStructuredRejectionUsesParamError(t *testing.T) {
+	restore := saveStyConfState(t)
+	originalFormat := config.OutputFormat
+	defer func() {
+		restore()
+		config.OutputFormat = originalFormat
+	}()
+
+	config.OutputFormat = config.OUTPUT_JSON
+	pigstyConfRaw = true
+	pigstyConfDomain = "infra.example.com"
+	var runErr error
+	raw := captureStdout(t, func() {
+		runErr = pigstyConfCmd.RunE(pigstyConfCmd, nil)
+	})
+	if runErr == nil {
+		t.Fatal("expected structured raw configure rejection")
+	}
+	for _, expected := range []string{
+		`"message":"invalid raw configure options"`,
+		`"command":"pig sty conf"`,
+		`"domain":"infra.example.com"`,
+	} {
+		if !strings.Contains(raw, expected) {
+			t.Fatalf("structured raw rejection omitted %q: %s", expected, raw)
+		}
+	}
+}
+
+func TestStyConfStructuredModeConflictUsesParamError(t *testing.T) {
+	restore := saveStyConfState(t)
+	originalFormat := config.OutputFormat
+	defer func() {
+		restore()
+		config.OutputFormat = originalFormat
+	}()
+
+	config.OutputFormat = config.OUTPUT_JSON
+	pigstyConfName = "rich"
+	var runErr error
+	raw := captureStdout(t, func() {
+		runErr = pigstyConfCmd.RunE(pigstyConfCmd, []string{"meta"})
+	})
+	if runErr == nil {
+		t.Fatal("expected structured positional/flag mode conflict")
+	}
+	for _, expected := range []string{
+		`"message":"invalid configuration mode"`,
+		`"command":"pig sty conf"`,
+		"either positionally or with --conf",
+	} {
+		if !strings.Contains(raw, expected) {
+			t.Fatalf("structured mode conflict omitted %q: %s", expected, raw)
+		}
 	}
 }
 
@@ -550,7 +687,7 @@ func TestStyConfMirrorFlagSetsRegionChina(t *testing.T) {
 	}
 }
 
-func TestStyConfDefaultsToNativeRoute(t *testing.T) {
+func TestStyConfPositionalModeUsesNativeRoute(t *testing.T) {
 	restore := saveStyConfState(t)
 	defer restore()
 
@@ -561,12 +698,13 @@ func TestStyConfDefaultsToNativeRoute(t *testing.T) {
 	template := `all:
   vars:
     admin_ip: 10.10.10.10
+    home_domain: i.pigsty
     region: default
     node_tune: oltp
     pg_version: 18
     pg_conf: oltp.yml
 `
-	if err := os.WriteFile(filepath.Join(home, "conf", "meta.yml"), []byte(template), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "conf", "rich.yml"), []byte(template), 0o644); err != nil {
 		t.Fatalf("write template: %v", err)
 	}
 	if err := writeExecutable(filepath.Join(home, "configure"), "#!/bin/sh\nprintf raw > route_raw.txt\n"); err != nil {
@@ -575,21 +713,26 @@ func TestStyConfDefaultsToNativeRoute(t *testing.T) {
 
 	config.PigstyHome = home
 	pigstyConfRaw = false
-	pigstyConfName = "meta"
+	pigstyConfName = ""
+	pigstyConfDomain = "infra.example.com"
 	pigstyConfRegion = "default"
 	pigstyConfSkip = true
 	pigstyConfNonInteractive = true
 	pigstyConfOutput = "native.yml"
 
-	if err := pigstyConfCmd.RunE(pigstyConfCmd, nil); err != nil {
+	if err := pigstyConfCmd.RunE(pigstyConfCmd, []string{"rich"}); err != nil {
 		t.Fatalf("pig sty conf failed: %v", err)
 	}
 
 	if _, err := os.Stat(filepath.Join(home, "route_raw.txt")); err == nil {
 		t.Fatal("raw configure script should not be called without --raw")
 	}
-	if _, err := os.Stat(filepath.Join(home, "native.yml")); err != nil {
+	rendered, err := os.ReadFile(filepath.Join(home, "native.yml"))
+	if err != nil {
 		t.Fatalf("expected native output file: %v", err)
+	}
+	if !strings.Contains(string(rendered), "home_domain: infra.example.com") {
+		t.Fatalf("native --domain replacement missing:\n%s", rendered)
 	}
 }
 
@@ -598,14 +741,15 @@ func TestStyConfRawFlagUsesRawRoute(t *testing.T) {
 	defer restore()
 
 	home := t.TempDir()
-	if err := writeExecutable(filepath.Join(home, "configure"), "#!/bin/sh\nprintf raw > route_raw.txt\n"); err != nil {
+	if err := writeExecutable(filepath.Join(home, "configure"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > route_raw.txt\n"); err != nil {
 		t.Fatalf("write configure script: %v", err)
 	}
 
 	config.PigstyHome = home
 	pigstyConfRaw = true
+	pigstyConfName = ""
 
-	if err := pigstyConfCmd.RunE(pigstyConfCmd, nil); err != nil {
+	if err := pigstyConfCmd.RunE(pigstyConfCmd, []string{"rich"}); err != nil {
 		t.Fatalf("pig sty conf --raw failed: %v", err)
 	}
 
@@ -613,8 +757,8 @@ func TestStyConfRawFlagUsesRawRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected raw marker file: %v", err)
 	}
-	if strings.TrimSpace(string(got)) != "raw" {
-		t.Fatalf("unexpected raw marker content: %q", string(got))
+	if fields := strings.Fields(string(got)); strings.Join(fields, " ") != "-c rich" {
+		t.Fatalf("raw configure args = %q, want -c rich", string(got))
 	}
 }
 
@@ -634,14 +778,16 @@ func TestStyConfRawStructuredOutputRetainsGeneratedSecrets(t *testing.T) {
 	config.OutputFormat = config.OUTPUT_JSON
 	pigstyConfRaw = true
 	pigstyConfGenerate = true
+	pigstyConfName = ""
 
 	raw := captureStdout(t, func() {
-		if err := pigstyConfCmd.RunE(pigstyConfCmd, nil); err != nil {
+		if err := pigstyConfCmd.RunE(pigstyConfCmd, []string{"rich"}); err != nil {
 			t.Fatal(err)
 		}
 	})
 	for _, expected := range []string{
 		`"kind":"pig.sty.configure.raw/v1"`,
+		`"conf":"rich"`,
 		`"secret_bearing_output":true`,
 		`generated_password=raw-random-secret`,
 	} {
@@ -663,6 +809,7 @@ func saveStyConfState(t *testing.T) func() {
 	origHome := config.PigstyHome
 	origName := pigstyConfName
 	origIP := pigstyConfIP
+	origDomain := pigstyConfDomain
 	origVer := pigstyConfVer
 	origRegion := pigstyConfRegion
 	origOutput := pigstyConfOutput
@@ -678,6 +825,7 @@ func saveStyConfState(t *testing.T) func() {
 		config.PigstyHome = origHome
 		pigstyConfName = origName
 		pigstyConfIP = origIP
+		pigstyConfDomain = origDomain
 		pigstyConfVer = origVer
 		pigstyConfRegion = origRegion
 		pigstyConfOutput = origOutput

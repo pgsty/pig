@@ -24,6 +24,7 @@ var (
 
 	pigstyConfName            string
 	pigstyConfIP              string
+	pigstyConfDomain          string
 	pigstyConfVer             string
 	pigstyConfRegion          string
 	pigstyConfOutput          string
@@ -77,28 +78,35 @@ and controller-side Grafana dashboards.
 
 var styConfigureLong = fmt.Sprintf(`Configure Pigsty through the native Inventory workflow.
 
+MODE selects conf/MODE.yml and is equivalent to --conf MODE. Specify the mode
+either positionally or with --conf, not both.
+
 PostgreSQL major versions: %s (beta: %d). --skip uses the placeholder primary
 IP and skips the admin SSH/sudo preflight; it cannot be combined with --ip.
-Use --raw only for the legacy shell workflow, where generated passwords remain
-visible.
+The native --ip flag accepts up to %d comma-separated IPv4 addresses, replacing
+10.10.10.10 through 10.10.10.19 in order. --domain replaces the exact i.pigsty
+placeholder. Use --raw only for the legacy shell workflow, which supports one
+IP and no custom domain; generated passwords remain visible.
 
 See https://pigsty.io/docs/setup/install/#configure for details.
-`, strings.Join(ext.PostgresActiveVersionStrings(), "|"), ext.PostgresBetaMajorVersion)
+`, strings.Join(ext.PostgresActiveVersionStrings(), "|"), ext.PostgresBetaMajorVersion, stycli.MaxConfigureIPs)
 
 const styConfigureExample = `
   pig sty conf                       # native Go configure path (default)
   pig sty conf --raw                 # raw shell configure path fallback
   pig sty configure                  # same as 'pig sty conf' (alias)
   pig sty conf -g                    # generate with random passwords (RECOMMENDED!)
-  pig sty conf -c rich               # use conf/rich.yml template (with more extensions)
-  pig sty conf -c ha/full            # use conf/ha/full.yml 4-node ha template
-  pig sty conf -c slim               # use conf/slim.yml template (minimal install)
-  pig sty conf -c supabase           # use conf/supabase.yml template (self-hosting)
-  pig sty conf -v 17 -c rich         # use conf/rich.yml template with PostgreSQL 17
+  pig sty conf rich                  # use conf/rich.yml template (with more extensions)
+  pig sty conf ha/full               # use conf/ha/full.yml 4-node ha template
+  pig sty conf slim                  # use conf/slim.yml template (minimal install)
+  pig sty conf supabase              # use conf/supabase.yml template (self-hosting)
+  pig sty conf rich -v 17            # use conf/rich.yml template with PostgreSQL 17
   pig sty conf -r china -s           # use china mirrors and placeholder primary IP
   pig sty conf -m -s                 # mirror mode with admin preflight skipped
   pig sty conf -x                    # write proxy env from environment to config
-  pig sty conf -c full -g -O ha.yml  # full HA template with random passwords to ha.yml
+  pig sty conf ha/trio --ip 10.0.0.10,10.0.0.11,10.0.0.12
+  pig sty conf --domain infra.example.com
+  pig sty conf full -g -O ha.yml     # full HA template with random passwords to ha.yml
 `
 
 var pigstyInitCmd = &cobra.Command{
@@ -177,29 +185,39 @@ https://pigsty.io/docs/setup/offline/#bootstrap for details.`,
 }
 
 var pigstyConfCmd = &cobra.Command{
-	Use:         "conf",
+	Use:         "conf [mode]",
 	Short:       "Configure Pigsty",
-	Annotations: ancsAnn("pig sty conf", "action", "volatile", "unsafe", false, "medium", "recommended", "root", 10000),
+	Annotations: ancsAnn("pig sty conf", "action", "volatile", "unsafe", false, "medium", "recommended", "current", 10000),
 	Aliases:     []string{"c", "configure"},
-	Args:        cobra.NoArgs,
+	Args:        cobra.MaximumNArgs(1),
 	Long:        styConfigureLong,
 	Example:     styConfigureExample,
-	RunE: func(cmd *cobra.Command, _ []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		command := "pig sty conf"
-		if cmd != nil {
-			if called := strings.TrimSpace(cmd.CalledAs()); called != "" {
-				command = "pig sty " + called
-			}
-		}
 		confRegion := pigstyConfRegion
 		if pigstyConfMirror {
 			confRegion = "china"
 		}
+		confMode, err := resolveStyConfigureMode(pigstyConfName, args)
+		if err != nil {
+			return structuredParamError(
+				legacyModuleSty, command, "invalid configuration mode", err.Error(),
+				args, styConfigureParams(confRegion, pigstyConfName),
+			)
+		}
 		if pigstyConfRaw {
-			return runLegacyStructuredKind(legacyModuleSty, command, "pig.sty.configure.raw/v1", nil, styConfigureParams(confRegion), func() error {
+			if strings.Contains(pigstyConfIP, ",") {
+				detail := "multiple --ip addresses are not supported with --raw"
+				return structuredParamError(legacyModuleSty, command, "invalid raw configure options", detail, args, styConfigureParams(confRegion, confMode))
+			}
+			if domain := strings.TrimSpace(pigstyConfDomain); domain != "" && domain != stycli.DefaultConfigureDomain {
+				detail := "--domain is not supported with --raw"
+				return structuredParamError(legacyModuleSty, command, "invalid raw configure options", detail, args, styConfigureParams(confRegion, confMode))
+			}
+			return runLegacyStructuredKind(legacyModuleSty, command, "pig.sty.configure.raw/v1", args, styConfigureParams(confRegion, confMode), func() error {
 				return stycli.ConfigureRaw(stycli.RawConfigureOptions{
 					PigstyHome:     config.PigstyHome,
-					Mode:           pigstyConfName,
+					Mode:           confMode,
 					PrimaryIP:      pigstyConfIP,
 					PGVersion:      pigstyConfVer,
 					Region:         confRegion,
@@ -212,7 +230,7 @@ var pigstyConfCmd = &cobra.Command{
 				})
 			})
 		}
-		return runPigstyConfigureNative(confRegion)
+		return runPigstyConfigureNative(confRegion, confMode)
 	},
 }
 
@@ -396,10 +414,25 @@ func runPigstyGrafanaClean(options stycli.GrafanaOptions) error {
 	return handleAuxResult(pigstyGrafanaCleanExec(options))
 }
 
-func styConfigureParams(region string) map[string]interface{} {
+func resolveStyConfigureMode(flagMode string, args []string) (string, error) {
+	mode := strings.TrimSpace(flagMode)
+	if len(args) > 1 {
+		return "", fmt.Errorf("accepts at most one configuration mode")
+	}
+	if len(args) == 1 {
+		if mode != "" {
+			return "", fmt.Errorf("specify the configuration mode either positionally or with --conf, not both")
+		}
+		mode = strings.TrimSpace(args[0])
+	}
+	return mode, nil
+}
+
+func styConfigureParams(region, mode string) map[string]interface{} {
 	return map[string]interface{}{
-		"conf":                  pigstyConfName,
+		"conf":                  mode,
 		"ip":                    pigstyConfIP,
+		"domain":                pigstyConfDomain,
 		"version":               pigstyConfVer,
 		"region":                region,
 		"mirror":                pigstyConfMirror,
@@ -414,11 +447,12 @@ func styConfigureParams(region string) map[string]interface{} {
 	}
 }
 
-func runPigstyConfigureNative(region string) error {
+func runPigstyConfigureNative(region, mode string) error {
 	opts := stycli.ConfigureOptions{
 		PigstyHome:     config.PigstyHome,
-		Mode:           pigstyConfName,
+		Mode:           mode,
 		PrimaryIP:      pigstyConfIP,
+		Domain:         pigstyConfDomain,
 		PGVersion:      pigstyConfVer,
 		Region:         region,
 		SSHPort:        pigstyConfPort,
@@ -435,8 +469,9 @@ func addStyConfigureFlags(cmd *cobra.Command) {
 	if cmd == nil {
 		return
 	}
-	cmd.Flags().StringVarP(&pigstyConfName, "conf", "c", "", "config template name")
-	cmd.Flags().StringVar(&pigstyConfIP, "ip", "", "primary ip address")
+	cmd.Flags().StringVarP(&pigstyConfName, "conf", "c", "", "config template mode (same as positional mode)")
+	cmd.Flags().StringVar(&pigstyConfIP, "ip", "", fmt.Sprintf("up to %d comma-separated IPv4 addresses", stycli.MaxConfigureIPs))
+	cmd.Flags().StringVar(&pigstyConfDomain, "domain", stycli.DefaultConfigureDomain, "replace the i.pigsty placeholder domain (native only)")
 	cmd.Flags().StringVarP(&pigstyConfVer, "version", "v", "", "postgres major version")
 	cmd.Flags().StringVarP(&pigstyConfRegion, "region", "r", "", "upstream repo region")
 	cmd.Flags().BoolVarP(&pigstyConfMirror, "mirror", "m", false, "same as --region china")

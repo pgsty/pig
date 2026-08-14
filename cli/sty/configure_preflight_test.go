@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"pig/cli/get"
 	"pig/internal/config"
+	"pig/internal/output"
 	"reflect"
 	"strings"
 	"testing"
@@ -210,6 +211,7 @@ func TestDetectRegionFromNetworkConditionUsesSource(t *testing.T) {
 func TestResolvePrimaryIPInteractivePrompt(t *testing.T) {
 	restore := savePreflightHooks()
 	defer restore()
+	t.Setenv("PIG_NON_INTERACTIVE", "")
 
 	goosFn = func() string { return "linux" }
 	localIPv4CandidatesFn = func() []localIPv4Candidate {
@@ -245,6 +247,7 @@ func TestResolvePrimaryIPInteractivePrompt(t *testing.T) {
 func TestResolvePrimaryIPInteractiveSelectionNumber(t *testing.T) {
 	restore := savePreflightHooks()
 	defer restore()
+	t.Setenv("PIG_NON_INTERACTIVE", "")
 
 	goosFn = func() string { return "linux" }
 	localIPv4CandidatesFn = func() []localIPv4Candidate {
@@ -272,9 +275,126 @@ func TestResolvePrimaryIPInteractiveSelectionNumber(t *testing.T) {
 	}
 }
 
+func TestConfigureNativePrintsKnownValuesBeforeIPPrompt(t *testing.T) {
+	restore := savePreflightHooks()
+	defer restore()
+	t.Setenv("PIG_NON_INTERACTIVE", "")
+	originalFormat := config.OutputFormat
+	defer func() { config.OutputFormat = originalFormat }()
+	t.Setenv("NO_COLOR", "1")
+	config.OutputFormat = config.OUTPUT_TEXT
+
+	goosFn = func() string { return "linux" }
+	localIPv4CandidatesFn = func() []localIPv4Candidate {
+		return []localIPv4Candidate{
+			{IP: "10.0.0.2", Interfaces: []string{"eth0"}},
+			{IP: "10.0.0.3", Interfaces: []string{"eth1"}},
+		}
+	}
+	inReader = strings.NewReader("1\n")
+	var errBuf bytes.Buffer
+	errWriter = &errBuf
+	progressWriter = &errBuf
+
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "conf"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	template := `all:
+  vars:
+    admin_ip: 10.10.10.10
+    region: default
+    pg_version: 18
+`
+	if err := os.WriteFile(filepath.Join(home, "conf", "meta.yml"), []byte(template), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := ConfigureNative(ConfigureOptions{
+		PigstyHome:       home,
+		Mode:             "meta",
+		Domain:           "infra.example.com",
+		Region:           "default",
+		DisablePreflight: true,
+	})
+	if result == nil || !result.Success {
+		t.Fatalf("configure failed: %+v", result)
+	}
+	progress := errBuf.String()
+	begin := strings.Index(progress, "configure pigsty")
+	mode := strings.Index(progress, "[ OK ] mode")
+	domain := strings.Index(progress, "[ OK ] domain")
+	candidates := strings.Index(progress, "Multiple IP address candidates found:")
+	prompt := strings.Index(progress, "INPUT primary_ip")
+	if begin < 0 || mode < begin || domain < mode || candidates < domain || prompt < candidates {
+		t.Fatalf("known values were not printed before candidate list and prompt:\n%s", progress)
+	}
+
+	data, ok := result.Data.(*ConfigureData)
+	if !ok {
+		t.Fatalf("configure data type = %T", result.Data)
+	}
+	finalText := data.Text()
+	if strings.Contains(finalText, "configure pigsty") || strings.Contains(finalText, "[ OK ] mode") {
+		t.Fatalf("final output repeated the pre-prompt prelude:\n%s", finalText)
+	}
+	for _, expected := range []string{
+		"[ OK ] primary_ip = 10.0.0.2",
+		"proceed with:",
+		"pig inv edit",
+		"pig sty deploy",
+	} {
+		if !strings.Contains(finalText, expected) {
+			t.Fatalf("final output omitted %q:\n%s", expected, finalText)
+		}
+	}
+}
+
+func TestConfigureNativeStructuredOutputNeverPromptsForIP(t *testing.T) {
+	restore := savePreflightHooks()
+	defer restore()
+	originalFormat := config.OutputFormat
+	defer func() { config.OutputFormat = originalFormat }()
+	t.Setenv("PIG_NON_INTERACTIVE", "")
+	config.OutputFormat = config.OUTPUT_JSON
+
+	goosFn = func() string { return "linux" }
+	localIPv4CandidatesFn = func() []localIPv4Candidate {
+		return []localIPv4Candidate{
+			{IP: "10.0.0.2", Interfaces: []string{"eth0"}},
+			{IP: "10.0.0.3", Interfaces: []string{"eth1"}},
+		}
+	}
+	inReader = strings.NewReader("1\n")
+	var progressBuf bytes.Buffer
+	var errBuf bytes.Buffer
+	progressWriter = &progressBuf
+	errWriter = &errBuf
+
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "conf"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "conf", "meta.yml"), []byte("all:\n  vars:\n    admin_ip: 10.10.10.10\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := ConfigureNative(ConfigureOptions{PigstyHome: home, Mode: "meta", Region: "default", DisablePreflight: true})
+	if result == nil || result.Success || result.Code != output.CodeStyConfigureInvalidArgs {
+		t.Fatalf("structured multi-IP configure result = %+v", result)
+	}
+	if !strings.Contains(result.Message, "specify --ip") {
+		t.Fatalf("structured multi-IP error = %q", result.Message)
+	}
+	if progressBuf.Len() != 0 || errBuf.Len() != 0 {
+		t.Fatalf("structured configure emitted interactive output: stdout=%q stderr=%q", progressBuf.String(), errBuf.String())
+	}
+}
+
 func TestResolvePrimaryIPRejectsInvalidSelectionNumber(t *testing.T) {
 	restore := savePreflightHooks()
 	defer restore()
+	t.Setenv("PIG_NON_INTERACTIVE", "")
 
 	goosFn = func() string { return "linux" }
 	localIPv4CandidatesFn = func() []localIPv4Candidate {
@@ -426,9 +546,14 @@ func TestResolvePrimaryIPBranches(t *testing.T) {
 	localIPv4CandidatesFn = func() []localIPv4Candidate {
 		return []localIPv4Candidate{{IP: "10.0.0.2", Interfaces: []string{"eth0"}}, {IP: defaultPrimaryIP, Interfaces: []string{"eth1"}}}
 	}
+	var demoBuf bytes.Buffer
+	errWriter = &demoBuf
 	ip, warnings, err = resolvePrimaryIP(ConfigureOptions{}, "meta")
 	if err != nil || ip != defaultPrimaryIP || len(warnings) != 0 {
 		t.Fatalf("demo-ip auto selection mismatch: ip=%q warnings=%v err=%v", ip, warnings, err)
+	}
+	if !strings.Contains(demoBuf.String(), "Multiple IP address candidates found:") || !strings.Contains(demoBuf.String(), "AUTO primary_ip") {
+		t.Fatalf("demo-ip auto selection was not explained: %q", demoBuf.String())
 	}
 
 	goosFn = func() string { return "darwin" }
@@ -562,6 +687,7 @@ func savePreflightHooks() func() {
 	origRegionDetect := regionDetectFn
 	origInReader := inReader
 	origErrWriter := errWriter
+	origProgressWriter := progressWriter
 	origGOOS := goosFn
 	origGOARCH := goarchFn
 	origNetworkInterfaces := networkInterfacesFn
@@ -589,6 +715,7 @@ func savePreflightHooks() func() {
 		regionDetectFn = origRegionDetect
 		inReader = origInReader
 		errWriter = origErrWriter
+		progressWriter = origProgressWriter
 		goosFn = origGOOS
 		goarchFn = origGOARCH
 		networkInterfacesFn = origNetworkInterfaces

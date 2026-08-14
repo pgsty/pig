@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"pig/cli/ext"
+	"pig/internal/config"
 	"pig/internal/output"
 	"pig/inventory"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -79,6 +81,103 @@ func TestResolveOutputPath(t *testing.T) {
 	abs := resolveOutputPath(home, "/tmp/bar.yml")
 	if abs != "/tmp/bar.yml" {
 		t.Fatalf("absolute output path mismatch: %q", abs)
+	}
+}
+
+func TestParsePrimaryIPs(t *testing.T) {
+	ten := make([]string, MaxConfigureIPs)
+	for index := range ten {
+		ten[index] = fmt.Sprintf("192.0.2.%d", index+1)
+	}
+	tests := []struct {
+		name    string
+		raw     string
+		want    []string
+		wantErr string
+	}{
+		{name: "single", raw: " 192.0.2.1 ", want: []string{"192.0.2.1"}},
+		{name: "multiple", raw: "192.0.2.1, 192.0.2.2", want: []string{"192.0.2.1", "192.0.2.2"}},
+		{name: "maximum", raw: strings.Join(ten, ","), want: ten},
+		{name: "too many", raw: strings.Join(append(append([]string{}, ten...), "192.0.2.11"), ","), wantErr: "at most 10"},
+		{name: "empty item", raw: "192.0.2.1,,192.0.2.3", wantErr: "position 2"},
+		{name: "duplicate", raw: "192.0.2.1,192.0.2.1", wantErr: "duplicate primary ip at position 2"},
+		{name: "ipv6", raw: "2001:db8::1", wantErr: "position 1"},
+		{name: "invalid", raw: "not-an-ip", wantErr: "position 1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parsePrimaryIPs(tt.raw)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("parsePrimaryIPs(%q) error = %v, want %q", tt.raw, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(got, tt.want) {
+				t.Fatalf("parsePrimaryIPs(%q) = %v, %v; want %v", tt.raw, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeConfigureDomain(t *testing.T) {
+	for _, test := range []struct {
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{want: DefaultConfigureDomain},
+		{input: " infra.example.com ", want: "infra.example.com"},
+		{input: "bad domain", wantErr: true},
+		{input: "-bad.example", wantErr: true},
+		{input: "bad..example", wantErr: true},
+	} {
+		got, err := normalizeConfigureDomain(test.input)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("normalizeConfigureDomain(%q) = %q, want error", test.input, got)
+			}
+			continue
+		}
+		if err != nil || got != test.want {
+			t.Fatalf("normalizeConfigureDomain(%q) = %q, %v; want %q", test.input, got, err, test.want)
+		}
+	}
+}
+
+func TestReplaceConfigurePlaceholders(t *testing.T) {
+	primaryIPs := []string{
+		"10.10.10.11", "192.0.2.11", "192.0.2.12", "192.0.2.13", "192.0.2.14",
+		"192.0.2.15", "192.0.2.16", "192.0.2.17", "192.0.2.18", "192.0.2.19",
+	}
+	content := strings.Join([]string{
+		"ip10=10.10.10.10",
+		"ip11=10.10.10.11",
+		"ip19=10.10.10.19",
+		"ip20=10.10.10.20",
+		"ip100=10.10.10.100",
+		"domain=i.pigsty",
+		"domains=i.pigsty i.pigsty",
+		"other=cli.pigsty i.pigsty.cc",
+	}, "\n")
+	got := replaceConfigurePlaceholders(content, mutationOptions{
+		Mode:       "meta",
+		PrimaryIPs: primaryIPs,
+		Domain:     "infra.example.com",
+	})
+	for _, expected := range []string{
+		"ip10=10.10.10.11",
+		"ip11=192.0.2.11",
+		"ip19=192.0.2.19",
+		"ip20=10.10.10.20",
+		"ip100=10.10.10.100",
+		"domain=infra.example.com",
+		"domains=infra.example.com infra.example.com",
+		"other=cli.pigsty i.pigsty.cc",
+	} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("placeholder replacement omitted %q:\n%s", expected, got)
+		}
 	}
 }
 
@@ -918,6 +1017,94 @@ func TestConfigureNativeEndToEndAbsoluteOutput(t *testing.T) {
 	}
 }
 
+func TestConfigureNativeMultipleIPsAndDomain(t *testing.T) {
+	tmp := t.TempDir()
+	confDir := filepath.Join(tmp, "conf")
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	template := `all:
+  vars:
+    admin_ip: 10.10.10.10
+    second_ip: 10.10.10.11
+    third_ip: 10.10.10.12
+    fourth_ip: 10.10.10.13
+    fifth_ip: 10.10.10.14
+    sixth_ip: 10.10.10.15
+    seventh_ip: 10.10.10.16
+    eighth_ip: 10.10.10.17
+    ninth_ip: 10.10.10.18
+    tenth_ip: 10.10.10.19
+    untouched_ip: 10.10.10.20
+    infra_portal:
+      home: { domain: i.pigsty }
+      other: { domain: cli.pigsty }
+    node_etc_hosts: '${admin_ip} i.pigsty'
+    region: default
+    pg_version: 18
+`
+	if err := os.WriteFile(filepath.Join(confDir, "meta.yml"), []byte(template), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	outPath := filepath.Join(tmp, "multi.yml")
+	locale := false
+	primaryIPs := make([]string, MaxConfigureIPs)
+	for index := range primaryIPs {
+		primaryIPs[index] = fmt.Sprintf("192.0.2.%d", index+10)
+	}
+	result := ConfigureNative(ConfigureOptions{
+		PigstyHome:       tmp,
+		Mode:             "meta",
+		PrimaryIP:        strings.Join(primaryIPs, ","),
+		Domain:           "infra.example.com",
+		Region:           "default",
+		OutputFile:       outPath,
+		CPUCount:         8,
+		LocaleAvailable:  &locale,
+		DisablePreflight: true,
+	})
+	if result == nil || !result.Success {
+		t.Fatalf("expected success result, got: %+v", result)
+	}
+	data, ok := result.Data.(*ConfigureData)
+	if !ok {
+		t.Fatalf("configure data type = %T", result.Data)
+	}
+	if data.PrimaryIP != "192.0.2.10" || !slices.Equal(data.PrimaryIPs, primaryIPs) {
+		t.Fatalf("unexpected reported primary IPs: primary=%q all=%v", data.PrimaryIP, data.PrimaryIPs)
+	}
+	if data.Domain != "infra.example.com" {
+		t.Fatalf("reported domain = %q", data.Domain)
+	}
+
+	rendered, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(rendered)
+	for _, expected := range []string{
+		"admin_ip: 192.0.2.10",
+		"second_ip: 192.0.2.11",
+		"third_ip: 192.0.2.12",
+		"fourth_ip: 192.0.2.13",
+		"fifth_ip: 192.0.2.14",
+		"sixth_ip: 192.0.2.15",
+		"seventh_ip: 192.0.2.16",
+		"eighth_ip: 192.0.2.17",
+		"ninth_ip: 192.0.2.18",
+		"tenth_ip: 192.0.2.19",
+		"untouched_ip: 10.10.10.20",
+		"domain: infra.example.com",
+		"domain: cli.pigsty",
+		"${admin_ip} infra.example.com",
+	} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("configured output omitted %q:\n%s", expected, got)
+		}
+	}
+}
+
 func TestConfigureNativeOutputUsesPrivateFileMode(t *testing.T) {
 	tmp := t.TempDir()
 	confDir := filepath.Join(tmp, "conf")
@@ -1159,33 +1346,101 @@ func TestConfigureNativeRejectTraversalMode(t *testing.T) {
 }
 
 func TestConfigureDataText(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	data := &ConfigureData{
+		Mode:               "meta",
+		TemplatePath:       "/tmp/conf/meta.yml",
+		OutputPath:         "/tmp/pigsty.yml",
+		Region:             "default",
+		PrimaryIP:          "10.10.10.10",
+		SSHPort:            "2222",
+		PGVersion:          "17",
+		EffectivePGVersion: "18",
+		Warnings:           []string{"warn-a"},
+	}
+	text := data.Text()
+	expected := strings.Join([]string{
+		fmt.Sprintf("configure pigsty %s begin", config.PigstyVersion),
+		"[ OK ] mode       = meta",
+		"[ OK ] template   = /tmp/conf/meta.yml",
+		"[ OK ] output     = /tmp/pigsty.yml",
+		"[ OK ] region     = default",
+		"[ OK ] primary_ip = 10.10.10.10",
+		"[ OK ] ssh_port   = 2222",
+		"[ OK ] pg_version = 18",
+		"[WARN] warn-a",
+		"[WARN] don't forget to check it and change passwords!",
+		"proceed with:",
+		"    pig inv edit       # adjust config inventory",
+		"    pig sty deploy     # deploy everything",
+	}, "\n")
+	if text != expected {
+		t.Fatalf("unexpected configure text output:\n%s\nwant:\n%s", text, expected)
+	}
+	if strings.Contains(text, "effective_pg_version") {
+		t.Fatalf("text output leaked structured field name: %s", text)
+	}
+}
+
+func TestConfigureDataTextCustomOutputCommand(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
 	data := &ConfigureData{
 		Mode:         "meta",
 		TemplatePath: "/tmp/conf/meta.yml",
-		OutputPath:   "/tmp/pigsty.yml",
+		OutputPath:   "/tmp/custom inventory.yml",
 		Region:       "default",
 		PrimaryIP:    "10.10.10.10",
-		SSHPort:      "2222",
-		PGVersion:    "18",
-		Warnings:     []string{"warn-a"},
+		PGVersion:    "17",
+	}
+
+	text := data.Text()
+	if !strings.Contains(text, "[ OK ] pg_version = 17") {
+		t.Fatalf("requested pg_version fallback missing:\n%s", text)
+	}
+	expected := strings.Join([]string{
+		"proceed with:",
+		"    pig inv edit -i '/tmp/custom inventory.yml'   # adjust config inventory",
+		"    pig sty deploy -i '/tmp/custom inventory.yml' # deploy everything",
+	}, "\n")
+	if !strings.Contains(text, expected) {
+		t.Fatalf("custom inventory commands missing or unsafe:\n%s", text)
+	}
+}
+
+func TestConfigureDataTextSameBasenameCustomOutput(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	data := &ConfigureData{
+		Mode:              "meta",
+		TemplatePath:      "/srv/pigsty/conf/meta.yml",
+		OutputPath:        "/tmp/staging/pigsty.yml",
+		Region:            "default",
+		PrimaryIP:         defaultPrimaryIP,
+		defaultOutputPath: "/srv/pigsty/pigsty.yml",
 	}
 	text := data.Text()
 	for _, expected := range []string{
-		"configure pigsty",
-		"[ OK ] mode",
-		"/tmp/conf/meta.yml",
-		"/tmp/pigsty.yml",
-		"[ OK ] region",
-		"[ OK ] primary_ip",
-		"[ OK ] ssh_port",
-		"[ OK ] pg_version",
-		"[WARN] warn-a",
-		"[WARN] don't forget to check it and change passwords!",
-		"proceed with ./deploy.yml",
+		"pig inv edit -i /tmp/staging/pigsty.yml",
+		"pig sty deploy -i /tmp/staging/pigsty.yml",
 	} {
 		if !strings.Contains(text, expected) {
-			t.Fatalf("expected %q in text output, got:\n%s", expected, text)
+			t.Fatalf("same-basename custom output omitted %q:\n%s", expected, text)
 		}
+	}
+}
+
+func TestConfigureDataTextOutputDiffersFromActiveInventory(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	data := &ConfigureData{
+		Mode:                "meta",
+		TemplatePath:        "/srv/pigsty/conf/meta.yml",
+		OutputPath:          "/srv/pigsty/pigsty.yml",
+		Region:              "default",
+		PrimaryIP:           defaultPrimaryIP,
+		defaultOutputPath:   "/srv/pigsty/pigsty.yml",
+		activeInventoryPath: "/srv/pigsty/existing.yml",
+	}
+	if text := data.Text(); !strings.Contains(text, "pig sty deploy -i /srv/pigsty/pigsty.yml") {
+		t.Fatalf("next action did not pin the newly generated inventory:\n%s", text)
 	}
 }
 
