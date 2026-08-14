@@ -1,6 +1,7 @@
 package sty
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -81,6 +82,40 @@ func TestResolveOutputPath(t *testing.T) {
 	abs := resolveOutputPath(home, "/tmp/bar.yml")
 	if abs != "/tmp/bar.yml" {
 		t.Fatalf("absolute output path mismatch: %q", abs)
+	}
+}
+
+func TestConfigurePathsSameFile(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "template.yml")
+	if err := os.WriteFile(source, []byte("all: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	same, err := configurePathsSameFile(source, filepath.Join(dir, ".", "template.yml"))
+	if err != nil || !same {
+		t.Fatalf("exact source alias: same=%v err=%v", same, err)
+	}
+
+	hardlink := filepath.Join(dir, "hardlink.yml")
+	if err := os.Link(source, hardlink); err == nil {
+		same, err = configurePathsSameFile(source, hardlink)
+		if err != nil || !same {
+			t.Fatalf("hardlink source alias: same=%v err=%v", same, err)
+		}
+	}
+
+	other := filepath.Join(dir, "other.yml")
+	if err := os.WriteFile(other, []byte("all: { vars: {} }\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	same, err = configurePathsSameFile(source, other)
+	if err != nil || same {
+		t.Fatalf("independent output: same=%v err=%v", same, err)
+	}
+	same, err = configurePathsSameFile(source, filepath.Join(dir, "missing.yml"))
+	if err != nil || same {
+		t.Fatalf("missing output: same=%v err=%v", same, err)
 	}
 }
 
@@ -187,6 +222,29 @@ func TestReplaceConfigurePlaceholders(t *testing.T) {
 	if result.Replacements[0] != (ConfigureIPReplacement{From: "10.10.10.10", To: "10.10.10.11"}) ||
 		result.Replacements[2] != (ConfigureIPReplacement{From: "10.10.10.19", To: "192.0.2.19"}) {
 		t.Fatalf("unexpected replacement mappings: %+v", result.Replacements)
+	}
+}
+
+func TestValidateConfigureIPReplacementPlan(t *testing.T) {
+	content := `all:
+  children:
+    infra:
+      hosts:
+        10.10.10.10: { infra_seq: 1 }
+        10.10.10.11: { infra_seq: 2 }
+        10.10.10.12: { infra_seq: 3 }
+  vars:
+    admin_ip: 10.10.10.10
+`
+	err := validateConfigureIPReplacementPlan(content, "ha/trio", []string{"10.10.10.11"})
+	if err == nil || !strings.Contains(err.Error(), "collides with unreplaced template key 10.10.10.11") {
+		t.Fatalf("expected actionable collision, got %v", err)
+	}
+	if err := validateConfigureIPReplacementPlan(content, "ha/trio", []string{"10.10.10.11", "10.10.10.12", "10.10.10.13"}); err != nil {
+		t.Fatalf("complete placeholder remap should be valid: %v", err)
+	}
+	if err := validateConfigureIPReplacementPlan(content, "ha/trio", []string{"192.0.2.10"}); err != nil {
+		t.Fatalf("non-placeholder address should be valid: %v", err)
 	}
 }
 
@@ -745,6 +803,36 @@ func TestMutateTemplatePasswordGeneration(t *testing.T) {
 	}
 }
 
+func TestMutateTemplatePasswordGenerationRewritesCommentTokens(t *testing.T) {
+	content := `all:
+  vars:
+    backup_secret: S3User.Backup # example: S3User.Backup
+    # minio_users:
+    #   - { access_key: pgbackrest, secret_key: S3User.Backup, policy: pgsql }
+    #   - { access_key: s3user_meta, secret_key: S3User.Meta, policy: meta }
+`
+	got, generated, _, err := mutateTemplate(content, mutationOptions{
+		Mode:             "meta",
+		PrimaryIP:        defaultPrimaryIP,
+		GeneratePassword: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{"S3User.Backup", "S3User.Meta"} {
+		if strings.Contains(got, token) {
+			t.Fatalf("comment retained public token %q:\n%s", token, got)
+		}
+		if !slices.Contains(generated, token) {
+			t.Fatalf("generated identifiers omitted comment token %q: %v", token, generated)
+		}
+	}
+	match := regexp.MustCompile(`(?m)^\s*backup_secret:\s*([A-Za-z0-9]{24})\s+# example: ([A-Za-z0-9]{24})$`).FindStringSubmatch(got)
+	if len(match) != 3 || match[1] != match[2] {
+		t.Fatalf("active value and comment did not share one generated password:\n%s", got)
+	}
+}
+
 func TestMutateTemplateChinaLeavesAbsentMirrorDeclarationsAbsent(t *testing.T) {
 	got, _, _, err := mutateTemplate("all:\n  vars:\n    region: default\n", mutationOptions{Mode: "custom", Region: "china"})
 	if err != nil {
@@ -897,6 +985,49 @@ func TestMutateChinaPigstyCorpusActivatesTemplateKeys(t *testing.T) {
 			}
 			if active := len(after.PathsByKey(key)); active < count {
 				return fmt.Errorf("%s: %s active=%d, want at least %d", relative, key, active, count)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMutatePasswordGenerationPigstyCorpus(t *testing.T) {
+	root := pigstyConfTestRoot(t)
+	tokens := []string{
+		"DBUser.Meta", "DBUser.Viewer", "S3User.Backup", "S3User.Meta",
+		"S3User.Data", "DBUser.Supa", "Vibe.Coding",
+	}
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || strings.ToLower(filepath.Ext(path)) != ".yml" {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		mode := strings.TrimSuffix(filepath.ToSlash(relative), ".yml")
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		got, _, _, err := mutateTemplate(string(source), mutationOptions{
+			Mode: mode, PrimaryIP: defaultPrimaryIP, CPUCount: 8, GeneratePassword: true,
+		})
+		if err != nil {
+			return fmt.Errorf("%s: %w", relative, err)
+		}
+		if _, err := inventory.Parse(path+"#passwords", []byte(got)); err != nil {
+			return fmt.Errorf("%s: generated inventory does not parse: %w", relative, err)
+		}
+		for _, token := range tokens {
+			if strings.Contains(got, token) {
+				return fmt.Errorf("%s: generated inventory retains public token %s", relative, token)
 			}
 		}
 		return nil
@@ -1210,6 +1341,105 @@ func TestConfigureNativeOutputUsesPrivateFileMode(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0600 {
 		t.Fatalf("generated config mode = %04o, want 0600", got)
+	}
+}
+
+func TestConfigureNativeRejectsTemplateAsOutput(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		outputFile func(*testing.T, string, string) string
+	}{
+		{name: "exact path", outputFile: func(_ *testing.T, _, _ string) string { return filepath.Join("conf", "meta.yml") }},
+		{name: "hardlink alias", outputFile: func(t *testing.T, home, templatePath string) string {
+			path := filepath.Join(home, "template-hardlink.yml")
+			if err := os.Link(templatePath, path); err != nil {
+				t.Skipf("hardlink unavailable: %v", err)
+			}
+			return path
+		}},
+		{name: "symlinked parent", outputFile: func(t *testing.T, home, _ string) string {
+			alias := filepath.Join(home, "conf-alias")
+			if err := os.Symlink(filepath.Join(home, "conf"), alias); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+			return filepath.Join(alias, "meta.yml")
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			confDir := filepath.Join(home, "conf")
+			if err := os.MkdirAll(confDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			original := []byte("all:\n  vars:\n    admin_ip: 10.10.10.10\n    region: default\n    pg_version: 18\n")
+			templatePath := filepath.Join(confDir, "meta.yml")
+			if err := os.WriteFile(templatePath, original, 0644); err != nil {
+				t.Fatal(err)
+			}
+			locale := false
+			result := ConfigureNative(ConfigureOptions{
+				PigstyHome:       home,
+				Mode:             "meta",
+				OutputFile:       test.outputFile(t, home, templatePath),
+				Skip:             true,
+				LocaleAvailable:  &locale,
+				DisablePreflight: true,
+			})
+			if result == nil || result.Success || result.Code != output.CodeStyConfigureInvalidArgs {
+				t.Fatalf("expected invalid-argument rejection, got %+v", result)
+			}
+			if !strings.Contains(result.Message, "must not overwrite its source template") {
+				t.Fatalf("unexpected error: %q", result.Message)
+			}
+			got, err := os.ReadFile(templatePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, original) {
+				t.Fatalf("source template changed after rejection:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestConfigureNativeReportsIPCollisionAsInvalidArgument(t *testing.T) {
+	home := t.TempDir()
+	confDir := filepath.Join(home, "conf", "ha")
+	if err := os.MkdirAll(confDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	template := `all:
+  children:
+    infra:
+      hosts:
+        10.10.10.10: { infra_seq: 1 }
+        10.10.10.11: { infra_seq: 2 }
+  vars:
+    admin_ip: 10.10.10.10
+    region: default
+    pg_version: 18
+`
+	if err := os.WriteFile(filepath.Join(confDir, "trio.yml"), []byte(template), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outputPath := filepath.Join(home, "generated.yml")
+	result := ConfigureNative(ConfigureOptions{
+		PigstyHome:       home,
+		Mode:             "ha/trio",
+		PrimaryIP:        "10.10.10.11",
+		Region:           "default",
+		OutputFile:       outputPath,
+		NonInteractive:   true,
+		DisablePreflight: true,
+	})
+	if result == nil || result.Success || result.Code != output.CodeStyConfigureInvalidArgs {
+		t.Fatalf("expected invalid-argument collision, got %+v", result)
+	}
+	if !strings.Contains(result.Message, "collides with unreplaced template key 10.10.10.11") || strings.Contains(result.Message, "failed to parse inventory template") {
+		t.Fatalf("unexpected collision diagnostic: %q", result.Message)
+	}
+	if _, err := os.Stat(outputPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("collision should not create output, stat error=%v", err)
 	}
 }
 
@@ -1587,17 +1817,42 @@ func TestBuildProxyEnv(t *testing.T) {
 }
 
 func TestShouldSetLocale(t *testing.T) {
-	if !shouldSetLocale(0, "meta", false) {
-		t.Fatal("expected locale enabled when pg version is not specified for meta")
+	if !shouldSetLocale(0, false) {
+		t.Fatal("expected locale enabled when effective pg version is not resolved")
 	}
-	if shouldSetLocale(16, "mssql", false) {
-		t.Fatal("expected locale disabled for mssql without locale support")
+	if shouldSetLocale(16, false) {
+		t.Fatal("expected locale disabled for pg16 without locale support")
 	}
-	if !shouldSetLocale(16, "mssql", true) {
+	if !shouldSetLocale(16, true) {
 		t.Fatal("expected locale enabled when locale support exists")
 	}
-	if !shouldSetLocale(17, "polar", false) {
+	if !shouldSetLocale(17, false) {
 		t.Fatal("expected locale enabled for pg>=17")
+	}
+}
+
+func TestMutatePinnedKernelLocaleUsesEffectiveVersion(t *testing.T) {
+	for _, test := range []struct {
+		mode    string
+		version int
+		want    bool
+	}{
+		{mode: "mssql", version: 16, want: false},
+		{mode: "mssql", version: 17, want: true},
+		{mode: "polar", version: 17, want: true},
+	} {
+		t.Run(fmt.Sprintf("%s_pg%d", test.mode, test.version), func(t *testing.T) {
+			content := fmt.Sprintf("all:\n  vars:\n    pg_version: %d\n", test.version)
+			got, _, _, err := mutateTemplate(content, mutationOptions{
+				Mode: test.mode, PrimaryIP: defaultPrimaryIP, LocaleAvailable: false,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if present := strings.Contains(got, "pg_locale: C.UTF-8"); present != test.want {
+				t.Fatalf("locale present=%v, want %v:\n%s", present, test.want, got)
+			}
+		})
 	}
 }
 
@@ -1642,5 +1897,25 @@ func TestRandomPassword(t *testing.T) {
 	}
 	if !matched {
 		t.Fatalf("password contains non-alphanumeric characters: %q", got)
+	}
+}
+
+func TestMutateTemplateDocumentWarnsWhenSingleIPHasNoPlaceholder(t *testing.T) {
+	content := "all:\n  vars:\n    admin_ip: 192.168.5.5\n"
+	result, err := mutateTemplateDocument(content, mutationOptions{Mode: "custom", PrimaryIPs: []string{"10.0.0.50"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.DiscardedIPs) != 1 || result.DiscardedIPs[0] != "10.0.0.50" {
+		t.Fatalf("discarded ips = %v", result.DiscardedIPs)
+	}
+	found := false
+	for _, warning := range result.Warnings {
+		if strings.Contains(warning, "10.0.0.50") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("single discarded --ip produced no warning: %v", result.Warnings)
 	}
 }

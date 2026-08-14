@@ -316,6 +316,14 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 	}
 
 	outputPath := resolveOutputPath(home, opts.OutputFile)
+	sameFile, err := configurePathsSameFile(templatePath, outputPath)
+	if err != nil {
+		return output.Fail(output.CodeStyConfigureWriteFailed, fmt.Sprintf("failed to inspect output path: %v", err))
+	}
+	if sameFile {
+		return output.Fail(output.CodeStyConfigureInvalidArgs,
+			fmt.Sprintf("output file %s must not overwrite its source template %s", outputPath, templatePath))
+	}
 	prelude := &ConfigureData{
 		Mode:               mode,
 		TemplatePath:       templatePath,
@@ -338,6 +346,9 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 
 	primaryIPs, warnings, err := resolvePrimaryIPs(opts, mode, beforePrompt)
 	if err != nil {
+		return output.Fail(output.CodeStyConfigureInvalidArgs, err.Error())
+	}
+	if err := validateConfigureIPReplacementPlan(string(templateBytes), mode, primaryIPs); err != nil {
 		return output.Fail(output.CodeStyConfigureInvalidArgs, err.Error())
 	}
 	primaryIP := primaryIPs[0]
@@ -520,14 +531,6 @@ func previewEffectivePGVersion(content, mode string, requested int) (int, error)
 	return chooseEffectivePGVersion(mode, requested, templateVersion), nil
 }
 
-func resolvePrimaryIP(opts ConfigureOptions, mode string) (string, []string, error) {
-	primaryIPs, warnings, err := resolvePrimaryIPs(opts, mode, nil)
-	if err != nil {
-		return "", warnings, err
-	}
-	return primaryIPs[0], warnings, nil
-}
-
 func resolvePrimaryIPs(opts ConfigureOptions, mode string, beforePrompt func()) ([]string, []string, error) {
 	var warnings []string
 	style := configureTextStyle{color: output.IsColorEnabled()}
@@ -598,6 +601,11 @@ func resolvePrimaryIPs(opts ConfigureOptions, mode string, beforePrompt func()) 
 	fmt.Fprint(errWriter, style.inputPrompt(fmt.Sprintf("INPUT primary_ip candidate number [1-%d] or IPv4 address:", len(candidates))))
 	var input string
 	if _, err := fmt.Fscanln(inReader, &input); err != nil {
+		if errors.Is(err, io.EOF) {
+			// Piped or closed stdin: report the same actionable guidance as
+			// the non-interactive branch instead of a bare EOF read error.
+			return nil, warnings, fmt.Errorf("multiple IP candidates found, specify --ip in non-interactive mode")
+		}
 		return nil, warnings, fmt.Errorf("failed to read primary ip: %w", err)
 	}
 	selected, err := selectPrimaryIP(input, candidates)
@@ -768,6 +776,33 @@ func resolveOutputPath(home, outputFile string) string {
 		return outputFile
 	}
 	return filepath.Join(home, outputFile)
+}
+
+func configurePathsSameFile(sourcePath, outputPath string) (bool, error) {
+	sourceAbs, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return false, err
+	}
+	outputAbs, err := filepath.Abs(outputPath)
+	if err != nil {
+		return false, err
+	}
+	if sourceAbs == outputAbs {
+		return true, nil
+	}
+
+	sourceInfo, err := os.Stat(sourceAbs)
+	if err != nil {
+		return false, err
+	}
+	outputInfo, err := os.Stat(outputAbs)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(sourceInfo, outputInfo), nil
 }
 
 func detectRegion() string {
@@ -1119,10 +1154,6 @@ type templateMutationResult struct {
 
 var configurePlaceholderIP = regexp.MustCompile(`\b10\.10\.10\.[0-9]{1,3}\b`)
 
-func replaceConfigurePlaceholders(content string, opts mutationOptions) string {
-	return replaceConfigurePlaceholdersDetailed(content, opts).Content
-}
-
 type configurePlaceholderResult struct {
 	Content      string
 	Provided     int
@@ -1130,15 +1161,64 @@ type configurePlaceholderResult struct {
 	DiscardedIPs []string
 }
 
-func replaceConfigurePlaceholdersDetailed(content string, opts mutationOptions) configurePlaceholderResult {
+func configureMutationIPs(opts mutationOptions) []string {
 	primaryIPs := opts.PrimaryIPs
 	if len(primaryIPs) == 0 && strings.TrimSpace(opts.PrimaryIP) != "" {
 		primaryIPs = []string{strings.TrimSpace(opts.PrimaryIP)}
 	}
-	result := configurePlaceholderResult{Content: content, Provided: len(primaryIPs)}
 	if len(primaryIPs) > MaxConfigureIPs {
 		primaryIPs = primaryIPs[:MaxConfigureIPs]
 	}
+	return primaryIPs
+}
+
+func validateConfigureIPReplacementPlan(content, mode string, primaryIPs []string) error {
+	if len(primaryIPs) == 0 || strings.HasPrefix(mode, "build/") {
+		return nil
+	}
+	if len(primaryIPs) > MaxConfigureIPs {
+		primaryIPs = primaryIPs[:MaxConfigureIPs]
+	}
+	doc, err := inventory.Parse(mode+".yml", []byte(content))
+	if err != nil {
+		return fmt.Errorf("failed to parse inventory template: %w", err)
+	}
+
+	consumed := make(map[string]struct{}, len(primaryIPs))
+	for index, replacement := range primaryIPs {
+		source := fmt.Sprintf("10.10.10.%d", index+10)
+		if source != replacement {
+			consumed[source] = struct{}{}
+		}
+	}
+	for index, replacement := range primaryIPs {
+		source := fmt.Sprintf("10.10.10.%d", index+10)
+		if source == replacement {
+			continue
+		}
+		if _, replaced := consumed[replacement]; replaced {
+			continue
+		}
+		for _, sourcePath := range doc.PathsByKey(source) {
+			sourceParent, sourceOK := sourcePath.Parent()
+			if !sourceOK {
+				continue
+			}
+			for _, targetPath := range doc.PathsByKey(replacement) {
+				targetParent, targetOK := targetPath.Parent()
+				if targetOK && sourceParent.String() == targetParent.String() {
+					return fmt.Errorf("--ip value at position %d (%s) collides with unreplaced template key %s at %s; provide the complete template IP sequence or choose a different address",
+						index+1, replacement, replacement, targetParent.String())
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func replaceConfigurePlaceholdersDetailed(content string, opts mutationOptions) configurePlaceholderResult {
+	primaryIPs := configureMutationIPs(opts)
+	result := configurePlaceholderResult{Content: content, Provided: len(primaryIPs)}
 	if len(primaryIPs) > 0 && !strings.HasPrefix(opts.Mode, "build/") {
 		matched := make([]bool, len(primaryIPs))
 		result.Content = configurePlaceholderIP.ReplaceAllStringFunc(result.Content, func(placeholder string) string {
@@ -1214,6 +1294,9 @@ func isDomainTokenByte(value byte) bool {
 }
 
 func mutateTemplateDocument(content string, opts mutationOptions) (*templateMutationResult, error) {
+	if err := validateConfigureIPReplacementPlan(content, opts.Mode, configureMutationIPs(opts)); err != nil {
+		return nil, err
+	}
 	placeholderResult := replaceConfigurePlaceholdersDetailed(content, opts)
 	doc, err := inventory.Parse(opts.Mode+".yml", []byte(placeholderResult.Content))
 	if err != nil {
@@ -1222,7 +1305,7 @@ func mutateTemplateDocument(content string, opts mutationOptions) (*templateMuta
 	mutation := doc.Mutate()
 	globals := mutation.AllVars()
 	var warnings []string
-	if placeholderResult.Provided > 1 && len(placeholderResult.DiscardedIPs) > 0 {
+	if len(placeholderResult.DiscardedIPs) > 0 {
 		warnings = append(warnings, fmt.Sprintf(
 			"%d IPs given, only %d replaced; discard: %s",
 			placeholderResult.Provided, len(placeholderResult.Replacements), strings.Join(placeholderResult.DiscardedIPs, ", ")))
@@ -1301,7 +1384,7 @@ func mutateTemplateDocument(content string, opts mutationOptions) (*templateMuta
 		}
 	}
 
-	if shouldSetLocale(effectivePGVersion, opts.Mode, opts.LocaleAvailable) {
+	if shouldSetLocale(effectivePGVersion, opts.LocaleAvailable) {
 		if err := ensureLocaleSettings(mutation); err != nil {
 			return nil, err
 		}
@@ -1515,8 +1598,10 @@ func enableBetaRepoModules(mutation *inventory.Mutation) (bool, error) {
 	return enabled, nil
 }
 
-func shouldSetLocale(pgVersion int, mode string, localeAvailable bool) bool {
-	return (pgVersion == 0 && mode != "mssql" && mode != "polar") || pgVersion >= 17 || localeAvailable
+func shouldSetLocale(effectivePGVersion int, localeAvailable bool) bool {
+	// Pinned kernel modes follow their resolved major. A version flag that was
+	// ignored must not make locale behavior differ from the unflagged command.
+	return effectivePGVersion == 0 || effectivePGVersion >= 17 || localeAvailable
 }
 
 func ensureLocaleSettings(mutation *inventory.Mutation) error {
@@ -1586,7 +1671,7 @@ func replacePasswordsInMutation(mutation *inventory.Mutation) ([]string, error) 
 			return nil, err
 		}
 		count, err := mutation.ReplaceAll(token, pass,
-			inventory.WithLiteralTargets(inventory.LiteralScalars),
+			inventory.WithLiteralTargets(inventory.LiteralScalars|inventory.LiteralComments),
 			inventory.WithIdentifier(token))
 		if err != nil {
 			return nil, err

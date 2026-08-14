@@ -224,7 +224,7 @@ func TestResolvePrimaryIPInteractivePrompt(t *testing.T) {
 	var errBuf bytes.Buffer
 	errWriter = &errBuf
 
-	ip, warnings, err := resolvePrimaryIP(ConfigureOptions{NonInteractive: false}, "meta")
+	ip, warnings, err := resolvePrimaryIPForTest(ConfigureOptions{NonInteractive: false}, "meta")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestResolvePrimaryIPInteractiveSelectionNumber(t *testing.T) {
 	var errBuf bytes.Buffer
 	errWriter = &errBuf
 
-	ip, warnings, err := resolvePrimaryIP(ConfigureOptions{}, "meta")
+	ip, warnings, err := resolvePrimaryIPForTest(ConfigureOptions{}, "meta")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestResolvePrimaryIPRejectsInvalidSelectionNumber(t *testing.T) {
 	inReader = strings.NewReader("3\n")
 	errWriter = io.Discard
 
-	if _, _, err := resolvePrimaryIP(ConfigureOptions{}, "meta"); err == nil || !strings.Contains(err.Error(), "valid range: 1-2") {
+	if _, _, err := resolvePrimaryIPForTest(ConfigureOptions{}, "meta"); err == nil || !strings.Contains(err.Error(), "valid range: 1-2") {
 		t.Fatalf("expected out-of-range selection error, got %v", err)
 	}
 }
@@ -534,20 +534,20 @@ func TestResolvePrimaryIPBranches(t *testing.T) {
 
 	goosFn = func() string { return "linux" }
 
-	ip, warnings, err := resolvePrimaryIP(ConfigureOptions{Skip: true}, "meta")
+	ip, warnings, err := resolvePrimaryIPForTest(ConfigureOptions{Skip: true}, "meta")
 	if err != nil || ip != defaultPrimaryIP || len(warnings) != 0 {
 		t.Fatalf("skip branch mismatch: ip=%q warnings=%v err=%v", ip, warnings, err)
 	}
-	if _, _, err := resolvePrimaryIP(ConfigureOptions{Skip: true, PrimaryIP: "10.0.0.1"}, "meta"); err == nil {
+	if _, _, err := resolvePrimaryIPForTest(ConfigureOptions{Skip: true, PrimaryIP: "10.0.0.1"}, "meta"); err == nil {
 		t.Fatal("expected --skip and --ip conflict")
 	}
 
-	if _, _, err := resolvePrimaryIP(ConfigureOptions{PrimaryIP: "bad-ip"}, "meta"); err == nil {
+	if _, _, err := resolvePrimaryIPForTest(ConfigureOptions{PrimaryIP: "bad-ip"}, "meta"); err == nil {
 		t.Fatal("expected invalid ip error")
 	}
 
 	localIPv4CandidatesFn = func() []localIPv4Candidate { return nil }
-	ip, warnings, err = resolvePrimaryIP(ConfigureOptions{}, "meta")
+	ip, warnings, err = resolvePrimaryIPForTest(ConfigureOptions{}, "meta")
 	if err != nil || ip != defaultPrimaryIP {
 		t.Fatalf("empty probe fallback mismatch: ip=%q err=%v", ip, err)
 	}
@@ -558,7 +558,7 @@ func TestResolvePrimaryIPBranches(t *testing.T) {
 	localIPv4CandidatesFn = func() []localIPv4Candidate {
 		return []localIPv4Candidate{{IP: "10.0.0.5", Interfaces: []string{"eth0"}}}
 	}
-	ip, warnings, err = resolvePrimaryIP(ConfigureOptions{}, "meta")
+	ip, warnings, err = resolvePrimaryIPForTest(ConfigureOptions{}, "meta")
 	if err != nil || ip != "10.0.0.5" || len(warnings) != 0 {
 		t.Fatalf("single ip branch mismatch: ip=%q warnings=%v err=%v", ip, warnings, err)
 	}
@@ -567,7 +567,7 @@ func TestResolvePrimaryIPBranches(t *testing.T) {
 		return []localIPv4Candidate{{IP: "10.0.0.2", Interfaces: []string{"eth0"}}, {IP: "10.0.0.3", Interfaces: []string{"eth1"}}}
 	}
 	errWriter = io.Discard
-	if _, _, err := resolvePrimaryIP(ConfigureOptions{NonInteractive: true}, "meta"); err == nil {
+	if _, _, err := resolvePrimaryIPForTest(ConfigureOptions{NonInteractive: true}, "meta"); err == nil {
 		t.Fatal("expected non-interactive dilemma error for multiple ip candidates")
 	}
 
@@ -576,7 +576,7 @@ func TestResolvePrimaryIPBranches(t *testing.T) {
 	}
 	var demoBuf bytes.Buffer
 	errWriter = &demoBuf
-	ip, warnings, err = resolvePrimaryIP(ConfigureOptions{}, "meta")
+	ip, warnings, err = resolvePrimaryIPForTest(ConfigureOptions{}, "meta")
 	if err != nil || ip != defaultPrimaryIP || len(warnings) != 0 {
 		t.Fatalf("demo-ip auto selection mismatch: ip=%q warnings=%v err=%v", ip, warnings, err)
 	}
@@ -588,7 +588,7 @@ func TestResolvePrimaryIPBranches(t *testing.T) {
 	localIPv4CandidatesFn = func() []localIPv4Candidate {
 		return []localIPv4Candidate{{IP: "192.168.1.10", Interfaces: []string{"en0"}}}
 	}
-	ip, warnings, err = resolvePrimaryIP(ConfigureOptions{}, "meta")
+	ip, warnings, err = resolvePrimaryIPForTest(ConfigureOptions{}, "meta")
 	if err != nil || ip != defaultPrimaryIP {
 		t.Fatalf("darwin fallback mismatch: ip=%q err=%v", ip, err)
 	}
@@ -781,4 +781,30 @@ func containsArg(args []string, value string) bool {
 		}
 	}
 	return false
+}
+
+// resolvePrimaryIPForTest adapts resolvePrimaryIPs to the single-IP signature
+// the older tests were written against.
+func resolvePrimaryIPForTest(opts ConfigureOptions, mode string) (string, []string, error) {
+	primaryIPs, warnings, err := resolvePrimaryIPs(opts, mode, nil)
+	if err != nil {
+		return "", warnings, err
+	}
+	return primaryIPs[0], warnings, nil
+}
+
+func TestResolvePrimaryIPsPipedEOFGivesActionableError(t *testing.T) {
+	restore := savePreflightHooks()
+	defer restore()
+	goosFn = func() string { return "linux" }
+	localIPv4CandidatesFn = func() []localIPv4Candidate {
+		return []localIPv4Candidate{{IP: "10.0.0.2", Interfaces: []string{"eth0"}}, {IP: "10.0.0.3", Interfaces: []string{"eth1"}}}
+	}
+	errWriter = io.Discard
+	inReader = strings.NewReader("")
+
+	_, _, err := resolvePrimaryIPs(ConfigureOptions{}, "meta", nil)
+	if err == nil || !strings.Contains(err.Error(), "specify --ip in non-interactive mode") {
+		t.Fatalf("piped EOF error = %v", err)
+	}
 }
