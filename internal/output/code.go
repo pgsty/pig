@@ -277,7 +277,7 @@ const (
 	CodeStyCheckResourceMissing        = MODULE_STY + CAT_RESOURCE + 3   // Pigsty home or required project layout is unavailable
 	CodeStyGrafanaResourceMissing      = MODULE_STY + CAT_RESOURCE + 4   // Grafana dashboard path or dump destination is unavailable
 	CodeStyBootstrapResourceMissing    = MODULE_STY + CAT_RESOURCE + 5   // A native Bootstrap package-manager or source resource is unavailable
-	CodeStyConfigureResourceMissing    = MODULE_STY + CAT_RESOURCE + 6   // Pigsty home or raw configure script is unavailable
+	CodeStyConfigureResourceMissing    = MODULE_STY + CAT_RESOURCE + 6   // Pigsty home or configure template is unavailable
 	CodeStyDeployResourceMissing       = MODULE_STY + CAT_RESOURCE + 7   // Pigsty home, inventory, or playbook is unavailable
 	CodeStyInventoryInvalid            = MODULE_STY + CAT_CONFIG + 1     // Inventory YAML or semantics are invalid
 	CodeStyValidationFailed            = MODULE_STY + CAT_CONFIG + 2     // Inventory validation reported diagnostics
@@ -303,7 +303,6 @@ const (
 	CodeStyCMDBOutputFailed            = MODULE_STY + CAT_OPERATION + 11 // Private CMDB output could not be committed
 	CodeStyInitFailed                  = MODULE_STY + CAT_OPERATION + 12 // Pigsty source download, staging, or commit failed
 	CodeStyBootstrapFailed             = MODULE_STY + CAT_OPERATION + 13 // Pigsty bootstrap execution failed
-	CodeStyRawConfigureFailed          = MODULE_STY + CAT_OPERATION + 14 // Legacy raw configure execution failed
 	CodeStyReleaseDownloadFailed       = MODULE_STY + CAT_OPERATION + 15 // Pigsty release download failed
 	CodeStyDeployFailed                = MODULE_STY + CAT_OPERATION + 16 // ansible-playbook execution failed
 	CodeStyGrafanaConfirmationRequired = MODULE_STY + CAT_CONFIRM + 1    // Grafana deletion requires explicit confirmation

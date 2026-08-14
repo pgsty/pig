@@ -65,9 +65,6 @@ func TestLifecycleVersionConflictsHaveStableParameterCodes(t *testing.T) {
 }
 
 func TestLifecycleResourceAndDependencyCodes(t *testing.T) {
-	if err := ConfigureRaw(RawConfigureOptions{}); lifecycleStatusCode(err) != output.CodeStyConfigureResourceMissing {
-		t.Fatalf("ConfigureRaw error = %v", err)
-	}
 	t.Setenv("PATH", t.TempDir())
 	if err := Deploy(DeployOptions{}); lifecycleStatusCode(err) != output.CodeStyDeployDependencyMissing {
 		t.Fatalf("Deploy error = %v", err)
@@ -76,15 +73,6 @@ func TestLifecycleResourceAndDependencyCodes(t *testing.T) {
 
 func TestLifecycleCommandsRunInHomeWithoutChangingProcessDirectory(t *testing.T) {
 	home := t.TempDir()
-	writeScript := func(name string) {
-		t.Helper()
-		body := "#!/bin/sh\npwd > " + name + ".cwd\n"
-		if err := os.WriteFile(filepath.Join(home, name), []byte(body), 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	writeScript("configure")
-
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "ansible-playbook"), []byte("#!/bin/sh\npwd > deploy.cwd\n"), 0755); err != nil {
 		t.Fatal(err)
@@ -104,7 +92,6 @@ func TestLifecycleCommandsRunInHomeWithoutChangingProcessDirectory(t *testing.T)
 		name string
 		run  func() error
 	}{
-		{name: "configure", run: func() error { return ConfigureRaw(RawConfigureOptions{PigstyHome: home}) }},
 		{name: "deploy", run: func() error {
 			return Deploy(DeployOptions{PigstyHome: home, PigstyConfig: filepath.Join(home, "pigsty.yml")})
 		}},
