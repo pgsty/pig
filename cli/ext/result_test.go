@@ -686,6 +686,54 @@ func TestListExtensionsWithExtensions(t *testing.T) {
 	}
 }
 
+func TestListExtensionsClassifiesPackageOnlySQLUtility(t *testing.T) {
+	origCatalog := Catalog
+	origShowPkg := ShowPkg
+	defer func() {
+		Catalog = origCatalog
+		ShowPkg = origShowPkg
+	}()
+
+	extension := &Extension{Name: "example", Pkg: "example", Lead: true, NeedDDL: true}
+	utility := &Extension{
+		Name:  "pg_relation_sql",
+		Pkg:   "pg_relation_sql",
+		Lead:  true,
+		Extra: map[string]interface{}{"type": "puresql"},
+	}
+	Catalog = &ExtensionCatalog{
+		Extensions: []*Extension{extension, utility},
+		ExtNameMap: map[string]*Extension{extension.Name: extension, utility.Name: utility},
+		ExtPkgMap:  map[string]*Extension{extension.Pkg: extension, utility.Pkg: utility},
+	}
+
+	ShowPkg = false
+	result := ListExtensions("", 0)
+	data, ok := result.Data.(*ExtensionListData)
+	if !ok {
+		t.Fatalf("expected *ExtensionListData, got %T", result.Data)
+	}
+	if data.Count != 1 || data.Extensions[0].Name != "example" {
+		t.Fatalf("default extension list = %#v, want only example", data.Extensions)
+	}
+	if Catalog.ExtensionCount() != 1 {
+		t.Fatalf("ExtensionCount() = %d, want 1", Catalog.ExtensionCount())
+	}
+
+	result = ListExtensions("pg_relation_sql", 0)
+	data, ok = result.Data.(*ExtensionListData)
+	if !ok || data.Count != 1 || data.Extensions[0].Name != "pg_relation_sql" {
+		t.Fatalf("explicit utility lookup = %#v, want pg_relation_sql", result.Data)
+	}
+
+	ShowPkg = true
+	result = ListExtensions("", 0)
+	data, ok = result.Data.(*ExtensionListData)
+	if !ok || data.Count != 2 {
+		t.Fatalf("package list count = %#v, want 2", result.Data)
+	}
+}
+
 func TestGetExtensionInfoSuccess(t *testing.T) {
 	// Save and restore
 	origCatalog := Catalog

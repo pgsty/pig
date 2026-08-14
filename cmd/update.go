@@ -26,7 +26,7 @@ var updateCmd = &cobra.Command{
   
   pig update 				    # update pig to the latest version
   pig update [-v version]       # update pig to given version
-	  pig update -v 1.7.0 		    # update pig to version 1.7.0
+  pig update -v 1.8.0 		    # update pig to version 1.8.0
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		effectiveRegion := updateRegion
@@ -50,7 +50,7 @@ var updateCmd = &cobra.Command{
 var updateExec = get.UpdatePig
 
 func init() {
-	updateCmd.Flags().StringVarP(&updateVersion, "version", "v", "", "pigsty version to update to")
+	updateCmd.Flags().StringVarP(&updateVersion, "version", "v", "", "pig version to update to")
 	updateCmd.Flags().StringVarP(&updateRegion, "region", "r", "", "pigsty region (default,china,...)")
 	updateCmd.Flags().BoolVarP(&updateMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 }

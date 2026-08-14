@@ -410,7 +410,7 @@ func (d *ExtensionAvailData) textGlobalAvailability() string {
 
 		osName := osFullName(osCode, arch)
 		sb.WriteString(fmt.Sprintf("\nExtension Availability on %s : https://pigsty.io/ext/os/%s\n", osName, osName))
-		sb.WriteString(fmt.Sprintf("Showing %d packages with %d extensions  %s\n\n", len(packages), len(Catalog.Extensions), colorLegend()))
+		sb.WriteString(fmt.Sprintf("Showing %d packages with %d extensions  %s\n\n", len(packages), Catalog.ExtensionCount(), colorLegend()))
 
 		sort.Slice(packages, func(i, j int) bool {
 			return packages[i].ID < packages[j].ID

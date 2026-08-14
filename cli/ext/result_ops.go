@@ -19,7 +19,10 @@ func ListExtensions(query string, pgVer int) *output.Result {
 		return output.Fail(output.CodeExtensionCatalogError, "extension catalog not initialized")
 	}
 
-	results := Catalog.Extensions
+	results := Catalog.PostgreSQLExtensions()
+	if ShowPkg {
+		results = Catalog.Extensions
+	}
 	if query != "" {
 		results = SearchExtensions(query, Catalog.Extensions)
 	}
@@ -46,9 +49,13 @@ func ListExtensions(query string, pgVer int) *output.Result {
 		Extensions: extensions,
 	}
 
-	message := fmt.Sprintf("Found %d extensions", data.Count)
+	noun := "extensions"
+	if ShowPkg {
+		noun = "packages"
+	}
+	message := fmt.Sprintf("Found %d %s", data.Count, noun)
 	if query != "" {
-		message = fmt.Sprintf("Found %d extensions matching '%s'", data.Count, query)
+		message = fmt.Sprintf("Found %d %s matching '%s'", data.Count, noun, query)
 	}
 
 	return output.OK(message, data)

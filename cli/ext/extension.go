@@ -56,6 +56,21 @@ type Extension struct {
 	Mtime       string                 `csv:"mtime"`       // Last modify time
 }
 
+// IsPostgreSQLExtension reports whether this catalog record represents an
+// extension installed into PostgreSQL, rather than a package-only utility.
+// Package-only records stay resolvable by name and package, but do not count
+// toward the public PostgreSQL extension total.
+func (e *Extension) IsPostgreSQLExtension() bool {
+	if e == nil {
+		return false
+	}
+	if e.Contrib || e.HasBin || e.HasLib || e.NeedDDL || e.NeedLoad {
+		return true
+	}
+	kind, _ := e.Extra["type"].(string)
+	return !strings.EqualFold(kind, "puresql")
+}
+
 // SummaryURL returns the URL to the Pigsty extension catalog summary page
 func (e *Extension) SummaryURL() string {
 	return fmt.Sprintf("https://pigsty.io/ext/e/%s", e.Name)

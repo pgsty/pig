@@ -23,7 +23,7 @@ func ReloadCatalogResult(mirror ...bool) *output.Result {
 		if err := ec.Load(content); err != nil {
 			return fmt.Errorf("failed to validate extension catalog: %w", err)
 		}
-		extNum = len(ec.Extensions)
+		extNum = ec.ExtensionCount()
 		return nil
 	}
 

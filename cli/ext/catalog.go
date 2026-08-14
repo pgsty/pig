@@ -140,6 +140,37 @@ func (ec *ExtensionCatalog) Load(data []byte) error {
 	return nil
 }
 
+// PostgreSQLExtensions returns catalog records that represent PostgreSQL
+// extensions. Package-only utilities remain in Extensions and the lookup maps
+// so package resolution and explicit searches continue to work.
+func (ec *ExtensionCatalog) PostgreSQLExtensions() []*Extension {
+	if ec == nil {
+		return nil
+	}
+	extensions := make([]*Extension, 0, len(ec.Extensions))
+	for _, ext := range ec.Extensions {
+		if ext.IsPostgreSQLExtension() {
+			extensions = append(extensions, ext)
+		}
+	}
+	return extensions
+}
+
+// ExtensionCount returns the semantic PostgreSQL extension count, excluding
+// package-only utility records retained in the catalog.
+func (ec *ExtensionCatalog) ExtensionCount() int {
+	if ec == nil {
+		return 0
+	}
+	count := 0
+	for _, ext := range ec.Extensions {
+		if ext.IsPostgreSQLExtension() {
+			count++
+		}
+	}
+	return count
+}
+
 const (
 	ansibleComboEL7  = "ansible sshpass"
 	ansibleComboEL8  = "ansible sshpass python3.12-jmespath python3-cryptography"

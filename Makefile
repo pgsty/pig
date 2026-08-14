@@ -3,8 +3,9 @@
 # Mtime     :   2026-08-14
 # Copyright (C) 2018-2026 Ruohang Feng
 #==============================================================#
-VERSION=v1.7.0
+VERSION=v1.8.0
 PIG_VERSION:=$(patsubst v%,%,$(VERSION))
+PIGSTY_VERSION:=4.5.0
 GORELEASER_VERSION:=v2.17.1
 GORELEASER:=go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
 
@@ -16,6 +17,7 @@ GO_VERSION=$(shell go version | awk '{print $$3}')
 
 # LD Flags for injecting build-time variables
 LD_FLAGS=-X 'pig/internal/config.PigVersion=$(PIG_VERSION)' \
+        -X 'pig/internal/config.PigstyVersion=$(PIGSTY_VERSION)' \
         -X 'pig/internal/config.Branch=$(BRANCH)' \
         -X 'pig/internal/config.Revision=$(REVISION)' \
         -X 'pig/internal/config.BuildDate=$(BUILD_DATE)' \
@@ -79,7 +81,7 @@ release-new: gr-release
 ###############################################################
 u: upload
 upload:
-	bin/upload.sh
+	bin/upload.sh $(VERSION)
 tag:
 	git tag -d $(VERSION) || true
 	git tag $(VERSION)
