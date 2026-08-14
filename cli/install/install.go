@@ -134,6 +134,9 @@ func InstallPackagesWithOptions(pgVer int, names []string, opts PackageOptions) 
 // its transaction so dnf/yum query tooling requested in the same package set is
 // available even on a minimal host.
 func verifyLocalPackagesAvailable(manager string, packages []string, opts PackageOptions) error {
+	if config.OSType == config.DistroEL {
+		return verifyELLocalPackagesAvailable(manager, packages)
+	}
 	var name string
 	var args []string
 	switch config.OSType {
@@ -146,14 +149,6 @@ func verifyLocalPackagesAvailable(manager string, packages []string, opts Packag
 			"-o", "Dir::Etc::sourcelist=" + opts.APTSourceList,
 			"-o", "Dir::Etc::sourceparts=-",
 			"madison",
-		}
-	case config.DistroEL:
-		if manager == "yum" {
-			name = "repoquery"
-			args = []string{"--repoid=pigsty-local", "--qf=%{name}"}
-		} else {
-			name = manager
-			args = []string{"--disablerepo=*", "--enablerepo=pigsty-local", "repoquery", "--available", "--qf=%{name}"}
 		}
 	default:
 		return fmt.Errorf("unsupported OS type: %s", config.OSType)
@@ -181,6 +176,33 @@ func verifyLocalPackagesAvailable(manager string, packages []string, opts Packag
 	missing := make([]string, 0)
 	for _, pkg := range packages {
 		if !available[pkg] {
+			missing = append(missing, pkg)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("local repository does not provide required packages: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func verifyELLocalPackagesAvailable(manager string, packages []string) error {
+	missing := make([]string, 0)
+	for _, pkg := range packages {
+		name := manager
+		args := []string{"-q", "--disablerepo=*", "--enablerepo=pigsty-local", "repoquery", "--available", "--whatprovides", pkg, "--qf=%{name}"}
+		if manager == "yum" {
+			name = "repoquery"
+			args = []string{"--repoid=pigsty-local", "--whatprovides", pkg, "--qf=%{name}"}
+		}
+		output, err := runPackageQuery(name, args...)
+		if err != nil {
+			detail := strings.TrimSpace(string(output))
+			if detail == "" {
+				return fmt.Errorf("failed to query local repository provider for %s: %w", pkg, err)
+			}
+			return fmt.Errorf("failed to query local repository provider for %s: %w: %s", pkg, err, detail)
+		}
+		if strings.TrimSpace(string(output)) == "" {
 			missing = append(missing, pkg)
 		}
 	}

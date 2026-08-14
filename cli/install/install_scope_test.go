@@ -24,11 +24,11 @@ func TestInstallPackagesLocalScope(t *testing.T) {
 		return nil
 	}
 	var queryName string
-	var queryArgs []string
+	var queryCalls [][]string
 	runPackageQuery = func(name string, args ...string) ([]byte, error) {
-		queryName, queryArgs = name, append([]string(nil), args...)
-		start := slices.Index(args, "--qf=%{name}") + 1
-		return []byte(strings.Join(args[start:], "\n")), nil
+		queryName = name
+		queryCalls = append(queryCalls, append([]string(nil), args...))
+		return []byte("provider\n"), nil
 	}
 	config.OSType, config.OSCode, config.OSVersion = config.DistroEL, "el10", "10"
 	if err := InstallPackagesWithOptions(0, []string{"node-bootstrap"}, PackageOptions{Yes: true, LocalOnly: true}); err != nil {
@@ -50,10 +50,42 @@ func TestInstallPackagesLocalScope(t *testing.T) {
 	if queryName != "dnf" {
 		t.Fatalf("local query command = %q", queryName)
 	}
-	for _, want := range []string{"--disablerepo=*", "--enablerepo=pigsty-local", "repoquery", "--available", "ansible"} {
-		if !slices.Contains(queryArgs, want) {
-			t.Fatalf("local query argv missing %q: %v", want, queryArgs)
+	if len(queryCalls) == 0 {
+		t.Fatal("local package provider query was not called")
+	}
+	for _, queryArgs := range queryCalls {
+		for _, want := range []string{"--disablerepo=*", "--enablerepo=pigsty-local", "repoquery", "--available", "--whatprovides"} {
+			if !slices.Contains(queryArgs, want) {
+				t.Fatalf("local query argv missing %q: %v", want, queryArgs)
+			}
 		}
+	}
+}
+
+func TestVerifyLocalPackagesAvailableAcceptsELProviders(t *testing.T) {
+	origQuery := runPackageQuery
+	origType := config.OSType
+	t.Cleanup(func() {
+		runPackageQuery = origQuery
+		config.OSType = origType
+	})
+	config.OSType = config.DistroEL
+	providers := map[string]string{"python3": "python36\n", "dnf-utils": "yum-utils\n"}
+	runPackageQuery = func(name string, args ...string) ([]byte, error) {
+		if name != "dnf" || !slices.Contains(args, "--whatprovides") {
+			t.Fatalf("EL provider query = %s %v", name, args)
+		}
+		idx := slices.Index(args, "--whatprovides")
+		if idx < 0 || idx+1 >= len(args) {
+			t.Fatalf("EL provider query omitted capability: %v", args)
+		}
+		return []byte(providers[args[idx+1]]), nil
+	}
+	if err := verifyLocalPackagesAvailable("dnf", []string{"python3", "dnf-utils"}, PackageOptions{LocalOnly: true}); err != nil {
+		t.Fatalf("provider-backed EL packages were rejected: %v", err)
+	}
+	if err := verifyLocalPackagesAvailable("dnf", []string{"missing"}, PackageOptions{LocalOnly: true}); err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("missing EL capability result = %v", err)
 	}
 }
 
