@@ -25,11 +25,11 @@ var (
 // repoCmd represents the top-level `repo` command
 var repoCmd = &cobra.Command{
 	Use:         "repo",
-	Short:       "Manage Linux Software Repo (apt/dnf)",
+	Short:       "Manage Linux software repositories",
 	Aliases:     []string{"r"},
 	GroupID:     "pgext",
 	Annotations: ancsAnn("pig repo", "query", "stable", "safe", true, "safe", "none", "current", 100),
-	Long: `pig repo - Manage Linux APT/YUM Repo
+	Long: `pig repo - Manage Linux APT/RPM Repositories
 
   pig repo list                    # available repo list             (info)
   pig repo info   [repo|module...] # show repo info                  (info)
@@ -179,7 +179,7 @@ var repoUpdateCmd = &cobra.Command{
 	Annotations:  ancsAnn("pig repo update", "action", "volatile", "safe", true, "safe", "none", "root", 10000),
 	Args:         cobra.NoArgs,
 	Example: `
-  pig repo update                  # yum makecache or apt update
+  pig repo update                  # dnf makecache (yum on EL7) or apt-get update
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := repo.UpdateCache()

@@ -153,6 +153,7 @@ const (
 	nodeBootstrapComboEL10 = "ansible python3 python3-requests python3-jmespath python3-cryptography dnf-utils sow sshpass crypto-policies-scripts"
 	nodeBootstrapComboD12  = "ansible python3 python3-requests python3-jmespath sow sshpass tnftp linux-perf"
 	nodeBootstrapComboU22  = "ansible python3 python3-requests python3-jmespath sow sshpass ftp linux-tools-generic"
+	nodeComboEL7           = "audit bash bind-utils bzip2 ca-certificates chkconfig chrony cronie etcd git grubby haproxy htop iotop ipvsadm jq keepalived lsof lz4 make ncdu net-tools node-exporter numactl nvme-cli openssh-clients openssh-server openssl patch pig pv python3 readline rsync socat sysstat tcpdump telnet tuned unzip uv vector vim-minimal wget yum zlib"
 )
 
 // OSAliasOverride contains package name overrides for specific OS code combinations
@@ -162,6 +163,7 @@ var OSAliasOverride = map[string]map[string]string{
 		"java-runtime":   "java-11-openjdk-src java-11-openjdk-headless",
 		"ansible":        ansibleComboEL7,
 		"node-bootstrap": nodeBootstrapComboEL7,
+		"node":           nodeComboEL7,
 		"kube-runtime":   "containerd.io cri-dockerd",
 		"oriole":         "",
 	},
@@ -278,7 +280,7 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"mysql":               "mysql-community-server mysql-community-client mysql-shell mysql-router-community percona-xtrabackup-84 mysqld-exporter",
 			"kube-runtime":        "containerd.io",
 			"kubernetes":          "kubeadm kubelet kubectl",
-			"node":                "audit bash bind-utils bzip2 ca-certificates chkconfig chrony cronie etcd git grubby haproxy htop iotop ipvsadm jq keepalived lsof lz4 make ncdu net-tools node-exporter numactl nvme-cli openssh-clients openssh-server openssl patch pig pv python3 readline rsync socat sysstat tcpdump telnet tuned unzip uv vector vim-minimal wget yum zlib",
+			"node":                "audit bash bind-utils bzip2 ca-certificates chkconfig chrony cronie dnf etcd git grubby haproxy htop iotop ipvsadm jq keepalived lsof lz4 make ncdu net-tools node-exporter numactl nvme-cli openssh-clients openssh-server openssl patch pig pv python3 readline rsync socat sysstat tcpdump telnet tuned unzip uv vector vim-minimal wget zlib",
 			"infra":               "alertmanager ansible blackbox-exporter certbot dnsmasq etcd grafana grafana-plugins grafana-victorialogs-ds grafana-victoriametrics-ds mcli nginx nginx-exporter node-exporter pev2 pg-exporter python3-certbot-nginx python3-requests redis restic victoria-logs victoria-metrics victoria-traces vlogscli vmutils",
 			"infra-extra":         "victoria-metrics victoria-metrics-cluster vmutils grafana-victoriametrics-ds victoria-logs vlogscli vlagent victoria-traces grafana-victorialogs-ds rclone mysqld-exporter mongodb-exporter kafka-exporter",
 			"clickhouse":          "clickhouse-server clickhouse-client clickhouse-common-static",

@@ -164,7 +164,7 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 	return output.OK(message, data)
 }
 
-// DownloadRPM downloads RPM packages with repotrack
+// DownloadRPM downloads RPM packages and dependencies with dnf (repotrack on EL7).
 func DownloadRPM(pkgNames []string, workDir string) ([]string, error) {
 	osarch := config.OSArch
 	switch osarch {
@@ -174,7 +174,10 @@ func DownloadRPM(pkgNames []string, workDir string) ([]string, error) {
 		osarch = "aarch64,noarch"
 	}
 
-	downloadCmds := []string{"repotrack", "--arch", osarch}
+	downloadCmds := []string{"dnf", "download", "--resolve", "--alldeps", "--arch", osarch}
+	if config.OSMajor == 7 {
+		downloadCmds = []string{"repotrack", "--arch", osarch}
+	}
 	downloadCmds = append(downloadCmds, pkgNames...)
 	logrus.Infof("download commands: %s", strings.Join(downloadCmds, " "))
 	if err := sudoCommandInDir(downloadCmds, workDir); err != nil {
@@ -336,14 +339,18 @@ func sudoCommandInDir(args []string, workDir string) error {
 func validateTool() error {
 	switch config.OSType {
 	case config.DistroEL:
-		// check repotrack in path, if not, hint to install it
-		if _, err := exec.LookPath("repotrack"); err != nil {
-			logrus.Warnf("repotrack is required to download el rpm, install with: yum install -y yum-utils")
-			return fmt.Errorf("repotrack not found, please install yum-utils: %w", err)
-		} else {
+		if config.OSMajor == 7 {
+			if _, err := exec.LookPath("repotrack"); err != nil {
+				return fmt.Errorf("repotrack not found, please install yum-utils: %w", err)
+			}
 			logrus.Debugf("repotrack (yum-utils) is installed")
 			return nil
 		}
+		if _, err := exec.LookPath("dnf"); err != nil {
+			return fmt.Errorf("dnf not found: %w", err)
+		}
+		logrus.Debugf("dnf is installed")
+		return nil
 	case config.DistroDEB:
 		if _, err := exec.LookPath("apt-get"); err != nil {
 			logrus.Warnf("apt-get is required to download deb package")

@@ -178,15 +178,20 @@ done < "$1" > "$SCRIPT_TEST_LOG"
 
 func TestCreateRepoFailsWithoutAnyBackend(t *testing.T) {
 	tests := []struct {
-		name   string
-		create func(string) error
-		want   string
+		name    string
+		create  func(string) error
+		osMajor int
+		want    []string
 	}{
-		{name: "el", create: CreateRepoEL, want: "createrepo_c"},
-		{name: "deb", create: CreateRepoDEB, want: "dpkg-scanpackages"},
+		{name: "el7", create: CreateRepoEL, osMajor: 7, want: []string{"createrepo_c", "yum install"}},
+		{name: "el9", create: CreateRepoEL, osMajor: 9, want: []string{"createrepo_c", "dnf install"}},
+		{name: "deb", create: CreateRepoDEB, want: []string{"dpkg-scanpackages"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			oldMajor := config.OSMajor
+			config.OSMajor = tt.osMajor
+			t.Cleanup(func() { config.OSMajor = oldMajor })
 			t.Setenv("PATH", t.TempDir())
 			t.Setenv("PIG_NO_SUDO", "1")
 
@@ -194,7 +199,7 @@ func TestCreateRepoFailsWithoutAnyBackend(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected missing repository backend error")
 			}
-			for _, want := range []string{"sow", tt.want} {
+			for _, want := range append([]string{"sow"}, tt.want...) {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("error = %q, want %q", err, want)
 				}

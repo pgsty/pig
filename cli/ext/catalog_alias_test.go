@@ -90,6 +90,39 @@ func TestNodeBootstrapUsesSowWithoutLegacyRepoTools(t *testing.T) {
 	}
 }
 
+func TestELAliasesDoNotInstallYum(t *testing.T) {
+	for _, osCode := range []string{"el8", "el9", "el10"} {
+		t.Run(osCode, func(t *testing.T) {
+			cleanup := withAliasMapTestEnv(t, config.DistroEL, osCode, "amd64")
+			defer cleanup()
+
+			ec := &ExtensionCatalog{}
+			ec.LoadAliasMap(config.OSType)
+			for _, alias := range []string{"node", "node-bootstrap"} {
+				packages := " " + ec.AliasMap[alias] + " "
+				if strings.Contains(packages, " yum ") {
+					t.Fatalf("%s %s alias still installs yum: %q", osCode, alias, ec.AliasMap[alias])
+				}
+			}
+		})
+	}
+}
+
+func TestEL7NodeAliasKeepsYum(t *testing.T) {
+	cleanup := withAliasMapTestEnv(t, config.DistroEL, "el7", "amd64")
+	defer cleanup()
+
+	ec := &ExtensionCatalog{}
+	ec.LoadAliasMap(config.OSType)
+	packages := " " + ec.AliasMap["node"] + " "
+	if !strings.Contains(packages, " yum ") {
+		t.Fatalf("el7 node alias does not install yum: %q", ec.AliasMap["node"])
+	}
+	if strings.Contains(packages, " dnf ") {
+		t.Fatalf("el7 node alias unexpectedly installs dnf: %q", ec.AliasMap["node"])
+	}
+}
+
 func TestLoadAliasMapNormalizesLegacyInfraPackageNames(t *testing.T) {
 	legacy := map[string]string{
 		"blackbox_exporter":   "blackbox-exporter",

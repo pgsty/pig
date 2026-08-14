@@ -22,6 +22,21 @@ func installFakePackageManager(t *testing.T, cmdName string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+func installRecordingPackageManager(t *testing.T, cmdName, argsFile string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	cmdPath := filepath.Join(dir, cmdName)
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PIG_TEST_ARGS_FILE\"\n"
+	if err := os.WriteFile(cmdPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to create recording %s command: %v", cmdName, err)
+	}
+
+	t.Setenv("PIG_NO_SUDO", "1")
+	t.Setenv("PIG_TEST_ARGS_FILE", argsFile)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 func setupAliasPackageOpEnv(t *testing.T) func() {
 	t.Helper()
 

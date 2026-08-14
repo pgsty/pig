@@ -125,8 +125,8 @@ requires interactive EULA acceptance or --accept-eula.`,
   pig sty init -f                # install and OVERWRITE existing pigsty dir
   pig sty init -m                # install from mirror source
   pig sty init -p /tmp/pigsty    # install to another location /tmp/pigsty
-  pig sty init -v 3.4            # get & install specific version v3.4.1
-  pig sty init 3                 # get & install specific version v3 latest
+  pig sty init -v 4.5            # get & install specific version v4.5.0
+  pig sty init 4                 # get & install specific version v4 latest
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructuredKind(legacyModuleSty, "pig sty init", "pig.sty.init/v1", args, map[string]interface{}{

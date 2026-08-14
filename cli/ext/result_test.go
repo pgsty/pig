@@ -5,8 +5,11 @@ package ext
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/output"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -3614,6 +3617,60 @@ func TestImportExtensionsResultExtensionNotFound(t *testing.T) {
 	}
 	if len(data.Packages) != 0 {
 		t.Fatalf("expected no resolved packages, got %v", data.Packages)
+	}
+}
+
+func TestDownloadRPMUsesDNF(t *testing.T) {
+	oldArch := config.OSArch
+	oldMajor := config.OSMajor
+	t.Cleanup(func() {
+		config.OSArch = oldArch
+		config.OSMajor = oldMajor
+	})
+	config.OSArch = "amd64"
+	config.OSMajor = 9
+
+	argsFile := filepath.Join(t.TempDir(), "args")
+	installRecordingPackageManager(t, "dnf", argsFile)
+	downloaded, err := DownloadRPM([]string{"postgis_17"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("DownloadRPM returned error: %v", err)
+	}
+	if !reflect.DeepEqual(downloaded, []string{"postgis_17"}) {
+		t.Fatalf("downloaded packages = %v", downloaded)
+	}
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read recorded dnf args: %v", err)
+	}
+	want := "download\n--resolve\n--alldeps\n--arch\nx86_64,noarch\npostgis_17\n"
+	if string(got) != want {
+		t.Fatalf("dnf args = %q, want %q", got, want)
+	}
+}
+
+func TestDownloadRPMUsesRepotrackForEL7(t *testing.T) {
+	oldArch := config.OSArch
+	oldMajor := config.OSMajor
+	t.Cleanup(func() {
+		config.OSArch = oldArch
+		config.OSMajor = oldMajor
+	})
+	config.OSArch = "amd64"
+	config.OSMajor = 7
+
+	argsFile := filepath.Join(t.TempDir(), "args")
+	installRecordingPackageManager(t, "repotrack", argsFile)
+	if _, err := DownloadRPM([]string{"postgis_14"}, t.TempDir()); err != nil {
+		t.Fatalf("DownloadRPM returned error: %v", err)
+	}
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read recorded repotrack args: %v", err)
+	}
+	want := "--arch\nx86_64,noarch\npostgis_14\n"
+	if string(got) != want {
+		t.Fatalf("repotrack args = %q, want %q", got, want)
 	}
 }
 

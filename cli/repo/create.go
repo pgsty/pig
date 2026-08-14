@@ -15,7 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// CreateRepoEL will create a local YUM repository in the specified directory
+// CreateRepoEL will create a local RPM repository in the specified directory
 func CreateRepoEL(dir string) error {
 	dir, err := absoluteRepoDir(dir)
 	if err != nil {
@@ -78,7 +78,11 @@ func createRepoWithSow(dir, repoType string, useSudo bool) error {
 
 func createRepoWithCreaterepo(dir string) error {
 	if _, err := exec.LookPath("createrepo_c"); err != nil {
-		return fmt.Errorf("neither sow nor createrepo_c found; install sow from the Pigsty INFRA repository or run: yum install -y createrepo_c")
+		manager := "dnf"
+		if config.OSMajor == 7 {
+			manager = "yum"
+		}
+		return fmt.Errorf("neither sow nor createrepo_c found; install sow from the Pigsty INFRA repository or run: %s install -y createrepo_c", manager)
 	}
 
 	script := createRepoCmdEL(dir)
@@ -132,7 +136,7 @@ func verifyRepoComplete(dir string) error {
 	return nil
 }
 
-// createRepoCmdEL will create a local YUM repository in the specified directory
+// createRepoCmdEL will create a local RPM repository in the specified directory
 func createRepoCmdEL(dir string) string {
 	dirQ := utils.ShellQuoteArgs([]string{dir})
 	completeQ := utils.ShellQuoteArgs([]string{filepath.Join(dir, "repo_complete")})
@@ -148,7 +152,7 @@ md5sum *.rpm > %s
 	`, dirQ, completeQ)
 }
 
-// createRepoCmdEL7 will create a local YUM repository in the specified directory
+// createRepoCmdEL7 will create a local RPM repository in the specified directory
 func createRepoCmdEL7(dir string) string {
 	dirQ := utils.ShellQuoteArgs([]string{dir})
 	completeQ := utils.ShellQuoteArgs([]string{filepath.Join(dir, "repo_complete")})

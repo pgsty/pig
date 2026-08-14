@@ -29,8 +29,9 @@ var installCmd = &cobra.Command{
 	Args:        cobra.MinimumNArgs(1),
 	Long: `pig install - Install packages using native package manager with alias translation
 
-This command acts like a smart wrapper around yum/dnf/apt-get, providing automatic
-package name translation for known PostgreSQL extensions and other aliases.
+This command acts like a smart wrapper around dnf (yum on EL7) or apt-get,
+providing automatic package name translation for known PostgreSQL extensions
+and other aliases.
 
 Examples:
   pig install pg_duckdb                # install extension with translation
