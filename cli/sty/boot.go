@@ -75,23 +75,25 @@ func (d *BootData) Text() string {
 }
 
 var (
-	bootInstall                 = install.InstallPackagesWithOptions
-	bootRepos                   = repo.ConfigureRepos
-	bootResetRepos              = repo.RmRepos
-	bootRepo                    = repo.ExtractOfflineWithResult
-	bootAddLocal                = repo.AddLocalRepo
-	bootRestoreRepos            = repo.RestoreRepos
-	bootLocalRepo               = repo.LocalRepoPath
-	bootLookPath                = exec.LookPath
-	bootEUID                    = os.Geteuid
-	bootDownload                = utils.DownloadFile
-	bootRepairLocale            = repairDebianBootstrapLocale
-	bootVerifyAnsible           = verifyAnsible
-	bootEnsureSSH               = ensureLocalSSH
-	bootEnsurePigsty            = ensureDefaultPigsty
-	bootAutoPkg                 = "/tmp/pkg.tgz"
-	bootRepoDir                 = "/www/pigsty"
-	bootProgressOut   io.Writer = os.Stderr
+	bootInstall                   = install.InstallPackagesWithOptions
+	bootRepos                     = repo.ConfigureRepos
+	bootResetRepos                = repo.RmRepos
+	bootRepo                      = repo.ExtractOfflineWithResult
+	bootAddLocal                  = repo.AddLocalRepo
+	bootRestoreRepos              = repo.RestoreRepos
+	bootLocalRepo                 = repo.LocalRepoPath
+	bootLookPath                  = exec.LookPath
+	bootEUID                      = os.Geteuid
+	bootDownload                  = utils.DownloadFile
+	bootRepairLocale              = repairDebianBootstrapLocale
+	bootVerifyAnsible             = verifyAnsible
+	bootVerifyHelpers             = verifyControllerHelpers
+	bootStdinIsTerminal           = utils.StdinIsTerminal
+	bootEnsureSSH                 = ensureLocalSSH
+	bootEnsurePigsty              = ensureDefaultPigsty
+	bootAutoPkg                   = "/tmp/pkg.tgz"
+	bootRepoDir                   = "/www/pigsty"
+	bootProgressOut     io.Writer = os.Stderr
 )
 
 var errUntrustedAutomaticPackage = errors.New("untrusted automatic offline package")
@@ -107,17 +109,35 @@ func BootstrapNative(ctx context.Context, opts NativeBootstrapOptions) *output.R
 	if !overwrite {
 		policy = "keep"
 	}
+	// Region flows into repository routing, mirror selection, and the child
+	// pig sty init invocation; normalize once so "China" and "china" behave
+	// identically on every path.
+	opts.Region = strings.ToLower(strings.TrimSpace(opts.Region))
 	data := &BootData{Kind: BootResultKind, RepositoryPolicy: policy}
 	if bootEUID() != 0 {
 		return output.Fail(output.CodeStyBootstrapPermissionDenied, "native bootstrap requires root privileges").WithData(data)
 	}
 	prepareBootstrapLocale(ctx, data)
 
-	if err := bootVerifyAnsible(ctx); err != nil {
+	ansibleErr := bootVerifyAnsible(ctx)
+	if ansibleErr != nil {
 		data.Ansible = "missing"
-		if failure := bootstrapAnsible(opts, data); failure != nil {
+	} else {
+		data.Ansible = "ready"
+	}
+	pkg, hasLocalRepo, sourceFailure := resolveBootstrapOfflineSource(opts.PackagePath, data)
+	if sourceFailure != nil {
+		return sourceFailure
+	}
+
+	if ansibleErr != nil {
+		if failure := bootstrapAnsible(opts, data, pkg, hasLocalRepo); failure != nil {
 			return failure
 		}
+		// The locales package may only have arrived with the controller
+		// package set, so a repair that failed before installation gets one
+		// retry before Ansible is verified again.
+		retryBootstrapLocale(ctx, data)
 		if err := bootVerifyAnsible(ctx); err != nil {
 			data.Ansible = "failed"
 			return output.Fail(output.CodeStyBootstrapFailed, "ansible bootstrap verification failed").
@@ -127,9 +147,20 @@ func BootstrapNative(ctx context.Context, opts NativeBootstrapOptions) *output.R
 		data.Changed = true
 		writeBootStatus("ansible", "ready")
 	} else {
-		data.Ansible = "ready"
-		data.Mode = "ready"
+		if pkg != "" || hasLocalRepo {
+			if failure := prepareOfflineBootstrap(opts, data, pkg, hasLocalRepo, false); failure != nil {
+				return failure
+			}
+		} else {
+			data.Mode = "ready"
+		}
 		writeBootStatus("ansible", "ready")
+	}
+
+	// Advisory only: deploy needs these helpers, but an otherwise usable
+	// controller is not failed solely because one of them is absent.
+	if err := bootVerifyHelpers(ctx); err != nil {
+		appendBootWarning(data, "controller helpers", err)
 	}
 
 	sshStatus, sshErr := bootEnsureSSH(ctx)
@@ -163,14 +194,32 @@ func BootstrapNative(ctx context.Context, opts NativeBootstrapOptions) *output.R
 	}
 
 	data.next = []output.NextAction{
-		output.NextAction{Command: "pig sty conf -g", Reason: "generate config with random passwords"},
-		output.NextAction{Command: "pig inv edit", Reason: "edit the inventory, [OPTIONAL]"},
-		output.NextAction{Command: "pig sty deploy", Reason: "run the actual deployment"},
+		{Command: "pig sty conf -g", Reason: "generate config with random passwords"},
+		{Command: "pig inv edit", Reason: "edit the inventory, [OPTIONAL]"},
+		{Command: "pig sty deploy", Reason: "run the actual deployment"},
 	}
 	writeBootOK("bootstrap complete")
 	result := output.OK("Pigsty bootstrap complete", data)
 	result.WithNextActions(data.next...)
 	return result
+}
+
+func resolveBootstrapOfflineSource(requested string, data *BootData) (string, bool, *output.Result) {
+	requested = strings.TrimSpace(requested)
+	hasLocalRepo := regularFile(filepath.Join(bootRepoDir, "repo_complete"))
+	if hasLocalRepo && requested != "" {
+		return requested, true, nil
+	}
+	pkg, err := resolveBootPackage(requested)
+	if err != nil {
+		if errors.Is(err, errUntrustedAutomaticPackage) {
+			appendBootWarningText(data, "ignored unsafe automatic package: "+bootAutoPkg)
+			pkg = ""
+		} else {
+			return "", false, output.Fail(output.CodeStyBootstrapResourceMissing, err.Error()).WithData(data)
+		}
+	}
+	return pkg, hasLocalRepo, nil
 }
 
 // prepareBootstrapLocale runs before even probing Ansible. A broken inherited
@@ -196,10 +245,37 @@ func prepareBootstrapLocale(ctx context.Context, data *BootData) {
 	writeBootStatus("locale", "ready")
 }
 
-// bootstrapAnsible performs repository and package work only when the Ansible
-// hard precheck fails. A nil Result means the repair path completed and the
-// caller should verify Ansible again.
-func bootstrapAnsible(opts NativeBootstrapOptions, data *BootData) *output.Result {
+// retryBootstrapLocale re-attempts a locale repair that failed before package
+// installation: on minimal Debian images /etc/locale.gen and locale-gen only
+// exist after the locales package from the controller set is installed.
+func retryBootstrapLocale(ctx context.Context, data *BootData) {
+	if data.Locale != "warning" || !needsDebianBootstrapLocale() {
+		return
+	}
+	repaired, err := bootRepairLocale(ctx)
+	if err != nil {
+		return // the first attempt already recorded the warning
+	}
+	filtered := data.Warnings[:0]
+	for _, warning := range data.Warnings {
+		if !strings.HasPrefix(warning, "locale: ") {
+			filtered = append(filtered, warning)
+		}
+	}
+	data.Warnings = filtered
+	if repaired {
+		data.Locale = "repaired"
+		data.Changed = true
+	} else {
+		data.Locale = "ready"
+	}
+	writeBootStatus("locale", "ready")
+}
+
+// bootstrapAnsible installs the controller package set when the Ansible hard
+// precheck fails. Offline repository preparation is shared with the ready fast
+// path so an explicit or committed local repository is never ignored.
+func bootstrapAnsible(opts NativeBootstrapOptions, data *BootData, pkg string, hasLocalRepo bool) *output.Result {
 	overwrite := !opts.Keep
 	manager := ext.PackageManagerCmd()
 	if manager == "" {
@@ -221,56 +297,8 @@ func bootstrapAnsible(opts NativeBootstrapOptions, data *BootData) *output.Resul
 		}()
 	}
 
-	pkg, err := resolveBootPackage(opts.PackagePath)
-	if err != nil {
-		if errors.Is(err, errUntrustedAutomaticPackage) {
-			appendBootWarningText(data, "ignored unsafe automatic package: "+bootAutoPkg)
-			pkg = ""
-		} else {
-			return output.Fail(output.CodeStyBootstrapResourceMissing, err.Error()).WithData(data)
-		}
-	}
-	repoDir := bootRepoDir
-	hasLocalRepo := regularFile(filepath.Join(repoDir, "repo_complete"))
 	if pkg != "" || hasLocalRepo {
-		data.Mode, data.RepositoryDir = "offline", repoDir
-		if !hasLocalRepo {
-			data.PackagePath = pkg
-			result := bootRepo(pkg, filepath.Dir(repoDir))
-			if result == nil || !result.Success {
-				message := "failed to unpack offline repository"
-				if result != nil && result.Message != "" {
-					message = result.Message
-				}
-				return output.Fail(output.CodeStyBootstrapFailed, message).WithData(data)
-			}
-		} else {
-			if pkg != "" {
-				appendBootWarningText(data, "committed local repository was reused; the selected offline package was not unpacked")
-			}
-		}
-		var backupInfo *repo.BackupInfo
-		if overwrite {
-			result := bootResetRepos(nil, false)
-			recordBootRepositoryRollback(data, result)
-			if result == nil || !result.Success {
-				return output.Fail(output.CodeStyBootstrapFailed, "failed to back up existing repositories before configuring the local repository").WithData(data)
-			}
-			backupInfo = bootRepositoryBackupInfo(result)
-			if backupInfo == nil {
-				data.RepositoryRollback = "failed"
-				appendBootWarningText(data, "repository backup completed without restoration metadata")
-				return output.Fail(output.CodeStyBootstrapFailed, "repository backup metadata is unavailable").WithData(data)
-			}
-		}
-		if err := bootAddLocal(repoDir); err != nil {
-			return failOfflineRepositoryReplacement(data, backupInfo, overwrite,
-				fmt.Sprintf("failed to configure local repository: %v", err))
-		}
-		if err := bootInstall(0, controllerBootstrapPackages(), install.PackageOptions{Yes: true, NoTranslation: true, LocalOnly: true, Quiet: true}); err != nil {
-			return failOfflineRepositoryReplacement(data, backupInfo, overwrite,
-				fmt.Sprintf("failed to install controller packages from local repository: %v", err))
-		}
+		return prepareOfflineBootstrap(opts, data, pkg, hasLocalRepo, true)
 	} else {
 		region := strings.TrimSpace(opts.Region)
 		result := bootRepos([]string{"node", "pigsty"}, repo.AddOptions{
@@ -282,21 +310,76 @@ func bootstrapAnsible(opts NativeBootstrapOptions, data *BootData) *output.Resul
 			Quiet:    true,
 		})
 		recordBootRepositoryRollback(data, result)
+		if result == nil {
+			return output.Fail(output.CodeStyBootstrapFailed, "failed to configure Pigsty bootstrap repositories").WithData(data)
+		}
+		if !result.Success && (overwrite || result.Code != output.CodeRepoCacheUpdateFailed) {
+			message := "failed to configure Pigsty bootstrap repositories"
+			if result.Message != "" {
+				message += ": " + result.Message
+			}
+			return output.Fail(output.CodeStyBootstrapFailed, message).WithDetail(result.Detail).WithData(data)
+		}
 		if missing := missingBootstrapRepoModules(result, "node", "pigsty"); len(missing) > 0 {
 			return output.Fail(output.CodeStyBootstrapFailed,
 				fmt.Sprintf("failed to configure required bootstrap repository modules: %s", strings.Join(missing, ", "))).WithData(data)
 		}
-		if result == nil || !result.Success {
-			if overwrite || result == nil || result.Code != output.CodeRepoCacheUpdateFailed {
-				return output.Fail(output.CodeStyBootstrapFailed, "failed to configure Pigsty bootstrap repositories").WithData(data)
-			}
+		if !result.Success {
 			data.Mode = "existing"
 			appendBootWarningText(data, "Pigsty repository cache refresh failed; package installation will retry with all configured repositories")
 		} else {
 			data.Mode = "online"
 		}
 		if err := bootInstall(0, controllerBootstrapPackages(), install.PackageOptions{Yes: true, NoTranslation: true, Quiet: true}); err != nil {
-			return output.Fail(output.CodeStyBootstrapFailed, fmt.Sprintf("failed to install controller packages: %v", err)).WithData(data)
+			return failOnlineRepositoryReplacement(data, result, overwrite,
+				fmt.Sprintf("failed to install controller packages: %v", err))
+		}
+	}
+	return nil
+}
+
+func prepareOfflineBootstrap(opts NativeBootstrapOptions, data *BootData, pkg string, hasLocalRepo, installController bool) *output.Result {
+	overwrite := !opts.Keep
+	repoDir := bootRepoDir
+	data.Mode, data.RepositoryDir = "offline", repoDir
+	if !hasLocalRepo {
+		data.PackagePath = pkg
+		result := bootRepo(pkg, filepath.Dir(repoDir))
+		if result == nil || !result.Success {
+			message := "failed to unpack offline repository"
+			if result != nil && result.Message != "" {
+				message = result.Message
+			}
+			return output.Fail(output.CodeStyBootstrapFailed, message).WithData(data)
+		}
+		data.Changed = true
+	} else if pkg != "" {
+		appendBootWarningText(data, "committed local repository was reused; the selected offline package was not unpacked")
+	}
+
+	var backupInfo *repo.BackupInfo
+	if overwrite {
+		result := bootResetRepos(nil, false)
+		recordBootRepositoryRollback(data, result)
+		if result == nil || !result.Success {
+			return output.Fail(output.CodeStyBootstrapFailed, "failed to back up existing repositories before configuring the local repository").WithData(data)
+		}
+		backupInfo = bootRepositoryBackupInfo(result)
+		if backupInfo == nil {
+			data.RepositoryRollback = "failed"
+			appendBootWarningText(data, "repository backup completed without restoration metadata")
+			return output.Fail(output.CodeStyBootstrapFailed, "repository backup metadata is unavailable").WithData(data)
+		}
+	}
+	if err := bootAddLocal(repoDir); err != nil {
+		return failOfflineRepositoryReplacement(data, backupInfo, overwrite,
+			fmt.Sprintf("failed to configure local repository: %v", err))
+	}
+	data.Changed = true
+	if installController {
+		if err := bootInstall(0, controllerBootstrapPackages(), install.PackageOptions{Yes: true, NoTranslation: true, LocalOnly: true, Quiet: true}); err != nil {
+			return failOfflineRepositoryReplacement(data, backupInfo, overwrite,
+				fmt.Sprintf("failed to install controller packages from local repository: %v", err))
 		}
 	}
 	return nil
@@ -452,7 +535,7 @@ func controllerBootstrapPackages() []string {
 		case "7":
 			return []string{"ansible", "python3", "python36-requests", "python36-idna", "sow", "openssh-clients", "sshpass", "unzip", "yum-utils", "ca-certificates"}
 		case "8":
-			return []string{"ansible", "python3", "python3.12-jinja2", "python3.12-requests", "python3.12-jmespath", "python3.12-cryptography", "sow", "openssh-clients", "sshpass", "unzip", "dnf-utils", "ca-certificates"}
+			return []string{"ansible", "python3.12-jmespath", "python3-cryptography", "openssh-clients", "sshpass", "unzip", "dnf-utils", "ca-certificates"}
 		default:
 			return []string{"ansible", "python3", "python3-requests", "python3-jmespath", "python3-cryptography", "sow", "openssh-clients", "sshpass", "unzip", "dnf-utils", "ca-certificates"}
 		}
@@ -461,17 +544,51 @@ func controllerBootstrapPackages() []string {
 	}
 }
 
-func missingBootstrapRepoModules(result *output.Result, required ...string) []string {
+// bootRepoAddData unwraps the RepoAddData payload carried by a repository
+// configuration Result, tolerating both pointer and value forms and typed nil.
+func bootRepoAddData(result *output.Result) *repo.RepoAddData {
 	if result == nil {
-		return append([]string(nil), required...)
+		return nil
 	}
-	var data *repo.RepoAddData
 	switch value := result.Data.(type) {
 	case *repo.RepoAddData:
-		data = value
+		return value
 	case repo.RepoAddData:
-		data = &value
-	default:
+		return &value
+	}
+	return nil
+}
+
+// failOnlineRepositoryReplacement mirrors failOfflineRepositoryReplacement for
+// the online branch: it restores the definitions bootRepos backed up and
+// removes the repository files it wrote.
+func failOnlineRepositoryReplacement(data *BootData, result *output.Result, overwrite bool, message string) *output.Result {
+	if overwrite {
+		var backup *repo.BackupInfo
+		var added []string
+		if repoData := bootRepoAddData(result); repoData != nil {
+			backup = repoData.BackupInfo
+			for _, item := range repoData.AddedRepos {
+				if item != nil && item.FilePath != "" {
+					added = append(added, item.FilePath)
+				}
+			}
+		}
+		rollback, err := bootRestoreRepos(backup, added...)
+		if rollback == nil {
+			rollback = &repo.RollbackInfo{}
+		}
+		if err != nil && rollback.Error == "" {
+			rollback.Error = err.Error()
+		}
+		recordBootRollbackInfo(data, rollback)
+	}
+	return output.Fail(output.CodeStyBootstrapFailed, message).WithData(data)
+}
+
+func missingBootstrapRepoModules(result *output.Result, required ...string) []string {
+	data := bootRepoAddData(result)
+	if data == nil {
 		return append([]string(nil), required...)
 	}
 	added := make(map[string]bool, len(data.AddedRepos))
@@ -548,6 +665,10 @@ type ReexecOutcome struct {
 	ExitCode int
 	Err      error
 	Started  bool
+	// ResourceMissing marks failures raised while resolving bootstrap inputs
+	// (offline package path or URL) before sudo was attempted, so callers can
+	// report them as resource errors rather than privilege errors.
+	ResourceMissing bool
 }
 
 // ReexecBootstrapAsRoot performs the one privilege transition needed by the
@@ -570,7 +691,7 @@ func ReexecBootstrapAsRoot(args []string, stderr io.Writer) ReexecOutcome {
 	}
 	args, err = prepareBootstrapArgs(args)
 	if err != nil {
-		return ReexecOutcome{ExitCode: 3, Err: err}
+		return ReexecOutcome{ExitCode: 3, Err: err, ResourceMissing: true}
 	}
 	sudoArgs := []string{"--", executable}
 	if os.Getenv("PIG_NON_INTERACTIVE") != "" {
@@ -599,6 +720,9 @@ func ReexecBootstrapAsRoot(args []string, stderr io.Writer) ReexecOutcome {
 
 func prepareBootstrapArgs(args []string) ([]string, error) {
 	result := append([]string(nil), args...)
+	if regularFile(filepath.Join(bootRepoDir, "repo_complete")) {
+		return result, nil
+	}
 	for i := 0; i < len(result); i++ {
 		if result[i] == "-p" || result[i] == "--path" {
 			if i+1 >= len(result) {

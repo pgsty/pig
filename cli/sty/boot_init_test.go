@@ -145,6 +145,9 @@ func TestBootstrapUserEnvironmentUsesInvokingAccount(t *testing.T) {
 	t.Setenv("SUDO_UID", "1000")
 	t.Setenv("SUDO_GID", "1000")
 	t.Setenv("PIG_TEST_PRESERVE", "yes")
+	origTerminal := bootStdinIsTerminal
+	t.Cleanup(func() { bootStdinIsTerminal = origTerminal })
+	bootStdinIsTerminal = func() bool { return false }
 	identity := localSSHUser{Name: "admin", Home: "/home/admin", UID: 1000, GID: 1000}
 	env := bootstrapUserEnvironment(identity)
 	joined := "\n" + strings.Join(env, "\n") + "\n"
@@ -158,16 +161,27 @@ func TestBootstrapUserEnvironmentUsesInvokingAccount(t *testing.T) {
 			t.Fatalf("environment retained %q: %v", forbidden, env)
 		}
 	}
+
+	// With a real terminal the child may prompt (e.g. Pro EULA acceptance),
+	// so non-interactive mode must not be forced.
+	bootStdinIsTerminal = func() bool { return true }
+	joined = "\n" + strings.Join(bootstrapUserEnvironment(identity), "\n") + "\n"
+	if strings.Contains(joined, "\nPIG_NON_INTERACTIVE=") {
+		t.Fatalf("interactive environment must not force PIG_NON_INTERACTIVE: %q", joined)
+	}
 }
 
 func TestRunDefaultPigstyInitReusesCLIAsInvokingUser(t *testing.T) {
 	origExecutable := bootExecutable
 	origFormat := config.OutputFormat
+	origTerminal := bootStdinIsTerminal
 	t.Cleanup(func() {
 		bootExecutable = origExecutable
 		config.OutputFormat = origFormat
+		bootStdinIsTerminal = origTerminal
 	})
 	config.OutputFormat = config.OUTPUT_TEXT
+	bootStdinIsTerminal = func() bool { return false }
 
 	root := t.TempDir()
 	capture := filepath.Join(root, "capture")

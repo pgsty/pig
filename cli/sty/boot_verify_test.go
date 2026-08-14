@@ -28,10 +28,15 @@ func TestAnsiblePythonExecutableFallsBackToShebang(t *testing.T) {
 	}
 }
 
-func TestControllerPythonProbeCoversPigstyDependencies(t *testing.T) {
-	for _, module := range []string{"yaml", "jinja2", "jmespath", "requests", "cryptography", "OpenSSL"} {
+func TestControllerPythonProbeCoversExternalPigstyDependencies(t *testing.T) {
+	for _, module := range []string{"'yaml'", "'jmespath'", "'cryptography'", "'OpenSSL'"} {
 		if !strings.Contains(controllerPythonProbe, module) {
 			t.Fatalf("controller Python probe omitted %s", module)
+		}
+	}
+	for _, bundledOrUnrequired := range []string{"'jinja2'", "'requests'"} {
+		if strings.Contains(controllerPythonProbe, bundledOrUnrequired) {
+			t.Fatalf("controller Python probe retained non-external dependency %s", bundledOrUnrequired)
 		}
 	}
 }
@@ -45,12 +50,15 @@ func TestVerifyControllerUsesAnsiblePython(t *testing.T) {
 		writeBootExecutable(t, filepath.Join(dir, name), "#!/bin/sh\nexit 0\n")
 	}
 	t.Setenv("PATH", dir)
-	if err := verifyController(context.Background()); err != nil {
-		t.Fatalf("controller verification failed: %v", err)
+	if err := verifyAnsible(context.Background()); err != nil {
+		t.Fatalf("ansible verification failed: %v", err)
+	}
+	if err := verifyControllerHelpers(context.Background()); err != nil {
+		t.Fatalf("controller helper verification failed: %v", err)
 	}
 
 	writeBootExecutable(t, python, "#!/bin/sh\necho 'missing jmespath' >&2\nexit 1\n")
-	if err := verifyController(context.Background()); err == nil || !strings.Contains(err.Error(), "missing jmespath") {
+	if err := verifyAnsible(context.Background()); err == nil || !strings.Contains(err.Error(), "missing jmespath") {
 		t.Fatalf("missing Ansible Python dependency was not reported: %v", err)
 	}
 }

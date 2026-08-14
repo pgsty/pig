@@ -14,7 +14,7 @@ const controllerPythonProbe = `
 import importlib
 
 missing = []
-for name in ('yaml', 'jinja2', 'jmespath', 'requests'):
+for name in ('yaml', 'jmespath'):
     try:
         importlib.import_module(name)
     except ImportError:
@@ -37,7 +37,9 @@ if missing:
 
 // verifyAnsible checks the one hard Bootstrap invariant. The Python probe
 // follows ansible-playbook's interpreter rather than assuming that the system
-// python3 is the same runtime.
+// python3 is the same runtime. ansible-playbook itself validates Ansible's
+// bundled runtime, including the vendored Jinja2 used by the EL8 package; the
+// explicit probe is limited to external modules Pigsty playbooks require.
 func verifyAnsible(ctx context.Context) error {
 	ansiblePath, err := exec.LookPath("ansible-playbook")
 	if err != nil {
@@ -78,13 +80,6 @@ func verifyControllerHelpers(ctx context.Context) error {
 		return fmt.Errorf("ssh-keygen: %w", err)
 	}
 	return nil
-}
-
-func verifyController(ctx context.Context) error {
-	if err := verifyAnsible(ctx); err != nil {
-		return err
-	}
-	return verifyControllerHelpers(ctx)
 }
 
 func runControllerProbe(ctx context.Context, name string, args ...string) ([]byte, error) {

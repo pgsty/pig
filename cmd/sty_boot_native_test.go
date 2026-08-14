@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	stycli "pig/cli/sty"
@@ -129,5 +130,51 @@ func TestStyBootNonRootPreservesTextChildFailure(t *testing.T) {
 	exitErr, ok := err.(*utils.ExitCodeError)
 	if !ok || exitErr.Code != 5 || !exitErr.Silent {
 		t.Fatalf("child failure = %#v, want silent exit 5", err)
+	}
+}
+
+func TestStyBootNonRootStructuredFailureEmitsEnvelope(t *testing.T) {
+	origNative, origReexec, origEUID := pigstyBootNativeExec, pigstyBootReexec, pigstyBootEUID
+	origFormat := config.OutputFormat
+	t.Cleanup(func() {
+		pigstyBootNativeExec, pigstyBootReexec, pigstyBootEUID = origNative, origReexec, origEUID
+		config.OutputFormat = origFormat
+	})
+	config.OutputFormat = config.OUTPUT_JSON
+	pigstyBootEUID = func() int { return 501 }
+	pigstyBootReexec = func([]string, io.Writer) stycli.ReexecOutcome {
+		return stycli.ReexecOutcome{Started: true, ExitCode: 1, Err: errors.New("sudo: a password is required")}
+	}
+	pigstyBootNativeExec = func(context.Context, stycli.NativeBootstrapOptions) *output.Result {
+		t.Fatal("non-root parent ran native engine")
+		return nil
+	}
+
+	err := pigstyBootCmd.RunE(pigstyBootCmd, nil)
+	exitErr, ok := err.(*utils.ExitCodeError)
+	if !ok || exitErr.Silent {
+		t.Fatalf("structured sudo failure = %#v, want non-silent envelope error", err)
+	}
+}
+
+func TestStyBootNonRootReportsResourceErrorsWithResourceCode(t *testing.T) {
+	origNative, origReexec, origEUID := pigstyBootNativeExec, pigstyBootReexec, pigstyBootEUID
+	t.Cleanup(func() {
+		pigstyBootNativeExec, pigstyBootReexec, pigstyBootEUID = origNative, origReexec, origEUID
+	})
+	pigstyBootEUID = func() int { return 501 }
+	pigstyBootReexec = func([]string, io.Writer) stycli.ReexecOutcome {
+		return stycli.ReexecOutcome{ExitCode: 3, Err: errors.New("offline package not found: /nope.tgz"), ResourceMissing: true}
+	}
+	pigstyBootNativeExec = func(context.Context, stycli.NativeBootstrapOptions) *output.Result {
+		t.Fatal("non-root parent ran native engine")
+		return nil
+	}
+
+	err := pigstyBootCmd.RunE(pigstyBootCmd, nil)
+	exitErr, ok := err.(*utils.ExitCodeError)
+	if !ok || exitErr.Err == nil || !strings.Contains(exitErr.Err.Error(), "offline package not found") ||
+		strings.Contains(exitErr.Err.Error(), "root privileges") {
+		t.Fatalf("resource error classification = %#v", err)
 	}
 }

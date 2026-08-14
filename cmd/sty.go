@@ -188,11 +188,12 @@ var pigstyBootCmd = &cobra.Command{
 
 On Debian 12 and 13, Bootstrap first performs a best-effort en_US.UTF-8 locale
 check and repair so Ansible can initialize. Pig then verifies Ansible and its
-Python dependencies. If Ansible is unavailable or unusable, Pig installs the
-required controller packages from a committed local repository at /www/pigsty,
-a trusted offline package at /tmp/pkg.tgz, or the configured upstream
-repositories. When repository changes are required, Pig backs up existing
-definitions unless -k or --keep is specified.
+Python dependencies. An explicitly selected, trusted automatic, or committed
+offline repository is prepared even when Ansible is already usable. If Ansible
+is unavailable or unusable, Pig also installs the required controller packages
+from that local repository or the configured upstream repositories. When
+repository changes are required, Pig backs up existing definitions unless -k
+or --keep is specified.
 
 After Ansible is ready, Pig performs best-effort checks and repairs for
 key-based localhost SSH and the invoking user's ~/pigsty directory. If ~/pigsty
@@ -214,7 +215,14 @@ command.`,
 				}
 			}
 			if outcome.Err != nil {
+				if outcome.ResourceMissing {
+					return handleAuxResult(output.Fail(output.CodeStyBootstrapResourceMissing, outcome.Err.Error()))
+				}
 				if outcome.Started {
+					if config.IsStructuredOutput() && len(outcome.Output) == 0 {
+						return handleAuxResult(output.Fail(output.CodeStyBootstrapFailed,
+							"native bootstrap failed without producing structured output").WithDetail(outcome.Err.Error()))
+					}
 					return &utils.ExitCodeError{Code: outcome.ExitCode, Err: outcome.Err, Silent: true}
 				}
 				return handleAuxResult(output.Fail(output.CodeStyBootstrapPermissionDenied, "native bootstrap could not obtain root privileges").WithDetail(outcome.Err.Error()))

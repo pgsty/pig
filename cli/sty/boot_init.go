@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unicode/utf8"
 
 	"pig/cli/get"
 	"pig/internal/config"
@@ -193,7 +194,11 @@ func runPigstyInitCommand(ctx context.Context, identity localSSHUser, target, do
 			detail = strings.TrimSpace(stdout.String())
 		}
 		if len(detail) > 2048 {
-			detail = detail[len(detail)-2048:]
+			cut := len(detail) - 2048
+			for cut < len(detail) && !utf8.RuneStart(detail[cut]) {
+				cut++
+			}
+			detail = detail[cut:]
 		}
 		if detail != "" {
 			return fmt.Errorf("pig sty init as %s: %w: %s", identity.Name, err, detail)
@@ -213,12 +218,18 @@ func bootstrapUserEnvironment(identity localSSHUser) []string {
 		}
 		env = append(env, item)
 	}
-	return append(env,
+	env = append(env,
 		"HOME="+identity.Home,
 		"USER="+identity.Name,
 		"LOGNAME="+identity.Name,
-		"PIG_NON_INTERACTIVE=1",
 	)
+	// The child pig sty init may legitimately prompt (e.g. Pro EULA
+	// acceptance) and its stdin is wired to the terminal; only force
+	// non-interactive mode when no terminal conversation is possible.
+	if config.IsStructuredOutput() || !bootStdinIsTerminal() {
+		env = append(env, "PIG_NON_INTERACTIVE=1")
+	}
+	return env
 }
 
 func cleanupPigstyInitTemp(path string) {
