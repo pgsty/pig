@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"pig/cli/ext"
 	stycli "pig/cli/sty"
 	"pig/internal/config"
 	"pig/internal/output"
+	"pig/internal/utils"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -152,35 +154,59 @@ requires interactive EULA acceptance or --accept-eula.`,
 
 var pigstyInitExec = stycli.Init
 
+var (
+	pigstyBootNativeExec = stycli.BootstrapNative
+	pigstyBootReexec     = stycli.ReexecBootstrapAsRoot
+	pigstyBootEUID       = os.Geteuid
+)
+
 var pigstyBootCmd = &cobra.Command{
 	Use:         "boot",
 	Short:       "Bootstrap Pigsty",
 	Annotations: ancsAnn("pig sty boot", "action", "volatile", "unsafe", true, "medium", "none", "root", 60000),
 	Aliases:     []string{"b", "bootstrap"},
 	Args:        cobra.NoArgs,
-	Long: `Bootstrap Pigsty with its ./bootstrap script.
+	Long: `Bootstrap the local Pigsty controller with native Go orchestration.
 
---mirror is shorthand for --region china. See
+The native path needs only the host package manager (dnf, yum on EL7, or
+apt-get). It downloads and extracts offline tar.gz packages without host
+curl/wget/tar/gzip. By default it backs up and replaces existing repository
+definitions before adding the complete bootstrap repository set; --keep
+preserves existing repositories. Offline package transactions are restricted
+to pigsty-local.
+It verifies Ansible's own Python dependencies, then checks and best-effort
+repairs key-based localhost SSH without making SSH failure fatal. If the
+invoking user's ~/pigsty does not exist and the Pigsty source repository is
+reachable, it runs pig sty init as that user. --mirror is shorthand for
+--region china. See
 https://pigsty.io/docs/setup/offline/#bootstrap for details.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		bootRegion := pigstyBootRegion
 		if pigstyBootMirror {
 			bootRegion = "china"
 		}
-		return runLegacyStructuredKind(legacyModuleSty, "pig sty boot", "pig.sty.boot/v1", args, map[string]interface{}{
-			"region":   bootRegion,
-			"mirror":   pigstyBootMirror,
-			"path":     pigstyBootPackage,
-			"keep":     pigstyBootKeep,
-			"pig_home": config.PigstyHome,
-		}, func() error {
-			return stycli.Bootstrap(stycli.BootstrapOptions{
-				PigstyHome:  config.PigstyHome,
-				Region:      bootRegion,
-				PackagePath: pigstyBootPackage,
-				Keep:        pigstyBootKeep,
-			})
-		})
+
+		if pigstyBootEUID() != 0 {
+			outcome := pigstyBootReexec(os.Args[1:], os.Stderr)
+			if len(outcome.Output) > 0 {
+				if _, err := os.Stdout.Write(outcome.Output); err != nil {
+					return err
+				}
+			}
+			if outcome.Err != nil {
+				if outcome.Started {
+					return &utils.ExitCodeError{Code: outcome.ExitCode, Err: outcome.Err, Silent: true}
+				}
+				return handleAuxResult(output.Fail(output.CodeStyBootstrapPermissionDenied, "native bootstrap could not obtain root privileges").WithDetail(outcome.Err.Error()))
+			}
+			return nil
+		}
+
+		return handleAuxResult(pigstyBootNativeExec(cmd.Context(), stycli.NativeBootstrapOptions{
+			Region:      bootRegion,
+			PackagePath: pigstyBootPackage,
+			Keep:        pigstyBootKeep,
+		}))
 	},
 }
 
@@ -578,8 +604,8 @@ func init() {
 
 	pigstyBootCmd.Flags().StringVarP(&pigstyBootRegion, "region", "r", "", "default,china,europe,...")
 	pigstyBootCmd.Flags().BoolVarP(&pigstyBootMirror, "mirror", "m", false, "same as --region china")
-	pigstyBootCmd.Flags().StringVarP(&pigstyBootPackage, "path", "p", "", "offline package path")
-	pigstyBootCmd.Flags().BoolVarP(&pigstyBootKeep, "keep", "k", false, "keep existing repo")
+	pigstyBootCmd.Flags().StringVarP(&pigstyBootPackage, "path", "p", "", "offline package file or HTTP(S) URL")
+	pigstyBootCmd.Flags().BoolVarP(&pigstyBootKeep, "keep", "k", false, "preserve existing repositories instead of replacing them")
 	pigstyBootCmd.MarkFlagsMutuallyExclusive("mirror", "region")
 
 	addStyConfigureFlags(pigstyConfCmd)

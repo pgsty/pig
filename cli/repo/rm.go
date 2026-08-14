@@ -15,6 +15,8 @@ import (
 
 var rmModuleNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
+var newRmRepoManager = NewManager
+
 func resolveModulePathForRm(m *Manager, module string) (string, error) {
 	module = strings.TrimSpace(module)
 	if module == "" {
@@ -57,7 +59,7 @@ func RmRepos(modules []string, doUpdate bool) *output.Result {
 	}
 
 	// Initialize manager
-	manager, err := NewManager()
+	manager, err := newRmRepoManager()
 	if err != nil {
 		return output.Fail(output.CodeRepoManagerError, fmt.Sprintf("failed to get repo manager: %v", err))
 	}
@@ -80,12 +82,22 @@ func RmRepos(modules []string, doUpdate bool) *output.Result {
 	// If no modules specified, backup all repos
 	if len(modules) == 0 {
 		backupInfo, err := backupReposStructured(manager)
+		data.BackupInfo = backupInfo
 		if err != nil {
 			data.DurationMs = time.Since(startTime).Milliseconds()
-			return output.Fail(output.CodeRepoBackupFailed,
+			result := output.Fail(output.CodeRepoBackupFailed,
 				fmt.Sprintf("failed to backup repos: %v", err)).WithData(data)
+			if backupInfo != nil {
+				rollback, rollbackErr := restoreReposStructured(manager, backupInfo, nil)
+				data.RollbackInfo = rollback
+				if rollbackErr != nil {
+					result.Detail = fmt.Sprintf("repository rollback failed: %v", rollbackErr)
+				} else {
+					result.Detail = "previous repository definitions restored"
+				}
+			}
+			return result
 		}
-		data.BackupInfo = backupInfo
 		data.DurationMs = time.Since(startTime).Milliseconds()
 
 		message := "Backed up all repositories"

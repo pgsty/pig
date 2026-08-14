@@ -563,7 +563,7 @@ func TestStyListMirrorFlagPassesMirrorOption(t *testing.T) {
 	}
 }
 
-func TestStyBootMirrorFlagSetsRegionChina(t *testing.T) {
+func TestStyBootMirrorFlagIsVisible(t *testing.T) {
 	flag := pigstyBootCmd.Flags().Lookup("mirror")
 	if flag == nil {
 		t.Fatal("expected --mirror flag on pig sty boot")
@@ -573,51 +573,6 @@ func TestStyBootMirrorFlagSetsRegionChina(t *testing.T) {
 	}
 	if flag.Hidden {
 		t.Fatal("pig sty boot --mirror should be visible")
-	}
-
-	origMirror := flag.Value.String()
-	origHome := config.PigstyHome
-	origRegion := pigstyBootRegion
-	origPackage := pigstyBootPackage
-	origKeep := pigstyBootKeep
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	defer func() {
-		config.PigstyHome = origHome
-		pigstyBootRegion = origRegion
-		pigstyBootPackage = origPackage
-		pigstyBootKeep = origKeep
-		_ = flag.Value.Set(origMirror)
-	}()
-
-	home := t.TempDir()
-	if err := writeExecutable(filepath.Join(home, "bootstrap"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > bootstrap.args\n"); err != nil {
-		t.Fatalf("write bootstrap script: %v", err)
-	}
-
-	config.PigstyHome = home
-	pigstyBootRegion = "europe"
-	pigstyBootPackage = ""
-	pigstyBootKeep = false
-	if err := flag.Value.Set("true"); err != nil {
-		t.Fatalf("set --mirror: %v", err)
-	}
-
-	if err := pigstyBootCmd.RunE(pigstyBootCmd, nil); err != nil {
-		t.Fatalf("pig sty boot --mirror failed: %v", err)
-	}
-	if current, err := os.Getwd(); err != nil || current != cwd {
-		t.Fatalf("working directory changed from %q to %q: %v", cwd, current, err)
-	}
-
-	got, err := os.ReadFile(filepath.Join(home, "bootstrap.args"))
-	if err != nil {
-		t.Fatalf("read bootstrap args: %v", err)
-	}
-	if fields := strings.Fields(string(got)); strings.Join(fields, " ") != "-r china" {
-		t.Fatalf("bootstrap args = %q, want -r china", strings.TrimSpace(string(got)))
 	}
 }
 

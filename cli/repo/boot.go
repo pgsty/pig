@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"pig/internal/archive"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
@@ -13,21 +14,13 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// addLocalRepo adds local repo config for yum/apt
+// addLocalRepo adds local repo config for dnf/apt
 func addLocalRepo(targetDir string) error {
 	switch config.OSType {
 	case config.DistroEL:
 		logrus.Infof("add %s to %s", fmt.Sprintf("file://%s", targetDir), "/etc/yum.repos.d/local.repo")
 		repoFile := "/etc/yum.repos.d/local.repo"
-		repoContent := strings.Join([]string{
-			"[pigsty-local]",
-			"name=Pigsty Local Repo",
-			fmt.Sprintf("baseurl=file://%s", targetDir),
-			"enabled=1",
-			"gpgcheck=0",
-			"",
-		}, "\n")
-		return utils.PutFile(repoFile, []byte(repoContent))
+		return utils.PutFile(repoFile, []byte(elLocalRepoContent(targetDir)))
 	case config.DistroDEB:
 		logrus.Infof("add %s to %s", fmt.Sprintf("file:%s ./", targetDir), "/etc/apt/sources.list.d/local.list")
 		repoFile := "/etc/apt/sources.list.d/local.list"
@@ -37,6 +30,28 @@ func addLocalRepo(targetDir string) error {
 		return fmt.Errorf("unsupported OS for adding local repo: %s", config.OSType)
 	}
 }
+
+func elLocalRepoContent(targetDir string) string {
+	lines := []string{
+		"[pigsty-local]",
+		"name=Pigsty Local Repo",
+		fmt.Sprintf("baseurl=file://%s", targetDir),
+		"enabled=1",
+	}
+	if config.OSVersion == "8" || config.OSVersion == "9" {
+		lines = append(lines, "module_hotfixes=1")
+	}
+	return strings.Join(append(lines, "gpgcheck=0", ""), "\n")
+}
+
+// AddLocalRepo exposes the existing canonical local-repository writer to
+// higher-level workflows such as native sty boot.
+func AddLocalRepo(targetDir string) error { return addLocalRepo(targetDir) }
+
+var (
+	repoBootEUID     = os.Geteuid
+	repoBootAddLocal = addLocalRepo
+)
 
 // getLocalRepoPath returns the local repo config file path based on OS type
 func getLocalRepoPath() string {
@@ -50,9 +65,23 @@ func getLocalRepoPath() string {
 	}
 }
 
-// BootWithResult bootstraps a local repo from offline package and returns a structured Result
-// This function is used for YAML/JSON output modes
+// LocalRepoPath returns the canonical definition written by AddLocalRepo.
+func LocalRepoPath() string { return getLocalRepoPath() }
+
+// BootWithResult bootstraps a local repo from an offline package and enables
+// its package-manager definition.
 func BootWithResult(offlinePkg, targetDir string) *output.Result {
+	return bootWithResult(offlinePkg, targetDir, true)
+}
+
+// ExtractOfflineWithResult commits an offline repository tree without writing
+// package-manager definitions. Higher-level replacement workflows use this so
+// existing definitions can be backed up before local.repo is changed.
+func ExtractOfflineWithResult(offlinePkg, targetDir string) *output.Result {
+	return bootWithResult(offlinePkg, targetDir, false)
+}
+
+func bootWithResult(offlinePkg, targetDir string, configureLocal bool) *output.Result {
 	startTime := time.Now()
 
 	// Use defaults if not provided
@@ -78,25 +107,65 @@ func BootWithResult(offlinePkg, targetDir string) *output.Result {
 		TargetDir: targetDir,
 	}
 
+	pigstyDir := filepath.Join(targetDir, "pigsty")
+	reuseCommitted := false
+	if info, err := os.Lstat(pigstyDir); err == nil && info.IsDir() && regularFileAt(filepath.Join(pigstyDir, "repo_complete")) {
+		reuseCommitted = true
+	}
+
 	// Check if offline package exists
-	if _, err := os.Stat(offlinePkg); os.IsNotExist(err) {
+	if _, err := os.Stat(offlinePkg); !reuseCommitted && os.IsNotExist(err) {
 		data.DurationMs = time.Since(startTime).Milliseconds()
 		return output.Fail(output.CodeRepoPackageNotFound,
 			fmt.Sprintf("offline package not found: %s", offlinePkg)).WithData(data)
 	}
+	if repoBootEUID() != 0 {
+		data.DurationMs = time.Since(startTime).Milliseconds()
+		return output.Fail(output.CodeRepoBootFailed,
+			"native repository extraction requires root; run pig repo boot with sudo").WithData(data)
+	}
 
 	// Create target directory
-	if err := utils.SudoCommand([]string{"mkdir", "-p", targetDir}); err != nil {
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		data.DurationMs = time.Since(startTime).Milliseconds()
 		return output.Fail(output.CodeRepoBootFailed,
 			fmt.Sprintf("failed to create target directory: %v", err)).WithData(data)
 	}
 
-	// Extract package using tar
-	if err := utils.SudoCommand([]string{"tar", "-xvzf", offlinePkg, "-C", targetDir}); err != nil {
+	// Stream through Go's gzip/tar readers. Neither native sty boot nor direct
+	// repo boot invokes or installs host tar/gzip executables.
+	var extractErr error
+	reusedExisting := false
+	if reuseCommitted {
+		reusedExisting = true
+	} else if info, err := os.Lstat(pigstyDir); err == nil {
+		if info.IsDir() && regularFileAt(filepath.Join(pigstyDir, "repo_complete")) {
+			reusedExisting = true
+		} else {
+			extractErr = fmt.Errorf("target already exists without a valid repo; remove or move it before retrying: %s", pigstyDir)
+		}
+	} else if !os.IsNotExist(err) {
+		extractErr = err
+	} else {
+		stage, err := os.MkdirTemp(targetDir, ".pig-repo-*")
+		if err != nil {
+			extractErr = err
+		} else {
+			defer os.RemoveAll(stage)
+			extractErr = archive.ExtractTarGz(offlinePkg, stage)
+			stagedRepo := filepath.Join(stage, "pigsty")
+			if extractErr == nil && !regularFileAt(filepath.Join(stagedRepo, "repo_complete")) {
+				extractErr = fmt.Errorf("offline package is missing pigsty/repo_complete")
+			}
+			if extractErr == nil {
+				extractErr = os.Rename(stagedRepo, pigstyDir)
+			}
+		}
+	}
+	if extractErr != nil {
 		data.DurationMs = time.Since(startTime).Milliseconds()
 		return output.Fail(output.CodeRepoBootFailed,
-			fmt.Sprintf("failed to extract package: %v", err)).WithData(data)
+			fmt.Sprintf("failed to extract package: %v", extractErr)).WithData(data)
 	}
 
 	// List extracted directories (top-level only for brevity)
@@ -107,25 +176,44 @@ func BootWithResult(offlinePkg, targetDir string) *output.Result {
 		}
 	}
 
-	// Check if targetDir/pigsty/repo_complete exists
+	// Check if targetDir/pigsty/repo_complete exists.
 	repoCompleteFile := filepath.Join(targetDir, "pigsty", "repo_complete")
-	if _, err := os.Stat(repoCompleteFile); err == nil {
-		pigstyDir := filepath.Join(targetDir, "pigsty")
+	if regularFileAt(repoCompleteFile) {
+		if !configureLocal {
+			data.DurationMs = time.Since(startTime).Milliseconds()
+			message := fmt.Sprintf("Extracted repo from %s to %s", offlinePkg, targetDir)
+			if reusedExisting {
+				message = fmt.Sprintf("Reused existing repo at %s", filepath.Join(targetDir, "pigsty"))
+			}
+			return output.OK(message, data)
+		}
 		data.LocalRepoPath = getLocalRepoPath()
-		if err := addLocalRepo(pigstyDir); err != nil {
+		if err := repoBootAddLocal(pigstyDir); err != nil {
 			data.DurationMs = time.Since(startTime).Milliseconds()
 			return output.Fail(output.CodeRepoBootFailed,
 				fmt.Sprintf("failed to add local repo config: %v", err)).WithData(data)
 		}
 		data.LocalRepoAdded = true
+	} else {
+		data.DurationMs = time.Since(startTime).Milliseconds()
+		return output.Fail(output.CodeRepoBootFailed,
+			fmt.Sprintf("offline package is missing %s", repoCompleteFile)).WithData(data)
 	}
 
 	data.DurationMs = time.Since(startTime).Milliseconds()
 
 	message := fmt.Sprintf("Bootstrapped repo from %s to %s", offlinePkg, targetDir)
+	if reusedExisting {
+		message = fmt.Sprintf("Reused existing repo at %s", filepath.Join(targetDir, "pigsty"))
+	}
 	if data.LocalRepoAdded {
 		message += fmt.Sprintf(", local repo config added: %s", data.LocalRepoPath)
 	}
 
 	return output.OK(message, data)
+}
+
+func regularFileAt(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0
 }

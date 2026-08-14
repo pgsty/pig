@@ -93,42 +93,6 @@ func usePigstyMirrorSource() {
 	}
 }
 
-type BootstrapOptions struct {
-	PigstyHome  string
-	Region      string
-	PackagePath string
-	Keep        bool
-}
-
-func Bootstrap(opts BootstrapOptions) error {
-	if opts.PigstyHome == "" {
-		logrus.Errorf("pigsty home not found, specify it with -H/--home")
-		return commandFailedf(output.CodeStyBootstrapResourceMissing, "pigsty home not found")
-	}
-	bootstrapPath := filepath.Join(opts.PigstyHome, "bootstrap")
-	if info, err := os.Stat(bootstrapPath); err != nil || info.IsDir() {
-		logrus.Errorf("bootstrap script not found: %s", bootstrapPath)
-		return commandFailedf(output.CodeStyBootstrapResourceMissing, "bootstrap script not found: %s", bootstrapPath)
-	}
-
-	cmdArgs := []string{bootstrapPath}
-	if opts.Region != "" {
-		cmdArgs = append(cmdArgs, "-r", opts.Region)
-	}
-	if opts.PackagePath != "" {
-		cmdArgs = append(cmdArgs, "-p", opts.PackagePath)
-	}
-	if opts.Keep {
-		cmdArgs = append(cmdArgs, "-k")
-	}
-	logrus.Infof("bootstrap with: %s", strings.Join(cmdArgs, " "))
-	if err := utils.CommandInDir(cmdArgs, opts.PigstyHome); err != nil {
-		logrus.Errorf("bootstrap execution failed: %v", err)
-		return commandFailed(output.CodeStyBootstrapFailed, err)
-	}
-	return nil
-}
-
 type RawConfigureOptions struct {
 	PigstyHome string
 	Mode       string

@@ -249,3 +249,9 @@ func TestStyCMDBCodeCategories(t *testing.T) {
 		}
 	}
 }
+
+func TestStyBootstrapPermissionCode(t *testing.T) {
+	if got := ExitCode(CodeStyBootstrapPermissionDenied); got != 3 {
+		t.Fatalf("Bootstrap permission code exit = %d, want 3", got)
+	}
+}

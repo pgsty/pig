@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,12 @@ import (
 )
 
 var moduleNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+var (
+	newAddRepoManager = NewManager
+	runAddRepoCommand = utils.SudoCommand
+	addRepoModule     = func(manager *Manager, module string) error { return manager.AddModule(module) }
+)
 
 // AddModule handles adding a single module to the system
 func (m *Manager) AddModule(module string) error {
@@ -123,10 +130,11 @@ func ExpandModuleArgs(args []string) []string {
 }
 
 type AddOptions struct {
-	Region string
-	Remove bool
-	Update bool
-	Mirror bool
+	Region   string
+	Remove   bool
+	Update   bool
+	Mirror   bool
+	GPGCheck bool
 }
 
 // ConfigureRepos is the shared entry point for CLI workflows that add or set
@@ -149,7 +157,7 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 	}
 
 	// Initialize manager
-	manager, err := NewManager()
+	manager, err := newAddRepoManager()
 	if err != nil {
 		return output.Fail(output.CodeRepoManagerError, fmt.Sprintf("failed to get repo manager: %v", err))
 	}
@@ -157,7 +165,6 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 		return output.Fail(output.CodeRepoUnsupportedOS,
 			fmt.Sprintf("unsupported platform: %s %s", config.OSVendor, config.OSVersionFull))
 	}
-
 	// Build OS environment info
 	osEnv := &OSEnvironment{
 		Code:  manager.OsDistroCode,
@@ -197,25 +204,45 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 		return output.Fail(output.CodeRepoModuleNotFound,
 			fmt.Sprintf("all modules not found: %v", expandedModules)).WithData(data)
 	}
-
-	// Handle backup if doRemove is true
-	if opts.Remove {
-		backupInfo, err := backupReposStructured(manager)
-		if err != nil {
-			data.DurationMs = time.Since(startTime).Milliseconds()
-			return output.Fail(output.CodeRepoBackupFailed,
-				fmt.Sprintf("failed to backup repos: %v", err)).WithData(data)
-		}
-		data.BackupInfo = backupInfo
+	// Replacement is all-or-nothing. Reject a mixed valid/invalid request before
+	// moving any active definitions; additive mode keeps its historical partial
+	// success behavior.
+	if opts.Remove && len(data.Failed) > 0 {
+		data.DurationMs = time.Since(startTime).Milliseconds()
+		return output.Fail(output.CodeRepoModuleNotFound,
+			fmt.Sprintf("repository replacement contains %d unknown module(s)", len(data.Failed))).WithData(data)
 	}
 
-	// The explicit mirror route uses China-region repositories
+	// Resolve the repository route before moving active definitions. This keeps
+	// network detection outside the destructive replacement window.
 	if opts.Mirror {
 		applyPGDGMirrorRoute(manager)
 	} else {
 		manager.DetectRegion(opts.Region)
 	}
 	data.Region = manager.Region
+
+	if opts.GPGCheck {
+		if err := InstallPigstyKey(); err != nil {
+			return output.Fail(output.CodeRepoAddFailed, err.Error()).WithData(data)
+		}
+		manager.enablePigstyGPGCheck()
+	}
+
+	// Handle backup if doRemove is true
+	if opts.Remove {
+		backupInfo, err := backupReposStructured(manager)
+		data.BackupInfo = backupInfo
+		if err != nil {
+			data.DurationMs = time.Since(startTime).Milliseconds()
+			result := output.Fail(output.CodeRepoBackupFailed,
+				fmt.Sprintf("failed to backup repos: %v", err)).WithData(data)
+			if backupInfo != nil {
+				return rollbackReplacement(manager, data, result, startTime)
+			}
+			return result
+		}
+	}
 
 	// Add each module
 	for _, module := range expandedModules {
@@ -235,12 +262,15 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 		repoNames := manager.Module[module]
 		filePath := manager.getModulePath(module)
 
-		if err := manager.AddModule(module); err != nil {
+		if err := addRepoModule(manager, module); err != nil {
 			data.Failed = append(data.Failed, &FailedRepoItem{
 				Module: module,
 				Error:  err.Error(),
 				Code:   output.CodeRepoAddFailed,
 			})
+			if opts.Remove {
+				break
+			}
 		} else {
 			data.AddedRepos = append(data.AddedRepos, &AddedRepoItem{
 				Module:   module,
@@ -249,11 +279,17 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 			})
 		}
 	}
+	if opts.Remove && len(data.Failed) > 0 {
+		data.DurationMs = time.Since(startTime).Milliseconds()
+		result := output.Fail(output.CodeRepoAddFailed,
+			fmt.Sprintf("failed to replace repositories: %d module(s) could not be added", len(data.Failed))).WithData(data)
+		return rollbackReplacement(manager, data, result, startTime)
+	}
 
 	// Handle cache update if doUpdate is true
 	if opts.Update {
 		updateCmd := strings.Join(manager.UpdateCmd, " ")
-		err := utils.SudoCommand(manager.UpdateCmd)
+		err := runAddRepoCommand(manager.UpdateCmd)
 		if err != nil {
 			data.UpdateResult = &UpdateCacheResult{
 				Command: updateCmd,
@@ -269,7 +305,133 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 	}
 
 	data.DurationMs = time.Since(startTime).Milliseconds()
-	return buildAddReposResult(data, expandedModules)
+	result := buildAddReposResult(data, expandedModules)
+	if opts.Remove && !result.Success {
+		return rollbackReplacement(manager, data, result, startTime)
+	}
+	return result
+}
+
+func rollbackReplacement(manager *Manager, data *RepoAddData, result *output.Result, startTime time.Time) *output.Result {
+	rollback, err := rollbackReposStructured(manager, data)
+	data.RollbackInfo = rollback
+	data.DurationMs = time.Since(startTime).Milliseconds()
+	if err != nil {
+		rollbackDetail := fmt.Sprintf("repository rollback failed: %v", err)
+		if result.Detail == "" {
+			result.Detail = rollbackDetail
+		} else {
+			result.Detail += "; " + rollbackDetail
+		}
+		return result
+	}
+	if result.Detail == "" {
+		result.Detail = "previous repository definitions restored"
+	} else {
+		result.Detail += "; previous repository definitions restored"
+	}
+	return result
+}
+
+func rollbackReposStructured(manager *Manager, data *RepoAddData) (*RollbackInfo, error) {
+	if data == nil {
+		info := &RollbackInfo{Error: "repository replacement metadata is unavailable"}
+		return info, errors.New(info.Error)
+	}
+	addedPaths := make([]string, 0, len(data.AddedRepos))
+	for _, item := range data.AddedRepos {
+		if item == nil {
+			continue
+		}
+		addedPaths = append(addedPaths, item.FilePath)
+	}
+	return restoreReposStructured(manager, data.BackupInfo, addedPaths)
+}
+
+// RestoreRepos removes repository definitions created by a failed replacement
+// and restores the exact active paths recorded by BackupInfo.
+func RestoreRepos(backup *BackupInfo, addedPaths ...string) (*RollbackInfo, error) {
+	manager, err := NewManager()
+	if err != nil {
+		info := &RollbackInfo{Error: fmt.Sprintf("initialize repository manager: %v", err)}
+		return info, errors.New(info.Error)
+	}
+	return restoreReposStructured(manager, backup, addedPaths)
+}
+
+func restoreReposStructured(manager *Manager, backup *BackupInfo, addedPaths []string) (*RollbackInfo, error) {
+	info := &RollbackInfo{}
+	if manager == nil || backup == nil {
+		info.Error = "repository backup metadata is unavailable"
+		return info, errors.New(info.Error)
+	}
+	backupDir := filepath.Clean(backup.BackupDir)
+	if backupDir != filepath.Clean(manager.BackupDir) {
+		info.Error = "repository backup directory does not match manager configuration"
+		return info, errors.New(info.Error)
+	}
+
+	var rollbackErrors []error
+	seenAdded := make(map[string]bool)
+	for _, addedPath := range addedPaths {
+		path := filepath.Clean(addedPath)
+		if seenAdded[path] {
+			continue
+		}
+		seenAdded[path] = true
+		if !isPathWithinBase(manager.RepoDir, path) {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("refusing unsafe failed repository path %s", path))
+			continue
+		}
+		if err := runAddRepoCommand([]string{"rm", "-f", path}); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("remove failed repository file %s: %w", path, err))
+			continue
+		}
+		info.RemovedFiles = append(info.RemovedFiles, path)
+	}
+
+	for _, original := range backup.BackedUpFiles {
+		original = filepath.Clean(original)
+		if !validRepoRestoreTarget(manager, original) {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("refusing unsafe repository restore target %s", original))
+			continue
+		}
+		source := backupPathForRepoFile(manager, original)
+		if !isPathWithinBase(backupDir, source) {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("refusing unsafe repository backup path %s", source))
+			continue
+		}
+		if err := runAddRepoCommand([]string{"mv", "-f", source, original}); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("restore repository file %s: %w", original, err))
+			continue
+		}
+		info.RestoredFiles = append(info.RestoredFiles, original)
+	}
+
+	if err := errors.Join(rollbackErrors...); err != nil {
+		info.Error = err.Error()
+		return info, err
+	}
+	info.Success = true
+	return info, nil
+}
+
+func validRepoRestoreTarget(manager *Manager, path string) bool {
+	if manager == nil {
+		return false
+	}
+	if isPathWithinBase(manager.RepoDir, path) {
+		return true
+	}
+	return config.OSType == config.DistroDEB && path == "/etc/apt/sources.list"
+}
+
+func backupPathForRepoFile(manager *Manager, original string) string {
+	name := filepath.Base(original)
+	if config.OSType == config.DistroDEB && filepath.Clean(original) == "/etc/apt/sources.list" {
+		name = ".pig-root-sources.list"
+	}
+	return filepath.Join(manager.BackupDir, name)
 }
 
 // buildAddReposResult computes the final AddRepos result from collected operation data.
@@ -305,7 +467,7 @@ func backupReposStructured(manager *Manager) (*BackupInfo, error) {
 	logrus.Infof("backup repos from %s to %s", manager.RepoDir, manager.BackupDir)
 
 	// Create backup directory
-	if err := utils.SudoCommand([]string{"mkdir", "-p", manager.BackupDir}); err != nil {
+	if err := runAddRepoCommand([]string{"mkdir", "-p", manager.BackupDir}); err != nil {
 		return nil, err
 	}
 
@@ -326,34 +488,49 @@ func backupReposStructured(manager *Manager) (*BackupInfo, error) {
 		}
 		filesToMove = append(filesToMove, fullPath)
 	}
+	debSourcesList := ""
+	if config.OSType == config.DistroDEB {
+		const path = "/etc/apt/sources.list"
+		if fileInfo, err := os.Stat(path); err == nil && fileInfo.Size() > 0 {
+			debSourcesList = path
+		}
+	}
+	backupTargets := make(map[string]string, len(filesToMove)+1)
+	for _, source := range append(append([]string(nil), filesToMove...), debSourcesList) {
+		if source == "" {
+			continue
+		}
+		target := backupPathForRepoFile(manager, source)
+		if previous, exists := backupTargets[target]; exists {
+			return nil, fmt.Errorf("repository backup path collision: %s and %s", previous, source)
+		}
+		backupTargets[target] = source
+	}
 
 	backupInfo := &BackupInfo{
 		BackupDir:     manager.BackupDir,
-		BackedUpFiles: filesToMove,
+		BackedUpFiles: make([]string, 0, len(filesToMove)+1),
 	}
 
-	// Move all files in one command if any exist
-	if len(filesToMove) > 0 {
-		mvCmd := []string{"mv", "-f"}
-		mvCmd = append(mvCmd, filesToMove...)
-		mvCmd = append(mvCmd, manager.BackupDir)
-		logrus.Debugf("mv -f %s... %s", filepath.Base(filesToMove[0]), manager.BackupDir)
-		if err := utils.SudoCommand(mvCmd); err != nil {
-			return nil, fmt.Errorf("failed to move repo files: %w", err)
+	// Move files individually so a partial failure can be rolled back from the
+	// exact set that already reached the backup directory.
+	for _, source := range filesToMove {
+		target := backupPathForRepoFile(manager, source)
+		logrus.Debugf("mv -f %s %s", filepath.Base(source), target)
+		if err := runAddRepoCommand([]string{"mv", "-f", source, target}); err != nil {
+			return backupInfo, fmt.Errorf("failed to move repo file %s: %w", source, err)
 		}
+		backupInfo.BackedUpFiles = append(backupInfo.BackedUpFiles, source)
 	}
 
 	// For debian, also backup sources.list
-	if config.OSType == config.DistroDEB {
-		debSourcesList := "/etc/apt/sources.list"
-		if fileInfo, err := os.Stat(debSourcesList); err == nil && fileInfo.Size() > 0 {
-			if err := utils.SudoCommand([]string{"mv", "-f", debSourcesList, filepath.Join(manager.BackupDir, "sources.list")}); err != nil {
-				return nil, err
-			}
-			if err := utils.SudoCommand([]string{"touch", debSourcesList}); err != nil {
-				return nil, err
-			}
-			backupInfo.BackedUpFiles = append(backupInfo.BackedUpFiles, debSourcesList)
+	if debSourcesList != "" {
+		if err := runAddRepoCommand([]string{"mv", "-f", debSourcesList, backupPathForRepoFile(manager, debSourcesList)}); err != nil {
+			return backupInfo, err
+		}
+		backupInfo.BackedUpFiles = append(backupInfo.BackedUpFiles, debSourcesList)
+		if err := runAddRepoCommand([]string{"touch", debSourcesList}); err != nil {
+			return backupInfo, err
 		}
 	}
 

@@ -265,6 +265,7 @@ const (
 	CodeStyCheckPermissionDenied       = MODULE_STY + CAT_PERM + 1       // Check observed a permission or privilege failure
 	CodeStyGrafanaPermissionDenied     = MODULE_STY + CAT_PERM + 2       // Grafana rejected credentials or authorization
 	CodeStyCMDBPermissionDenied        = MODULE_STY + CAT_PERM + 3       // CMDB connection or private file permissions are insufficient
+	CodeStyBootstrapPermissionDenied   = MODULE_STY + CAT_PERM + 4       // Bootstrap could not obtain or retain root privileges
 	CodeStyCheckDependencyMissing      = MODULE_STY + CAT_DEPEND + 1     // A required local Check executable is unavailable
 	CodeStyDeployDependencyMissing     = MODULE_STY + CAT_DEPEND + 2     // ansible-playbook is unavailable
 	CodeStyCheckNetworkFailed          = MODULE_STY + CAT_NETWORK + 1    // A selected target failed its TCP reachability probe
@@ -275,7 +276,7 @@ const (
 	CodeStyInventoryNotFound           = MODULE_STY + CAT_RESOURCE + 2   // Inventory file not found
 	CodeStyCheckResourceMissing        = MODULE_STY + CAT_RESOURCE + 3   // Pigsty home or required project layout is unavailable
 	CodeStyGrafanaResourceMissing      = MODULE_STY + CAT_RESOURCE + 4   // Grafana dashboard path or dump destination is unavailable
-	CodeStyBootstrapResourceMissing    = MODULE_STY + CAT_RESOURCE + 5   // Pigsty home or bootstrap script is unavailable
+	CodeStyBootstrapResourceMissing    = MODULE_STY + CAT_RESOURCE + 5   // A native Bootstrap package-manager or source resource is unavailable
 	CodeStyConfigureResourceMissing    = MODULE_STY + CAT_RESOURCE + 6   // Pigsty home or raw configure script is unavailable
 	CodeStyDeployResourceMissing       = MODULE_STY + CAT_RESOURCE + 7   // Pigsty home, inventory, or playbook is unavailable
 	CodeStyInventoryInvalid            = MODULE_STY + CAT_CONFIG + 1     // Inventory YAML or semantics are invalid

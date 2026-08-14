@@ -203,13 +203,17 @@ func (m *Manager) adjustPigstyRepoMeta() {
 	if !config.PigstyGPGCheck {
 		return
 	}
+	m.enablePigstyGPGCheck()
+}
+
+func (m *Manager) enablePigstyGPGCheck() {
 	if repo, ok := m.Map["pigsty-pgsql"]; ok {
 		if m.OsType == config.DistroEL {
 			repo.Meta["gpgcheck"] = "1"
 			repo.Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
 		} else if m.OsType == config.DistroDEB {
 			delete(repo.Meta, "trusted")
-			repo.Meta["signed-by"] = "/etc/apt/keyrings/pigsty.gpg"
+			repo.Meta["signed-by"] = pigstyAPTKeyPath
 		}
 	}
 	if repo, ok := m.Map["pigsty-infra"]; ok {
@@ -218,7 +222,7 @@ func (m *Manager) adjustPigstyRepoMeta() {
 			repo.Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
 		} else if m.OsType == config.DistroDEB {
 			delete(repo.Meta, "trusted")
-			repo.Meta["signed-by"] = "/etc/apt/keyrings/pigsty.gpg"
+			repo.Meta["signed-by"] = pigstyAPTKeyPath
 		}
 	}
 }

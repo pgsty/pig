@@ -9,11 +9,11 @@ categories: [Reference]
 
 # `pig sty` Design Contract
 
-Status: **normative; Inventory/CMDB migration and native Grafana management implemented**
+Status: **normative; native controller bootstrap, Inventory/CMDB migration, and native Grafana management implemented**
 
-Contract version: **1.7**
+Contract version: **1.8**
 
-Last updated: **2026-07-19**
+Last updated: **2026-08-14**
 
 This document is the design contract for the `pig sty` installation and
 controller command family. Sty consumes the lossless Inventory API, but the
@@ -68,8 +68,9 @@ The following are outside this roadmap:
 
 ## 2. Implementation status
 
-| Surface | Status at contract v1.6 |
+| Surface | Status at contract v1.8 |
 |:---|:---|
+| native `sty boot` | Implemented |
 | Lossless `inventory.Document`, ordered semantic model, selectors, editor, mutations, diagnostics | Implemented baseline |
 | `sty conf/configure` through Inventory API, with `--raw` fallback | Implemented |
 | staged `sty init`, fail-closed Pro EULA, atomic release download | Implemented |
@@ -150,6 +151,96 @@ The exact mapping and compatibility decision are defined by
 `sty list/l/ls` MUST NEVER be repurposed to mean Inventory list. It remains the
 canonical release listing, while `pig inv ls` provides the short Inventory
 spelling without changing an existing command's meaning.
+
+### 3.2.1 Native controller bootstrap
+
+`pig sty boot` is a thin native coordinator. It requires only the platform
+package manager (`dnf`, EL7 `yum`, or `apt-get`) and reuses Pig's existing
+repository configuration, package installation, extension-alias resolution,
+sudo, and Result-envelope implementations. Go code supplies HTTP(S) download
+and restricted `tar.gz` extraction because a minimal host may lack
+`curl`, `wget`, `tar`, and `gzip`. Archive extraction MUST stream through Go's
+`compress/gzip` and `archive/tar`; Bootstrap MUST NOT probe, install, repair, or
+invoke host `tar`/`gzip`, including on Debian-family systems.
+
+Source handling has three reported modes: `offline` uses a selected package or
+a committed `/www/pigsty/repo_complete`; `online` adds the existing `node` and
+`pigsty` repository modules; and `existing` reports the compatibility fallback
+when a `--keep` repository cache refresh fails but the configured host
+repositories can still satisfy installation. The `pigsty` module MUST contain
+both `pigsty-infra` (including SOW) and `pigsty-pgsql`. Matching the legacy
+bootstrap contract, existing repository definitions are backed up and replaced
+by default before the complete bootstrap set is added. Only explicit `--keep`
+preserves them. Offline package transactions MUST be restricted to
+`pigsty-local`. A committed local repository is preserved and reused; if a
+package is also selected, the result MUST warn that it was not unpacked and
+MUST NOT report it as the package used.
+
+Replacement-style repository configuration is atomic at the active definition
+boundary. Online region detection happens before active definitions are moved.
+When an online module cannot be written or its package-manager cache refresh
+fails, Pig MUST remove definitions created by that failed attempt and restore
+every path recorded in `BackupInfo`. Offline extraction MUST commit only the
+repository tree: it MUST NOT write `local.repo`/`local.list` until existing
+definitions have been backed up. Failure to write that local definition or to
+complete its strictly local cache/package transaction likewise restores the
+recorded definitions. Shared repository Results expose `rollback_info`;
+Bootstrap summarizes it as `repository_rollback=restored|failed`. Additive
+`--keep` behavior does not remove or roll back pre-existing definitions.
+
+`repo_complete` establishes only that a repository tree was committed. It does
+not prove that repository metadata and package dependencies are consumable.
+Bootstrap MUST therefore run its controller package transaction even when the
+controller already appears ready. In offline mode both cache refresh and package
+installation MUST remain restricted to `pigsty-local`; failure to resolve or
+install Ansible and its dependencies from that scope is a Bootstrap failure.
+The generated `/etc/yum.repos.d/local.repo` MUST set `module_hotfixes=1` on
+EL8 and EL9 so DNF modular filtering cannot hide packages from the offline
+repository; EL7 and EL10 omit that setting.
+
+Online bootstrap installs Pigsty's embedded signing key and renders the two
+Pigsty repositories with signature verification enabled, so APT must not depend
+on `apt-key`, curl, or wget and must not emit a missing Pigsty-key warning.
+
+Controller bootstrap MUST use the narrow package set required by the legacy
+`check_utils` responsibility, plus SOW, the platform OpenSSH client, Python
+requests, jmespath, and cryptography. It MUST NOT expand the broader
+`node-bootstrap` alias or install node tuning, performance, kernel,
+kernel-header, kernel-image, or ZFS packages. In particular, Ubuntu bootstrap
+MUST NOT request `linux-tools-generic`, and no platform may request `tar` or
+`gzip` as a Bootstrap dependency. Final verification MUST execute
+`ansible-playbook` and probe `yaml`, `jinja2`, `jmespath`, `requests`, and either
+`cryptography` or `OpenSSL` using the Python interpreter that actually launches
+Ansible, rather than assuming the system `python3` is the same runtime. On EL8,
+the explicit Jinja2, requests, jmespath, and cryptography packages therefore use
+the `python3.12-*` namespace required by the packaged Ansible interpreter.
+On Debian 12 and 13 it MUST also install the `locales` package, enable
+`en_US.UTF-8 UTF-8` in `/etc/locale.gen`, run `locale-gen en_US.UTF-8`, set
+`LANG` and `LC_ALL` through `update-locale`, and verify that the generated
+locale is listed by `locale -a`. This repair does not apply to Ubuntu or EL.
+
+After hard controller verification succeeds, Bootstrap MUST test key-based SSH
+to the invoking administrator at `127.0.0.1`. Failure is non-fatal: Bootstrap
+warns, authorizes an existing standard user key when available, or generates an
+RSA key when none exists, and retries once. A failed repair remains a structured
+warning and MUST NOT turn an otherwise successful Bootstrap into failure.
+
+After controller and localhost-SSH checks, Bootstrap MUST inspect the invoking
+administrator's default `~/pigsty` path. When Bootstrap was entered through
+sudo, this means the account identified by `SUDO_UID`, not root's home. An
+existing path is preserved without a network probe. If the path is absent and a
+Pigsty source repository is reachable, Bootstrap runs the current executable's
+`pig sty init` as that administrator so the resulting tree has user ownership.
+An unreachable source leaves Bootstrap successful with a warning and a
+`pig sty init` next action. Once automatic initialization starts, any failure is
+a Bootstrap failure.
+
+The conventional implicit `/tmp/pkg.tgz` is accepted only when it is a
+non-group/world-writable regular file owned by root or the sudo caller.
+Explicit `--path` accepts a local file or downloads an HTTP(S) URL before the
+single sudo re-exec, including compact `-pVALUE` shorthand. Native output uses
+`pig.sty.boot/v2`; the Boot command is the sole implementation and has no legacy
+raw-script mode or dependency on a Pigsty `bootstrap` script.
 
 ### 3.3 Reserved names
 
@@ -446,7 +537,7 @@ structured data payload MUST also carry a stable `kind`, for example:
 
 ```text
 pig.sty.init/v1
-pig.sty.boot/v1
+pig.sty.boot/v2
 pig.sty.configure/v1
 pig.sty.configure.raw/v1
 pig.sty.deploy/v1
@@ -846,9 +937,10 @@ Check now have root-only command paths; the unreleased experimental
 | query `pigsty.raw_config` | `pig inventory cmdb dump` | corrected CMDB adapter |
 | Vagrant/Terraform Make targets | thin P3 commands | P3 only |
 
-An old wrapper remains for at least one released deprecation window and until
-its parity fixtures have no unresolved regression. Its removal is a separate,
-reviewed change.
+Legacy retention is decided per released surface. Configure keeps its explicit
+`--raw` rollback path during native stabilization. Boot is deliberately
+Native-only: there is no Boot wrapper or deprecation window for the Pigsty
+`bootstrap` script.
 
 
 ## 16. Phase gates and acceptance
@@ -987,6 +1079,13 @@ exposed in the active agent runtime, so the strongest available
 `gpt-5.6-sol` adversarial reviewer was used and that substitution is recorded
 rather than represented as a Claude result.
 
+The native `sty boot` revision received a read-only Claude Code Fable 5 review
+at `effort=max` on 2026-08-14. It found no blocker and judged the simplified
+coordinator free of the discarded provider/journal/transaction framework. Its
+two P2 findings (selected-package reporting with an existing committed repo and
+root `repo boot` idempotency) and four P3 hardening/synchronization findings
+were resolved before acceptance.
+
 
 ## 18. Current stable workflow
 
@@ -994,7 +1093,7 @@ The currently implemented installation path remains:
 
 ```bash
 pig sty init [--accept-eula]     # install Pigsty to ~/pigsty
-pig sty boot                     # install controller prerequisites
+pig sty boot [--path PKG|URL]    # native controller bootstrap
 pig sty conf                     # native Inventory-aware configure
 pig sty conf --raw               # legacy configure fallback
 pig inventory edit [selector]    # edit full Inventory or one fragment
@@ -1011,7 +1110,8 @@ pig sty gf init [root]           # complete load followed by boot
 `sty configure` remains an alias of `sty conf`. Generic templates may apply
 explicit PostgreSQL version/region/proxy/locale/password options through the
 Inventory mutation API; version-pinned templates retain their pinned kernel
-semantics. `--raw` remains the rollback path during native stabilization.
+semantics. `--raw` remains only as the explicit Configure rollback path during
+native stabilization.
 
 The canonical Inventory workflow is defined by [`inventory.md`](inventory.md).
 New automation should use `pig inventory|inv`; Sty exposes no edit, validate,

@@ -65,9 +65,6 @@ func TestLifecycleVersionConflictsHaveStableParameterCodes(t *testing.T) {
 }
 
 func TestLifecycleResourceAndDependencyCodes(t *testing.T) {
-	if err := Bootstrap(BootstrapOptions{}); lifecycleStatusCode(err) != output.CodeStyBootstrapResourceMissing {
-		t.Fatalf("Bootstrap error = %v", err)
-	}
 	if err := ConfigureRaw(RawConfigureOptions{}); lifecycleStatusCode(err) != output.CodeStyConfigureResourceMissing {
 		t.Fatalf("ConfigureRaw error = %v", err)
 	}
@@ -86,7 +83,6 @@ func TestLifecycleCommandsRunInHomeWithoutChangingProcessDirectory(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	writeScript("bootstrap")
 	writeScript("configure")
 
 	bin := t.TempDir()
@@ -108,7 +104,6 @@ func TestLifecycleCommandsRunInHomeWithoutChangingProcessDirectory(t *testing.T)
 		name string
 		run  func() error
 	}{
-		{name: "bootstrap", run: func() error { return Bootstrap(BootstrapOptions{PigstyHome: home}) }},
 		{name: "configure", run: func() error { return ConfigureRaw(RawConfigureOptions{PigstyHome: home}) }},
 		{name: "deploy", run: func() error {
 			return Deploy(DeployOptions{PigstyHome: home, PigstyConfig: filepath.Join(home, "pigsty.yml")})

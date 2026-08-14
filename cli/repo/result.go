@@ -227,6 +227,13 @@ func (r *RepoAddData) Text() string {
 	if r.BackupInfo != nil && len(r.BackupInfo.BackedUpFiles) > 0 {
 		sb.WriteString(fmt.Sprintf("Backed up %d files to %s\n", len(r.BackupInfo.BackedUpFiles), r.BackupInfo.BackupDir))
 	}
+	if r.RollbackInfo != nil {
+		if r.RollbackInfo.Success {
+			sb.WriteString(fmt.Sprintf("Restored %d original repository files after failure\n", len(r.RollbackInfo.RestoredFiles)))
+		} else {
+			sb.WriteString(fmt.Sprintf("Repository rollback failed: %s\n", r.RollbackInfo.Error))
+		}
+	}
 	for _, item := range r.AddedRepos {
 		if item == nil {
 			continue
@@ -588,6 +595,7 @@ type RepoAddData struct {
 	AddedRepos       []*AddedRepoItem   `json:"added_repos" yaml:"added_repos"`
 	Failed           []*FailedRepoItem  `json:"failed,omitempty" yaml:"failed,omitempty"`
 	BackupInfo       *BackupInfo        `json:"backup_info,omitempty" yaml:"backup_info,omitempty"`
+	RollbackInfo     *RollbackInfo      `json:"rollback_info,omitempty" yaml:"rollback_info,omitempty"`
 	UpdateResult     *UpdateCacheResult `json:"update_result,omitempty" yaml:"update_result,omitempty"`
 	DurationMs       int64              `json:"duration_ms" yaml:"duration_ms"`
 }
@@ -610,6 +618,16 @@ type FailedRepoItem struct {
 type BackupInfo struct {
 	BackupDir     string   `json:"backup_dir" yaml:"backup_dir"`
 	BackedUpFiles []string `json:"backed_up_files" yaml:"backed_up_files"`
+}
+
+// RollbackInfo records restoration after a replacement-style repository
+// operation fails. RemovedFiles are definitions created by the failed attempt;
+// RestoredFiles are the original paths moved back from BackupInfo.BackupDir.
+type RollbackInfo struct {
+	Success       bool     `json:"success" yaml:"success"`
+	RemovedFiles  []string `json:"removed_files,omitempty" yaml:"removed_files,omitempty"`
+	RestoredFiles []string `json:"restored_files,omitempty" yaml:"restored_files,omitempty"`
+	Error         string   `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
 // UpdateCacheResult contains the result of cache update operation
@@ -637,6 +655,7 @@ type RepoRmData struct {
 	RequestedModules []string           `json:"requested_modules" yaml:"requested_modules"`
 	RemovedRepos     []*RemovedRepoItem `json:"removed_repos" yaml:"removed_repos"`
 	BackupInfo       *BackupInfo        `json:"backup_info,omitempty" yaml:"backup_info,omitempty"`
+	RollbackInfo     *RollbackInfo      `json:"rollback_info,omitempty" yaml:"rollback_info,omitempty"`
 	UpdateResult     *UpdateCacheResult `json:"update_result,omitempty" yaml:"update_result,omitempty"`
 	DurationMs       int64              `json:"duration_ms" yaml:"duration_ms"`
 }
@@ -677,6 +696,12 @@ type RepoUpdateData struct {
 func (r *RepoRmData) Text() string {
 	if r == nil {
 		return ""
+	}
+	if r.RollbackInfo != nil {
+		if r.RollbackInfo.Success {
+			return fmt.Sprintf("Restored %d original repository files after backup failure", len(r.RollbackInfo.RestoredFiles))
+		}
+		return fmt.Sprintf("Repository rollback failed: %s", r.RollbackInfo.Error)
 	}
 	if r.BackupInfo != nil && len(r.BackupInfo.BackedUpFiles) > 0 {
 		return fmt.Sprintf("Backed up %d files to %s", len(r.BackupInfo.BackedUpFiles), r.BackupInfo.BackupDir)
