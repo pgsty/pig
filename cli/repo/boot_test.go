@@ -85,6 +85,75 @@ func TestRegularFileAtRejectsSymlinkMarker(t *testing.T) {
 	}
 }
 
+func TestEnsureRepoTargetLayoutCreatesCanonicalSymlink(t *testing.T) {
+	root := t.TempDir()
+	repoHome := filepath.Join(root, "www")
+	repoData := filepath.Join(root, "data", "nginx")
+
+	if err := ensureRepoTargetLayout(repoHome, repoHome, repoData); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(repoHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("repository home mode = %v, want symlink", info.Mode())
+	}
+	link, err := os.Readlink(repoHome)
+	if err != nil || link != repoData {
+		t.Fatalf("repository home link = %q, %v; want %q", link, err, repoData)
+	}
+	if dataInfo, err := os.Stat(repoData); err != nil || !dataInfo.IsDir() {
+		t.Fatalf("repository data directory = %+v, %v", dataInfo, err)
+	}
+}
+
+func TestEnsureRepoTargetLayoutPreservesExistingDirectoryAndSymlink(t *testing.T) {
+	root := t.TempDir()
+	repoData := filepath.Join(root, "data", "nginx")
+	if err := os.MkdirAll(repoData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	directory := filepath.Join(root, "existing-directory")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureRepoTargetLayout(directory, directory, repoData); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(directory); err != nil || !info.IsDir() {
+		t.Fatalf("existing directory was not preserved: %+v, %v", info, err)
+	}
+
+	linkTarget := filepath.Join(root, "alternate-data")
+	if err := os.MkdirAll(linkTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "existing-link")
+	if err := os.Symlink(linkTarget, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureRepoTargetLayout(link, link, repoData); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(link); err != nil || got != linkTarget {
+		t.Fatalf("existing repository link = %q, %v; want %q", got, err, linkTarget)
+	}
+}
+
+func TestEnsureRepoTargetLayoutRejectsInvalidCanonicalPath(t *testing.T) {
+	root := t.TempDir()
+	repoHome := filepath.Join(root, "www")
+	if err := os.WriteFile(repoHome, []byte("occupied"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureRepoTargetLayout(repoHome, repoHome, filepath.Join(root, "data", "nginx")); err == nil {
+		t.Fatal("regular file was accepted as the canonical repository home")
+	}
+}
+
 func TestBootWithResultStreamsArchiveWithGo(t *testing.T) {
 	origEUID, origAddLocal := repoBootEUID, repoBootAddLocal
 	t.Cleanup(func() {

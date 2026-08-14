@@ -14,6 +14,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	defaultRepoTargetDir = "/www"
+	defaultRepoDataDir   = "/data/nginx"
+)
+
 // addLocalRepo adds local repo config for dnf/apt
 func addLocalRepo(targetDir string) error {
 	switch config.OSType {
@@ -86,7 +91,7 @@ func bootWithResult(offlinePkg, targetDir string, configureLocal bool) *output.R
 
 	// Use defaults if not provided
 	if targetDir == "" {
-		targetDir = "/www"
+		targetDir = defaultRepoTargetDir
 	}
 	if offlinePkg == "" {
 		offlinePkg = "/tmp/pkg.tgz"
@@ -125,11 +130,13 @@ func bootWithResult(offlinePkg, targetDir string, configureLocal bool) *output.R
 			"native repository extraction requires root; run pig repo boot with sudo").WithData(data)
 	}
 
-	// Create target directory
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+	// Match Pigsty's repository layout on a fresh host: /www is a stable
+	// convenience link while repository data lives below /data/nginx. Existing
+	// directories and valid directory symlinks are preserved for compatibility.
+	if err := ensureRepoTargetDir(targetDir); err != nil {
 		data.DurationMs = time.Since(startTime).Milliseconds()
 		return output.Fail(output.CodeRepoBootFailed,
-			fmt.Sprintf("failed to create target directory: %v", err)).WithData(data)
+			fmt.Sprintf("failed to prepare target directory: %v", err)).WithData(data)
 	}
 
 	// Stream through Go's gzip/tar readers. Neither native sty boot nor direct
@@ -211,6 +218,53 @@ func bootWithResult(offlinePkg, targetDir string, configureLocal bool) *output.R
 	}
 
 	return output.OK(message, data)
+}
+
+func ensureRepoTargetDir(targetDir string) error {
+	return ensureRepoTargetLayout(targetDir, defaultRepoTargetDir, defaultRepoDataDir)
+}
+
+func ensureRepoTargetLayout(targetDir, repoHome, repoData string) error {
+	if filepath.Clean(targetDir) != filepath.Clean(repoHome) {
+		return os.MkdirAll(targetDir, 0o755)
+	}
+
+	info, err := os.Lstat(repoHome)
+	if err == nil {
+		return validateRepoHome(repoHome, info)
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect repository home %s: %w", repoHome, err)
+	}
+	if err := os.MkdirAll(repoData, 0o755); err != nil {
+		return fmt.Errorf("create repository data directory %s: %w", repoData, err)
+	}
+	if err := os.Symlink(repoData, repoHome); err != nil {
+		if os.IsExist(err) {
+			info, statErr := os.Lstat(repoHome)
+			if statErr == nil {
+				return validateRepoHome(repoHome, info)
+			}
+		}
+		return fmt.Errorf("link repository home %s to %s: %w", repoHome, repoData, err)
+	}
+	return nil
+}
+
+func validateRepoHome(repoHome string, info os.FileInfo) error {
+	if info.IsDir() {
+		return nil
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Stat(repoHome)
+		if err != nil {
+			return fmt.Errorf("repository home symlink %s is not usable: %w", repoHome, err)
+		}
+		if target.IsDir() {
+			return nil
+		}
+	}
+	return fmt.Errorf("repository home %s exists but is not a directory or directory symlink", repoHome)
 }
 
 func regularFileAt(path string) bool {
