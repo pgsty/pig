@@ -3,9 +3,11 @@ package get
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"regexp"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -26,8 +28,8 @@ func UpdatePig(pigVer, region string) error {
 	// Fetch the latest version if not specified
 	if pigVer == "" {
 		pigVer, err = getLatestPigVersion(region)
-		if err != nil || !ValidVersion(pigVer) {
-			return fmt.Errorf("failed to fetch latest version: %v", err)
+		if err != nil {
+			return fmt.Errorf("failed to fetch latest version: %w", err)
 		}
 		logrus.Infof("get latest pig version: %s", pigVer)
 	} else {
@@ -106,16 +108,27 @@ func getLatestPigVersion(region string) (string, error) {
 	if region == "china" {
 		latestURL = config.RepoPigstyCC + "/pkg/pig/latest"
 	}
+	return fetchLatestPigVersion(latestURL)
+}
+
+func fetchLatestPigVersion(latestURL string) (string, error) {
 	resp, err := utils.DefaultClient().Get(latestURL)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected HTTP status: %s", resp.Status)
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch latest version: %v", err)
+		return "", fmt.Errorf("failed to read latest version: %w", err)
 	}
-	return string(body), nil
+	version := strings.TrimSpace(string(body))
+	if !ValidVersion(version) {
+		return "", fmt.Errorf("invalid version response: %q", version)
+	}
+	return version, nil
 }
 
 func ValidVersion(version string) bool {
