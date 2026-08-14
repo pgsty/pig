@@ -11,7 +11,7 @@ categories: [Reference]
 
 Status: **normative; native controller bootstrap, Inventory/CMDB migration, and native Grafana management implemented**
 
-Contract version: **1.8**
+Contract version: **1.9**
 
 Last updated: **2026-08-14**
 
@@ -68,7 +68,7 @@ The following are outside this roadmap:
 
 ## 2. Implementation status
 
-| Surface | Status at contract v1.8 |
+| Surface | Status at contract v1.9 |
 |:---|:---|
 | native `sty boot` | Implemented |
 | Lossless `inventory.Document`, ordered semantic model, selectors, editor, mutations, diagnostics | Implemented baseline |
@@ -120,6 +120,98 @@ The released `sty list/l/ls` and `sty get/g/download` spellings are the sole
 release-management surface. They preserve their 1.x command identifiers and
 structured payloads; Sty has no nested `release` namespace.
 
+### 3.1.1 Native Configure contract
+
+`pig sty conf [mode]` is the sole Pig implementation of the Pigsty configure
+workflow; `configure` and `c` are aliases. It reads one lossless template below
+`<PIGSTY_HOME>/conf`, applies bounded Inventory mutations, validates the complete
+candidate, and only then atomically writes an owner-only Inventory. It does not
+invoke or fall back to the Pigsty `configure` shell script.
+
+The public options are:
+
+| Flag | Contract |
+|:---|:---|
+| `--conf, -c MODE` | Select `conf/MODE.yml`; mutually exclusive with positional `mode` |
+| `--ip IP[,IP...]` | Supply at most ten distinct IPv4 addresses for ordered placeholder replacement |
+| `--domain DOMAIN` | Replace the exact `i.pigsty` placeholder token |
+| `--version, -v MAJOR` | Request an installable PostgreSQL major for a generic template |
+| `--region, -r REGION` | Select the upstream repository region |
+| `--mirror, -m` | Alias for `--region china`; mutually exclusive with `--region` |
+| `--output-file, -O FILE` | Write FILE instead of `<PIGSTY_HOME>/pigsty.yml`; `-o` remains the global output-format flag |
+| `--skip, -s` | Keep the placeholder primary IP and skip admin SSH/sudo checks; mutually exclusive with `--ip` |
+| `--proxy, -x` | Materialize non-empty proxy environment variables in `all.vars.proxy_env` |
+| `--non-interactive, -n` | Refuse an ambiguous IP probe instead of prompting |
+| `--port, -p PORT` | Use PORT for the admin SSH preflight |
+| `--generate, -g` | Replace known demo credentials with cryptographically random 24-character alphanumeric values |
+
+An empty mode resolves to `meta`. A mode is a slash-separated relative name;
+absolute paths, traversal, and characters outside letters, digits, `_`, `-`,
+and `/` are rejected. The resolved template must remain below `conf`. A relative
+output is resolved below `PIGSTY_HOME`; an absolute output is retained. The
+output MUST NOT resolve to the source template, including through a hard link,
+the final symlink, or a symlinked parent directory. Existing output symlinks are
+otherwise refused by the atomic writer. Successful output is mode `0600`.
+
+Configure treats `10.10.10.10` through `10.10.10.19` as ten ordered placeholder
+slots. The first supplied address replaces `.10`, the second `.11`, and so on,
+with token boundaries; replacement is simultaneous rather than cascading.
+Addresses outside that range, including template VIPs such as `.9`, remain
+unchanged. `build/*` templates bypass IP replacement and the admin preflight.
+An address that would make one consumed mapping key collide with an unreplaced
+key is an invalid argument with an actionable collision diagnostic; it MUST NOT
+be reported as a malformed source template. Any supplied address that matches
+no placeholder slot in the template is reported as a discarded warning,
+including a single `--ip` against a template with no placeholders. When the
+interactive primary-IP prompt reads a closed or exhausted stdin (piped input),
+it reports the same actionable `specify --ip` guidance as the non-interactive
+branch instead of a raw EOF read error.
+
+Domain replacement also uses token boundaries: `i.pigsty` changes, while names
+such as `cli.pigsty` and `i.pigsty.cc` remain intact. A domain must satisfy DNS
+label length and character rules.
+
+After placeholder planning, native mutation applies these compatibility rules:
+
+- fewer than four CPUs changes the exact `node_tune: oltp` and
+  `pg_conf: oltp.yml` declarations to `tiny` equivalents;
+- a non-default region updates `all.vars.region`; `china` activates existing
+  `docker_registry_mirrors` and `PIP_MIRROR_URL` declarations but does not
+  invent template-specific values that are absent;
+- proxy mode replaces `all.vars.proxy_env` only when at least one supported
+  proxy value is available;
+- a requested PostgreSQL major updates the global version and matching package
+  aliases in generic templates. `mssql`, `polar`, and `pgNN` templates retain
+  their declared effective major and warn when a different requested version is
+  ignored. A beta effective major enables an existing global `pgsql` repository
+  module list for beta packages or warns when no eligible list exists;
+- locale eligibility is based on the effective PostgreSQL major, not on a
+  version flag that a pinned template ignored. A global `pg_version` receives
+  `C.UTF-8` locale declarations for the legacy unresolved/default case, for
+  PG17+, or when the controller advertises `C.UTF-8`; mode names do not override
+  that effective-version decision;
+- password generation updates active declarations for
+  `grafana_admin_password`, `pg_admin_password`, `pg_monitor_password`,
+  `pg_replication_password`, `patroni_password`, `haproxy_admin_password`,
+  `minio_secret_key`, and `etcd_root_password`. The distinctive placeholders
+  `DBUser.Meta`, `DBUser.Viewer`, `S3User.Backup`, `S3User.Meta`, `S3User.Data`,
+  `DBUser.Supa`, and `Vibe.Coding` are replaced in both active scalar values and
+  comments so later activation of a dormant example cannot restore a public
+  credential. One generated value is reused for every occurrence of one
+  identifier.
+
+The source template is parsed before interactive or external work. IP-key
+collisions are rejected before SSH preflight. The rendered candidate then passes
+native Inventory validation and, when available, bounded `ansible-inventory`
+validation. No output is created or replaced after any parse, mutation, or
+validation failure. Argument and replacement-plan failures use the parameter
+status class; template read/mutation/validation failures use the configure
+operation class; destination-write failures use the configure write class.
+
+Text and structured results may expose template/output paths, effective version,
+applied/discarded IP metadata, warnings, and generated secret identifiers. They
+MUST NOT expose generated secret values.
+
 ### 3.2 Root Inventory migration promise
 
 The canonical Inventory spelling is now outside Sty:
@@ -158,19 +250,23 @@ spelling without changing an existing command's meaning.
 the best-effort locale preflight described below, because an unsupported
 inherited locale can prevent `ansible-playbook` from initializing at all. It
 then executes `ansible-playbook` and probes Ansible's Python dependencies. When
-that check succeeds, Bootstrap reports `[ OK ] ansible = ready`, skips all
-repository and package work, and continues with the remaining controller
-repairs. Only an unusable Ansible runtime enters the repository/package
-Bootstrap flow and requires the platform package manager (`dnf`, EL7 `yum`, or
-`apt-get`). That flow reuses Pig's existing repository configuration, package
-installation, extension-alias resolution, sudo, and Result-envelope
-implementations.
+that check succeeds, Bootstrap reports `[ OK ] ansible = ready` and skips the
+controller package transaction. It still prepares an explicitly selected,
+trusted automatic, or committed offline repository so later deployment uses
+the requested local source. Only an unusable Ansible runtime configures online
+repositories or installs controller packages and therefore requires the
+platform package manager (`dnf`, EL7 `yum`, or `apt-get`). That flow reuses
+Pig's existing repository configuration, package installation,
+extension-alias resolution, sudo, and Result-envelope implementations.
 
 Go code supplies HTTP(S) download and restricted `tar.gz` extraction because a
 minimal host may lack `curl`, `wget`, `tar`, and `gzip`. Archive extraction MUST
 stream through Go's `compress/gzip` and `archive/tar`; Bootstrap MUST NOT probe,
 install, repair, or invoke host `tar`/`gzip`, including on Debian-family
-systems.
+systems. When the default `/www` repository home is absent, Bootstrap MUST
+create `/data/nginx` and make `/www` a symbolic link to it before extraction.
+An existing directory or valid directory symlink is preserved; any other path
+type is rejected.
 
 Source handling has three reported modes: `offline` uses a selected package or
 a committed `/www/pigsty/repo_complete`; `online` adds the existing `node` and
@@ -213,20 +309,24 @@ Pigsty repositories with signature verification enabled, so APT must not depend
 on `apt-key`, curl, or wget and must not emit a missing Pigsty-key warning.
 
 Ansible bootstrap MUST use the narrow package set required by the legacy
-`check_utils` responsibility, plus SOW, the platform OpenSSH client, Python
-requests, jmespath, and cryptography. It MUST NOT expand the broader
-`node-bootstrap` alias or install node tuning, performance, kernel,
+`check_utils` responsibility, plus SOW, the platform OpenSSH client, and the
+external Python dependencies required by Pigsty playbooks. It MUST NOT expand
+the broader `node-bootstrap` alias or install node tuning, performance, kernel,
 kernel-header, kernel-image, or ZFS packages. In particular, Ubuntu bootstrap
 MUST NOT request `linux-tools-generic`, and no platform may request `tar` or
 `gzip` as a Bootstrap dependency. The initial check and post-repair verification
 MUST execute
-`ansible-playbook` and probe `yaml`, `jinja2`, `jmespath`, `requests`, and either
-`cryptography` or `OpenSSL` using the Python interpreter that actually launches
-Ansible, rather than assuming the system `python3` is the same runtime. On EL8,
-the explicit Jinja2, requests, jmespath, and cryptography packages therefore use
-the `python3.12-*` namespace required by the packaged Ansible interpreter. If
-Ansible remains unusable after repair, Bootstrap fails. This is the sole hard
-post-repair controller invariant.
+`ansible-playbook` and probe `yaml`, `jmespath`, and either `cryptography` or
+`OpenSSL` using the Python interpreter that actually launches Ansible, rather
+than assuming the system `python3` is the same runtime. EL8 Python package names
+MUST match legacy `bootstrap`: `python3.12-jmespath` and
+`python3-cryptography`; its `ansible-core` package supplies its own Python 3.12
+dependencies and vendored Jinja2. The system `python3` capability remains an
+implicit platform dependency, and EL8 MUST NOT request SOW because the legacy
+offline package does not provide it. RPM local-repository verification resolves
+package capabilities through their providers, matching DNF behavior for names
+such as `dnf-utils`. If Ansible remains unusable after repair, Bootstrap fails.
+This is the sole hard post-repair controller invariant.
 
 Before the initial Ansible probe, Debian 12 and 13 Bootstrap MUST check
 `locale -a` for `en_US.UTF-8` using a safe `C` process environment.
@@ -260,8 +360,22 @@ An unsafe implicit file is treated as an incomplete artifact: Bootstrap warns,
 ignores it, and continues by checking `/www/pigsty/repo_complete` before
 choosing online mode. It is not deleted.
 Explicit `--path` accepts a local file or downloads an HTTP(S) URL before the
-single sudo re-exec, including compact `-pVALUE` shorthand. Native output uses
-`pig.sty.boot/v2`; successful package-manager output is shown as transient
+single sudo re-exec, including compact `-pVALUE` shorthand. Failures raised
+while resolving that input in the unprivileged parent (missing file, failed
+download) are reported as resource errors, never as a privilege failure; only
+an actual inability to run sudo produces the permission-denied code. When
+structured output is requested and the sudo child exits without emitting any
+structured output, the parent MUST synthesize a failure Result envelope on
+stdout so machine consumers never observe an empty document. The `--region`
+value is case-insensitive: it is lowercased once on entry and the normalized
+value drives repository routing, mirror selection, and the child
+`pig sty init` invocation identically. After the Ansible phase, Bootstrap runs
+an advisory probe for the deploy-time helpers (`ssh`, `sshpass`, `sow`,
+`ssh-keygen`); a missing helper is reported as a warning and never fails the
+command. On Debian, a locale repair that failed before package installation is
+retried once after the controller packages (which include `locales`) are
+installed, and a successful retry withdraws the earlier locale warning.
+Native output uses `pig.sty.boot/v2`; successful package-manager output is shown as transient
 single-line rolling progress by replacing line breaks with carriage returns,
 then cleared when the command finishes. A failed command still reports at most
 its final four lines. Structured output suppresses this dynamic progress. Text
