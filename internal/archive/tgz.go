@@ -79,7 +79,7 @@ func ExtractTarGz(filename, dst string) error {
 				_ = gz.Close()
 				return fmt.Errorf("create %s: %w", hdr.Name, err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg, 0: // A zero type flag is the legacy regular-file encoding.
 			if hdr.Size < 0 || hdr.Size > maxFile || total > maxTotal-hdr.Size {
 				_ = gz.Close()
 				return fmt.Errorf("offline package entry is too large: %s", hdr.Name)

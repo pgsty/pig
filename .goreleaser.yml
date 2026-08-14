@@ -6,11 +6,11 @@ env:
 before:
   hooks:
     - go mod download
-    - go mod tidy
+    - go mod verify
 
 builds:
   - id: pig
-    main: ./main.go
+    main: .
     binary: pig
     goos:
       - linux
@@ -27,7 +27,7 @@ builds:
       - -X 'pig/internal/config.Revision={{.ShortCommit}}'
       - -X 'pig/internal/config.BuildDate={{.Date}}'
     flags:
-      - -a
+      - -trimpath
 
 archives:
   - id: pig
@@ -78,7 +78,7 @@ checksum:
   algorithm: sha256
 
 snapshot:
-  version_template: "{{ .Tag }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc

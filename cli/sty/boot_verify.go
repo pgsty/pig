@@ -52,7 +52,7 @@ func verifyController(ctx context.Context) error {
 		return err
 	}
 	if _, err := runControllerProbe(ctx, python, "-c", controllerPythonProbe); err != nil {
-		return fmt.Errorf("Ansible Python dependencies: %w", err)
+		return fmt.Errorf("ansible Python dependencies: %w", err)
 	}
 
 	for _, probe := range [][]string{

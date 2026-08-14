@@ -1,6 +1,7 @@
 package license
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/csv"
@@ -456,9 +457,16 @@ func loadPEMBlock(pathOrStr string) (*pem.Block, error) {
 
 // PublicKeysEqual compares two ECDSA public keys for equality
 func PublicKeysEqual(k1, k2 *ecdsa.PublicKey) bool {
-	return k1.X.Cmp(k2.X) == 0 &&
-		k1.Y.Cmp(k2.Y) == 0 &&
-		k1.Curve.Params().Name == k2.Curve.Params().Name
+	encoded1, err := k1.Bytes()
+	if err != nil {
+		return false
+	}
+	encoded2, err := k2.Bytes()
+	if err != nil {
+		return false
+	}
+	return k1.Curve.Params().Name == k2.Curve.Params().Name &&
+		bytes.Equal(encoded1, encoded2)
 }
 
 func AddLicense(license string) error {

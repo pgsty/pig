@@ -7,23 +7,43 @@ on:
       - master
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
+
+      - name: Verify dependencies
+        run: |
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
 
       - name: Install analysis tools
         run: |
-          go install honnef.co/go/tools/cmd/staticcheck@v0.6.1
-          go install golang.org/x/tools/cmd/deadcode@v0.41.0
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          go install honnef.co/go/tools/cmd/staticcheck@2026.1
+          go install golang.org/x/tools/cmd/deadcode@v0.49.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+
+      - name: Check GitHub Actions workflows
+        run: actionlint
 
       - name: Run tests
         run: go test ./...
@@ -36,3 +56,13 @@ jobs:
 
       - name: Run deadcode
         run: deadcode ./...
+
+      - name: Run vulnerability scan
+        run: govulncheck ./...
+
+      - name: Build release snapshot
+        uses: goreleaser/goreleaser-action@v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.17.1
+          args: release --snapshot --clean --skip=publish
