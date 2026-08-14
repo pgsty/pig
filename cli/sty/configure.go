@@ -1,6 +1,7 @@
 package sty
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -35,16 +36,18 @@ const (
 )
 
 var (
-	lookPathFn               = exec.LookPath
-	runCommandFn             = runCommandWithTimeout
-	currentUserFn            = detectCurrentUser
-	shellOutputFn            = utils.ShellOutput
-	regionDetectFn           = detectRegionFromNetworkCondition
-	inReader       io.Reader = os.Stdin
-	errWriter      io.Writer = os.Stderr
-	goosFn                   = detectedGOOS
-	goarchFn                 = detectedGOARCH
-	localIPv4sFn             = localIPv4s
+	lookPathFn                      = exec.LookPath
+	runCommandFn                    = runCommandWithTimeout
+	currentUserFn                   = detectCurrentUser
+	shellOutputFn                   = utils.ShellOutput
+	regionDetectFn                  = detectRegionFromNetworkCondition
+	inReader              io.Reader = os.Stdin
+	errWriter             io.Writer = os.Stderr
+	goosFn                          = detectedGOOS
+	goarchFn                        = detectedGOARCH
+	networkInterfacesFn             = net.Interfaces
+	interfaceAddrsFn                = func(iface net.Interface) ([]net.Addr, error) { return iface.Addrs() }
+	localIPv4CandidatesFn           = localIPv4Candidates
 
 	networkConditionFn = get.NetworkCondition
 	internetAccessFn   = func() bool { return get.InternetAccess }
@@ -398,18 +401,19 @@ func resolvePrimaryIP(opts ConfigureOptions, mode string) (string, []string, err
 		return defaultPrimaryIP, warnings, nil
 	}
 
-	ips := localIPv4sFn()
-	switch len(ips) {
+	candidates := localIPv4CandidatesFn()
+	switch len(candidates) {
 	case 0:
 		warnings = append(warnings, "failed to probe local IPv4, fallback to placeholder primary_ip")
 		return defaultPrimaryIP, warnings, nil
 	case 1:
-		return ips[0], warnings, nil
-	default:
-		for _, c := range ips {
-			if c == defaultPrimaryIP {
-				return defaultPrimaryIP, warnings, nil
-			}
+		return candidates[0].IP, warnings, nil
+	}
+
+	printLocalIPv4Candidates(errWriter, candidates)
+	for _, candidate := range candidates {
+		if candidate.IP == defaultPrimaryIP {
+			return defaultPrimaryIP, warnings, nil
 		}
 	}
 
@@ -417,30 +421,72 @@ func resolvePrimaryIP(opts ConfigureOptions, mode string) (string, []string, err
 		return "", warnings, fmt.Errorf("multiple IP candidates found, specify --ip or disable --non-interactive")
 	}
 
-	fmt.Fprintf(errWriter, "INPUT primary_ip address (e.g. %s):\n=> ", defaultPrimaryIP)
+	fmt.Fprintf(errWriter, "INPUT primary_ip candidate number [1-%d] or IPv4 address:\n=> ", len(candidates))
 	var input string
 	if _, err := fmt.Fscanln(inReader, &input); err != nil {
 		return "", warnings, fmt.Errorf("failed to read primary ip: %w", err)
 	}
-	input = strings.TrimSpace(input)
-	if parsed := net.ParseIP(input); parsed == nil || parsed.To4() == nil {
-		return "", warnings, fmt.Errorf("invalid primary ip: %s", input)
+	selected, err := selectPrimaryIP(input, candidates)
+	if err != nil {
+		return "", warnings, err
 	}
-	return input, warnings, nil
+	return selected, warnings, nil
 }
 
-func localIPv4s() []string {
-	out := make([]string, 0, 4)
-	seen := make(map[string]struct{})
-	ifaces, err := net.Interfaces()
+type localIPv4Candidate struct {
+	IP         string
+	Interfaces []string
+}
+
+func printLocalIPv4Candidates(w io.Writer, candidates []localIPv4Candidate) {
+	if w == nil || len(candidates) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Multiple IP address candidates found:")
+	width := len(strconv.Itoa(len(candidates)))
+	for i, candidate := range candidates {
+		fmt.Fprintf(w, "    (%*d) %-15s  %s\n", width, i+1, candidate.IP, strings.Join(candidate.Interfaces, ", "))
+	}
+}
+
+func selectPrimaryIP(input string, candidates []localIPv4Candidate) (string, error) {
+	input = strings.TrimSpace(input)
+	if isDecimal(input) {
+		selection, err := strconv.Atoi(input)
+		if err != nil || selection < 1 || selection > len(candidates) {
+			return "", fmt.Errorf("invalid primary ip selection: %s (valid range: 1-%d)", input, len(candidates))
+		}
+		return candidates[selection-1].IP, nil
+	}
+	if parsed := net.ParseIP(input); parsed == nil || parsed.To4() == nil {
+		return "", fmt.Errorf("invalid primary ip: %s", input)
+	}
+	return input, nil
+}
+
+func isDecimal(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func localIPv4Candidates() []localIPv4Candidate {
+	interfacesByIP := make(map[string]map[string]struct{})
+	ifaces, err := networkInterfacesFn()
 	if err != nil {
-		return out
+		return nil
 	}
 	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
 		}
-		addrs, err := iface.Addrs()
+		addrs, err := interfaceAddrsFn(iface)
 		if err != nil {
 			continue
 		}
@@ -460,14 +506,27 @@ func localIPv4s() []string {
 				continue
 			}
 			s := ip.String()
-			if _, ok := seen[s]; ok {
-				continue
+			interfaces, ok := interfacesByIP[s]
+			if !ok {
+				interfaces = make(map[string]struct{})
+				interfacesByIP[s] = interfaces
 			}
-			seen[s] = struct{}{}
-			out = append(out, s)
+			interfaces[iface.Name] = struct{}{}
 		}
 	}
-	slices.Sort(out)
+
+	out := make([]localIPv4Candidate, 0, len(interfacesByIP))
+	for ip, interfaceSet := range interfacesByIP {
+		interfaces := make([]string, 0, len(interfaceSet))
+		for name := range interfaceSet {
+			interfaces = append(interfaces, name)
+		}
+		slices.Sort(interfaces)
+		out = append(out, localIPv4Candidate{IP: ip, Interfaces: interfaces})
+	}
+	slices.SortFunc(out, func(a, b localIPv4Candidate) int {
+		return bytes.Compare(net.ParseIP(a.IP).To4(), net.ParseIP(b.IP).To4())
+	})
 	return out
 }
 

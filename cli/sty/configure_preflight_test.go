@@ -2,11 +2,14 @@ package sty
 
 import (
 	"bytes"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"pig/cli/get"
 	"pig/internal/config"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -209,7 +212,12 @@ func TestResolvePrimaryIPInteractivePrompt(t *testing.T) {
 	defer restore()
 
 	goosFn = func() string { return "linux" }
-	localIPv4sFn = func() []string { return []string{"10.0.0.2", "10.0.0.3"} }
+	localIPv4CandidatesFn = func() []localIPv4Candidate {
+		return []localIPv4Candidate{
+			{IP: "10.0.0.2", Interfaces: []string{"eth0"}},
+			{IP: "10.0.0.3", Interfaces: []string{"eth1"}},
+		}
+	}
 	inReader = strings.NewReader("10.0.0.8\n")
 	var errBuf bytes.Buffer
 	errWriter = &errBuf
@@ -224,8 +232,108 @@ func TestResolvePrimaryIPInteractivePrompt(t *testing.T) {
 	if len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
-	if !strings.Contains(errBuf.String(), "INPUT primary_ip address") {
+	if !strings.Contains(errBuf.String(), "INPUT primary_ip") {
 		t.Fatalf("expected prompt output, got %q", errBuf.String())
+	}
+	for _, expected := range []string{"Multiple IP address candidates found:", "(1) 10.0.0.2", "eth0", "(2) 10.0.0.3", "eth1"} {
+		if !strings.Contains(errBuf.String(), expected) {
+			t.Fatalf("expected candidate output %q, got %q", expected, errBuf.String())
+		}
+	}
+}
+
+func TestResolvePrimaryIPInteractiveSelectionNumber(t *testing.T) {
+	restore := savePreflightHooks()
+	defer restore()
+
+	goosFn = func() string { return "linux" }
+	localIPv4CandidatesFn = func() []localIPv4Candidate {
+		return []localIPv4Candidate{
+			{IP: "10.0.0.2", Interfaces: []string{"eth0"}},
+			{IP: "10.0.0.3", Interfaces: []string{"eth1"}},
+		}
+	}
+	inReader = strings.NewReader("2\n")
+	var errBuf bytes.Buffer
+	errWriter = &errBuf
+
+	ip, warnings, err := resolvePrimaryIP(ConfigureOptions{}, "meta")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ip != "10.0.0.3" {
+		t.Fatalf("expected candidate 2 IP, got %q", ip)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	if !strings.Contains(errBuf.String(), "candidate number [1-2] or IPv4 address") {
+		t.Fatalf("expected selection-aware prompt, got %q", errBuf.String())
+	}
+}
+
+func TestResolvePrimaryIPRejectsInvalidSelectionNumber(t *testing.T) {
+	restore := savePreflightHooks()
+	defer restore()
+
+	goosFn = func() string { return "linux" }
+	localIPv4CandidatesFn = func() []localIPv4Candidate {
+		return []localIPv4Candidate{
+			{IP: "10.0.0.2", Interfaces: []string{"eth0"}},
+			{IP: "10.0.0.3", Interfaces: []string{"eth1"}},
+		}
+	}
+	inReader = strings.NewReader("3\n")
+	errWriter = io.Discard
+
+	if _, _, err := resolvePrimaryIP(ConfigureOptions{}, "meta"); err == nil || !strings.Contains(err.Error(), "valid range: 1-2") {
+		t.Fatalf("expected out-of-range selection error, got %v", err)
+	}
+}
+
+func TestLocalIPv4CandidatesIncludesInterfacesAndSortsNumerically(t *testing.T) {
+	restore := savePreflightHooks()
+	defer restore()
+
+	networkInterfacesFn = func() ([]net.Interface, error) {
+		return []net.Interface{
+			{Index: 1, Name: "lo", Flags: net.FlagUp | net.FlagLoopback},
+			{Index: 2, Name: "eth9", Flags: net.FlagUp},
+			{Index: 3, Name: "eth1", Flags: net.FlagUp},
+			{Index: 4, Name: "down0"},
+		}, nil
+	}
+	interfaceAddrsFn = func(iface net.Interface) ([]net.Addr, error) {
+		switch iface.Name {
+		case "lo":
+			return []net.Addr{
+				&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
+				&net.IPNet{IP: net.ParseIP("10.0.0.20"), Mask: net.CIDRMask(32, 32)},
+			}, nil
+		case "eth9":
+			return []net.Addr{
+				&net.IPNet{IP: net.ParseIP("10.0.0.10"), Mask: net.CIDRMask(24, 32)},
+				&net.IPNet{IP: net.ParseIP("10.0.0.2"), Mask: net.CIDRMask(24, 32)},
+				&net.IPNet{IP: net.ParseIP("2001:db8::1"), Mask: net.CIDRMask(64, 128)},
+			}, nil
+		case "eth1":
+			return []net.Addr{
+				&net.IPAddr{IP: net.ParseIP("10.0.0.2")},
+				&net.IPAddr{IP: net.ParseIP("192.168.1.5")},
+			}, nil
+		default:
+			return nil, nil
+		}
+	}
+
+	got := localIPv4Candidates()
+	want := []localIPv4Candidate{
+		{IP: "10.0.0.2", Interfaces: []string{"eth1", "eth9"}},
+		{IP: "10.0.0.10", Interfaces: []string{"eth9"}},
+		{IP: "192.168.1.5", Interfaces: []string{"eth1"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected local IPv4 candidates: got=%v want=%v", got, want)
 	}
 }
 
@@ -290,7 +398,7 @@ func TestResolvePrimaryIPBranches(t *testing.T) {
 		t.Fatal("expected invalid ip error")
 	}
 
-	localIPv4sFn = func() []string { return nil }
+	localIPv4CandidatesFn = func() []localIPv4Candidate { return nil }
 	ip, warnings, err = resolvePrimaryIP(ConfigureOptions{}, "meta")
 	if err != nil || ip != defaultPrimaryIP {
 		t.Fatalf("empty probe fallback mismatch: ip=%q err=%v", ip, err)
@@ -299,25 +407,34 @@ func TestResolvePrimaryIPBranches(t *testing.T) {
 		t.Fatal("expected warning when probe fails")
 	}
 
-	localIPv4sFn = func() []string { return []string{"10.0.0.5"} }
+	localIPv4CandidatesFn = func() []localIPv4Candidate {
+		return []localIPv4Candidate{{IP: "10.0.0.5", Interfaces: []string{"eth0"}}}
+	}
 	ip, warnings, err = resolvePrimaryIP(ConfigureOptions{}, "meta")
 	if err != nil || ip != "10.0.0.5" || len(warnings) != 0 {
 		t.Fatalf("single ip branch mismatch: ip=%q warnings=%v err=%v", ip, warnings, err)
 	}
 
-	localIPv4sFn = func() []string { return []string{"10.0.0.2", "10.0.0.3"} }
+	localIPv4CandidatesFn = func() []localIPv4Candidate {
+		return []localIPv4Candidate{{IP: "10.0.0.2", Interfaces: []string{"eth0"}}, {IP: "10.0.0.3", Interfaces: []string{"eth1"}}}
+	}
+	errWriter = io.Discard
 	if _, _, err := resolvePrimaryIP(ConfigureOptions{NonInteractive: true}, "meta"); err == nil {
 		t.Fatal("expected non-interactive dilemma error for multiple ip candidates")
 	}
 
-	localIPv4sFn = func() []string { return []string{"10.0.0.2", defaultPrimaryIP} }
+	localIPv4CandidatesFn = func() []localIPv4Candidate {
+		return []localIPv4Candidate{{IP: "10.0.0.2", Interfaces: []string{"eth0"}}, {IP: defaultPrimaryIP, Interfaces: []string{"eth1"}}}
+	}
 	ip, warnings, err = resolvePrimaryIP(ConfigureOptions{}, "meta")
 	if err != nil || ip != defaultPrimaryIP || len(warnings) != 0 {
 		t.Fatalf("demo-ip auto selection mismatch: ip=%q warnings=%v err=%v", ip, warnings, err)
 	}
 
 	goosFn = func() string { return "darwin" }
-	localIPv4sFn = func() []string { return []string{"192.168.1.10"} }
+	localIPv4CandidatesFn = func() []localIPv4Candidate {
+		return []localIPv4Candidate{{IP: "192.168.1.10", Interfaces: []string{"en0"}}}
+	}
 	ip, warnings, err = resolvePrimaryIP(ConfigureOptions{}, "meta")
 	if err != nil || ip != defaultPrimaryIP {
 		t.Fatalf("darwin fallback mismatch: ip=%q err=%v", ip, err)
@@ -447,7 +564,9 @@ func savePreflightHooks() func() {
 	origErrWriter := errWriter
 	origGOOS := goosFn
 	origGOARCH := goarchFn
-	origLocalIPv4s := localIPv4sFn
+	origNetworkInterfaces := networkInterfacesFn
+	origInterfaceAddrs := interfaceAddrsFn
+	origLocalIPv4Candidates := localIPv4CandidatesFn
 	origNetworkCondition := networkConditionFn
 	origInternetAccess := internetAccessFn
 	origNetworkSource := networkSourceFn
@@ -472,7 +591,9 @@ func savePreflightHooks() func() {
 		errWriter = origErrWriter
 		goosFn = origGOOS
 		goarchFn = origGOARCH
-		localIPv4sFn = origLocalIPv4s
+		networkInterfacesFn = origNetworkInterfaces
+		interfaceAddrsFn = origInterfaceAddrs
+		localIPv4CandidatesFn = origLocalIPv4Candidates
 		networkConditionFn = origNetworkCondition
 		internetAccessFn = origInternetAccess
 		networkSourceFn = origNetworkSource
