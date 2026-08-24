@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"pig/cli/ext"
@@ -147,6 +148,17 @@ type ForkCommands struct {
 	Connect string `json:"connect,omitempty" yaml:"connect,omitempty"`
 	Stop    string `json:"stop,omitempty" yaml:"stop,omitempty"`
 	Remove  string `json:"remove,omitempty" yaml:"remove,omitempty"`
+}
+
+type forkListRow struct {
+	name   string
+	port   string
+	state  string
+	pid    string
+	age    string
+	source string
+	copy   string
+	data   string
 }
 
 type ForkError struct {
@@ -1644,12 +1656,95 @@ func reservedForkPortsAs(dbsu string, forks []ForkInfo, excludeDataDir string) m
 	return reserved
 }
 
-func forkPortReservedByManagedFork(dbsu string, port int, dataDir string) bool {
-	if !validPort(port) {
-		return false
+// RefreshForkRuntimeStates updates persisted fork metadata with live process
+// state before list output is rendered or serialized.
+func RefreshForkRuntimeStates(forks []ForkInfo, dbsu string) {
+	dbsu = utils.GetDBSU(dbsu)
+	for i := range forks {
+		if forks[i].Orphan || forks[i].Target.Data == "" {
+			continue
+		}
+		running, pid := forkCheckPostgresRunning(dbsu, forks[i].Target.Data)
+		forks[i].Target.Started = running
+		if running {
+			forks[i].Target.PID = pid
+		} else {
+			forks[i].Target.PID = 0
+		}
 	}
-	_, ok := managedForkPortOwner(dbsu, port, dataDir)
-	return ok
+}
+
+// RenderForkList formats managed forks for the text command surface.
+func RenderForkList(forks []ForkInfo, now time.Time) string {
+	var rendered strings.Builder
+	tw := tabwriter.NewWriter(&rendered, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tPORT\tSTATE\tPID\tAGE\tSOURCE\tCOPY\tDATA")
+	for _, fork := range forks {
+		row := formatForkListRow(fork, now)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			row.name, row.port, row.state, row.pid, row.age, row.source, row.copy, row.data)
+	}
+	_ = tw.Flush()
+	return rendered.String()
+}
+
+func forkListStatus(fork ForkInfo) string {
+	if fork.Orphan {
+		return "orphan"
+	}
+	if fork.Target.Started {
+		return "running"
+	}
+	return "stopped"
+}
+
+func formatForkListAge(createdAt string, now time.Time) string {
+	if createdAt == "" {
+		return "-"
+	}
+	created, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return "-"
+	}
+	age := now.Sub(created)
+	if age < 0 {
+		age = 0
+	}
+	switch {
+	case age < time.Minute:
+		return "<1m"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm", int(age.Minutes()))
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(age.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(age.Hours()/24))
+	}
+}
+
+func formatForkListRow(fork ForkInfo, now time.Time) forkListRow {
+	row := forkListRow{
+		name: fork.Name, port: "-", state: forkListStatus(fork), pid: "-",
+		age: formatForkListAge(fork.CreatedAt, now), source: "-", copy: "-", data: fork.Target.Data,
+	}
+	if fork.Target.Port > 0 {
+		row.port = strconv.Itoa(fork.Target.Port)
+	}
+	if fork.Target.Started && fork.Target.PID > 0 {
+		row.pid = strconv.Itoa(fork.Target.PID)
+	}
+	switch {
+	case fork.Source.Data != "" && fork.Source.Port > 0:
+		row.source = fmt.Sprintf("%s:%d", fork.Source.Data, fork.Source.Port)
+	case fork.Source.Data != "":
+		row.source = fork.Source.Data
+	case fork.Source.Port > 0:
+		row.source = fmt.Sprintf(":%d", fork.Source.Port)
+	}
+	if fork.Copy.Actual != "" && fork.Copy.Actual != string(CloneModeUnknown) {
+		row.copy = fork.Copy.Actual
+	}
+	return row
 }
 
 func managedForkPortOwner(dbsu string, port int, excludeDataDir string) (ForkInfo, bool) {

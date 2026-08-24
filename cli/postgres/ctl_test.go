@@ -207,7 +207,7 @@ func TestRestartTextStatusCheckErrorIsNotReportedAsStopped(t *testing.T) {
 		return false, 0, "", os.ErrPermission
 	}
 
-	err := Restart(&Config{PgData: "/pg/data", DbSU: config.CurrentUser}, &RestartOptions{Mode: "fast"})
+	err := Restart(&Config{PgData: "/pg/data", DbSU: testDBSU(t)}, &RestartOptions{Mode: "fast"})
 	if err == nil {
 		t.Fatal("expected status check error")
 	}

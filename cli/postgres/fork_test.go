@@ -17,6 +17,86 @@ import (
 	"pig/internal/output"
 )
 
+func TestForkListStatusReflectsRuntimeState(t *testing.T) {
+	tests := []struct {
+		name string
+		info ForkInfo
+		want string
+	}{
+		{"orphan", ForkInfo{Orphan: true}, "orphan"},
+		{"stopped fork", ForkInfo{Target: ForkEndpoint{Started: false}}, "stopped"},
+		{"running fork", ForkInfo{Target: ForkEndpoint{Started: true}}, "running"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.info.Name = "example"
+			rendered := RenderForkList([]ForkInfo{tt.info}, time.Now())
+			if !strings.Contains(rendered, tt.want) {
+				t.Fatalf("fork list output missing state %q:\n%s", tt.want, rendered)
+			}
+		})
+	}
+}
+
+func TestRefreshForkRuntimeStates(t *testing.T) {
+	original := forkCheckPostgresRunning
+	t.Cleanup(func() { forkCheckPostgresRunning = original })
+	forkCheckPostgresRunning = func(dbsu, dataDir string) (bool, int) {
+		if dbsu != "dba" {
+			t.Fatalf("dbsu = %q, want dba", dbsu)
+		}
+		if dataDir == "/pg/data-running" {
+			return true, 4242
+		}
+		return false, 99
+	}
+	forks := []ForkInfo{
+		{Name: "running", Target: ForkEndpoint{Data: "/pg/data-running"}},
+		{Name: "stopped", Target: ForkEndpoint{Data: "/pg/data-stopped", Started: true, PID: 99}},
+		{Name: "orphan", Orphan: true, Target: ForkEndpoint{Data: "/pg/data-orphan", Started: true, PID: 88}},
+	}
+	RefreshForkRuntimeStates(forks, "dba")
+	if !forks[0].Target.Started || forks[0].Target.PID != 4242 {
+		t.Fatalf("running state = %+v", forks[0].Target)
+	}
+	if forks[1].Target.Started || forks[1].Target.PID != 0 {
+		t.Fatalf("stopped state = %+v", forks[1].Target)
+	}
+	if !forks[2].Target.Started || forks[2].Target.PID != 88 {
+		t.Fatalf("orphan state changed = %+v", forks[2].Target)
+	}
+}
+
+func TestForkListDiagnosticsFormatRuntimeMetadata(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	info := ForkInfo{
+		CreatedAt: "2026-06-29T10:15:00Z",
+		Source:    ForkEndpoint{Data: "/pg/data", Port: 5432},
+		Target:    ForkEndpoint{Data: "/pg/data-dev", Port: 15432, Started: true, PID: 4242},
+		Copy:      ForkCopyInfo{Actual: "cow"},
+	}
+	rendered := RenderForkList([]ForkInfo{info}, now)
+	for _, want := range []string{"15432", "running", "4242", "1h", "/pg/data:5432", "cow", "/pg/data-dev"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("fork list output missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestForkListDiagnosticsUseDashForUnknownValues(t *testing.T) {
+	info := ForkInfo{Name: "old", Orphan: true, Target: ForkEndpoint{Data: "/pg/data-old"}}
+	rendered := RenderForkList([]ForkInfo{info}, time.Now())
+	fields := strings.Fields(strings.SplitN(rendered, "\n", 3)[1])
+	if len(fields) != 8 {
+		t.Fatalf("fork list fields = %v, want 8 columns:\n%s", fields, rendered)
+	}
+	for _, index := range []int{1, 3, 4, 5, 6} {
+		if fields[index] != "-" {
+			t.Fatalf("field %d = %q, want -: %v", index, fields[index], fields)
+		}
+	}
+}
+
 func TestNormalizeInstanceDefaults(t *testing.T) {
 	opts := &Options{
 		Kind: KindInstance,
@@ -1046,7 +1126,7 @@ func TestForkPortReservationIgnoresCurrentForkPathAlias(t *testing.T) {
 		return "", nil
 	}
 
-	if forkPortReservedByManagedFork("postgres", 15432, "/pg/data-dev") {
+	if _, reserved := managedForkPortOwner("postgres", 15432, "/pg/data-dev"); reserved {
 		t.Fatal("current fork path alias should not reserve its own port")
 	}
 }
@@ -1626,13 +1706,21 @@ func TestPrecheckInstancePortReservedErrorNamesManagedFork(t *testing.T) {
 	}
 }
 
-func TestPostmasterPIDMatchesDataDirRejectsCopiedSourcePID(t *testing.T) {
-	pidContent := strconv.Itoa(os.Getpid()) + "\n/pg/data\n1782617444\n5432\n"
-	if postmasterPIDMatchesDataDir(pidContent, "/pg/data-dev") {
-		t.Fatal("postmaster.pid copied from source data directory should not match fork data directory")
+func TestPostmasterPIDMatchesDataDirAsDBSURejectsCopiedSourcePID(t *testing.T) {
+	original := postgresDBSUCommandOutput
+	t.Cleanup(func() { postgresDBSUCommandOutput = original })
+	postgresDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+		if dbsu != "postgres" || len(args) != 3 || args[0] != "readlink" || args[1] != "-f" {
+			t.Fatalf("unexpected command: dbsu=%q args=%#v", dbsu, args)
+		}
+		return args[2] + "\n", nil
 	}
-	if !postmasterPIDMatchesDataDir(pidContent, "/pg/data") {
-		t.Fatal("postmaster.pid should match its own data directory")
+	pidContent := strconv.Itoa(os.Getpid()) + "\n/pg/data\n1782617444\n5432\n"
+	if postmasterPIDMatchesDataDirAsDBSU("postgres", pidContent, "/pg/data-dev") {
+		t.Fatal("postmaster.pid copied from source data directory matched fork data directory")
+	}
+	if !postmasterPIDMatchesDataDirAsDBSU("postgres", pidContent, "/pg/data") {
+		t.Fatal("postmaster.pid did not match its own data directory")
 	}
 }
 

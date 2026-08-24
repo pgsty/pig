@@ -15,7 +15,6 @@ import (
 	"pig/internal/utils"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestPgCloneCommandIsRegistered(t *testing.T) {
@@ -510,69 +509,6 @@ func captureStderr(t *testing.T, fn func()) string {
 		t.Fatalf("read captured stderr failed: %v", err)
 	}
 	return string(out)
-}
-
-func TestForkListStatusReflectsRuntimeState(t *testing.T) {
-	tests := []struct {
-		name string
-		info postgrescli.ForkInfo
-		want string
-	}{
-		{"orphan", postgrescli.ForkInfo{Orphan: true}, "orphan"},
-		{"stopped fork", postgrescli.ForkInfo{Target: postgrescli.ForkEndpoint{Started: false}}, "stopped"},
-		{"running fork", postgrescli.ForkInfo{Target: postgrescli.ForkEndpoint{Started: true}}, "running"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := forkListStatus(tt.info); got != tt.want {
-				t.Fatalf("forkListStatus() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestForkListDiagnosticsFormatRuntimeMetadata(t *testing.T) {
-	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
-	info := postgrescli.ForkInfo{
-		CreatedAt: "2026-06-29T10:15:00Z",
-		Source:    postgrescli.ForkEndpoint{Data: "/pg/data", Port: 5432},
-		Target:    postgrescli.ForkEndpoint{Data: "/pg/data-dev", Port: 15432, Started: true, PID: 4242},
-		Copy:      postgrescli.ForkCopyInfo{Actual: "cow"},
-	}
-	row := formatForkListRow(info, now)
-
-	if row.port != "15432" {
-		t.Fatalf("row.port = %q, want 15432", row.port)
-	}
-	if row.pid != "4242" {
-		t.Fatalf("row.pid = %q, want 4242", row.pid)
-	}
-	if row.age != "1h" {
-		t.Fatalf("row.age = %q, want 1h", row.age)
-	}
-	if row.source != "/pg/data:5432" {
-		t.Fatalf("row.source = %q, want /pg/data:5432", row.source)
-	}
-	if row.copy != "cow" {
-		t.Fatalf("row.copy = %q, want cow", row.copy)
-	}
-}
-
-func TestForkListDiagnosticsUseDashForUnknownValues(t *testing.T) {
-	info := postgrescli.ForkInfo{Orphan: true}
-	row := formatForkListRow(info, time.Now())
-	for name, got := range map[string]string{
-		"port":   row.port,
-		"pid":    row.pid,
-		"age":    row.age,
-		"source": row.source,
-		"copy":   row.copy,
-	} {
-		if got != "-" {
-			t.Fatalf("%s = %q, want -", name, got)
-		}
-	}
 }
 
 func TestForkErrorResultPreservesForkErrorCode(t *testing.T) {

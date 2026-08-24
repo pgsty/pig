@@ -46,22 +46,30 @@ func TestResolveRequestedLogFileValid(t *testing.T) {
 	}
 }
 
-func TestLogDirUsesConfigLogPath(t *testing.T) {
+func TestResolveLogDirUsesConfigLogPath(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "pgbackrest.conf")
 	if err := os.WriteFile(configPath, []byte("[global]\nlog-path = /custom/pgbackrest/log\n"), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
-	if got := LogDir(configPath, ""); got != "/custom/pgbackrest/log" {
-		t.Fatalf("LogDir() = %q, want custom log-path", got)
+	got, err := ResolveLogDir(configPath, "", false)
+	if err != nil {
+		t.Fatalf("ResolveLogDir() error = %v", err)
+	}
+	if got != "/custom/pgbackrest/log" {
+		t.Fatalf("ResolveLogDir() = %q, want custom log-path", got)
 	}
 }
 
-func TestLogDirFallsBackToDefaultWhenConfigMissing(t *testing.T) {
+func TestResolveLogDirFallsBackToDefaultWhenConfigMissing(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "missing.conf")
 
-	if got := LogDir(configPath, ""); got != DefaultLogDir {
-		t.Fatalf("LogDir() = %q, want default %q", got, DefaultLogDir)
+	got, err := ResolveLogDir(configPath, "", false)
+	if err != nil {
+		t.Fatalf("ResolveLogDir() error = %v", err)
+	}
+	if got != DefaultLogDir {
+		t.Fatalf("ResolveLogDir() = %q, want default %q", got, DefaultLogDir)
 	}
 }
 

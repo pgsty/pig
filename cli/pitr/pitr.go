@@ -1034,23 +1034,44 @@ func buildCommandWith(opts *Options, includePlan bool, includeYes bool) string {
 	if opts == nil {
 		return "pig pitr"
 	}
-	args := []string{"pig", "pitr"}
+	args := appendPITRTarget([]string{"pig", "pitr"}, opts)
+	args = appendPITROptions(args, opts)
+	if includeYes {
+		args = append(args, "--yes")
+	} else if opts.Yes {
+		args = append(args, "-y")
+	}
+	if includePlan {
+		args = append(args, "--plan")
+	}
+	if len(opts.ExtraArgs) > 0 {
+		args = append(args, "--")
+		for _, arg := range opts.ExtraArgs {
+			args = append(args, pgbackrest.QuoteShellArg(arg))
+		}
+	}
+	return strings.Join(args, " ")
+}
 
+func appendPITRTarget(args []string, opts *Options) []string {
 	switch {
 	case opts.Default:
-		args = append(args, "-d")
+		return append(args, "-d")
 	case opts.Immediate:
-		args = append(args, "-I")
+		return append(args, "-I")
 	case opts.Time != "":
-		args = append(args, "-t", pgbackrest.QuoteShellArg(pgbackrest.NormalizeRestoreTime(opts.Time)))
+		return append(args, "-t", pgbackrest.QuoteShellArg(pgbackrest.NormalizeRestoreTime(opts.Time)))
 	case opts.Name != "":
-		args = append(args, "--name", pgbackrest.QuoteShellArg(opts.Name))
+		return append(args, "--name", pgbackrest.QuoteShellArg(opts.Name))
 	case opts.LSN != "":
-		args = append(args, "--lsn", pgbackrest.QuoteShellArg(opts.LSN))
+		return append(args, "--lsn", pgbackrest.QuoteShellArg(opts.LSN))
 	case opts.XID != "":
-		args = append(args, "--xid", pgbackrest.QuoteShellArg(opts.XID))
+		return append(args, "--xid", pgbackrest.QuoteShellArg(opts.XID))
 	}
+	return args
+}
 
+func appendPITROptions(args []string, opts *Options) []string {
 	if opts.Set != "" {
 		args = append(args, "-b", pgbackrest.QuoteShellArg(opts.Set))
 	}
@@ -1087,22 +1108,7 @@ func buildCommandWith(opts *Options, includePlan bool, includeYes bool) string {
 	if opts.DataDir != "" {
 		args = append(args, "-D", pgbackrest.QuoteShellArg(opts.DataDir))
 	}
-	if includeYes {
-		args = append(args, "--yes")
-	} else if opts.Yes {
-		args = append(args, "-y")
-	}
-	if includePlan {
-		args = append(args, "--plan")
-	}
-	if len(opts.ExtraArgs) > 0 {
-		args = append(args, "--")
-		for _, arg := range opts.ExtraArgs {
-			args = append(args, pgbackrest.QuoteShellArg(arg))
-		}
-	}
-
-	return strings.Join(args, " ")
+	return args
 }
 
 // ============================================================================

@@ -216,14 +216,6 @@ func CheckPostgresRunningAsDBSU(dbsu, dataDir string) (bool, int) {
 	return true, pid
 }
 
-func postmasterPIDMatchesDataDir(pidContent, dataDir string) bool {
-	pidDataDir := postmasterPIDDataDir(pidContent)
-	if pidDataDir == "" {
-		return true
-	}
-	return filepath.Clean(pidDataDir) == filepath.Clean(dataDir)
-}
-
 func postmasterPIDMatchesDataDirAsDBSU(dbsu, pidContent, dataDir string) bool {
 	pidDataDir := postmasterPIDDataDir(pidContent)
 	if pidDataDir == "" {

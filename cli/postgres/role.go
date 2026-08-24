@@ -135,56 +135,16 @@ func roleFromProcesses(dbsu string, verbose bool) *RoleResult {
 		return result
 	}
 
-	lines := strings.Split(out.String(), "\n")
-	hasRecovery := false
-	hasWalreceiver := false
-	hasMainProcess := false
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Check for main postgres process
-		if (strings.Contains(line, "post") && strings.Contains(line, "-D")) ||
-			(strings.Contains(line, "postgres:") && strings.Contains(line, "checkpointer")) {
-			hasMainProcess = true
-		}
-
-		// Check for background processes indicating alive
-		if strings.Contains(line, "postgres:") {
-			for _, proc := range []string{"logger", "checkpointer", "background writer", "stats collector", "walwriter"} {
-				if strings.Contains(line, proc) {
-					hasMainProcess = true
-					break
-				}
-			}
-
-			// Check for recovery indicators (replica)
-			if strings.Contains(line, "walreceiver") {
-				hasWalreceiver = true
-				hasRecovery = true
-			}
-			if strings.Contains(line, "recovering") {
-				hasRecovery = true
-			}
-
-			// walsender indicates this node has replicas (but doesn't determine role)
-			if strings.Contains(line, "walsender") {
-				hasMainProcess = true
-			}
-		}
-	}
+	evidence := inspectPostgresProcesses(out.String())
 
 	if verbose {
 		fmt.Printf("    hasMainProcess=%v, hasRecovery=%v, hasWalreceiver=%v\n",
-			hasMainProcess, hasRecovery, hasWalreceiver)
+			evidence.alive, evidence.recovery, evidence.walreceiver)
 	}
 
-	result.Alive = hasMainProcess
-	if hasMainProcess {
-		if hasRecovery {
+	result.Alive = evidence.alive
+	if evidence.alive {
+		if evidence.recovery {
 			result.Role = RoleReplica
 		} else {
 			result.Role = RolePrimary
@@ -192,6 +152,50 @@ func roleFromProcesses(dbsu string, verbose bool) *RoleResult {
 	}
 
 	return result
+}
+
+type postgresProcessEvidence struct {
+	alive       bool
+	recovery    bool
+	walreceiver bool
+}
+
+var postgresBackgroundProcesses = []string{"logger", "checkpointer", "background writer", "stats collector", "walwriter"}
+
+func inspectPostgresProcesses(output string) postgresProcessEvidence {
+	var evidence postgresProcessEvidence
+	for _, raw := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "post") && strings.Contains(line, "-D") {
+			evidence.alive = true
+		}
+		if !strings.Contains(line, "postgres:") {
+			continue
+		}
+		if containsAny(line, postgresBackgroundProcesses) || strings.Contains(line, "walsender") {
+			evidence.alive = true
+		}
+		if strings.Contains(line, "walreceiver") {
+			evidence.walreceiver = true
+			evidence.recovery = true
+		}
+		if strings.Contains(line, "recovering") {
+			evidence.recovery = true
+		}
+	}
+	return evidence
+}
+
+func containsAny(value string, substrings []string) bool {
+	for _, substring := range substrings {
+		if strings.Contains(value, substring) {
+			return true
+		}
+	}
+	return false
 }
 
 // roleFromSQL queries PostgreSQL to determine role
@@ -275,37 +279,9 @@ func roleFromDataDir(dbsu, dataDir string, verbose bool) *RoleResult {
 		return result
 	}
 
-	// Default to primary if it's a valid data directory
-	result.Role = RolePrimary
-
-	for _, name := range files {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-
-		// Check for postmaster.pid (indicates potentially running)
-		if name == "postmaster.pid" {
-			result.Alive = true // May be stale, but indicates possible running state
-		}
-
-		// PostgreSQL 12+ uses standby.signal and recovery.signal
-		if name == "standby.signal" || name == "recovery.signal" {
-			result.Role = RoleReplica
-			if verbose {
-				fmt.Printf("    found %s -> replica\n", name)
-			}
-			return result
-		}
-
-		// PostgreSQL < 12 uses recovery.conf
-		if name == "recovery.conf" {
-			// Check if it contains primary_conninfo or restore_command
-			if checkRecoveryConfAsDBSU(dbsu, filepath.Join(dataDir, name), verbose) {
-				result.Role = RoleReplica
-				return result
-			}
-		}
+	result.Role, result.Alive = roleFromDataFiles(dbsu, dataDir, files, verbose)
+	if result.Role == RoleReplica {
+		return result
 	}
 
 	// Also check postgresql.auto.conf for primary_conninfo (PG12+)
@@ -321,6 +297,27 @@ func roleFromDataDir(dbsu, dataDir string, verbose bool) *RoleResult {
 	}
 
 	return result
+}
+
+func roleFromDataFiles(dbsu, dataDir string, files []string, verbose bool) (Role, bool) {
+	alive := false
+	for _, raw := range files {
+		name := strings.TrimSpace(raw)
+		switch name {
+		case "postmaster.pid":
+			alive = true
+		case "standby.signal", "recovery.signal":
+			if verbose {
+				fmt.Printf("    found %s -> replica\n", name)
+			}
+			return RoleReplica, alive
+		case "recovery.conf":
+			if checkRecoveryConfAsDBSU(dbsu, filepath.Join(dataDir, name), verbose) {
+				return RoleReplica, alive
+			}
+		}
+	}
+	return RolePrimary, alive
 }
 
 // fileExistsAsDBSU checks if a file exists as the database superuser

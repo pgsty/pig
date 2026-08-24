@@ -345,54 +345,67 @@ func readCSVLogEntries(r io.Reader, lines int) ([]csvLogEntry, error) {
 	reader := bufio.NewReader(r)
 	var entries []csvLogEntry
 	pending := ""
-	appendEntry := func(entry csvLogEntry) {
-		entries = append(entries, entry)
-		if len(entries) > lines {
-			copy(entries, entries[1:])
-			entries = entries[:lines]
-		}
-	}
 	for {
-		raw, err := reader.ReadString('\n')
+		raw, readErr := reader.ReadString('\n')
 		if len(raw) > 0 {
 			raw = strings.TrimRight(raw, "\r\n")
 			if raw != "" || pending != "" {
-				if pending == "" {
-					pending = raw
-				} else {
-					pending += "\n" + raw
+				pending = appendCSVPhysicalLine(pending, raw)
+				entry, complete, err := consumeCSVLogRecord(pending, readErr == io.EOF)
+				if err != nil {
+					return nil, err
 				}
-				entry, parseErr := parseCSVLogEntry(pending)
-				switch {
-				case parseErr == nil:
-					appendEntry(entry)
-					pending = ""
-				case strings.Contains(parseErr.Error(), "exceeds"):
-					return nil, parseErr
-				case isContinuableCSVParseError(parseErr) && err != io.EOF:
-					// PostgreSQL CSV fields can contain quoted newlines; keep
-					// accumulating physical lines until the record is complete.
-				default:
-					appendEntry(csvLogEntry{malformed: &malformedCSVLogEntry{raw: pending, parseErr: parseErr.Error()}})
+				if complete {
+					entries = appendRecentCSVLogEntry(entries, entry, lines)
 					pending = ""
 				}
 			}
 		}
-		if err == io.EOF {
+		if readErr == io.EOF {
 			if pending != "" {
-				if entry, parseErr := parseCSVLogEntry(pending); parseErr == nil {
-					appendEntry(entry)
-				} else {
-					appendEntry(csvLogEntry{malformed: &malformedCSVLogEntry{raw: pending, parseErr: parseErr.Error()}})
+				entry, _, err := consumeCSVLogRecord(pending, true)
+				if err != nil {
+					return nil, err
 				}
+				entries = appendRecentCSVLogEntry(entries, entry, lines)
 			}
 			break
 		}
-		if err != nil {
-			return nil, err
+		if readErr != nil {
+			return nil, readErr
 		}
 	}
 	return entries, nil
+}
+
+func appendCSVPhysicalLine(pending, line string) string {
+	if pending == "" {
+		return line
+	}
+	return pending + "\n" + line
+}
+
+func consumeCSVLogRecord(raw string, eof bool) (csvLogEntry, bool, error) {
+	entry, err := parseCSVLogEntry(raw)
+	if err == nil {
+		return entry, true, nil
+	}
+	if strings.Contains(err.Error(), "exceeds") {
+		return csvLogEntry{}, false, err
+	}
+	if isContinuableCSVParseError(err) && !eof {
+		return csvLogEntry{}, false, nil
+	}
+	return csvLogEntry{malformed: &malformedCSVLogEntry{raw: raw, parseErr: err.Error()}}, true, nil
+}
+
+func appendRecentCSVLogEntry(entries []csvLogEntry, entry csvLogEntry, limit int) []csvLogEntry {
+	entries = append(entries, entry)
+	if len(entries) <= limit {
+		return entries
+	}
+	copy(entries, entries[1:])
+	return entries[:limit]
 }
 
 func isContinuableCSVParseError(err error) bool {

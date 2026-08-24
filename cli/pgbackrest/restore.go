@@ -99,25 +99,7 @@ func ValidateRestoreOptions(opts *RestoreOptions) error {
 	}
 
 	// Check mutually exclusive targets (Set is NOT a target, can be combined)
-	targets := 0
-	if opts.Default {
-		targets++
-	}
-	if opts.Immediate {
-		targets++
-	}
-	if opts.Time != "" {
-		targets++
-	}
-	if opts.Name != "" {
-		targets++
-	}
-	if opts.LSN != "" {
-		targets++
-	}
-	if opts.XID != "" {
-		targets++
-	}
+	targets := restoreTargetCount(opts)
 
 	if targets > 1 {
 		return fmt.Errorf("multiple recovery targets specified, choose only one of: --default, --immediate, --time, --name, --lsn, --xid")
@@ -161,6 +143,18 @@ func ValidateRestoreOptions(opts *RestoreOptions) error {
 	}
 
 	return nil
+}
+
+func restoreTargetCount(opts *RestoreOptions) int {
+	targets := 0
+	for _, selected := range []bool{
+		opts.Default, opts.Immediate, opts.Time != "", opts.Name != "", opts.LSN != "", opts.XID != "",
+	} {
+		if selected {
+			targets++
+		}
+	}
+	return targets
 }
 
 func validateRestoreTime(value string) error {

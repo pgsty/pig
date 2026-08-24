@@ -15,12 +15,6 @@ var (
 	logDBSUCommandStdout = utils.DBSUCommandStdout
 )
 
-// LogDir returns the pgbackrest log directory from config or Pigsty default.
-func LogDir(configPath, dbsu string) string {
-	logDir, _ := ResolveLogDir(configPath, dbsu, false)
-	return logDir
-}
-
 // ResolveLogDir returns the pgBackRest log directory. If requireConfig is true,
 // config read errors are returned instead of silently falling back to defaults.
 func ResolveLogDir(configPath, dbsu string, requireConfig bool) (string, error) {
@@ -35,15 +29,6 @@ func ResolveLogDir(configPath, dbsu string, requireConfig bool) (string, error) 
 		return logDir, nil
 	}
 	return DefaultLogDir, nil
-}
-
-// GetLogPathFromConfig reads log-path from pgBackRest config.
-func GetLogPathFromConfig(configPath, dbsu string) string {
-	logDir, err := getLogPathFromConfig(configPath, dbsu)
-	if err != nil {
-		return ""
-	}
-	return logDir
 }
 
 func getLogPathFromConfig(configPath, dbsu string) (string, error) {

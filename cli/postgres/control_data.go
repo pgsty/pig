@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"pig/internal/output"
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
@@ -62,34 +61,6 @@ func ParsePgControlData(raw string) PgControlData {
 		result.Rows = append(result.Rows, PgControlDataRow{Key: key, Value: value})
 	}
 	return result
-}
-
-// RenderPgControlDataTable renders pg_controldata rows as a simple table.
-func RenderPgControlDataTable(control PgControlData) string {
-	if len(control.Rows) == 0 {
-		return ""
-	}
-	rows := make([][]string, 0, len(control.Rows))
-	for _, row := range control.Rows {
-		rows = append(rows, []string{row.Key, row.Value})
-	}
-	return output.RenderTable([]string{"Key", "Value"}, rows)
-}
-
-// RenderPgStatusCompactSummary renders the default human-facing pg status
-// summary. It intentionally keeps raw pg_controldata detail out of text mode.
-func RenderPgStatusCompactSummary(status *PgStatusResultData, role string, control PgControlData) string {
-	return renderPgStatusCompactSummary(status, role, control, false)
-}
-
-func RenderPgStatusCompactSummaryColor(status *PgStatusResultData, role string, control PgControlData) string {
-	return renderPgStatusCompactSummary(status, role, control, true)
-}
-
-func renderPgStatusCompactSummary(status *PgStatusResultData, role string, control PgControlData, color bool) string {
-	lines := []string{renderPgStatusCompactHeader(color)}
-	lines = append(lines, renderPgStatusCompactBodyLines(status, role, control, color)...)
-	return strings.Join(lines, "\n") + "\n"
 }
 
 func renderPgStatusCompactHeader(color bool) string {

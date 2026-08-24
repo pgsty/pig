@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"pig/internal/config"
 	"pig/internal/output"
 )
 
@@ -187,7 +186,8 @@ func TestBuildRestartCommand(t *testing.T) {
 }
 
 func TestBuildRestartPlanCommandIncludesTargetOptions(t *testing.T) {
-	cfg := &Config{PgVersion: 18, PgData: "/tmp/no such dir", DbSU: config.CurrentUser}
+	dbsu := testDBSU(t)
+	cfg := &Config{PgVersion: 18, PgData: "/tmp/no such dir", DbSU: dbsu}
 	plan := BuildRestartPlan(cfg, &RestartOptions{
 		Mode:    "immediate",
 		Timeout: 7,
@@ -199,7 +199,7 @@ func TestBuildRestartPlanCommandIncludesTargetOptions(t *testing.T) {
 		"--plan",
 		"--version 18",
 		"-D '/tmp/no such dir'",
-		"--dbsu " + config.CurrentUser,
+		"--dbsu " + dbsu,
 		"-m immediate",
 		"-t 7",
 		"--no-wait",
@@ -386,7 +386,8 @@ func TestBuildStopCommand(t *testing.T) {
 }
 
 func TestBuildStopPlanCommandIncludesTargetOptions(t *testing.T) {
-	cfg := &Config{PgVersion: 18, PgData: "/tmp/no such dir", DbSU: config.CurrentUser}
+	dbsu := testDBSU(t)
+	cfg := &Config{PgVersion: 18, PgData: "/tmp/no such dir", DbSU: dbsu}
 	plan := BuildStopPlan(cfg, &StopOptions{
 		Mode:    "immediate",
 		Timeout: 7,
@@ -397,7 +398,7 @@ func TestBuildStopPlanCommandIncludesTargetOptions(t *testing.T) {
 		"--plan",
 		"--version 18",
 		"-D '/tmp/no such dir'",
-		"--dbsu " + config.CurrentUser,
+		"--dbsu " + dbsu,
 		"-m immediate",
 		"-t 7",
 		"--no-wait",
@@ -409,7 +410,7 @@ func TestBuildStopPlanCommandIncludesTargetOptions(t *testing.T) {
 }
 
 func TestPatroniNextActionsUseSupportedNativeHelp(t *testing.T) {
-	cfg := &Config{PgVersion: 18, PgData: t.TempDir(), DbSU: config.CurrentUser}
+	cfg := &Config{PgVersion: 18, PgData: t.TempDir(), DbSU: testDBSU(t)}
 	plans := map[string]*output.Plan{
 		"restart": BuildRestartPlan(cfg, &RestartOptions{}),
 		"stop":    BuildStopPlan(cfg, &StopOptions{}),

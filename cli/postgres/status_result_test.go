@@ -8,6 +8,7 @@ package postgres
 import (
 	"encoding/json"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +20,15 @@ import (
 	"pig/internal/output"
 	"pig/internal/utils"
 )
+
+func testDBSU(t *testing.T) string {
+	t.Helper()
+	current, err := user.Current()
+	if err != nil || current.Username == "" {
+		t.Skip("current user not detected")
+	}
+	return current.Username
+}
 
 // TestPgStatusResultData_JSON tests JSON serialization of PgStatusResultData
 func TestPgStatusResultData_JSON(t *testing.T) {
@@ -136,37 +146,14 @@ func TestParsePgControlData(t *testing.T) {
 	}
 }
 
-func TestRenderPgControlDataTable(t *testing.T) {
-	parsed := ParsePgControlData(samplePgControlData())
-
-	rendered := RenderPgControlDataTable(parsed)
-
-	for _, want := range []string{
-		"Key",
-		"Value",
-		"Database system identifier",
-		"Database cluster state",
-		"in production",
-		"Latest checkpoint's REDO location",
-		"0/F000028",
-	} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("rendered control table missing %q:\n%s", want, rendered)
-		}
-	}
-	if strings.Contains(rendered, "map[") {
-		t.Fatalf("rendered control table should not expose Go map formatting:\n%s", rendered)
-	}
-}
-
-func TestRenderPgStatusCompactSummary(t *testing.T) {
+func TestRenderPgStatusCompactBody(t *testing.T) {
 	parsed := ParsePgControlData(samplePgControlData())
 	status := &PgStatusResultData{
 		Version: 18,
 		DataDir: "/pg/data",
 	}
 
-	rendered := RenderPgStatusCompactSummary(status, "replica", parsed)
+	rendered := renderPgStatusCompactHeader(false) + "\n" + renderPgStatusCompactBody(status, "replica", parsed, false)
 	want := `[pg_controldata status]
 PostgreSQL 18  DOWN replica  data=/pg/data
 Cluster    7658473303274012732  state="in production"  timeline=2
@@ -184,14 +171,14 @@ TransactID xid=619 next=1363 oldest=744 db=1 active=1363  mxid=0 next=1 oldest=1
 	}
 }
 
-func TestRenderPgStatusCompactSummaryColor(t *testing.T) {
+func TestRenderPgStatusCompactBodyColor(t *testing.T) {
 	parsed := ParsePgControlData(samplePgControlData())
 	status := &PgStatusResultData{
 		Version: 18,
 		DataDir: "/pg/data",
 	}
 
-	rendered := RenderPgStatusCompactSummaryColor(status, "replica", parsed)
+	rendered := renderPgStatusCompactHeader(true) + "\n" + renderPgStatusCompactBody(status, "replica", parsed, true)
 
 	for _, want := range []string{
 		utils.ColorBold + "[pg_controldata status]" + utils.ColorReset,
@@ -581,7 +568,7 @@ func TestReadPostmasterPidInfoAsDBSU(t *testing.T) {
 	dataDir := t.TempDir()
 	writeTestPostmasterPid(t, dataDir, "1738656000", "6543", "/tmp/pgsocket")
 
-	info, err := ReadPostmasterPidInfoAsDBSU(config.CurrentUser, dataDir)
+	info, err := ReadPostmasterPidInfoAsDBSU(testDBSU(t), dataDir)
 	if err != nil {
 		t.Fatalf("ReadPostmasterPidInfoAsDBSU returned error: %v", err)
 	}
