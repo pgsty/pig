@@ -38,6 +38,7 @@ jobs:
       - name: Install analysis tools
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
           go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
           go install golang.org/x/tools/cmd/deadcode@v0.49.0
           go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
@@ -46,7 +47,15 @@ jobs:
         run: actionlint
 
       - name: Run tests
-        run: go test ./...
+        # Broad randomization catches interactions introduced by new tests.
+        run: go test -shuffle=on -count=1 ./...
+
+      - name: Run command race tests
+        run: |
+          # Repeat the historical failing orders in one process: -count checks
+          # accumulated Cobra/config state; it is intentionally not reshuffled.
+          go test -race -shuffle=1787488288865406000 -count=3 ./cmd
+          go test -race -shuffle=1787505475779618000 -count=3 ./cmd
 
       - name: Run go vet
         run: go vet ./...
@@ -54,8 +63,16 @@ jobs:
       - name: Run staticcheck
         run: staticcheck ./...
 
+      - name: Run complexity checks
+        run: golangci-lint run --enable-only gocognit,gocyclo --tests=false
+
       - name: Run deadcode
-        run: deadcode ./...
+        run: |
+          deadcode_output="$(deadcode ./...)"
+          if [[ -n "${deadcode_output}" ]]; then
+            printf '%s\n' "${deadcode_output}"
+            exit 1
+          fi
 
       - name: Run vulnerability scan
         run: govulncheck ./...

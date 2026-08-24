@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"pig/internal/config"
@@ -304,6 +305,55 @@ func TestRunLegacyStructuredCapturesLogrusAndRestoresOutput(t *testing.T) {
 	}
 }
 
+func TestRunLegacyStructuredSerializesGlobalCapture(t *testing.T) {
+	original := config.OutputFormat
+	config.OutputFormat = config.OUTPUT_JSON
+	t.Cleanup(func() { config.OutputFormat = original })
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	raw := captureStdout(t, func() {
+		start := make(chan struct{})
+		for _, marker := range []string{"alpha", "beta"} {
+			marker := marker
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				errs <- runLegacyStructured(990000, marker, nil, nil, func() error {
+					fmt.Println(marker)
+					return nil
+				})
+			}()
+		}
+		close(start)
+		wg.Wait()
+	})
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("runLegacyStructured() error = %v", err)
+		}
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	seen := make(map[string]string)
+	for len(seen) < 2 {
+		var payload struct {
+			Data legacyCommandData `json:"data"`
+		}
+		if err := decoder.Decode(&payload); err != nil {
+			t.Fatalf("decode concurrent structured output: %v; raw=%q", err, raw)
+		}
+		seen[payload.Data.Command] = payload.Data.CapturedOutput
+	}
+	for _, marker := range []string{"alpha", "beta"} {
+		if seen[marker] != marker {
+			t.Fatalf("captured output for %s = %q, want isolated marker", marker, seen[marker])
+		}
+	}
+}
+
 func TestCaptureLegacyOutputRestoresStateAfterPanic(t *testing.T) {
 	origStdout := os.Stdout
 	origStderr := os.Stderr
@@ -320,7 +370,7 @@ func TestCaptureLegacyOutputRestoresStateAfterPanic(t *testing.T) {
 		defer func() {
 			recovered = recover()
 		}()
-		_, _, _ = captureLegacyOutput(func() error {
+		_, _, _ = captureLegacyOutputUnlocked(func() error {
 			panic("legacy panic")
 		}, 1024)
 	}()

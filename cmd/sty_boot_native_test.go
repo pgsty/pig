@@ -114,9 +114,12 @@ func TestStyBootNonRootReexecsOnce(t *testing.T) {
 
 func TestStyBootNonRootPreservesTextChildFailure(t *testing.T) {
 	origNative, origReexec, origEUID := pigstyBootNativeExec, pigstyBootReexec, pigstyBootEUID
+	origFormat := config.OutputFormat
 	t.Cleanup(func() {
 		pigstyBootNativeExec, pigstyBootReexec, pigstyBootEUID = origNative, origReexec, origEUID
+		config.OutputFormat = origFormat
 	})
+	config.OutputFormat = config.OUTPUT_TEXT
 	pigstyBootEUID = func() int { return 501 }
 	pigstyBootReexec = func([]string, io.Writer) stycli.ReexecOutcome {
 		return stycli.ReexecOutcome{Started: true, ExitCode: 5, Err: errors.New("child failed")}

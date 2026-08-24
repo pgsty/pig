@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"pig/internal/config"
 	"pig/internal/output"
@@ -21,6 +22,12 @@ import (
 const legacyOutputCaptureLimit = 64 * 1024
 
 var ansiColorSequence = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// Legacy callbacks still write through process globals. Serialize the complete
+// compatibility transaction (format check, capture, restore, Result emission)
+// so concurrent command execution cannot cross-contaminate output or config.
+// Callbacks live below cmd and must not re-enter this wrapper.
+var legacyStructuredOutputMu sync.Mutex
 
 func showCommandHelp(command *cobra.Command, _ []string) error { return command.Help() }
 
@@ -152,6 +159,8 @@ func runLegacyStructuredContract(module int, command, kind string, args []string
 	if fn == nil {
 		return fmt.Errorf("nil command executor for %s", command)
 	}
+	legacyStructuredOutputMu.Lock()
+	defer legacyStructuredOutputMu.Unlock()
 	if !config.IsStructuredOutput() {
 		return fn()
 	}
@@ -163,7 +172,7 @@ func runLegacyStructuredContract(module int, command, kind string, args []string
 		Params:  normalizeParams(params),
 	}
 
-	captured, truncated, err := captureLegacyOutput(fn, legacyOutputCaptureLimit)
+	captured, truncated, err := captureLegacyOutputUnlocked(fn, legacyOutputCaptureLimit)
 	if outputText := strings.TrimSpace(ansiColorSequence.ReplaceAllString(captured, "")); outputText != "" {
 		data.CapturedOutput = outputText
 	}
@@ -416,7 +425,7 @@ func runLogStream(module int, command, snapshotCommand string, lines int, args [
 	return stream()
 }
 
-func captureLegacyOutput(fn func() error, limit int) (captured string, truncated bool, runErr error) {
+func captureLegacyOutputUnlocked(fn func() error, limit int) (captured string, truncated bool, runErr error) {
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		return "", false, fn()

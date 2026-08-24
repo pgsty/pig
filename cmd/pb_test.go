@@ -162,7 +162,7 @@ func TestResolvePbInfoRawOutput(t *testing.T) {
 }
 
 func TestPbInfoRawOutputFlagDoesNotShadowGlobalOutput(t *testing.T) {
-	if f := pbInfoCmd.Flags().Lookup("output"); f != nil {
+	if f := commandLocalFlag(pbInfoCmd, "output"); f != nil {
 		t.Fatalf("pb info local --output should not exist, found %q", f.Name)
 	}
 	if f := pbInfoCmd.Flags().ShorthandLookup("o"); f != nil {

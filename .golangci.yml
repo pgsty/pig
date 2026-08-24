@@ -1,0 +1,10 @@
+version: "2"
+
+linters:
+  settings:
+    # Keep orchestration and validation readable without forcing cohesive
+    # command/package logic into tiny files or one-line helpers.
+    gocognit:
+      min-complexity: 30
+    gocyclo:
+      min-complexity: 25

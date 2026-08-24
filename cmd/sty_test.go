@@ -165,7 +165,7 @@ func TestStyConfOutputFileFlagKeepsGlobalOutputFlag(t *testing.T) {
 	if flag.Shorthand != "O" {
 		t.Fatalf("expected shorthand -O for output-file, got -%s", flag.Shorthand)
 	}
-	if local := pigstyConfCmd.Flags().Lookup("output"); local != nil {
+	if local := commandLocalFlag(pigstyConfCmd, "output"); local != nil {
 		t.Fatalf("did not expect local --output flag on pig sty conf, got %+v", local)
 	}
 	if inherited := pigstyConfCmd.InheritedFlags().Lookup("output"); inherited == nil {

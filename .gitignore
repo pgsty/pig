@@ -22,6 +22,8 @@ public/
 bin/
 docs/*
 !docs/spec/
+# Only the explicit allowlist below is versioned here as design contracts;
+# every other local docs/spec file remains untracked.
 docs/spec/*
 !docs/spec/pg.md
 !docs/spec/pb.md

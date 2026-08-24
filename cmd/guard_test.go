@@ -87,7 +87,9 @@ func TestNoCrossLayerAliasCollision(t *testing.T) {
 // their defining command.
 func visitOwnShorthands(c *cobra.Command, seen map[*pflag.Flag]bool, fn func(f *pflag.Flag)) {
 	visit := func(f *pflag.Flag) {
-		if f.Shorthand == "" || seen[f] {
+		// Cobra lazily injects -h after a command executes. It is framework
+		// state, not a project shorthand declaration.
+		if f.Name == "help" || f.Shorthand == "" || seen[f] {
 			return
 		}
 		seen[f] = true
@@ -95,6 +97,19 @@ func visitOwnShorthands(c *cobra.Command, seen map[*pflag.Flag]bool, fn func(f *
 	}
 	c.Flags().VisitAll(visit)
 	c.PersistentFlags().VisitAll(visit)
+}
+
+func commandLocalFlag(command *cobra.Command, name string) *pflag.Flag {
+	flag := command.Flags().Lookup(name)
+	if flag == nil {
+		return nil
+	}
+	for parent := command.Parent(); parent != nil; parent = parent.Parent() {
+		if parent.PersistentFlags().Lookup(name) == flag {
+			return nil
+		}
+	}
+	return flag
 }
 
 // shorthandPermitTable (T2 / Appendix A): every short flag on the ops surface
