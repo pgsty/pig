@@ -72,51 +72,7 @@ func FetchFirstValid(ctx context.Context, urls []string, validate func([]byte) e
 	for _, u := range urls {
 		u := u
 		go func() {
-			// 1) HEAD probe: check existence / fast-fail without downloading full body.
-			headReq, err := http.NewRequestWithContext(ctx, http.MethodHead, u, nil)
-			if err != nil {
-				results <- mirrorFetchResult{url: u, err: err}
-				return
-			}
-			headResp, err := client.Do(headReq)
-			if headResp != nil && headResp.Body != nil {
-				_ = headResp.Body.Close()
-			}
-			if err != nil {
-				results <- mirrorFetchResult{url: u, err: err}
-				return
-			}
-
-			// Fail fast on HEAD non-2xx unless it's a known case where GET may still work.
-			if headResp != nil && headResp.StatusCode/100 != 2 && !shouldFallbackToGetOnHeadStatus(headResp.StatusCode) {
-				results <- mirrorFetchResult{url: u, err: fmt.Errorf("bad status: %s", headResp.Status)}
-				return
-			}
-
-			// 2) GET content
-			getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-			if err != nil {
-				results <- mirrorFetchResult{url: u, err: err}
-				return
-			}
-			getResp, err := client.Do(getReq)
-			if err != nil {
-				results <- mirrorFetchResult{url: u, err: err}
-				return
-			}
-			defer getResp.Body.Close()
-
-			if getResp.StatusCode != http.StatusOK {
-				results <- mirrorFetchResult{url: u, err: fmt.Errorf("bad status: %s", getResp.Status)}
-				return
-			}
-
-			content, err := io.ReadAll(getResp.Body)
-			if err != nil {
-				results <- mirrorFetchResult{url: u, err: err}
-				return
-			}
-			results <- mirrorFetchResult{url: u, content: content}
+			results <- fetchMirror(ctx, client, u)
 		}()
 	}
 
@@ -150,6 +106,38 @@ func FetchFirstValid(ctx context.Context, urls []string, validate func([]byte) e
 		return nil, "", fmt.Errorf("all mirrors failed")
 	}
 	return nil, "", errors.Join(errs...)
+}
+
+func fetchMirror(ctx context.Context, client *http.Client, url string) mirrorFetchResult {
+	headReq, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return mirrorFetchResult{url: url, err: err}
+	}
+	headResp, err := client.Do(headReq)
+	if headResp != nil && headResp.Body != nil {
+		_ = headResp.Body.Close()
+	}
+	if err != nil {
+		return mirrorFetchResult{url: url, err: err}
+	}
+	if headResp != nil && headResp.StatusCode/100 != 2 && !shouldFallbackToGetOnHeadStatus(headResp.StatusCode) {
+		return mirrorFetchResult{url: url, err: fmt.Errorf("bad status: %s", headResp.Status)}
+	}
+
+	getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return mirrorFetchResult{url: url, err: err}
+	}
+	getResp, err := client.Do(getReq)
+	if err != nil {
+		return mirrorFetchResult{url: url, err: err}
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		return mirrorFetchResult{url: url, err: fmt.Errorf("bad status: %s", getResp.Status)}
+	}
+	content, err := io.ReadAll(getResp.Body)
+	return mirrorFetchResult{url: url, content: content, err: err}
 }
 
 // FetchFirstValidWithTimeout is a convenience wrapper around FetchFirstValid.

@@ -297,67 +297,12 @@ func loadGrafanaScopeAssets(scope *grafanaScope) error {
 	if scope == nil {
 		return errors.New("grafana scope is nil")
 	}
-	assets := make([]grafanaAsset, 0)
-	folders := make([]string, 0)
-	switch scope.Kind {
-	case grafanaScopeFile:
-		asset, err := readGrafanaAsset(scope.Path, scope.FolderUID)
-		if err != nil {
-			return err
-		}
-		assets = append(assets, asset)
-	case grafanaScopeFolder:
-		folders = append(folders, scope.FolderUID)
-		folderAssets, err := readGrafanaDirectory(scope.Path, scope.FolderUID)
-		if err != nil {
-			return err
-		}
-		assets = append(assets, folderAssets...)
-	case grafanaScopeRoot:
-		entries, err := os.ReadDir(scope.Root)
-		if err != nil {
-			return fmt.Errorf("read Grafana root: %w", err)
-		}
-		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-		for _, entry := range entries {
-			name := entry.Name()
-			if strings.HasPrefix(name, ".") || name == "__pycache__" {
-				continue
-			}
-			path := filepath.Join(scope.Root, name)
-			if entry.Type()&os.ModeSymlink != 0 {
-				return fmt.Errorf("grafana corpus must not contain symlinks: %s", path)
-			}
-			if entry.IsDir() {
-				if err := validateGrafanaUID("folder", name); err != nil {
-					return err
-				}
-				folders = append(folders, name)
-				folderAssets, readErr := readGrafanaDirectory(path, name)
-				if readErr != nil {
-					return readErr
-				}
-				assets = append(assets, folderAssets...)
-				continue
-			}
-			if strings.EqualFold(filepath.Ext(name), ".json") {
-				asset, readErr := readGrafanaAsset(path, "")
-				if readErr != nil {
-					return readErr
-				}
-				assets = append(assets, asset)
-			}
-		}
-	default:
-		return errors.New("unsupported Grafana scope")
+	assets, folders, err := readGrafanaScopeAssets(scope)
+	if err != nil {
+		return err
 	}
-
-	seen := make(map[string]string, len(assets))
-	for _, asset := range assets {
-		if previous, exists := seen[asset.UID]; exists {
-			return fmt.Errorf("dashboard UID %s is duplicated in %s and %s", asset.UID, previous, asset.Path)
-		}
-		seen[asset.UID] = asset.Path
+	if err := rejectDuplicateGrafanaAssets(assets); err != nil {
+		return err
 	}
 	sort.Slice(assets, func(i, j int) bool {
 		if assets[i].FolderUID != assets[j].FolderUID {
@@ -368,6 +313,76 @@ func loadGrafanaScopeAssets(scope *grafanaScope) error {
 	sort.Strings(folders)
 	scope.Assets = assets
 	scope.Folders = folders
+	return nil
+}
+
+func readGrafanaScopeAssets(scope *grafanaScope) ([]grafanaAsset, []string, error) {
+	switch scope.Kind {
+	case grafanaScopeFile:
+		asset, err := readGrafanaAsset(scope.Path, scope.FolderUID)
+		if err != nil {
+			return nil, nil, err
+		}
+		return []grafanaAsset{asset}, nil, nil
+	case grafanaScopeFolder:
+		assets, err := readGrafanaDirectory(scope.Path, scope.FolderUID)
+		if err != nil {
+			return nil, nil, err
+		}
+		return assets, []string{scope.FolderUID}, nil
+	case grafanaScopeRoot:
+		return readGrafanaRoot(scope.Root)
+	default:
+		return nil, nil, errors.New("unsupported Grafana scope")
+	}
+}
+
+func readGrafanaRoot(root string) ([]grafanaAsset, []string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read Grafana root: %w", err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	var assets []grafanaAsset
+	var folders []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") || name == "__pycache__" {
+			continue
+		}
+		path := filepath.Join(root, name)
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil, nil, fmt.Errorf("grafana corpus must not contain symlinks: %s", path)
+		}
+		if entry.IsDir() {
+			if err := validateGrafanaUID("folder", name); err != nil {
+				return nil, nil, err
+			}
+			folderAssets, err := readGrafanaDirectory(path, name)
+			if err != nil {
+				return nil, nil, err
+			}
+			folders = append(folders, name)
+			assets = append(assets, folderAssets...)
+		} else if strings.EqualFold(filepath.Ext(name), ".json") {
+			asset, err := readGrafanaAsset(path, "")
+			if err != nil {
+				return nil, nil, err
+			}
+			assets = append(assets, asset)
+		}
+	}
+	return assets, folders, nil
+}
+
+func rejectDuplicateGrafanaAssets(assets []grafanaAsset) error {
+	seen := make(map[string]string, len(assets))
+	for _, asset := range assets {
+		if previous, exists := seen[asset.UID]; exists {
+			return fmt.Errorf("dashboard UID %s is duplicated in %s and %s", asset.UID, previous, asset.Path)
+		}
+		seen[asset.UID] = asset.Path
+	}
 	return nil
 }
 

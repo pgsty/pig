@@ -47,80 +47,77 @@ func (d *ExtensionListData) Text() string {
 	if d == nil {
 		return ""
 	}
-
-	var sb strings.Builder
-
-	// Build table using output.RenderTable
 	if d.PgVersion > 0 {
-		// Version-aware mode (like TabulteVersion)
-		headers := []string{"Name", "Status", "Version", "Cate", "Flags", "License", "Repo", "PGVer", "Package", "Description"}
-		if ShowPkg {
-			headers[0] = "Pkg"
-		}
-		rows := make([][]string, 0, len(d.Extensions))
-		for _, ext := range d.Extensions {
-			if ext == nil {
-				continue
-			}
-			desc := ext.Description
-			if len(desc) > 64 {
-				desc = desc[:64]
-			}
-			firstCol := ext.Name
-			if ShowPkg {
-				firstCol = ext.Pkg
-			}
-			pkgStr := ext.PackageName
-			if strings.Contains(pkgStr, "$v") {
-				pkgStr = fmt.Sprintf("[%s]", pkgStr)
-			}
-			pgVer := ""
-			if len(ext.PgVer) > 0 {
-				pgVer = CompactVersion(ext.PgVer)
-			}
-			rows = append(rows, []string{firstCol, ext.Status, ext.Version, ext.Category, flagsFromSummary(ext), ext.License, ext.Repo, pgVer, pkgStr, desc})
-		}
-		sb.WriteString(output.RenderTable(headers, rows))
-	} else {
-		// Common mode (like TabulteCommon): no status column, show RPM/DEB repo instead
-		headers := []string{"Name", "Version", "Cate", "Flags", "License", "RPM", "DEB", "PG Ver", "Description"}
-		if ShowPkg {
-			headers[0] = "Pkg"
-		}
-		rows := make([][]string, 0, len(d.Extensions))
-		for _, ext := range d.Extensions {
-			if ext == nil {
-				continue
-			}
-			desc := ext.Description
-			if len(desc) > 64 {
-				desc = desc[:64] + "..."
-			}
-			firstCol := ext.Name
-			if ShowPkg {
-				firstCol = ext.Pkg
-			}
-			// For common mode, we need RPM/DEB repo info - use Repo as fallback
-			rpmRepo := ""
-			debRepo := ""
-			pgVer := ""
-			if len(ext.PgVer) > 0 {
-				pgVer = CompactVersion(ext.PgVer)
-			}
-			// Look up the extension in catalog for RPM/DEB repo info
-			if Catalog != nil {
-				if e, ok := Catalog.ExtNameMap[ext.Name]; ok {
-					rpmRepo = e.RpmRepo
-					debRepo = e.DebRepo
-				}
-			}
-			rows = append(rows, []string{firstCol, ext.Version, ext.Category, flagsFromSummary(ext), ext.License, rpmRepo, debRepo, pgVer, desc})
-		}
-		sb.WriteString(output.RenderTable(headers, rows))
+		return extensionListText(d.versionedRows(), d.Extensions, []string{"Name", "Status", "Version", "Cate", "Flags", "License", "Repo", "PGVer", "Package", "Description"})
 	}
+	return extensionListText(d.commonRows(), d.Extensions, []string{"Name", "Version", "Cate", "Flags", "License", "RPM", "DEB", "PG Ver", "Description"})
+}
 
-	sb.WriteString(fmt.Sprintf("\n(%d Rows)", len(d.Extensions)))
-	return sb.String()
+func extensionListText(rows [][]string, extensions []*ExtensionSummary, headers []string) string {
+	if ShowPkg {
+		headers[0] = "Pkg"
+	}
+	return output.RenderTable(headers, rows) + fmt.Sprintf("\n(%d Rows)", len(extensions))
+}
+
+func (d *ExtensionListData) versionedRows() [][]string {
+	rows := make([][]string, 0, len(d.Extensions))
+	for _, ext := range d.Extensions {
+		if ext == nil {
+			continue
+		}
+		desc := ext.Description
+		if len(desc) > 64 {
+			desc = desc[:64]
+		}
+		pkg := ext.PackageName
+		if strings.Contains(pkg, "$v") {
+			pkg = fmt.Sprintf("[%s]", pkg)
+		}
+		rows = append(rows, []string{extensionListFirstColumn(ext), ext.Status, ext.Version, ext.Category,
+			flagsFromSummary(ext), ext.License, ext.Repo, compactExtensionVersions(ext), pkg, desc})
+	}
+	return rows
+}
+
+func (d *ExtensionListData) commonRows() [][]string {
+	rows := make([][]string, 0, len(d.Extensions))
+	for _, ext := range d.Extensions {
+		if ext == nil {
+			continue
+		}
+		desc := ext.Description
+		if len(desc) > 64 {
+			desc = desc[:64] + "..."
+		}
+		rpmRepo, debRepo := extensionRepos(ext.Name)
+		rows = append(rows, []string{extensionListFirstColumn(ext), ext.Version, ext.Category, flagsFromSummary(ext),
+			ext.License, rpmRepo, debRepo, compactExtensionVersions(ext), desc})
+	}
+	return rows
+}
+
+func extensionListFirstColumn(ext *ExtensionSummary) string {
+	if ShowPkg {
+		return ext.Pkg
+	}
+	return ext.Name
+}
+
+func compactExtensionVersions(ext *ExtensionSummary) string {
+	if len(ext.PgVer) == 0 {
+		return ""
+	}
+	return CompactVersion(ext.PgVer)
+}
+
+func extensionRepos(name string) (string, string) {
+	if Catalog != nil {
+		if ext, ok := Catalog.ExtNameMap[name]; ok {
+			return ext.RpmRepo, ext.DebRepo
+		}
+	}
+	return "", ""
 }
 
 // flagsFromSummary reconstructs flag string from summary.

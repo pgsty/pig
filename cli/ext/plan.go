@@ -49,7 +49,7 @@ func BuildAddPlan(pgVer int, names []string, yes bool) *output.Plan {
 // buildAddPlanFromState constructs an add plan from given state.
 // This is separated for easier testing.
 func buildAddPlanFromState(names []string, resolved []resolvedExt, notFound []string, pgVer int, yes bool) *output.Plan {
-	actions := buildAddActions(resolved, notFound, pgVer, yes)
+	actions := buildPackageActions(resolved, notFound, pkgOpInstall, yes)
 	affects := buildAddAffects(resolved, pgVer)
 	expected := buildAddExpected(resolved)
 	risks := buildAddRisks(resolved, notFound)
@@ -63,7 +63,7 @@ func buildAddPlanFromState(names []string, resolved []resolvedExt, notFound []st
 	}
 }
 
-func buildAddActions(resolved []resolvedExt, notFound []string, pgVer int, yes bool) []output.Action {
+func buildPackageActions(resolved []resolvedExt, notFound []string, operation pkgOp, yes bool) []output.Action {
 	actions := []output.Action{}
 	step := 1
 
@@ -88,7 +88,7 @@ func buildAddActions(resolved []resolvedExt, notFound []string, pgVer int, yes b
 		for _, r := range resolved {
 			allPkgs = append(allPkgs, r.packages...)
 		}
-		command := buildPackageManagerCommand(pkgOpInstall, yes, allPkgs)
+		command := buildPackageManagerCommand(operation, yes, allPkgs)
 		actions = append(actions, output.Action{
 			Step:        step,
 			Description: fmt.Sprintf("Execute: sudo %s", strings.Join(command, " ")),
@@ -206,12 +206,12 @@ func BuildRmPlan(pgVer int, names []string, yes bool) *output.Plan {
 	resolution := ResolveExtensionPackages(pgVer, names, false)
 	resolved, notFound := resolution.resolved, resolution.unresolved
 
-	return buildRmPlanFromState(names, resolved, notFound, pgVer, yes)
+	return buildRmPlanFromState(names, resolved, notFound, yes)
 }
 
 // buildRmPlanFromState constructs a remove plan from given state.
 // This is separated for easier testing.
-func buildRmPlanFromState(names []string, resolved []resolvedExt, notFound []string, pgVer int, yes bool) *output.Plan {
+func buildRmPlanFromState(names []string, resolved []resolvedExt, notFound []string, yes bool) *output.Plan {
 	if len(resolved) == 0 {
 		return &output.Plan{
 			Command:  buildRmCommand(names),
@@ -222,7 +222,7 @@ func buildRmPlanFromState(names []string, resolved []resolvedExt, notFound []str
 		}
 	}
 
-	actions := buildRmActions(resolved, notFound, pgVer, yes)
+	actions := buildPackageActions(resolved, notFound, pkgOpRemove, yes)
 	affects := buildRmAffects(resolved)
 	expected := buildRmExpected(resolved)
 	risks := buildRmRisks(resolved, notFound)
@@ -234,47 +234,6 @@ func buildRmPlanFromState(names []string, resolved []resolvedExt, notFound []str
 		Expected: expected,
 		Risks:    risks,
 	}
-}
-
-func buildRmActions(resolved []resolvedExt, notFound []string, pgVer int, yes bool) []output.Action {
-	actions := []output.Action{}
-	step := 1
-
-	if len(resolved) > 0 {
-		var resolveDetails []string
-		for _, r := range resolved {
-			if len(r.packages) == 0 {
-				continue
-			}
-			pkgStr := strings.Join(r.packages, " ")
-			resolveDetails = append(resolveDetails, fmt.Sprintf("%s -> %s", r.name, pkgStr))
-		}
-		actions = append(actions, output.Action{
-			Step:        step,
-			Description: fmt.Sprintf("Resolve extension names: %s", strings.Join(resolveDetails, ", ")),
-		})
-		step++
-
-		var allPkgs []string
-		for _, r := range resolved {
-			allPkgs = append(allPkgs, r.packages...)
-		}
-		command := buildPackageManagerCommand(pkgOpRemove, yes, allPkgs)
-		actions = append(actions, output.Action{
-			Step:        step,
-			Description: fmt.Sprintf("Execute: sudo %s", strings.Join(command, " ")),
-		})
-		step++
-	}
-
-	if len(notFound) > 0 {
-		actions = append(actions, output.Action{
-			Step:        step,
-			Description: fmt.Sprintf("Skip (not found): %s", strings.Join(notFound, ", ")),
-		})
-	}
-
-	return actions
 }
 
 func buildRmAffects(resolved []resolvedExt) []output.Resource {

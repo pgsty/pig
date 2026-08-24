@@ -875,129 +875,175 @@ func GrafanaDump(options GrafanaOptions) *output.Result {
 	if err != nil {
 		return grafanaAPIFailure("Grafana dump selection failed", prepared.client, err).WithData(data)
 	}
-	type stagedFile struct {
-		target string
-		raw    []byte
-		uid    string
-		folder string
-	}
-	staged := make([]stagedFile, 0, len(items))
+	staged := make([]grafanaDumpFile, 0, len(items))
 	remoteUIDs := make(map[string]struct{}, len(items))
 	targets := make(map[string]string, len(items))
 	for _, item := range items {
-		if err := validateGrafanaUID("dashboard", item.UID); err != nil {
-			return grafanaSetupFailure("Grafana dump returned an unsafe UID", err).WithData(data)
-		}
-		if item.FolderUID != "" {
-			if err := validateGrafanaUID("folder", item.FolderUID); err != nil {
-				return grafanaSetupFailure("Grafana dump returned an unsafe folder UID", err).WithData(data)
-			}
-		}
-		envelope, getErr := prepared.client.GetDashboard(ctx, item.UID)
-		if getErr != nil {
-			return grafanaAPIFailure("Grafana dashboard could not be fetched for dump", prepared.client, getErr).WithData(data)
-		}
-		remoteFolder := envelope.Meta.FolderUID
-		if remoteFolder != item.FolderUID {
-			return grafanaSetupFailure("Grafana dump state changed during export", fmt.Errorf("dashboard %s moved from folder %q to %q", item.UID, item.FolderUID, remoteFolder)).WithData(data)
-		}
-		if scope.Kind == grafanaScopeFile && remoteFolder != scope.FolderUID {
-			return grafanaSetupFailure("Grafana dump target folder does not match the live dashboard", fmt.Errorf("dashboard %s is in folder %q", item.UID, remoteFolder)).WithData(data)
-		}
-		target := grafanaDumpTarget(scope, item.UID, remoteFolder)
-		if !pathWithin(scope.Root, target) {
-			return grafanaSetupFailure("Grafana dump target escapes its root", errors.New("unsafe dump target")).WithData(data)
-		}
-		if previous, exists := targets[target]; exists {
-			return grafanaSetupFailure("Grafana dump target collision", fmt.Errorf("dashboards %s and %s map to %s", previous, item.UID, target)).WithData(data)
-		}
-		targets[target] = item.UID
-		if err := rejectGrafanaSymlinkPath(scope.Root, target); err != nil {
-			return grafanaSetupFailure("Grafana dump target is unsafe", err).WithData(data)
-		}
-
-		var dashboard map[string]interface{}
-		localFormat := grafanaDashboardLegacy
-		localNamespace := ""
-		if _, statErr := os.Lstat(target); statErr == nil {
-			localAsset, readErr := readGrafanaAsset(target, remoteFolder)
-			if readErr != nil {
-				return grafanaSetupFailure("Grafana dump target is invalid", readErr).WithData(data)
-			}
-			localFormat, localNamespace = localAsset.Format, localAsset.Namespace
-		} else if !errors.Is(statErr, os.ErrNotExist) {
-			return grafanaSetupFailure("Grafana dump target could not be inspected", statErr).WithData(data)
-		}
-		if localFormat == grafanaDashboardV2 {
-			resource, resourceErr := prepared.client.GetDashboardResource(ctx, localNamespace, item.UID)
-			if resourceErr != nil {
-				return grafanaAPIFailure("Grafana dashboard resource could not be fetched for dump", prepared.client, resourceErr).WithData(data)
-			}
-			format, uid, namespace, identityErr := grafanaDashboardIdentity(resource)
-			if identityErr != nil || format != grafanaDashboardV2 || uid != item.UID || namespace != localNamespace {
-				if identityErr == nil {
-					identityErr = fmt.Errorf("resource identity %q/%q differs from expected %q/%q", namespace, uid, localNamespace, item.UID)
-				}
-				return grafanaSetupFailure("Grafana dump returned inconsistent dashboard resource identity", identityErr).WithData(data)
-			}
-			dashboard, resourceErr = dashboardResourceForGrafanaInit(resource, localNamespace, item.UID, remoteFolder)
-			if resourceErr != nil {
-				return grafanaSetupFailure("Grafana dashboard resource could not be normalized for dump", resourceErr).WithData(data)
-			}
-		} else {
-			var normalizeErr error
-			dashboard, normalizeErr = dashboardForGrafanaDump(envelope.Dashboard)
-			if normalizeErr != nil {
-				return grafanaSetupFailure("Grafana dashboard could not be normalized for dump", normalizeErr).WithData(data)
-			}
-			uid, _ := dashboard["uid"].(string)
-			if uid != item.UID {
-				return grafanaSetupFailure("Grafana dump returned inconsistent dashboard identity", fmt.Errorf("search UID %q differs from dashboard UID %q", item.UID, uid)).WithData(data)
-			}
+		file, changed, failure := prepareGrafanaDumpFile(ctx, prepared.client, scope, item, targets, data)
+		if failure != nil {
+			return failure
 		}
 		remoteUIDs[item.UID] = struct{}{}
-		raw, marshalErr := marshalGrafanaDashboard(dashboard)
-		if marshalErr != nil {
-			return grafanaSetupFailure("Grafana dashboard could not be encoded for dump", marshalErr).WithData(data)
-		}
-		if existing, readErr := os.ReadFile(target); readErr == nil && bytes.Equal(existing, raw) {
-			data.Results = append(data.Results, GrafanaObjectResult{ObjectKind: "dashboard", UID: item.UID, FolderUID: remoteFolder, Action: "dump", Status: "unchanged"})
-			continue
-		} else if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-			return grafanaSetupFailure("Grafana dump target could not be read", readErr).WithData(data)
-		}
-		staged = append(staged, stagedFile{target: target, raw: raw, uid: item.UID, folder: remoteFolder})
-		data.Results = append(data.Results, GrafanaObjectResult{ObjectKind: "dashboard", UID: item.UID, FolderUID: remoteFolder, Action: "dump", Status: "staged"})
-	}
-
-	if _, statErr := os.Lstat(scope.Path); statErr == nil {
-		localScope := *scope
-		if loadErr := loadGrafanaScopeAssets(&localScope); loadErr != nil {
-			return grafanaSetupFailure("Grafana dump local scope is invalid", loadErr).WithData(data)
-		}
-		for _, asset := range localScope.Assets {
-			if _, exists := remoteUIDs[asset.UID]; !exists {
-				data.Results = append(data.Results, GrafanaObjectResult{
-					ObjectKind: "dashboard", UID: asset.UID, FolderUID: asset.FolderUID,
-					Action: "dump", Status: "kept", Message: "local-only dashboard is never deleted by dump",
-				})
-			}
+		if changed {
+			staged = append(staged, file)
 		}
 	}
+	if failure := preserveLocalGrafanaDumpAssets(scope, remoteUIDs, data); failure != nil {
+		return failure
+	}
+	if failure := applyGrafanaDumpFiles(staged, data); failure != nil {
+		return failure
+	}
+	return finishGrafanaAction("Grafana dashboards dumped; local-only files were preserved", data)
+}
 
-	for _, file := range staged {
-		if writeErr := writeAtomicGrafanaFile(file.target, file.raw); writeErr != nil {
-			data.Results = append(data.Results, grafanaInternalFailure("dashboard", file.uid, file.folder, "dump", writeErr))
+type grafanaDumpFile struct {
+	target string
+	raw    []byte
+	uid    string
+	folder string
+}
+
+func prepareGrafanaDumpFile(ctx context.Context, client grafanaAPI, scope *grafanaScope, item grafana.SearchItem, targets map[string]string, data *GrafanaActionData) (grafanaDumpFile, bool, *output.Result) {
+	if err := validateGrafanaUID("dashboard", item.UID); err != nil {
+		return grafanaDumpFile{}, false, grafanaSetupFailure("Grafana dump returned an unsafe UID", err).WithData(data)
+	}
+	if item.FolderUID != "" {
+		if err := validateGrafanaUID("folder", item.FolderUID); err != nil {
+			return grafanaDumpFile{}, false, grafanaSetupFailure("Grafana dump returned an unsafe folder UID", err).WithData(data)
+		}
+	}
+	envelope, err := client.GetDashboard(ctx, item.UID)
+	if err != nil {
+		return grafanaDumpFile{}, false, grafanaAPIFailure("Grafana dashboard could not be fetched for dump", client, err).WithData(data)
+	}
+	remoteFolder := envelope.Meta.FolderUID
+	if failure := validateGrafanaDumpTarget(scope, item, remoteFolder, targets, data); failure != nil {
+		return grafanaDumpFile{}, false, failure
+	}
+	target := grafanaDumpTarget(scope, item.UID, remoteFolder)
+	dashboard, failure := loadGrafanaDumpDashboard(ctx, client, item.UID, remoteFolder, target, envelope.Dashboard, data)
+	if failure != nil {
+		return grafanaDumpFile{}, false, failure
+	}
+	raw, err := marshalGrafanaDashboard(dashboard)
+	if err != nil {
+		return grafanaDumpFile{}, false, grafanaSetupFailure("Grafana dashboard could not be encoded for dump", err).WithData(data)
+	}
+	existing, readErr := os.ReadFile(target)
+	if readErr == nil && bytes.Equal(existing, raw) {
+		data.Results = append(data.Results, GrafanaObjectResult{ObjectKind: "dashboard", UID: item.UID, FolderUID: remoteFolder, Action: "dump", Status: "unchanged"})
+		return grafanaDumpFile{}, false, nil
+	}
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return grafanaDumpFile{}, false, grafanaSetupFailure("Grafana dump target could not be read", readErr).WithData(data)
+	}
+	data.Results = append(data.Results, GrafanaObjectResult{ObjectKind: "dashboard", UID: item.UID, FolderUID: remoteFolder, Action: "dump", Status: "staged"})
+	return grafanaDumpFile{target: target, raw: raw, uid: item.UID, folder: remoteFolder}, true, nil
+}
+
+func validateGrafanaDumpTarget(scope *grafanaScope, item grafana.SearchItem, remoteFolder string, targets map[string]string, data *GrafanaActionData) *output.Result {
+	if remoteFolder != item.FolderUID {
+		return grafanaSetupFailure("Grafana dump state changed during export", fmt.Errorf("dashboard %s moved from folder %q to %q", item.UID, item.FolderUID, remoteFolder)).WithData(data)
+	}
+	if scope.Kind == grafanaScopeFile && remoteFolder != scope.FolderUID {
+		return grafanaSetupFailure("Grafana dump target folder does not match the live dashboard", fmt.Errorf("dashboard %s is in folder %q", item.UID, remoteFolder)).WithData(data)
+	}
+	target := grafanaDumpTarget(scope, item.UID, remoteFolder)
+	if !pathWithin(scope.Root, target) {
+		return grafanaSetupFailure("Grafana dump target escapes its root", errors.New("unsafe dump target")).WithData(data)
+	}
+	if previous, exists := targets[target]; exists {
+		return grafanaSetupFailure("Grafana dump target collision", fmt.Errorf("dashboards %s and %s map to %s", previous, item.UID, target)).WithData(data)
+	}
+	targets[target] = item.UID
+	if err := rejectGrafanaSymlinkPath(scope.Root, target); err != nil {
+		return grafanaSetupFailure("Grafana dump target is unsafe", err).WithData(data)
+	}
+	return nil
+}
+
+func loadGrafanaDumpDashboard(ctx context.Context, client grafanaAPI, uid, remoteFolder, target string, legacy map[string]interface{}, data *GrafanaActionData) (map[string]interface{}, *output.Result) {
+	format, namespace, failure := localGrafanaDumpFormat(target, remoteFolder, data)
+	if failure != nil {
+		return nil, failure
+	}
+	if format != grafanaDashboardV2 {
+		dashboard, err := dashboardForGrafanaDump(legacy)
+		if err != nil {
+			return nil, grafanaSetupFailure("Grafana dashboard could not be normalized for dump", err).WithData(data)
+		}
+		actualUID, _ := dashboard["uid"].(string)
+		if actualUID != uid {
+			return nil, grafanaSetupFailure("Grafana dump returned inconsistent dashboard identity", fmt.Errorf("search UID %q differs from dashboard UID %q", uid, actualUID)).WithData(data)
+		}
+		return dashboard, nil
+	}
+	resource, err := client.GetDashboardResource(ctx, namespace, uid)
+	if err != nil {
+		return nil, grafanaAPIFailure("Grafana dashboard resource could not be fetched for dump", client, err).WithData(data)
+	}
+	actualFormat, actualUID, actualNamespace, identityErr := grafanaDashboardIdentity(resource)
+	if identityErr == nil && (actualFormat != grafanaDashboardV2 || actualUID != uid || actualNamespace != namespace) {
+		identityErr = fmt.Errorf("resource identity %q/%q differs from expected %q/%q", actualNamespace, actualUID, namespace, uid)
+	}
+	if identityErr != nil {
+		return nil, grafanaSetupFailure("Grafana dump returned inconsistent dashboard resource identity", identityErr).WithData(data)
+	}
+	dashboard, err := dashboardResourceForGrafanaInit(resource, namespace, uid, remoteFolder)
+	if err != nil {
+		return nil, grafanaSetupFailure("Grafana dashboard resource could not be normalized for dump", err).WithData(data)
+	}
+	return dashboard, nil
+}
+
+func localGrafanaDumpFormat(target, remoteFolder string, data *GrafanaActionData) (grafanaDashboardFormat, string, *output.Result) {
+	if _, err := os.Lstat(target); errors.Is(err, os.ErrNotExist) {
+		return grafanaDashboardLegacy, "", nil
+	} else if err != nil {
+		return 0, "", grafanaSetupFailure("Grafana dump target could not be inspected", err).WithData(data)
+	}
+	asset, err := readGrafanaAsset(target, remoteFolder)
+	if err != nil {
+		return 0, "", grafanaSetupFailure("Grafana dump target is invalid", err).WithData(data)
+	}
+	return asset.Format, asset.Namespace, nil
+}
+
+func preserveLocalGrafanaDumpAssets(scope *grafanaScope, remoteUIDs map[string]struct{}, data *GrafanaActionData) *output.Result {
+	if _, err := os.Lstat(scope.Path); err != nil {
+		return nil
+	}
+	localScope := *scope
+	if err := loadGrafanaScopeAssets(&localScope); err != nil {
+		return grafanaSetupFailure("Grafana dump local scope is invalid", err).WithData(data)
+	}
+	for _, asset := range localScope.Assets {
+		if _, exists := remoteUIDs[asset.UID]; !exists {
+			data.Results = append(data.Results, GrafanaObjectResult{
+				ObjectKind: "dashboard", UID: asset.UID, FolderUID: asset.FolderUID,
+				Action: "dump", Status: "kept", Message: "local-only dashboard is never deleted by dump",
+			})
+		}
+	}
+	return nil
+}
+
+func applyGrafanaDumpFiles(files []grafanaDumpFile, data *GrafanaActionData) *output.Result {
+	for _, file := range files {
+		if err := writeAtomicGrafanaFile(file.target, file.raw); err != nil {
+			data.Results = append(data.Results, grafanaInternalFailure("dashboard", file.uid, file.folder, "dump", err))
 			return finishGrafanaAction("Grafana dump stopped after a local write failure", data)
 		}
 		for index := range data.Results {
-			if data.Results[index].UID == file.uid && data.Results[index].FolderUID == file.folder && data.Results[index].Status == "staged" {
-				data.Results[index].Status = "exported"
+			result := &data.Results[index]
+			if result.UID == file.uid && result.FolderUID == file.folder && result.Status == "staged" {
+				result.Status = "exported"
 				break
 			}
 		}
 	}
-	return finishGrafanaAction("Grafana dashboards dumped; local-only files were preserved", data)
+	return nil
 }
 
 func preflightGrafana(ctx context.Context, client grafanaAPI) (grafana.Organization, *grafanaLiveState, error) {

@@ -86,16 +86,6 @@ func PostgresActiveMajorVersionsAsc() []int {
 	return versions
 }
 
-// PostgresActiveVersionString returns a comma-separated string of active PG versions (ascending).
-func PostgresActiveVersionString() string {
-	asc := PostgresActiveMajorVersionsAsc()
-	parts := make([]string, len(asc))
-	for i, v := range asc {
-		parts[i] = strconv.Itoa(v)
-	}
-	return strings.Join(parts, ",")
-}
-
 // PostgresActiveVersionStrings returns active versions as string slice (descending).
 func PostgresActiveVersionStrings() []string {
 	result := make([]string, len(PostgresActiveMajorVersions))

@@ -126,14 +126,6 @@ func runDBSUCommand(dbsu string, args []string, preserveStdout bool) error {
 	return dbsuCommandError(result, err)
 }
 
-// StreamDBSUCommand executes a command as DBSU while streaming and retaining
-// its output. It is intended for thin wrappers that must inspect a successful
-// command's text without changing its terminal behavior.
-func StreamDBSUCommand(dbsu string, args []string) (DBSUCommandResult, error) {
-	result, err := executeDBSUCommand(dbsu, args, os.Stdin, os.Stdout, os.Stderr)
-	return result, dbsuCommandError(result, err)
-}
-
 func dbsuCommandError(result DBSUCommandResult, err error) error {
 	if err != nil {
 		outStr := strings.TrimSpace(result.CombinedOutput())

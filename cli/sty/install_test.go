@@ -113,11 +113,11 @@ func TestInstallPigsty(t *testing.T) {
 
 			// Run installation
 			srcTarball := createTestPigstyTarball(t)
-			err := InstallPigsty(srcTarball, tt.targetDir, tt.overwrite)
+			err := installPigsty(srcTarball, tt.targetDir, installOptions{Overwrite: tt.overwrite})
 
 			// Check error expectation
 			if (err != nil) != tt.wantErr {
-				t.Errorf("InstallPigsty() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("installPigsty() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 

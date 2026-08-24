@@ -335,14 +335,7 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 		EffectivePGVersion: formatOptionalPGVersion(previewPGVersion),
 	}
 	preludePrinted := false
-	beforePrompt := func() {
-		if config.IsStructuredOutput() || preludePrinted || progressWriter == nil {
-			return
-		}
-		style := configureTextStyle{color: output.IsColorEnabled()}
-		fmt.Fprintln(progressWriter, strings.Join(configurePreludeLines(style, prelude), "\n"))
-		preludePrinted = true
-	}
+	beforePrompt := configurePreludePrinter(prelude, &preludePrinted)
 
 	primaryIPs, warnings, err := resolvePrimaryIPs(opts, mode, beforePrompt)
 	if err != nil {
@@ -358,26 +351,11 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 	}
 	warnings = append(warnings, preflightWarnings...)
 
-	// Beta majors get a heads-up: the generic templates are not tuned for them.
-	if ext.IsBetaPGMajor(pgVer) {
-		betaMode := fmt.Sprintf("pg%d", pgVer)
-		if mode != betaMode {
-			warn := fmt.Sprintf("PG%d is a beta major, template conf/%s.yml is not tuned for it", pgVer, mode)
-			if _, statErr := os.Stat(filepath.Join(home, "conf", betaMode+".yml")); statErr == nil {
-				warn = fmt.Sprintf("PG%d is a beta major, consider the dedicated template: pig sty conf -c %s", pgVer, betaMode)
-			}
-			warnings = append(warnings, warn)
-		}
+	if warning := configureBetaWarning(home, mode, pgVer); warning != "" {
+		warnings = append(warnings, warning)
 	}
 
-	cpuCount := opts.CPUCount
-	if cpuCount <= 0 {
-		if config.NodeCPUCount > 0 {
-			cpuCount = config.NodeCPUCount
-		} else {
-			cpuCount = runtime.NumCPU()
-		}
-	}
+	cpuCount := configureCPUCount(opts.CPUCount)
 	localeAvailable := detectLocaleAvailable(opts.LocaleAvailable)
 	proxy := buildProxyEnv(opts.UseProxy)
 
@@ -398,70 +376,126 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 	}
 	warnings = append(warnings, mutationResult.Warnings...)
 	candidate := mutationResult.Document
-	diagnostics := candidate.Validate()
-	if inventory.HasErrors(diagnostics) {
-		return output.Fail(output.CodeStyConfigureFailed, formatInventoryDiagnostics("rendered inventory is invalid", diagnostics))
+	validationWarnings, failure := validateConfigureCandidate(candidate, opts.DisablePreflight)
+	if failure != nil {
+		return failure
 	}
-	for _, diagnostic := range diagnostics {
-		if diagnostic.Severity == inventory.SeverityWarning {
-			warnings = append(warnings, fmt.Sprintf("%s at %s: %s", diagnostic.Code, diagnostic.Path.String(), diagnostic.Message))
-		}
-	}
-	if ansibleInventory, lookupErr := exec.LookPath("ansible-inventory"); lookupErr == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		externalDiagnostics := inventory.ValidateWithAnsible(ctx, ansibleInventory, candidate)
-		cancel()
-		if inventory.HasErrors(externalDiagnostics) {
-			return output.Fail(output.CodeStyConfigureFailed, formatInventoryDiagnostics("ansible-inventory rejected rendered inventory", externalDiagnostics))
-		}
-	} else if !opts.DisablePreflight {
-		warnings = append(warnings, "ansible-inventory not found, external inventory validation skipped")
-	}
+	warnings = append(warnings, validationWarnings...)
 
 	if err := utils.PutFileMode(outputPath, candidate.Bytes(), 0600); err != nil {
 		return output.Fail(output.CodeStyConfigureWriteFailed, fmt.Sprintf("failed to write output: %v", err))
 	}
 
+	data := newConfigureData(configureDataInput{
+		opts: opts, home: home, mode: mode, templatePath: templatePath, outputPath: outputPath,
+		region: region, domain: domain, primaryIPs: primaryIPs, mutation: mutationResult,
+		warnings: warnings, preludePrinted: preludePrinted,
+	})
+	return output.OK(configureSuccessMessage(home, outputPath), data)
+}
+
+func configurePreludePrinter(prelude *ConfigureData, printed *bool) func() {
+	return func() {
+		if config.IsStructuredOutput() || *printed || progressWriter == nil {
+			return
+		}
+		style := configureTextStyle{color: output.IsColorEnabled()}
+		fmt.Fprintln(progressWriter, strings.Join(configurePreludeLines(style, prelude), "\n"))
+		*printed = true
+	}
+}
+
+type configureDataInput struct {
+	opts                                 ConfigureOptions
+	home, mode, templatePath, outputPath string
+	region, domain                       string
+	primaryIPs                           []string
+	mutation                             *templateMutationResult
+	warnings                             []string
+	preludePrinted                       bool
+}
+
+func newConfigureData(input configureDataInput) *ConfigureData {
 	var reportedPrimaryIPs []string
-	if len(primaryIPs) > 1 {
-		reportedPrimaryIPs = primaryIPs
+	if len(input.primaryIPs) > 1 {
+		reportedPrimaryIPs = input.primaryIPs
 	}
 	reportedDomain := ""
-	if domain != DefaultConfigureDomain {
-		reportedDomain = domain
+	if input.domain != DefaultConfigureDomain {
+		reportedDomain = input.domain
 	}
-	defaultOutputPath := filepath.Join(home, defaultConfigureOutput)
+	defaultOutputPath := filepath.Join(input.home, defaultConfigureOutput)
 	activeInventoryPath := strings.TrimSpace(config.PigstyConfig)
 	if activeInventoryPath == "" {
 		activeInventoryPath = defaultOutputPath
 	}
-	data := &ConfigureData{
-		Kind:                ConfigureKind,
-		Mode:                mode,
-		TemplatePath:        templatePath,
-		OutputPath:          outputPath,
-		Region:              region,
-		PrimaryIP:           primaryIP,
-		PrimaryIPs:          reportedPrimaryIPs,
-		IPReplacements:      mutationResult.IPReplacements,
-		DiscardedIPs:        mutationResult.DiscardedIPs,
-		Domain:              reportedDomain,
-		SSHPort:             strings.TrimSpace(opts.SSHPort),
-		PGVersion:           strings.TrimSpace(opts.PGVersion),
-		EffectivePGVersion:  formatOptionalPGVersion(mutationResult.EffectivePGVersion),
-		Native:              true,
-		GeneratedSecrets:    mutationResult.Generated,
-		Warnings:            warnings,
-		preludePrinted:      preludePrinted,
-		defaultOutputPath:   defaultOutputPath,
-		activeInventoryPath: activeInventoryPath,
+	return &ConfigureData{
+		Kind: ConfigureKind, Mode: input.mode, TemplatePath: input.templatePath, OutputPath: input.outputPath, Region: input.region,
+		PrimaryIP: input.primaryIPs[0], PrimaryIPs: reportedPrimaryIPs,
+		IPReplacements: input.mutation.IPReplacements, DiscardedIPs: input.mutation.DiscardedIPs,
+		Domain: reportedDomain, SSHPort: strings.TrimSpace(input.opts.SSHPort), PGVersion: strings.TrimSpace(input.opts.PGVersion),
+		EffectivePGVersion: formatOptionalPGVersion(input.mutation.EffectivePGVersion), Native: true,
+		GeneratedSecrets: input.mutation.Generated, Warnings: input.warnings, preludePrinted: input.preludePrinted,
+		defaultOutputPath: defaultOutputPath, activeInventoryPath: activeInventoryPath,
 	}
+}
 
-	msg := "pigsty configured"
-	if outputPath != filepath.Join(home, defaultConfigureOutput) {
-		msg = fmt.Sprintf("pigsty configured @ %s", outputPath)
+func configureSuccessMessage(home, outputPath string) string {
+	if outputPath == filepath.Join(home, defaultConfigureOutput) {
+		return "pigsty configured"
 	}
-	return output.OK(msg, data)
+	return fmt.Sprintf("pigsty configured @ %s", outputPath)
+}
+
+func configureBetaWarning(home, mode string, pgVersion int) string {
+	if !ext.IsBetaPGMajor(pgVersion) {
+		return ""
+	}
+	betaMode := fmt.Sprintf("pg%d", pgVersion)
+	if mode == betaMode {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(home, "conf", betaMode+".yml")); err == nil {
+		return fmt.Sprintf("PG%d is a beta major, consider the dedicated template: pig sty conf -c %s", pgVersion, betaMode)
+	}
+	return fmt.Sprintf("PG%d is a beta major, template conf/%s.yml is not tuned for it", pgVersion, mode)
+}
+
+func configureCPUCount(requested int) int {
+	if requested > 0 {
+		return requested
+	}
+	if config.NodeCPUCount > 0 {
+		return config.NodeCPUCount
+	}
+	return runtime.NumCPU()
+}
+
+func validateConfigureCandidate(candidate *inventory.Document, disableExternal bool) ([]string, *output.Result) {
+	diagnostics := candidate.Validate()
+	if inventory.HasErrors(diagnostics) {
+		return nil, output.Fail(output.CodeStyConfigureFailed, formatInventoryDiagnostics("rendered inventory is invalid", diagnostics))
+	}
+	var warnings []string
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Severity == inventory.SeverityWarning {
+			warnings = append(warnings, fmt.Sprintf("%s at %s: %s", diagnostic.Code, diagnostic.Path.String(), diagnostic.Message))
+		}
+	}
+	ansibleInventory, err := exec.LookPath("ansible-inventory")
+	if err != nil {
+		if !disableExternal {
+			warnings = append(warnings, "ansible-inventory not found, external inventory validation skipped")
+		}
+		return warnings, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	externalDiagnostics := inventory.ValidateWithAnsible(ctx, ansibleInventory, candidate)
+	cancel()
+	if inventory.HasErrors(externalDiagnostics) {
+		return nil, output.Fail(output.CodeStyConfigureFailed, formatInventoryDiagnostics("ansible-inventory rejected rendered inventory", externalDiagnostics))
+	}
+	return warnings, nil
 }
 
 func normalizeConfigureMode(mode string) (string, error) {
@@ -1304,38 +1338,12 @@ func mutateTemplateDocument(content string, opts mutationOptions) (*templateMuta
 	}
 	mutation := doc.Mutate()
 	globals := mutation.AllVars()
-	var warnings []string
-	if len(placeholderResult.DiscardedIPs) > 0 {
-		warnings = append(warnings, fmt.Sprintf(
-			"%d IPs given, only %d replaced; discard: %s",
-			placeholderResult.Provided, len(placeholderResult.Replacements), strings.Join(placeholderResult.DiscardedIPs, ", ")))
+	warnings := discardedIPWarnings(placeholderResult)
+	if err := applyTinyTemplateDefaults(globals, opts.CPUCount); err != nil {
+		return nil, err
 	}
-
-	if opts.CPUCount > 0 && opts.CPUCount < 4 {
-		if scalarEquals(globals, "node_tune", "oltp") {
-			if err := globals.Set("node_tune", "tiny"); err != nil {
-				return nil, err
-			}
-		}
-		if scalarEquals(globals, "pg_conf", "oltp.yml") {
-			if err := globals.Set("pg_conf", "tiny.yml"); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	if opts.Region != "" && opts.Region != "default" {
-		insertOptions := insertAfterExisting(globals, "admin_ip")
-		if err := globals.Set("region", opts.Region, insertOptions...); err != nil {
-			return nil, err
-		}
-	}
-	if opts.Region == "china" {
-		for _, key := range []string{"docker_registry_mirrors", "PIP_MIRROR_URL"} {
-			if err := enableChinaTemplateKey(mutation, key); err != nil {
-				return nil, err
-			}
-		}
+	if err := applyTemplateRegion(mutation, globals, opts.Region); err != nil {
+		return nil, err
 	}
 
 	if len(opts.Proxy) > 0 {
@@ -1343,46 +1351,11 @@ func mutateTemplateDocument(content string, opts mutationOptions) (*templateMuta
 			return nil, err
 		}
 	}
-
-	pinnedKernelMode := opts.Mode == "mssql" || opts.Mode == "polar"
-	pgMajorTemplate := pgMajorTemplateMode.MatchString(opts.Mode)
-	templatePGVersion := configureTemplatePGVersion(globals, opts.Mode)
-	effectivePGVersion := chooseEffectivePGVersion(opts.Mode, opts.PGVersion, templatePGVersion)
-	if opts.PGVersion > 0 && !pinnedKernelMode && !pgMajorTemplate {
-		insertOptions := insertAfterExisting(globals, "node_repo_modules")
-		if err := globals.Set("pg_version", opts.PGVersion, insertOptions...); err != nil {
-			return nil, err
-		}
-		if templatePGVersion > 0 && templatePGVersion != opts.PGVersion {
-			if _, err := mutation.ReplaceAll(fmt.Sprintf("pg%d-", templatePGVersion), fmt.Sprintf("pg%d-", opts.PGVersion),
-				inventory.WithLiteralTargets(inventory.LiteralScalars|inventory.LiteralComments),
-				inventory.WithIdentifier("pg_package_alias")); err != nil {
-				return nil, err
-			}
-		}
-		warnings = append(warnings, pgVersionOverrideWarnings(mutation.Document(), opts.PGVersion)...)
-	} else if opts.PGVersion > 0 && opts.PGVersion != effectivePGVersion {
-		if effectivePGVersion > 0 {
-			warnings = append(warnings, fmt.Sprintf(
-				"pg_version %d ignored: %s template pins PostgreSQL %d", opts.PGVersion, opts.Mode, effectivePGVersion))
-		} else {
-			warnings = append(warnings, fmt.Sprintf(
-				"pg_version %d ignored: %s template pins its own PostgreSQL version", opts.PGVersion, opts.Mode))
-		}
+	effectivePGVersion, versionWarnings, err := applyTemplatePGVersion(mutation, globals, opts)
+	if err != nil {
+		return nil, err
 	}
-
-	// Beta majors beyond the stable window ship from the PGDG testing repos.
-	// Only all.vars module lists are changed; group/host overrides remain intact.
-	if ext.IsBetaPGMajor(effectivePGVersion) {
-		enabled, err := enableBetaRepoModules(mutation)
-		if err != nil {
-			return nil, err
-		}
-		if !enabled {
-			warnings = append(warnings, fmt.Sprintf(
-				"beta repo module not enabled: no all.vars repo module list with 'pgsql' in template, add 'beta' manually for PG%d packages", effectivePGVersion))
-		}
-	}
+	warnings = append(warnings, versionWarnings...)
 
 	if shouldSetLocale(effectivePGVersion, opts.LocaleAvailable) {
 		if err := ensureLocaleSettings(mutation); err != nil {
@@ -1409,6 +1382,90 @@ func mutateTemplateDocument(content string, opts mutationOptions) (*templateMuta
 		Document: committed, EffectivePGVersion: effectivePGVersion, Generated: generated, Warnings: warnings,
 		IPReplacements: placeholderResult.Replacements, DiscardedIPs: placeholderResult.DiscardedIPs,
 	}, nil
+}
+
+func discardedIPWarnings(result configurePlaceholderResult) []string {
+	if len(result.DiscardedIPs) == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"%d IPs given, only %d replaced; discard: %s",
+		result.Provided, len(result.Replacements), strings.Join(result.DiscardedIPs, ", "))}
+}
+
+func applyTinyTemplateDefaults(globals *inventory.MappingEditor, cpuCount int) error {
+	if cpuCount <= 0 || cpuCount >= 4 {
+		return nil
+	}
+	if scalarEquals(globals, "node_tune", "oltp") {
+		if err := globals.Set("node_tune", "tiny"); err != nil {
+			return err
+		}
+	}
+	if scalarEquals(globals, "pg_conf", "oltp.yml") {
+		return globals.Set("pg_conf", "tiny.yml")
+	}
+	return nil
+}
+
+func applyTemplateRegion(mutation *inventory.Mutation, globals *inventory.MappingEditor, region string) error {
+	if region != "" && region != "default" {
+		if err := globals.Set("region", region, insertAfterExisting(globals, "admin_ip")...); err != nil {
+			return err
+		}
+	}
+	if region != "china" {
+		return nil
+	}
+	for _, key := range []string{"docker_registry_mirrors", "PIP_MIRROR_URL"} {
+		if err := enableChinaTemplateKey(mutation, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyTemplatePGVersion(mutation *inventory.Mutation, globals *inventory.MappingEditor, opts mutationOptions) (int, []string, error) {
+	templateVersion := configureTemplatePGVersion(globals, opts.Mode)
+	effectiveVersion := chooseEffectivePGVersion(opts.Mode, opts.PGVersion, templateVersion)
+	var warnings []string
+	canOverride := opts.Mode != "mssql" && opts.Mode != "polar" && !pgMajorTemplateMode.MatchString(opts.Mode)
+	if opts.PGVersion > 0 && canOverride {
+		if err := globals.Set("pg_version", opts.PGVersion, insertAfterExisting(globals, "node_repo_modules")...); err != nil {
+			return 0, nil, err
+		}
+		if templateVersion > 0 && templateVersion != opts.PGVersion {
+			if _, err := mutation.ReplaceAll(fmt.Sprintf("pg%d-", templateVersion), fmt.Sprintf("pg%d-", opts.PGVersion),
+				inventory.WithLiteralTargets(inventory.LiteralScalars|inventory.LiteralComments),
+				inventory.WithIdentifier("pg_package_alias")); err != nil {
+				return 0, nil, err
+			}
+		}
+		warnings = append(warnings, pgVersionOverrideWarnings(mutation.Document(), opts.PGVersion)...)
+	} else if opts.PGVersion > 0 && opts.PGVersion != effectiveVersion {
+		warnings = append(warnings, pinnedPGVersionWarning(opts, effectiveVersion))
+	}
+
+	// Beta majors beyond the stable window ship from the PGDG testing repos.
+	// Only all.vars module lists are changed; group/host overrides remain intact.
+	if ext.IsBetaPGMajor(effectiveVersion) {
+		enabled, err := enableBetaRepoModules(mutation)
+		if err != nil {
+			return 0, nil, err
+		}
+		if !enabled {
+			warnings = append(warnings, fmt.Sprintf(
+				"beta repo module not enabled: no all.vars repo module list with 'pgsql' in template, add 'beta' manually for PG%d packages", effectiveVersion))
+		}
+	}
+	return effectiveVersion, warnings, nil
+}
+
+func pinnedPGVersionWarning(opts mutationOptions, effectiveVersion int) string {
+	if effectiveVersion > 0 {
+		return fmt.Sprintf("pg_version %d ignored: %s template pins PostgreSQL %d", opts.PGVersion, opts.Mode, effectiveVersion)
+	}
+	return fmt.Sprintf("pg_version %d ignored: %s template pins its own PostgreSQL version", opts.PGVersion, opts.Mode)
 }
 
 func configureTemplatePGVersion(globals *inventory.MappingEditor, mode string) int {

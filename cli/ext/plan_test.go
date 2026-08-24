@@ -563,14 +563,14 @@ func validateExtPlanFields(t *testing.T, plan *output.Plan, planType string) {
 }
 
 // ============================================================================
-// buildAddActions / buildRmActions Tests
+// buildPackageActions Tests
 // ============================================================================
 
 func TestBuildAddActions_WithResolved(t *testing.T) {
 	resolved := []resolvedExt{
 		{name: "postgis", packages: []string{"postgis35_17*"}},
 	}
-	actions := buildAddActions(resolved, nil, 17, false)
+	actions := buildPackageActions(resolved, nil, pkgOpInstall, false)
 	if len(actions) != 2 {
 		t.Errorf("Expected 2 actions, got %d", len(actions))
 	}
@@ -584,7 +584,7 @@ func TestBuildAddActions_WithNotFound(t *testing.T) {
 		{name: "postgis", packages: []string{"postgis35_17*"}},
 	}
 	notFound := []string{"nonexistent"}
-	actions := buildAddActions(resolved, notFound, 17, false)
+	actions := buildPackageActions(resolved, notFound, pkgOpInstall, false)
 	// Should have resolve, execute, skip
 	if len(actions) != 3 {
 		t.Errorf("Expected 3 actions, got %d", len(actions))
@@ -595,7 +595,7 @@ func TestBuildRmActions_WithResolved(t *testing.T) {
 	resolved := []resolvedExt{
 		{name: "postgis", packages: []string{"postgis35_17*"}},
 	}
-	actions := buildRmActions(resolved, nil, 17, false)
+	actions := buildPackageActions(resolved, nil, pkgOpRemove, false)
 	if len(actions) != 2 {
 		t.Errorf("Expected 2 actions, got %d", len(actions))
 	}

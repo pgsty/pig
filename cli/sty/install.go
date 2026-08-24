@@ -30,14 +30,6 @@ type installOptions struct {
 	AcceptEULA bool
 }
 
-// InstallPigsty installs pigsty to the specified directory.
-// If targetDir is empty, it defaults to ~/pigsty.
-// If overwrite is true, it will overwrite existing files.
-// Returns error if installation fails.
-func InstallPigsty(srcTarball []byte, targetDir string, overwrite bool) error {
-	return installPigsty(srcTarball, targetDir, installOptions{Overwrite: overwrite})
-}
-
 // installPigsty stages a complete final tree beside the target and
 // commits it only after extraction succeeds. Existing --force installations
 // are cloned into staging first so protected and user-created files retain the
@@ -307,6 +299,9 @@ func unusedSiblingPath(parent, pattern string) (string, error) {
 // extractPigsty extracts pigsty source from embedded tarball to destination directory.
 // It handles files, directories and symlinks while preserving file modes.
 // Protected files like pigsty.yml and files/pki/* are not overwritten if they exist.
+// This source-overlay contract intentionally differs from internal/archive's
+// rooted offline/spec extraction: it strips the release archive's top-level
+// directory and preserves selected files from an existing installation.
 func extractPigsty(data []byte, dst string) error {
 	buf := bytes.NewReader(data)
 	gzr, err := gzip.NewReader(buf)
