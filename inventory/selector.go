@@ -50,72 +50,94 @@ func ParseSelector(doc *Document, selector string) (Path, error) {
 		return nil, selectorFailure(SelectorSyntax, selector, "selector must start with vars or a group name")
 	}
 
-	var path Path
-	group := false
-	children := false
-	if parts[0].Key == "vars" {
-		path = Keys("all", "vars")
-	} else {
-		childPath := Keys("all", "children", parts[0].Key)
-		rootPath := Keys(parts[0].Key)
-		_, childExists := doc.Lookup(childPath)
-		_, rootExists := doc.Lookup(rootPath)
-		switch {
-		case childExists && rootExists:
-			return nil, selectorFailure(SelectorSyntax, selector, "group %q has multiple source declarations; use a canonical pointer", parts[0].Key)
-		case childExists:
-			path = childPath
-		case rootExists:
-			path = rootPath
-		default:
-			path = childPath
-		}
-		group = true
-	}
-	if err := requireSelectorPath(doc, selector, path); err != nil {
+	cursor, err := initialSelectorCursor(doc, selector, parts[0])
+	if err != nil {
 		return nil, err
 	}
-
 	for _, part := range parts[1:] {
-		current, ok := doc.Lookup(path)
-		if !ok {
-			return nil, selectorFailure(SelectorNotFound, selector, "path %s does not exist", path.String())
-		}
-		if part.Kind == IndexSegment {
-			if current.Kind != SequenceValue {
-				return nil, selectorFailure(SelectorType, selector, "cannot use sequence index at %s (%s)", path.String(), current.Kind)
-			}
-			path = path.ChildIndex(part.Index)
-			group, children = false, false
-		} else if current.Kind != MappingValue {
-			return nil, selectorFailure(SelectorType, selector, "cannot descend through %s at %s", current.Kind, path.String())
-		} else if children {
-			path = path.ChildKey(part.Key)
-			group, children = true, false
-		} else if group {
-			switch part.Key {
-			case "vars", "hosts":
-				path = path.ChildKey(part.Key)
-				group = false
-			case "children":
-				path = path.ChildKey(part.Key)
-				group, children = false, true
-			default:
-				path = path.ChildKey("children")
-				if err := requireSelectorPath(doc, selector, path); err != nil {
-					return nil, err
-				}
-				path = path.ChildKey(part.Key)
-				group = true
-			}
-		} else {
-			path = path.ChildKey(part.Key)
-		}
-		if err := requireSelectorPath(doc, selector, path); err != nil {
+		cursor, err = advanceSelectorCursor(doc, selector, cursor, part)
+		if err != nil {
 			return nil, err
 		}
 	}
-	return path, nil
+	return cursor.path, nil
+}
+
+type selectorCursor struct {
+	path     Path
+	group    bool
+	children bool
+}
+
+func initialSelectorCursor(doc *Document, selector string, first Segment) (selectorCursor, error) {
+	if first.Key == "vars" {
+		cursor := selectorCursor{path: Keys("all", "vars")}
+		return cursor, requireSelectorPath(doc, selector, cursor.path)
+	}
+	childPath := Keys("all", "children", first.Key)
+	rootPath := Keys(first.Key)
+	_, childExists := doc.Lookup(childPath)
+	_, rootExists := doc.Lookup(rootPath)
+	if childExists && rootExists {
+		return selectorCursor{}, selectorFailure(SelectorSyntax, selector, "group %q has multiple source declarations; use a canonical pointer", first.Key)
+	}
+	path := childPath
+	if rootExists && !childExists {
+		path = rootPath
+	}
+	cursor := selectorCursor{path: path, group: true}
+	return cursor, requireSelectorPath(doc, selector, path)
+}
+
+func advanceSelectorCursor(doc *Document, selector string, cursor selectorCursor, part Segment) (selectorCursor, error) {
+	current, ok := doc.Lookup(cursor.path)
+	if !ok {
+		return cursor, selectorFailure(SelectorNotFound, selector, "path %s does not exist", cursor.path.String())
+	}
+	if part.Kind == IndexSegment {
+		if current.Kind != SequenceValue {
+			return cursor, selectorFailure(SelectorType, selector, "cannot use sequence index at %s (%s)", cursor.path.String(), current.Kind)
+		}
+		cursor.path = cursor.path.ChildIndex(part.Index)
+		cursor.group, cursor.children = false, false
+	} else if current.Kind != MappingValue {
+		return cursor, selectorFailure(SelectorType, selector, "cannot descend through %s at %s", current.Kind, cursor.path.String())
+	} else {
+		var err error
+		cursor, err = advanceSelectorKey(doc, selector, cursor, part.Key)
+		if err != nil {
+			return cursor, err
+		}
+	}
+	return cursor, requireSelectorPath(doc, selector, cursor.path)
+}
+
+func advanceSelectorKey(doc *Document, selector string, cursor selectorCursor, key string) (selectorCursor, error) {
+	if cursor.children {
+		cursor.path = cursor.path.ChildKey(key)
+		cursor.group, cursor.children = true, false
+		return cursor, nil
+	}
+	if !cursor.group {
+		cursor.path = cursor.path.ChildKey(key)
+		return cursor, nil
+	}
+	switch key {
+	case "vars", "hosts":
+		cursor.path = cursor.path.ChildKey(key)
+		cursor.group = false
+	case "children":
+		cursor.path = cursor.path.ChildKey(key)
+		cursor.group, cursor.children = false, true
+	default:
+		cursor.path = cursor.path.ChildKey("children")
+		if err := requireSelectorPath(doc, selector, cursor.path); err != nil {
+			return cursor, err
+		}
+		cursor.path = cursor.path.ChildKey(key)
+		cursor.group = true
+	}
+	return cursor, nil
 }
 
 func resolvePointer(doc *Document, selector string) (Path, error) {

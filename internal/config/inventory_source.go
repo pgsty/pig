@@ -70,10 +70,7 @@ func ParseAnsibleInventoryDirective(configPath string, body []byte) (AnsibleInve
 	if len(body) > maxInventoryAnsibleConfigSize || !utf8.Valid(body) || bytes.IndexByte(body, 0) >= 0 {
 		return AnsibleInventoryDirective{}, errors.New("invalid ansible config encoding")
 	}
-	directive := AnsibleInventoryDirective{}
-	defaultsSections := 0
-	inDefaults := false
-	inventoryAssignments := 0
+	parser := ansibleInventoryDirectiveParser{configPath: configPath, body: body}
 	for offset := 0; offset < len(body); {
 		lineStart := offset
 		newline := bytes.IndexByte(body[offset:], '\n')
@@ -84,61 +81,81 @@ func ParseAnsibleInventoryDirective(configPath string, body []byte) (AnsibleInve
 		} else {
 			offset = len(body)
 		}
-		contentEnd := lineEnd
-		if contentEnd > lineStart && body[contentEnd-1] == '\r' {
-			contentEnd--
-		}
-		line := body[lineStart:contentEnd]
-		if bytes.IndexByte(line, '\r') >= 0 {
-			return AnsibleInventoryDirective{}, errors.New("unsupported ansible config line ending")
-		}
-		trimmed, leading := trimInventorySpace(line)
-		if len(trimmed) == 0 || trimmed[0] == '#' || trimmed[0] == ';' {
-			continue
-		}
-		if trimmed[0] == '[' {
-			section, ok := parseInventorySection(trimmed)
-			if !ok {
-				return AnsibleInventoryDirective{}, errors.New("malformed ansible config section")
-			}
-			inDefaults = strings.EqualFold(section, "defaults")
-			if inDefaults {
-				defaultsSections++
-			}
-			continue
-		}
-		equal := bytes.IndexByte(trimmed, '=')
-		if equal < 0 {
-			if inDefaults && strings.EqualFold(strings.TrimSpace(string(trimmed)), "inventory") {
-				return AnsibleInventoryDirective{}, errors.New("malformed inventory directive")
-			}
-			continue
-		}
-		key := strings.TrimSpace(string(trimmed[:equal]))
-		if !inDefaults || !strings.EqualFold(key, "inventory") {
-			continue
-		}
-		literal, value, locator, relativeStart, relativeEnd, err := parseInventoryValue(configPath, trimmed, equal+1)
-		if err != nil {
+		if err := parser.consumeLine(lineStart, lineEnd); err != nil {
 			return AnsibleInventoryDirective{}, err
 		}
-		inventoryAssignments++
-		directive.ValueStart = lineStart + leading + relativeStart
-		directive.ValueEnd = lineStart + leading + relativeEnd
-		directive.Literal = literal
-		directive.Value = value
-		directive.Path = locator
 	}
-	if defaultsSections != 1 || inventoryAssignments > 1 {
+	return parser.result()
+}
+
+type ansibleInventoryDirectiveParser struct {
+	configPath       string
+	body             []byte
+	directive        AnsibleInventoryDirective
+	defaultsSections int
+	inDefaults       bool
+	assignments      int
+}
+
+func (p *ansibleInventoryDirectiveParser) consumeLine(lineStart, lineEnd int) error {
+	contentEnd := lineEnd
+	if contentEnd > lineStart && p.body[contentEnd-1] == '\r' {
+		contentEnd--
+	}
+	line := p.body[lineStart:contentEnd]
+	if bytes.IndexByte(line, '\r') >= 0 {
+		return errors.New("unsupported ansible config line ending")
+	}
+	trimmed, leading := trimInventorySpace(line)
+	if len(trimmed) == 0 || trimmed[0] == '#' || trimmed[0] == ';' {
+		return nil
+	}
+	if trimmed[0] == '[' {
+		section, ok := parseInventorySection(trimmed)
+		if !ok {
+			return errors.New("malformed ansible config section")
+		}
+		p.inDefaults = strings.EqualFold(section, "defaults")
+		if p.inDefaults {
+			p.defaultsSections++
+		}
+		return nil
+	}
+	equal := bytes.IndexByte(trimmed, '=')
+	if equal < 0 {
+		if p.inDefaults && strings.EqualFold(strings.TrimSpace(string(trimmed)), "inventory") {
+			return errors.New("malformed inventory directive")
+		}
+		return nil
+	}
+	key := strings.TrimSpace(string(trimmed[:equal]))
+	if !p.inDefaults || !strings.EqualFold(key, "inventory") {
+		return nil
+	}
+	literal, value, locator, relativeStart, relativeEnd, err := parseInventoryValue(p.configPath, trimmed, equal+1)
+	if err != nil {
+		return err
+	}
+	p.assignments++
+	p.directive = AnsibleInventoryDirective{
+		Literal: literal, Value: value, Path: locator,
+		ValueStart: lineStart + leading + relativeStart,
+		ValueEnd:   lineStart + leading + relativeEnd,
+	}
+	return nil
+}
+
+func (p *ansibleInventoryDirectiveParser) result() (AnsibleInventoryDirective, error) {
+	if p.defaultsSections != 1 || p.assignments > 1 {
 		return AnsibleInventoryDirective{}, errors.New("ambiguous ansible inventory directive")
 	}
-	if inventoryAssignments == 0 {
+	if p.assignments == 0 {
 		return AnsibleInventoryDirective{}, ErrAnsibleInventoryDirectiveMissing
 	}
-	if directive.ValueStart < 0 || directive.ValueStart >= directive.ValueEnd || directive.ValueEnd > len(body) {
+	if p.directive.ValueStart < 0 || p.directive.ValueStart >= p.directive.ValueEnd || p.directive.ValueEnd > len(p.body) {
 		return AnsibleInventoryDirective{}, errors.New("invalid ansible inventory directive span")
 	}
-	return directive, nil
+	return p.directive, nil
 }
 
 func ReadAnsibleInventoryDirective(path string) (AnsibleInventoryDirective, error) {
@@ -475,6 +492,14 @@ func inspectResolvedInventoryPath(base InventorySourceDescriptor, path string, t
 		base.Readable = true
 		_ = file.Close()
 	}
+	classifyInventorySource(&base, info, path, tier)
+	if !base.Readable {
+		base.Findings = append(base.Findings, "SOURCE_UNREADABLE")
+	}
+	return base
+}
+
+func classifyInventorySource(base *InventorySourceDescriptor, info os.FileInfo, path string, tier InventorySourceTier) {
 	switch {
 	case info.IsDir():
 		base.Type = InventorySourceDirectory
@@ -484,18 +509,7 @@ func inspectResolvedInventoryPath(base InventorySourceDescriptor, path string, t
 		base.Findings = append(base.Findings, "SOURCE_TYPE_UNSUPPORTED")
 	case base.Executable:
 		base.Type = InventorySourceExecutableDynamic
-		if !base.Symlink && tier == InventorySourceAnsibleConfig && base.Home != "" && path == filepath.Join(base.Home, "inventory.sh") {
-			if body, readErr := os.ReadFile(path); readErr == nil {
-				if _, managed := ManagedInventoryScriptShape(body); managed {
-					base.Type = InventorySourceManagedCMDB
-					base.Managed = true
-					base.Findings = append(base.Findings, "SOURCE_MANAGED_CMDB_ACTIVE")
-					if ManagedInventoryScriptHasPassword(body) {
-						base.Findings = append(base.Findings, "SOURCE_MANAGED_PASSWORD_LITERAL")
-					}
-				}
-			}
-		}
+		inspectManagedInventoryScript(base, path, tier)
 		if !base.Managed {
 			base.Findings = append(base.Findings, "SOURCE_DYNAMIC_UNSUPPORTED")
 		}
@@ -510,8 +524,24 @@ func inspectResolvedInventoryPath(base InventorySourceDescriptor, path string, t
 			}
 		}
 	}
-	if !base.Readable {
-		base.Findings = append(base.Findings, "SOURCE_UNREADABLE")
+}
+
+func inspectManagedInventoryScript(base *InventorySourceDescriptor, path string, tier InventorySourceTier) {
+	managedPath := tier == InventorySourceAnsibleConfig && base.Home != "" && path == filepath.Join(base.Home, "inventory.sh")
+	if base.Symlink || !managedPath {
+		return
 	}
-	return base
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	if _, managed := ManagedInventoryScriptShape(body); !managed {
+		return
+	}
+	base.Type = InventorySourceManagedCMDB
+	base.Managed = true
+	base.Findings = append(base.Findings, "SOURCE_MANAGED_CMDB_ACTIVE")
+	if ManagedInventoryScriptHasPassword(body) {
+		base.Findings = append(base.Findings, "SOURCE_MANAGED_PASSWORD_LITERAL")
+	}
 }

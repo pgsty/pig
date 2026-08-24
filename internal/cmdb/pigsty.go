@@ -456,39 +456,47 @@ func (s *Store) ReplaceDeclarationsIfCurrent(ctx context.Context, input Declarat
 		return LoadResult{}, failure("CMDB_LOAD_FAILED", "Inventory tables could not be replaced")
 	}
 
+	result, err := replaceDeclarationRows(txCtx, tx, input)
+	if err != nil {
+		return LoadResult{}, err
+	}
+	if err := tx.Commit(txCtx); err != nil {
+		return LoadResult{}, failure("CMDB_LOAD_FAILED", "Inventory transaction could not commit")
+	}
+	return result, nil
+}
+
+func replaceDeclarationRows(ctx context.Context, tx pgx.Tx, input Declarations) (LoadResult, error) {
 	result := LoadResult{}
 	for _, field := range input.Globals {
-		if _, err := tx.Exec(txCtx, `INSERT INTO pigsty.global_var (key, value) VALUES ($1, $2::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, mtime = now()`, field.Key, string(field.Value)); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO pigsty.global_var (key, value) VALUES ($1, $2::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, mtime = now()`, field.Key, string(field.Value)); err != nil {
 			return LoadResult{}, failure("CMDB_LOAD_FAILED", "global declarations could not be loaded")
 		}
 		result.Globals++
 	}
 	for _, group := range input.Groups {
-		if _, err := tx.Exec(txCtx, `INSERT INTO pigsty.group (cls) VALUES ($1) ON CONFLICT (cls) DO UPDATE SET mtime = now()`, group.Name); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO pigsty.group (cls) VALUES ($1) ON CONFLICT (cls) DO UPDATE SET mtime = now()`, group.Name); err != nil {
 			return LoadResult{}, failure("CMDB_LOAD_FAILED", "groups could not be loaded")
 		}
 		result.Groups++
 		for _, field := range group.Vars {
-			if _, err := tx.Exec(txCtx, `INSERT INTO pigsty.group_var (cls, key, value) VALUES ($1, $2, $3::jsonb) ON CONFLICT (cls, key) DO UPDATE SET value = EXCLUDED.value, mtime = now()`, group.Name, field.Key, string(field.Value)); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO pigsty.group_var (cls, key, value) VALUES ($1, $2, $3::jsonb) ON CONFLICT (cls, key) DO UPDATE SET value = EXCLUDED.value, mtime = now()`, group.Name, field.Key, string(field.Value)); err != nil {
 				return LoadResult{}, failure("CMDB_LOAD_FAILED", "group variables could not be loaded")
 			}
 			result.GroupVar++
 		}
 		for _, host := range group.Hosts {
-			if _, err := tx.Exec(txCtx, `INSERT INTO pigsty.host (cls, ip) VALUES ($1, $2::inet) ON CONFLICT (cls, ip) DO UPDATE SET mtime = now()`, group.Name, host.IP); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO pigsty.host (cls, ip) VALUES ($1, $2::inet) ON CONFLICT (cls, ip) DO UPDATE SET mtime = now()`, group.Name, host.IP); err != nil {
 				return LoadResult{}, failure("CMDB_LOAD_FAILED", "hosts could not be loaded")
 			}
 			result.Hosts++
 			for _, field := range host.Vars {
-				if _, err := tx.Exec(txCtx, `INSERT INTO pigsty.host_var (cls, ip, key, value) VALUES ($1, $2::inet, $3, $4::jsonb) ON CONFLICT (cls, ip, key) DO UPDATE SET value = EXCLUDED.value, mtime = now()`, group.Name, host.IP, field.Key, string(field.Value)); err != nil {
+				if _, err := tx.Exec(ctx, `INSERT INTO pigsty.host_var (cls, ip, key, value) VALUES ($1, $2::inet, $3, $4::jsonb) ON CONFLICT (cls, ip, key) DO UPDATE SET value = EXCLUDED.value, mtime = now()`, group.Name, host.IP, field.Key, string(field.Value)); err != nil {
 					return LoadResult{}, failure("CMDB_LOAD_FAILED", "host variables could not be loaded")
 				}
 				result.HostVar++
 			}
 		}
-	}
-	if err := tx.Commit(txCtx); err != nil {
-		return LoadResult{}, failure("CMDB_LOAD_FAILED", "Inventory transaction could not commit")
 	}
 	return result, nil
 }
@@ -852,26 +860,7 @@ func (p *PigstySourcePlan) Apply() (PigstySourceResult, error) {
 		}
 	}
 	if p.ConfigChanged {
-		if p.ScriptChanged {
-			if !p.managedCandidateCurrent() {
-				return PigstySourceResult{}, failure("CMDB_SWITCH_PARTIAL", "inventory.sh changed before ansible.cfg could be switched")
-			}
-		} else if !p.inventorySourceCurrent() {
-			return PigstySourceResult{}, failure("CMDB_SOURCE_CHANGED", "Inventory source changed after planning")
-		}
-		commit := commitAnsibleConfigPatch
-		if p.commitConfig != nil {
-			commit = p.commitConfig
-		}
-		if err := commit(p.configPatch); err != nil {
-			if p.ScriptChanged {
-				if p.configCandidateCurrent() {
-					return PigstySourceResult{}, failure("CMDB_SWITCH_PARTIAL", "ansible.cfg changed but its commit could not be verified")
-				}
-				if rollbackErr := p.rollbackInventoryScript(); rollbackErr != nil {
-					return PigstySourceResult{}, failure("CMDB_SWITCH_PARTIAL", "inventory.sh changed and could not be rolled back after ansible.cfg failed")
-				}
-			}
+		if err := p.applyConfigChange(); err != nil {
 			return PigstySourceResult{}, err
 		}
 	}
@@ -879,6 +868,37 @@ func (p *PigstySourcePlan) Apply() (PigstySourceResult, error) {
 		ConfigPath: p.ConfigPath, InventoryPath: p.InventoryPath, Changed: p.Changed,
 		ScriptChanged: p.ScriptChanged, ConfigChanged: p.ConfigChanged,
 	}, nil
+}
+
+func (p *PigstySourcePlan) applyConfigChange() error {
+	if p.ScriptChanged {
+		if !p.managedCandidateCurrent() {
+			return failure("CMDB_SWITCH_PARTIAL", "inventory.sh changed before ansible.cfg could be switched")
+		}
+	} else if !p.inventorySourceCurrent() {
+		return failure("CMDB_SOURCE_CHANGED", "Inventory source changed after planning")
+	}
+	commit := commitAnsibleConfigPatch
+	if p.commitConfig != nil {
+		commit = p.commitConfig
+	}
+	if err := commit(p.configPatch); err != nil {
+		return p.configCommitFailure(err)
+	}
+	return nil
+}
+
+func (p *PigstySourcePlan) configCommitFailure(commitErr error) error {
+	if !p.ScriptChanged {
+		return commitErr
+	}
+	if p.configCandidateCurrent() {
+		return failure("CMDB_SWITCH_PARTIAL", "ansible.cfg changed but its commit could not be verified")
+	}
+	if err := p.rollbackInventoryScript(); err != nil {
+		return failure("CMDB_SWITCH_PARTIAL", "inventory.sh changed and could not be rolled back after ansible.cfg failed")
+	}
+	return commitErr
 }
 
 func (p *PigstySourcePlan) configCandidateCurrent() bool {

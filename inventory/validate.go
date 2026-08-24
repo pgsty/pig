@@ -3,6 +3,7 @@ package inventory
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -175,120 +176,147 @@ func validateAnsible(doc *Document) []Diagnostic {
 	if doc.root == nil || doc.root.Kind != yaml.MappingNode {
 		return nil
 	}
-	var diagnostics []Diagnostic
-	_, hasAll := mappingNodeValue(doc.root, "all")
-	if !hasAll {
-		diagnostics = append(diagnostics, doc.diagnostic("INV_ALL_REQUIRED", SeverityError, Keys("all"), doc.nodeSpan(doc.root), "top-level group all is required"))
-	} else if len(doc.root.Content) < 2 || doc.root.Content[0].Value != "all" {
-		diagnostics = append(diagnostics, doc.diagnostic("INV_ALL_FIRST", SeverityError, nil, doc.nodeSpan(doc.root), "top-level group all must be the first mapping entry"))
-	}
-	declarations := make(map[string]string)
-	var validateGroup func(string, *yaml.Node, *yaml.Node, Path, []string)
-	validateGroup = func(name string, keyNode, node *yaml.Node, path Path, ancestors []string) {
-		if keyNode != nil && doc.semanticScalar(keyNode, doc.scalarSpan(keyNode)).Kind != StringScalar {
-			diagnostics = append(diagnostics, doc.diagnostic("INV_GROUP_NAME_TYPE", SeverityError, path, doc.nodeSpan(keyNode), fmt.Sprintf("group name %q must resolve to a string", name)))
-		}
-		if name != "all" && !validGroupName.MatchString(name) {
-			diagnostics = append(diagnostics, doc.diagnostic("INV_GROUP_NAME", SeverityWarning, path, doc.nodeSpan(node), fmt.Sprintf("group %q contains characters Ansible may transform or reject", name)))
-		}
-		for _, ancestor := range ancestors {
-			if ancestor == name {
-				diagnostics = append(diagnostics, doc.diagnostic("INV_GROUP_CYCLE", SeverityError, path, doc.nodeSpan(node), fmt.Sprintf("group cycle detected at %q", name)))
-				return
-			}
-		}
-		pathID := pathKey(path)
-		if previous, exists := declarations[name]; exists && previous != pathID {
-			diagnostics = append(diagnostics, doc.diagnostic("INV_GROUP_REDECLARED", SeverityWarning, path, doc.nodeSpan(node), fmt.Sprintf("group %q is declared more than once", name)))
-		} else {
-			declarations[name] = pathID
-		}
-		if isOpaqueYAMLNode(node) {
-			diagnostics = append(diagnostics, doc.diagnostic("UNVERIFIABLE", SeverityInfo, path, doc.nodeSpan(node), "plaintext value is unavailable for static Inventory structure validation"))
-			return
-		}
-		if isNullNode(node) {
-			if name == "all" {
-				diagnostics = append(diagnostics, doc.diagnostic("INV_GROUP_TYPE", SeverityError, path, doc.nodeSpan(node), "group all must be a mapping"))
-			}
-			return
-		}
-		if node.Kind != yaml.MappingNode {
-			diagnostics = append(diagnostics, doc.diagnostic("INV_GROUP_TYPE", SeverityError, path, doc.nodeSpan(node), fmt.Sprintf("group %q must be a mapping", name)))
-			return
-		}
-		descendants := append(append([]string{}, ancestors...), name)
-		hasVars := false
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			keyNode := node.Content[i]
-			valueNode := node.Content[i+1]
-			childPath := appendPath(path, Key(keyNode.Value))
-			switch keyNode.Value {
-			case "vars":
-				hasVars = true
-				if isOpaqueYAMLNode(valueNode) {
-					diagnostics = append(diagnostics, doc.diagnostic("UNVERIFIABLE", SeverityInfo, childPath, doc.nodeSpan(valueNode), "plaintext value is unavailable for group vars validation"))
-				} else if !isMappingOrNull(valueNode) {
-					diagnostics = append(diagnostics, doc.diagnostic("INV_VARS_TYPE", SeverityError, childPath, doc.nodeSpan(valueNode), "group vars must be a mapping"))
-				}
-			case "hosts":
-				if isOpaqueYAMLNode(valueNode) {
-					diagnostics = append(diagnostics, doc.diagnostic("UNVERIFIABLE", SeverityInfo, childPath, doc.nodeSpan(valueNode), "plaintext value is unavailable for group hosts validation"))
-					continue
-				}
-				if !isMappingOrNull(valueNode) {
-					diagnostics = append(diagnostics, doc.diagnostic("INV_HOSTS_TYPE", SeverityError, childPath, doc.nodeSpan(valueNode), "group hosts must be a mapping"))
-					continue
-				}
-				if valueNode.Kind == yaml.MappingNode {
-					for hostIndex := 0; hostIndex+1 < len(valueNode.Content); hostIndex += 2 {
-						hostKey := valueNode.Content[hostIndex]
-						hostName := hostKey.Value
-						hostNode := valueNode.Content[hostIndex+1]
-						hostPath := appendPath(childPath, Key(hostName))
-						if doc.semanticScalar(hostKey, doc.scalarSpan(hostKey)).Kind != StringScalar {
-							diagnostics = append(diagnostics, doc.diagnostic("INV_HOST_NAME_TYPE", SeverityError, hostPath, doc.nodeSpan(hostKey), fmt.Sprintf("host name %q must resolve to a string", hostName)))
-						}
-						if isOpaqueYAMLNode(hostNode) {
-							diagnostics = append(diagnostics, doc.diagnostic("UNVERIFIABLE", SeverityInfo, hostPath, doc.nodeSpan(hostNode), "plaintext value is unavailable for host vars validation"))
-						} else if !isMappingOrNull(hostNode) {
-							diagnostics = append(diagnostics, doc.diagnostic("INV_HOST_VARS_TYPE", SeverityError, hostPath, doc.nodeSpan(hostNode), fmt.Sprintf("host %q vars must be a mapping", hostName)))
-						}
-					}
-				}
-			case "children":
-				if isOpaqueYAMLNode(valueNode) {
-					diagnostics = append(diagnostics, doc.diagnostic("UNVERIFIABLE", SeverityInfo, childPath, doc.nodeSpan(valueNode), "plaintext value is unavailable for child group validation"))
-					continue
-				}
-				if !isMappingOrNull(valueNode) {
-					diagnostics = append(diagnostics, doc.diagnostic("INV_CHILDREN_TYPE", SeverityError, childPath, doc.nodeSpan(valueNode), "group children must be a mapping"))
-					continue
-				}
-				if valueNode.Kind == yaml.MappingNode {
-					for childIndex := 0; childIndex+1 < len(valueNode.Content); childIndex += 2 {
-						childKey := valueNode.Content[childIndex]
-						childName := childKey.Value
-						childNode := valueNode.Content[childIndex+1]
-						validateGroup(childName, childKey, childNode, appendPath(childPath, Key(childName)), descendants)
-					}
-				}
-			default:
-				diagnostics = append(diagnostics, doc.diagnostic("INV_GROUP_KEY", SeverityWarning, childPath, doc.nodeSpan(keyNode), fmt.Sprintf("unsupported group field %q; expected hosts, vars, or children", keyNode.Value)))
-			}
-		}
-		if name == "all" {
-			if !hasVars {
-				diagnostics = append(diagnostics, doc.diagnostic("INV_VARS_REQUIRED", SeverityWarning, path.ChildKey("vars"), doc.nodeSpan(node), "all.vars is not declared"))
-			}
-		}
-	}
+	validator := ansibleValidator{doc: doc, declarations: make(map[string]string)}
+	validator.validateRoot()
 	for i := 0; i+1 < len(doc.root.Content); i += 2 {
 		keyNode := doc.root.Content[i]
 		name := keyNode.Value
-		validateGroup(name, keyNode, doc.root.Content[i+1], Keys(name), nil)
+		validator.validateGroup(name, keyNode, doc.root.Content[i+1], Keys(name), nil)
 	}
-	return diagnostics
+	return validator.diagnostics
+}
+
+type ansibleValidator struct {
+	doc          *Document
+	diagnostics  []Diagnostic
+	declarations map[string]string
+}
+
+func (v *ansibleValidator) add(code string, severity Severity, path Path, node *yaml.Node, message string) {
+	v.diagnostics = append(v.diagnostics, v.doc.diagnostic(code, severity, path, v.doc.nodeSpan(node), message))
+}
+
+func (v *ansibleValidator) validateRoot() {
+	_, hasAll := mappingNodeValue(v.doc.root, "all")
+	if !hasAll {
+		v.add("INV_ALL_REQUIRED", SeverityError, Keys("all"), v.doc.root, "top-level group all is required")
+	} else if len(v.doc.root.Content) < 2 || v.doc.root.Content[0].Value != "all" {
+		v.add("INV_ALL_FIRST", SeverityError, nil, v.doc.root, "top-level group all must be the first mapping entry")
+	}
+}
+
+func (v *ansibleValidator) validateGroup(name string, keyNode, node *yaml.Node, path Path, ancestors []string) {
+	if !v.validateGroupDeclaration(name, keyNode, node, path, ancestors) {
+		return
+	}
+	descendants := append(append([]string{}, ancestors...), name)
+	hasVars := false
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		childPath := appendPath(path, Key(key.Value))
+		switch key.Value {
+		case "vars":
+			hasVars = true
+			v.validateGroupVars(value, childPath)
+		case "hosts":
+			v.validateGroupHosts(value, childPath)
+		case "children":
+			v.validateGroupChildren(value, childPath, descendants)
+		default:
+			v.add("INV_GROUP_KEY", SeverityWarning, childPath, key, fmt.Sprintf("unsupported group field %q; expected hosts, vars, or children", key.Value))
+		}
+	}
+	if name == "all" && !hasVars {
+		v.add("INV_VARS_REQUIRED", SeverityWarning, path.ChildKey("vars"), node, "all.vars is not declared")
+	}
+}
+
+func (v *ansibleValidator) validateGroupDeclaration(name string, keyNode, node *yaml.Node, path Path, ancestors []string) bool {
+	if keyNode != nil && v.doc.semanticScalar(keyNode, v.doc.scalarSpan(keyNode)).Kind != StringScalar {
+		v.add("INV_GROUP_NAME_TYPE", SeverityError, path, keyNode, fmt.Sprintf("group name %q must resolve to a string", name))
+	}
+	if name != "all" && !validGroupName.MatchString(name) {
+		v.add("INV_GROUP_NAME", SeverityWarning, path, node, fmt.Sprintf("group %q contains characters Ansible may transform or reject", name))
+	}
+	if slices.Contains(ancestors, name) {
+		v.add("INV_GROUP_CYCLE", SeverityError, path, node, fmt.Sprintf("group cycle detected at %q", name))
+		return false
+	}
+	pathID := pathKey(path)
+	if previous, exists := v.declarations[name]; exists && previous != pathID {
+		v.add("INV_GROUP_REDECLARED", SeverityWarning, path, node, fmt.Sprintf("group %q is declared more than once", name))
+	} else {
+		v.declarations[name] = pathID
+	}
+	if isOpaqueYAMLNode(node) {
+		v.add("UNVERIFIABLE", SeverityInfo, path, node, "plaintext value is unavailable for static Inventory structure validation")
+		return false
+	}
+	if isNullNode(node) {
+		if name == "all" {
+			v.add("INV_GROUP_TYPE", SeverityError, path, node, "group all must be a mapping")
+		}
+		return false
+	}
+	if node.Kind != yaml.MappingNode {
+		v.add("INV_GROUP_TYPE", SeverityError, path, node, fmt.Sprintf("group %q must be a mapping", name))
+		return false
+	}
+	return true
+}
+
+func (v *ansibleValidator) validateGroupVars(node *yaml.Node, path Path) {
+	if isOpaqueYAMLNode(node) {
+		v.add("UNVERIFIABLE", SeverityInfo, path, node, "plaintext value is unavailable for group vars validation")
+	} else if !isMappingOrNull(node) {
+		v.add("INV_VARS_TYPE", SeverityError, path, node, "group vars must be a mapping")
+	}
+}
+
+func (v *ansibleValidator) validateGroupHosts(node *yaml.Node, path Path) {
+	if isOpaqueYAMLNode(node) {
+		v.add("UNVERIFIABLE", SeverityInfo, path, node, "plaintext value is unavailable for group hosts validation")
+		return
+	}
+	if !isMappingOrNull(node) {
+		v.add("INV_HOSTS_TYPE", SeverityError, path, node, "group hosts must be a mapping")
+		return
+	}
+	if node.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		name := key.Value
+		hostPath := appendPath(path, Key(name))
+		if v.doc.semanticScalar(key, v.doc.scalarSpan(key)).Kind != StringScalar {
+			v.add("INV_HOST_NAME_TYPE", SeverityError, hostPath, key, fmt.Sprintf("host name %q must resolve to a string", name))
+		}
+		if isOpaqueYAMLNode(value) {
+			v.add("UNVERIFIABLE", SeverityInfo, hostPath, value, "plaintext value is unavailable for host vars validation")
+		} else if !isMappingOrNull(value) {
+			v.add("INV_HOST_VARS_TYPE", SeverityError, hostPath, value, fmt.Sprintf("host %q vars must be a mapping", name))
+		}
+	}
+}
+
+func (v *ansibleValidator) validateGroupChildren(node *yaml.Node, path Path, ancestors []string) {
+	if isOpaqueYAMLNode(node) {
+		v.add("UNVERIFIABLE", SeverityInfo, path, node, "plaintext value is unavailable for child group validation")
+		return
+	}
+	if !isMappingOrNull(node) {
+		v.add("INV_CHILDREN_TYPE", SeverityError, path, node, "group children must be a mapping")
+		return
+	}
+	if node.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		name := key.Value
+		v.validateGroup(name, key, node.Content[i+1], appendPath(path, Key(name)), ancestors)
+	}
 }
 
 func validateCompleteInventory(doc *Document) []Diagnostic {

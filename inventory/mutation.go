@@ -91,7 +91,7 @@ func (m *Mutation) ReplaceAll(old, replacement string, options ...ReplaceOption)
 
 // UncommentKey activates exact commented mapping keys and returns their new
 // semantic paths after the candidate is reparsed.
-func (m *Mutation) UncommentKey(key string, options ...UncommentOption) (EditResult, error) {
+func (m *Mutation) UncommentKey(key string) (EditResult, error) {
 	result := EditResult{}
 	before := make(map[string]struct{})
 	if m != nil && m.Document() != nil {
@@ -100,7 +100,7 @@ func (m *Mutation) UncommentKey(key string, options ...UncommentOption) (EditRes
 		}
 	}
 	err := m.apply(func(editor *Editor) (err error) {
-		result, err = editor.UncommentKey(key, options...)
+		result, err = editor.UncommentKey(key)
 		return err
 	})
 	if err != nil || m == nil || m.Document() == nil {

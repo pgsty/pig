@@ -125,10 +125,9 @@ func (e *Editor) Upsert(path Path, value any, options ...InsertOption) (err erro
 }
 
 type insertOptions struct {
-	after          string
-	hasAfter       bool
-	inlineComment  string
-	leadingComment string
+	after         string
+	hasAfter      bool
+	inlineComment string
 }
 
 // InsertOption customizes a mapping insertion.
@@ -148,15 +147,6 @@ func WithInlineComment(comment string) InsertOption {
 	return func(options *insertOptions) {
 		options.inlineComment = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(comment), "#"))
 	}
-}
-
-// WithLeadingComment adds standalone comment lines immediately before a newly
-// inserted block-mapping entry. Flow mappings reject this option because they
-// cannot represent an entry-owned standalone comment without restructuring.
-// After commit these lines are ordinary presentation data, so later deletion
-// preserves them rather than guessing whether a user still wants the comment.
-func WithLeadingComment(comment string) InsertOption {
-	return func(options *insertOptions) { options.leadingComment = strings.TrimSpace(comment) }
 }
 
 // Insert adds a new mapping entry while inheriting local flow/block style,
@@ -190,9 +180,6 @@ func (e *Editor) Insert(parent Path, key string, value any, options ...InsertOpt
 	if strings.ContainsAny(config.inlineComment, "\r\n") {
 		return fmt.Errorf("insert %s: inline comment must contain exactly one line", childPath.String())
 	}
-	if parentRef.node.Kind == yaml.MappingNode && parentRef.node.Style&yaml.FlowStyle != 0 && config.leadingComment != "" {
-		return fmt.Errorf("insert %s: leading comments in flow mappings: %w", childPath.String(), ErrFragmentUnsupported)
-	}
 	keyText := renderKey(key)
 	valueText, err := renderNewValue(value, parentRef.node.Style&yaml.FlowStyle != 0)
 	if err != nil {
@@ -208,7 +195,7 @@ func (e *Editor) Insert(parent Path, key string, value any, options ...InsertOpt
 			commentSpan, commentFragment, err = e.base.flowCommentInsertion(parentRef.node, config.inlineComment)
 		}
 	} else {
-		span, fragment, err = e.blockInsertion(parent, parentRef, config.after, config.hasAfter, keyText, valueText, config.leadingComment, config.inlineComment)
+		span, fragment, err = e.blockInsertion(parent, parentRef, config.after, config.hasAfter, keyText, valueText, config.inlineComment)
 	}
 	if err != nil {
 		return fmt.Errorf("insert %s: %w", childPath.String(), err)
@@ -303,7 +290,7 @@ type blockEntryStyle struct {
 	commentColumn int
 }
 
-func (e *Editor) blockInsertion(parent Path, parentRef *nodeRef, after string, hasAfter bool, key, value, leadingComment, inlineComment string) (byteSpan, string, error) {
+func (e *Editor) blockInsertion(parent Path, parentRef *nodeRef, after string, hasAfter bool, key, value, inlineComment string) (byteSpan, string, error) {
 	indent := 0
 	insertAt := 0
 	prefixNewline := false
@@ -352,35 +339,8 @@ func (e *Editor) blockInsertion(parent Path, parentRef *nodeRef, after string, h
 		prefix = e.base.newline
 	}
 	entry := e.base.renderBlockEntry(node, reference, indent, key, value, inlineComment)
-	leading, err := renderLeadingComment(leadingComment, indent, e.base.newline)
-	if err != nil {
-		return byteSpan{}, "", err
-	}
-	fragment := prefix + leading + entry + e.base.newline
+	fragment := prefix + entry + e.base.newline
 	return byteSpan{start: insertAt, end: insertAt}, fragment, nil
-}
-
-func renderLeadingComment(comment string, indent int, newline string) (string, error) {
-	if strings.TrimSpace(comment) == "" {
-		return "", nil
-	}
-	comment = strings.ReplaceAll(comment, "\r\n", "\n")
-	if strings.ContainsRune(comment, '\r') {
-		return "", errors.New("leading comment contains an unsupported carriage return")
-	}
-	prefix := strings.Repeat(" ", indent) + "#"
-	var rendered strings.Builder
-	for _, line := range strings.Split(comment, "\n") {
-		line = strings.TrimSpace(line)
-		line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
-		rendered.WriteString(prefix)
-		if line != "" {
-			rendered.WriteByte(' ')
-			rendered.WriteString(line)
-		}
-		rendered.WriteString(newline)
-	}
-	return rendered.String(), nil
 }
 
 func (d *Document) renderBlockEntry(mapping *yaml.Node, reference *nodeRef, indent int, key, value, comment string) string {
@@ -732,24 +692,9 @@ func (d *Document) literalContainers(targets LiteralTarget) []byteSpan {
 	return containers
 }
 
-type uncommentOptions struct {
-	within *Path
-}
-
-// UncommentOption limits a commented-key operation.
-type UncommentOption func(*uncommentOptions)
-
-// Within limits UncommentKey to the source subtree rooted at parent.
-func Within(parent Path) UncommentOption {
-	return func(options *uncommentOptions) {
-		path := clonePath(parent)
-		options.within = &path
-	}
-}
-
 // UncommentKey activates exact commented mapping keys with this name. Only
 // the comment marker and its separator spaces are removed.
-func (e *Editor) UncommentKey(key string, options ...UncommentOption) (result EditResult, err error) {
+func (e *Editor) UncommentKey(key string) (result EditResult, err error) {
 	defer e.captureFailure(&err)
 	if e == nil || e.base == nil {
 		return result, errors.New("inventory editor is nil")
@@ -757,21 +702,7 @@ func (e *Editor) UncommentKey(key string, options ...UncommentOption) (result Ed
 	if strings.TrimSpace(key) == "" {
 		return result, errors.New("commented key must not be empty")
 	}
-	config := uncommentOptions{}
-	for _, option := range options {
-		if option != nil {
-			option(&config)
-		}
-	}
-	var scope *byteSpan
-	if config.within != nil {
-		span, scopeErr := e.base.subtreeSpan(*config.within)
-		if scopeErr != nil {
-			return result, fmt.Errorf("uncomment key %q: %w", key, scopeErr)
-		}
-		scope = &span
-	}
-	for _, marker := range e.base.commentedKeyMarkers(key, scope) {
+	for _, marker := range e.base.commentedKeyMarkers(key) {
 		result.Matched++
 		changed, stageErr := e.stage(marker, nil)
 		if stageErr != nil {
@@ -792,15 +723,12 @@ func (d *Document) CommentedKeyCount(key string) int {
 	if d == nil || strings.TrimSpace(key) == "" {
 		return 0
 	}
-	return len(d.commentedKeyMarkers(key, nil))
+	return len(d.commentedKeyMarkers(key))
 }
 
-func (d *Document) commentedKeyMarkers(key string, scope *byteSpan) []byteSpan {
+func (d *Document) commentedKeyMarkers(key string) []byteSpan {
 	markers := make([]byteSpan, 0)
 	for _, comment := range d.comments {
-		if scope != nil && (comment.start < scope.start || comment.start >= scope.end) {
-			continue
-		}
 		position := d.positionAt(comment.start)
 		lineStart := d.lineStarts[position.Line-1]
 		if !horizontalWhitespace(d.source[lineStart:comment.start]) {
@@ -823,47 +751,6 @@ func (d *Document) commentedKeyMarkers(key string, scope *byteSpan) []byteSpan {
 		markers = append(markers, byteSpan{start: comment.start, end: cursor})
 	}
 	return markers
-}
-
-func (d *Document) subtreeSpan(path Path) (byteSpan, error) {
-	if len(path) == 0 {
-		return byteSpan{start: 0, end: len(d.source)}, nil
-	}
-	ref, ok := d.refs[pathKey(path)]
-	if !ok || ref == nil {
-		return byteSpan{}, fmt.Errorf("%s: %w", path.String(), ErrPathNotFound)
-	}
-	if ref.node == nil || (ref.node.Kind != yaml.MappingNode && ref.node.Kind != yaml.SequenceNode) {
-		return byteSpan{}, fmt.Errorf("%s is not a container", path.String())
-	}
-	if ref.node.Style&yaml.FlowStyle != 0 {
-		return d.nodeSpan(ref.node), nil
-	}
-	line, indent := ref.node.Line, ref.node.Column-1
-	if ref.key != nil {
-		line, indent = ref.key.Line, ref.key.Column-1
-	}
-	if line < 1 || line > len(d.lineStarts) {
-		return byteSpan{}, fmt.Errorf("%s has no source location", path.String())
-	}
-	start := d.lineStarts[line-1]
-	end := len(d.source)
-	for next := line + 1; next <= len(d.lineStarts); next++ {
-		lineStart := d.lineStarts[next-1]
-		lineEnd := d.lineEnd(lineStart, false)
-		cursor := lineStart
-		for cursor < lineEnd && (d.source[cursor] == ' ' || d.source[cursor] == '\t') {
-			cursor++
-		}
-		if cursor == lineEnd {
-			continue
-		}
-		if cursor-lineStart <= indent {
-			end = lineStart
-			break
-		}
-	}
-	return byteSpan{start: start, end: end}, nil
 }
 
 // Commit applies all non-overlapping patches in descending byte order,

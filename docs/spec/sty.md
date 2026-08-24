@@ -510,14 +510,14 @@ expressed through narrow helpers rather than raw text replacement, including:
 - group vars: `all.children.<group>.vars`;
 - host vars: `all.children.<group>.hosts.<host>`;
 - nested mapping/sequence values;
-- set/upsert/delete/rename with optional leading comments;
+- set/upsert/delete/rename with optional inline comments;
 - exact placeholder replacement across keys, active scalar lexemes, and comment
   tokens when explicitly requested by a template workflow;
 - atomic mutation sessions with redacted change sets.
 
 Comments are presentation data owned by `Document`, not semantic values. An API
-that accepts a comment MUST define whether it is a leading standalone comment
-or an inline comment and MUST preserve surrounding user comments.
+that accepts a comment MUST define its placement and MUST preserve surrounding
+user comments.
 
 ### 5.4 Future effective-vars resolver
 

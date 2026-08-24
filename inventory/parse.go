@@ -206,37 +206,58 @@ func (d *Document) indexComments(tokens token.Tokens) error {
 		if tok == nil || tok.Type != token.CommentType {
 			continue
 		}
-		if tok.Position == nil {
-			return errors.New("comment token has no source position")
+		span, err := d.locateComment(tok)
+		if err != nil {
+			return err
 		}
-		line := tok.Position.Line
-		if line < 1 || line > len(d.lineStarts) {
-			return fmt.Errorf("comment position is outside source at line %d", line)
-		}
-		lineStart := d.lineStarts[line-1]
-		lineEnd := d.lineEnd(lineStart, false)
-		if lineEnd > lineStart && d.source[lineEnd-1] == '\r' {
-			lineEnd--
-		}
-		value := []byte(tok.Value)
-		hash := lineEnd - len(value) - 1
-		if hash < lineStart || hash >= lineEnd || d.source[hash] != '#' || !bytes.Equal(d.source[hash+1:lineEnd], value) {
-			hash = -1
-			for candidate := lineStart; candidate < lineEnd; candidate++ {
-				if d.source[candidate] != '#' || !bytes.Equal(d.source[candidate+1:lineEnd], value) {
-					continue
-				}
-				if hash >= 0 {
-					return fmt.Errorf("comment cannot be located uniquely at line %d", line)
-				}
-				hash = candidate
-			}
-		}
-		if hash < 0 || (hash > lineStart && d.source[hash-1] != ' ' && d.source[hash-1] != '\t') {
-			return fmt.Errorf("comment cannot be located at line %d", line)
-		}
-		d.comments = append(d.comments, byteSpan{start: hash, end: lineEnd})
+		d.comments = append(d.comments, span)
 	}
+	return d.normalizeCommentSpans()
+}
+
+func (d *Document) locateComment(tok *token.Token) (byteSpan, error) {
+	if tok.Position == nil {
+		return byteSpan{}, errors.New("comment token has no source position")
+	}
+	line := tok.Position.Line
+	if line < 1 || line > len(d.lineStarts) {
+		return byteSpan{}, fmt.Errorf("comment position is outside source at line %d", line)
+	}
+	lineStart := d.lineStarts[line-1]
+	lineEnd := d.lineEnd(lineStart, false)
+	if lineEnd > lineStart && d.source[lineEnd-1] == '\r' {
+		lineEnd--
+	}
+	value := []byte(tok.Value)
+	hash := lineEnd - len(value) - 1
+	if hash < lineStart || hash >= lineEnd || d.source[hash] != '#' || !bytes.Equal(d.source[hash+1:lineEnd], value) {
+		var err error
+		hash, err = d.searchCommentHash(lineStart, lineEnd, value, line)
+		if err != nil {
+			return byteSpan{}, err
+		}
+	}
+	if hash < 0 || (hash > lineStart && d.source[hash-1] != ' ' && d.source[hash-1] != '\t') {
+		return byteSpan{}, fmt.Errorf("comment cannot be located at line %d", line)
+	}
+	return byteSpan{start: hash, end: lineEnd}, nil
+}
+
+func (d *Document) searchCommentHash(lineStart, lineEnd int, value []byte, line int) (int, error) {
+	hash := -1
+	for candidate := lineStart; candidate < lineEnd; candidate++ {
+		if d.source[candidate] != '#' || !bytes.Equal(d.source[candidate+1:lineEnd], value) {
+			continue
+		}
+		if hash >= 0 {
+			return -1, fmt.Errorf("comment cannot be located uniquely at line %d", line)
+		}
+		hash = candidate
+	}
+	return hash, nil
+}
+
+func (d *Document) normalizeCommentSpans() error {
 	sort.Slice(d.comments, func(i, j int) bool { return d.comments[i].start < d.comments[j].start })
 	unique := d.comments[:0]
 	for _, comment := range d.comments {
@@ -284,6 +305,19 @@ func (d *Document) indexNode(node, parent, key *yaml.Node, entry int, path Path,
 			return fmt.Errorf("%s: %w", path.String(), err)
 		}
 	}
+	d.initializeIndexedValue(node, span, path, value)
+	d.indexValueReference(node, parent, key, entry, path, value, span)
+	switch node.Kind {
+	case yaml.MappingNode:
+		return d.indexMappingNode(node, path, value, depth)
+	case yaml.SequenceNode:
+		return d.indexSequenceNode(node, path, value, depth)
+	default:
+		return nil
+	}
+}
+
+func (d *Document) initializeIndexedValue(node *yaml.Node, span byteSpan, path Path, value *Value) {
 	*value = Value{
 		Path:   clonePath(path),
 		Range:  d.sourceRange(span),
@@ -299,27 +333,26 @@ func (d *Document) indexNode(node, parent, key *yaml.Node, entry int, path Path,
 			raw = string(d.source[span.start:span.end])
 		}
 		value.Scalar = &Scalar{Kind: UnknownScalar, Value: node.Value, Raw: raw, Tag: node.Tag, Style: "alias", Range: value.Range}
-	} else {
-		switch node.Kind {
-		case yaml.MappingNode:
-			value.Kind = MappingValue
-			value.Mapping = make([]Entry, len(node.Content)/2)
-		case yaml.SequenceNode:
-			value.Kind = SequenceValue
-			value.Sequence = make([]Value, len(node.Content))
-		case yaml.ScalarNode:
-			scalar := d.semanticScalar(node, span)
-			value.Kind = ScalarValue
-			if scalar.Kind == NullScalar {
-				value.Kind = NullValue
-			}
-			value.Scalar = &scalar
-		default:
-			value.Kind = ScalarValue
-			scalar := d.semanticScalar(node, span)
-			value.Scalar = &scalar
-		}
+		return
 	}
+	switch node.Kind {
+	case yaml.MappingNode:
+		value.Kind = MappingValue
+		value.Mapping = make([]Entry, len(node.Content)/2)
+	case yaml.SequenceNode:
+		value.Kind = SequenceValue
+		value.Sequence = make([]Value, len(node.Content))
+	default:
+		scalar := d.semanticScalar(node, span)
+		value.Kind = ScalarValue
+		if scalar.Kind == NullScalar {
+			value.Kind = NullValue
+		}
+		value.Scalar = &scalar
+	}
+}
+
+func (d *Document) indexValueReference(node, parent, key *yaml.Node, entry int, path Path, value *Value, span byteSpan) {
 	ref := &nodeRef{
 		path:      clonePath(path),
 		node:      node,
@@ -334,44 +367,45 @@ func (d *Document) indexNode(node, parent, key *yaml.Node, entry int, path Path,
 	keyPath := pathKey(path)
 	d.refs[keyPath] = ref
 	d.values[keyPath] = value
+}
 
-	switch node.Kind {
-	case yaml.MappingNode:
-		seenKeys := make(map[string]struct{}, len(node.Content)/2)
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			keyNode := node.Content[i]
-			valueNode := node.Content[i+1]
-			keyName := keyNode.Value
-			childPath := appendPath(path, Key(keyName))
-			keySpan := d.scalarSpan(keyNode)
-			keyScalar := d.semanticScalar(keyNode, keySpan)
-			identity := scalarKeyIdentity(keyScalar)
-			if _, exists := seenKeys[identity]; exists {
-				return fmt.Errorf("%s: duplicate mapping key %q", childPath.String(), keyName)
-			}
-			seenKeys[identity] = struct{}{}
-			childValue := &value.Mapping[i/2]
-			*childValue = Entry{
-				Key: keyScalar, Path: clonePath(childPath),
-				Range: d.sourceRange(byteSpan{start: keySpan.start, end: d.nodeSpan(valueNode).end}),
-			}
-			d.keyPaths[keyName] = append(d.keyPaths[keyName], clonePath(childPath))
-			if err := d.indexNode(valueNode, node, keyNode, i/2, childPath, &childValue.Value, depth+1); err != nil {
-				return err
-			}
-			childRef := d.refs[pathKey(childPath)]
-			if node.Style&yaml.FlowStyle != 0 {
-				childRef.entrySpan = d.flowEntrySpan(node, i/2)
-			} else {
-				start, _ := d.offsetAt(keyNode.Line, 1)
-				childRef.entrySpan = byteSpan{start: start, end: d.lineEnd(childRef.valueSpan.end, true)}
-			}
+func (d *Document) indexMappingNode(node *yaml.Node, path Path, value *Value, depth int) error {
+	seenKeys := make(map[string]struct{}, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode, valueNode := node.Content[i], node.Content[i+1]
+		keyName := keyNode.Value
+		childPath := appendPath(path, Key(keyName))
+		keySpan := d.scalarSpan(keyNode)
+		keyScalar := d.semanticScalar(keyNode, keySpan)
+		identity := scalarKeyIdentity(keyScalar)
+		if _, exists := seenKeys[identity]; exists {
+			return fmt.Errorf("%s: duplicate mapping key %q", childPath.String(), keyName)
 		}
-	case yaml.SequenceNode:
-		for i, child := range node.Content {
-			if err := d.indexNode(child, node, nil, i, appendPath(path, Index(i)), &value.Sequence[i], depth+1); err != nil {
-				return err
-			}
+		seenKeys[identity] = struct{}{}
+		childValue := &value.Mapping[i/2]
+		*childValue = Entry{
+			Key: keyScalar, Path: clonePath(childPath),
+			Range: d.sourceRange(byteSpan{start: keySpan.start, end: d.nodeSpan(valueNode).end}),
+		}
+		d.keyPaths[keyName] = append(d.keyPaths[keyName], clonePath(childPath))
+		if err := d.indexNode(valueNode, node, keyNode, i/2, childPath, &childValue.Value, depth+1); err != nil {
+			return err
+		}
+		childRef := d.refs[pathKey(childPath)]
+		if node.Style&yaml.FlowStyle != 0 {
+			childRef.entrySpan = d.flowEntrySpan(node, i/2)
+		} else {
+			start, _ := d.offsetAt(keyNode.Line, 1)
+			childRef.entrySpan = byteSpan{start: start, end: d.lineEnd(childRef.valueSpan.end, true)}
+		}
+	}
+	return nil
+}
+
+func (d *Document) indexSequenceNode(node *yaml.Node, path Path, value *Value, depth int) error {
+	for i, child := range node.Content {
+		if err := d.indexNode(child, node, nil, i, appendPath(path, Index(i)), &value.Sequence[i], depth+1); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -602,21 +636,7 @@ func (d *Document) matchFlowEnd(start int) (int, bool) {
 	for i := start; i < len(d.source); i++ {
 		b := d.source[i]
 		if quote != 0 {
-			if quote == '"' && escaped {
-				escaped = false
-				continue
-			}
-			if quote == '"' && b == '\\' {
-				escaped = true
-				continue
-			}
-			if b == quote {
-				if quote == '\'' && i+1 < len(d.source) && d.source[i+1] == '\'' {
-					i++
-					continue
-				}
-				quote = 0
-			}
+			consumeFlowQuotedByte(d.source, &i, &quote, &escaped)
 			continue
 		}
 		if b == '\'' || b == '"' {
@@ -635,6 +655,26 @@ func (d *Document) matchFlowEnd(start int) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+func consumeFlowQuotedByte(source []byte, index *int, quote *byte, escaped *bool) {
+	b := source[*index]
+	if *quote == '"' && *escaped {
+		*escaped = false
+		return
+	}
+	if *quote == '"' && b == '\\' {
+		*escaped = true
+		return
+	}
+	if b != *quote {
+		return
+	}
+	if *quote == '\'' && *index+1 < len(source) && source[*index+1] == '\'' {
+		*index++
+		return
+	}
+	*quote = 0
 }
 
 func (d *Document) semanticScalar(node *yaml.Node, span byteSpan) Scalar {

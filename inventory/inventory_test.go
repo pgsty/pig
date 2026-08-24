@@ -445,7 +445,7 @@ func TestReplaceRenameUncommentAndConflictRollback(t *testing.T) {
 	}
 }
 
-func TestCommentIndexAndScopedUncomment(t *testing.T) {
+func TestCommentIndexAndUncomment(t *testing.T) {
 	source := []byte("all:\n  children:\n    one:\n      vars:\n        note: keep # inline\n        #mirror: one\n        literal: |-\n          #mirror: not-a-comment\n    two:\n      vars:\n        #mirror: two\n  vars: {}\n")
 	doc, err := Parse("comments.yml", source)
 	if err != nil {
@@ -455,15 +455,15 @@ func TestCommentIndexAndScopedUncomment(t *testing.T) {
 		t.Fatalf("CommentedKeyCount = %d, want 2", got)
 	}
 	mutation := doc.Mutate()
-	result, err := mutation.UncommentKey("mirror", Within(Keys("all", "children", "one")))
+	result, err := mutation.UncommentKey("mirror")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Matched != 1 || result.Changed != 1 || len(result.Paths) != 1 || result.Paths[0].String() != "/all/children/one/vars/mirror" {
-		t.Fatalf("scoped uncomment result = %+v", result)
+	if result.Matched != 2 || result.Changed != 2 || len(result.Paths) != 2 {
+		t.Fatalf("uncomment result = %+v", result)
 	}
-	if got := mutation.Document().CommentedKeyCount("mirror"); got != 1 {
-		t.Fatalf("remaining CommentedKeyCount = %d, want 1", got)
+	if got := mutation.Document().CommentedKeyCount("mirror"); got != 0 {
+		t.Fatalf("remaining CommentedKeyCount = %d, want 0", got)
 	}
 	if !bytes.Contains(mutation.Document().Bytes(), []byte("#mirror: not-a-comment")) {
 		t.Fatal("block scalar content was mistaken for a YAML comment")
@@ -724,7 +724,7 @@ func TestMutationHostVarsKeepDuplicateDeclarationsSeparate(t *testing.T) {
 	}
 }
 
-func TestTypedMappingMutationCommentsRenameAndDeleteAreLossless(t *testing.T) {
+func TestTypedMappingMutationRenameAndDeleteAreLossless(t *testing.T) {
 	source := []byte("all:\n  vars:\n    region: default\n")
 	doc, err := Parse("typed-mutation.yml", source)
 	if err != nil {
@@ -733,14 +733,13 @@ func TestTypedMappingMutationCommentsRenameAndDeleteAreLossless(t *testing.T) {
 
 	mutation := doc.Mutate()
 	vars := mutation.AllVars()
-	if err := vars.Set("region", "china", WithLeadingComment("ignored for existing entries")); err != nil {
+	if err := vars.Set("region", "china"); err != nil {
 		t.Fatal(err)
 	}
 	if err := vars.Set(
 		"generated_region",
 		"enabled",
 		AfterKey("region"),
-		WithLeadingComment("generated setting\n# remove it to use defaults"),
 		WithInlineComment("controller-only"),
 	); err != nil {
 		t.Fatal(err)
@@ -759,7 +758,7 @@ func TestTypedMappingMutationCommentsRenameAndDeleteAreLossless(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []byte("all:\n  vars:\n    region: china\n    # generated setting\n    # remove it to use defaults\n    region_mode: enabled # controller-only\n")
+	want := []byte("all:\n  vars:\n    region: china\n    region_mode: enabled # controller-only\n")
 	if !bytes.Equal(committed.Bytes(), want) {
 		t.Fatalf("typed mutation changed unexpected bytes:\n%s", committed.Bytes())
 	}
@@ -771,25 +770,6 @@ func TestTypedMappingMutationCommentsRenameAndDeleteAreLossless(t *testing.T) {
 		if changes.Changes[index].Operation != operation {
 			t.Fatalf("change %d operation = %q, want %q", index, changes.Changes[index].Operation, operation)
 		}
-	}
-}
-
-func TestLeadingCommentRefusesFlowMappingWithoutRestructuring(t *testing.T) {
-	source := []byte("all: { vars: { region: default } }\n")
-	doc, err := Parse("flow-comment.yml", source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mutation := doc.Mutate()
-	err = mutation.AllVars().Set("new_region", "china", WithLeadingComment("standalone"))
-	if !errors.Is(err, ErrFragmentUnsupported) {
-		t.Fatalf("flow leading comment error = %v", err)
-	}
-	if _, _, err := mutation.Commit(); err == nil {
-		t.Fatal("aborted flow mutation unexpectedly committed")
-	}
-	if !bytes.Equal(doc.Bytes(), source) {
-		t.Fatal("failed flow mutation changed the base document")
 	}
 }
 

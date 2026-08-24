@@ -47,16 +47,12 @@ func readRegularCMDBSnapshot(path, code string, allowSymlink bool) (*cmdbSourceS
 	}
 	absolute = filepath.Clean(absolute)
 	linkBefore, err := os.Lstat(absolute)
-	if err != nil || linkBefore.Mode()&os.ModeSymlink != 0 && !allowSymlink ||
-		linkBefore.Mode()&os.ModeSymlink == 0 && !linkBefore.Mode().IsRegular() {
+	if err != nil || !validCMDBSourceType(linkBefore, allowSymlink) {
 		return nil, &cmdb.Error{Code: code, Message: "source is not one bounded regular file"}
 	}
-	linkTarget := ""
-	if linkBefore.Mode()&os.ModeSymlink != 0 {
-		linkTarget, err = os.Readlink(absolute)
-		if err != nil {
-			return nil, &cmdb.Error{Code: code, Message: "source symlink could not be inspected"}
-		}
+	linkTarget, err := cmdbSourceLinkTarget(absolute, linkBefore)
+	if err != nil {
+		return nil, &cmdb.Error{Code: code, Message: "source symlink could not be inspected"}
 	}
 	file, err := os.Open(absolute)
 	if err != nil {
@@ -71,16 +67,54 @@ func readRegularCMDBSnapshot(path, code string, allowSymlink bool) (*cmdbSourceS
 	if pathErr == nil && linkAfter.Mode()&os.ModeSymlink != 0 {
 		linkTargetAfter, pathErr = os.Readlink(absolute)
 	}
-	if readErr != nil || statErr != nil || afterErr != nil || closeErr != nil || pathErr != nil ||
-		!before.Mode().IsRegular() || allowSymlink && before.Mode().Perm()&0o111 != 0 || before.Size() > maxCMDBSourceSize ||
-		len(body) == 0 || len(body) > maxCMDBSourceSize ||
-		!sameCMDBFileRevision(before, after) || !sameCMDBFileRevision(linkBefore, linkAfter) || linkTarget != linkTargetAfter {
+	observation := cmdbSnapshotObservation{
+		allowSymlink: allowSymlink, body: body,
+		linkTarget: linkTarget, linkTargetAfter: linkTargetAfter,
+		before: before, after: after, linkBefore: linkBefore, linkAfter: linkAfter,
+		errs: []error{readErr, statErr, afterErr, closeErr, pathErr},
+	}
+	if !validCMDBSnapshotRead(observation) {
 		return nil, &cmdb.Error{Code: code, Message: "source changed while it was read"}
 	}
 	return &cmdbSourceSnapshot{
 		Path: absolute, Body: body, Digest: contentDigest(body), Info: before,
 		LinkInfo: linkBefore, LinkTarget: linkTarget,
 	}, nil
+}
+
+func validCMDBSourceType(info os.FileInfo, allowSymlink bool) bool {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return allowSymlink
+	}
+	return info.Mode().IsRegular()
+}
+
+func cmdbSourceLinkTarget(path string, info os.FileInfo) (string, error) {
+	if info.Mode()&os.ModeSymlink == 0 {
+		return "", nil
+	}
+	return os.Readlink(path)
+}
+
+type cmdbSnapshotObservation struct {
+	allowSymlink                bool
+	body                        []byte
+	linkTarget, linkTargetAfter string
+	before, after               os.FileInfo
+	linkBefore, linkAfter       os.FileInfo
+	errs                        []error
+}
+
+func validCMDBSnapshotRead(observation cmdbSnapshotObservation) bool {
+	for _, err := range observation.errs {
+		if err != nil {
+			return false
+		}
+	}
+	return observation.before.Mode().IsRegular() && (!observation.allowSymlink || observation.before.Mode().Perm()&0o111 == 0) &&
+		observation.before.Size() <= maxCMDBSourceSize && len(observation.body) > 0 && len(observation.body) <= maxCMDBSourceSize &&
+		sameCMDBFileRevision(observation.before, observation.after) && sameCMDBFileRevision(observation.linkBefore, observation.linkAfter) &&
+		observation.linkTarget == observation.linkTargetAfter
 }
 
 func sameCMDBFileRevision(left, right os.FileInfo) bool {

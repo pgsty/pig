@@ -196,53 +196,62 @@ func (v *pigstyValidator) collectModulePresence(group *Group) {
 		return
 	}
 	if groupValue, exists := v.doc.Lookup(group.Path); exists && isOpaqueValue(groupValue) {
-		for _, spec := range pigstyModuleSpecs {
-			if group.Name == spec.module {
-				v.modulePresent[spec.module] = true
-			}
-		}
+		v.markNamedModule(group.Name)
 		return
 	}
 	if group.Name != "all" {
-		vars := mappingValues(group.Vars)
-		if _, exists := vars["pg_cluster"]; exists {
-			v.modulePresent["pgsql"] = true
-		}
-		for _, spec := range pigstyModuleSpecs {
-			if group.Name == spec.module {
-				v.modulePresent[spec.module] = true
-			}
-			if _, exists := vars[spec.cluster]; spec.cluster != "" && exists {
-				v.modulePresent[spec.module] = true
-			}
-		}
+		v.collectGroupModulePresence(group)
 		for _, host := range group.Hosts {
-			if host == nil {
-				continue
-			}
-			hostVars := mappingValues(&host.Vars)
-			if _, cluster := hostVars["pg_cluster"]; cluster {
-				v.modulePresent["pgsql"] = true
-			}
-			if _, seq := hostVars["pg_seq"]; seq {
-				v.modulePresent["pgsql"] = true
-			}
-			if _, role := hostVars["pg_role"]; role {
-				v.modulePresent["pgsql"] = true
-			}
-			for _, spec := range pigstyModuleSpecs {
-				if _, seq := hostVars[spec.seq]; seq {
-					v.modulePresent[spec.module] = true
-				}
-				if _, cluster := hostVars[spec.cluster]; spec.cluster != "" && cluster {
-					v.modulePresent[spec.module] = true
-				}
-			}
+			v.collectHostModulePresence(host)
 		}
 	}
 	for _, child := range group.Children {
 		v.collectModulePresence(child)
 	}
+}
+
+func (v *pigstyValidator) markNamedModule(groupName string) {
+	for _, spec := range pigstyModuleSpecs {
+		if groupName == spec.module {
+			v.modulePresent[spec.module] = true
+		}
+	}
+}
+
+func (v *pigstyValidator) collectGroupModulePresence(group *Group) {
+	vars := mappingValues(group.Vars)
+	if hasAnyValue(vars, "pg_cluster") {
+		v.modulePresent["pgsql"] = true
+	}
+	for _, spec := range pigstyModuleSpecs {
+		if group.Name == spec.module || spec.cluster != "" && hasAnyValue(vars, spec.cluster) {
+			v.modulePresent[spec.module] = true
+		}
+	}
+}
+
+func (v *pigstyValidator) collectHostModulePresence(host *Host) {
+	if host == nil {
+		return
+	}
+	vars := mappingValues(&host.Vars)
+	if hasAnyValue(vars, "pg_cluster", "pg_seq", "pg_role") {
+		v.modulePresent["pgsql"] = true
+	}
+	for _, spec := range pigstyModuleSpecs {
+		if hasAnyValue(vars, spec.seq) || spec.cluster != "" && hasAnyValue(vars, spec.cluster) {
+			v.modulePresent[spec.module] = true
+		}
+	}
+}
+
+func hasAnyValue(values map[string]*Value, keys ...string) bool {
+	for _, key := range keys {
+		if _, exists := values[key]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *pigstyValidator) validateRequiredModules(all *Group) {
@@ -280,46 +289,53 @@ func (v *pigstyValidator) validateScopedModuleIdentities(all *Group) {
 	for _, spec := range scopedModuleSpecs {
 		records[spec.module] = make(map[string][]scopedModuleRecord)
 	}
-	var visit func(*Group)
-	visit = func(group *Group) {
-		if group == nil {
-			return
-		}
-		if group.Name == "all" {
-			for _, child := range group.Children {
-				visit(child)
-			}
-			return
-		}
-		if value, exists := v.doc.Lookup(group.Path); exists && isOpaqueValue(value) {
-			return
-		}
-		groupVars := mappingValues(group.Vars)
-		for _, host := range group.Hosts {
-			if host == nil || isOpaqueValue(&host.Vars) {
-				continue
-			}
-			hostVars := mappingValues(&host.Vars)
-			for _, spec := range scopedModuleSpecs {
-				if !scopedModuleTriggered(spec, globalVars, groupVars, hostVars) {
-					continue
-				}
-				record := scopedModuleRecord{spec: spec, group: group, host: host}
-				record.cluster = resolveScopedIdentity(all.Vars, globalVars, group.Vars, groupVars, host, hostVars, spec.cluster)
-				record.sequence = resolveScopedIdentity(all.Vars, globalVars, group.Vars, groupVars, host, hostVars, spec.sequence)
-				record.extra = resolveScopedIdentity(all.Vars, globalVars, group.Vars, groupVars, host, hostVars, spec.extra)
-				if _, exists := records[spec.module][host.Name]; !exists {
-					orders[spec.module] = append(orders[spec.module], host.Name)
-				}
-				records[spec.module][host.Name] = append(records[spec.module][host.Name], record)
-			}
-		}
-		for _, child := range group.Children {
-			visit(child)
-		}
-	}
-	visit(all)
+	v.collectScopedModuleRecords(all, all, globalVars, records, orders)
+	v.validateScopedModuleRecords(records, orders)
+}
 
+func (v *pigstyValidator) collectScopedModuleRecords(all, group *Group, globalVars map[string]*Value, records map[string]map[string][]scopedModuleRecord, orders map[string][]string) {
+	if group == nil {
+		return
+	}
+	if group.Name == "all" {
+		for _, child := range group.Children {
+			v.collectScopedModuleRecords(all, child, globalVars, records, orders)
+		}
+		return
+	}
+	if value, exists := v.doc.Lookup(group.Path); exists && isOpaqueValue(value) {
+		return
+	}
+	groupVars := mappingValues(group.Vars)
+	for _, host := range group.Hosts {
+		v.collectScopedHostRecords(all, group, host, globalVars, groupVars, records, orders)
+	}
+	for _, child := range group.Children {
+		v.collectScopedModuleRecords(all, child, globalVars, records, orders)
+	}
+}
+
+func (v *pigstyValidator) collectScopedHostRecords(all, group *Group, host *Host, globalVars, groupVars map[string]*Value, records map[string]map[string][]scopedModuleRecord, orders map[string][]string) {
+	if host == nil || isOpaqueValue(&host.Vars) {
+		return
+	}
+	hostVars := mappingValues(&host.Vars)
+	for _, spec := range scopedModuleSpecs {
+		if !scopedModuleTriggered(spec, globalVars, groupVars, hostVars) {
+			continue
+		}
+		record := scopedModuleRecord{spec: spec, group: group, host: host}
+		record.cluster = resolveScopedIdentity(all.Vars, globalVars, group.Vars, groupVars, host, hostVars, spec.cluster)
+		record.sequence = resolveScopedIdentity(all.Vars, globalVars, group.Vars, groupVars, host, hostVars, spec.sequence)
+		record.extra = resolveScopedIdentity(all.Vars, globalVars, group.Vars, groupVars, host, hostVars, spec.extra)
+		if _, exists := records[spec.module][host.Name]; !exists {
+			orders[spec.module] = append(orders[spec.module], host.Name)
+		}
+		records[spec.module][host.Name] = append(records[spec.module][host.Name], record)
+	}
+}
+
+func (v *pigstyValidator) validateScopedModuleRecords(records map[string]map[string][]scopedModuleRecord, orders map[string][]string) {
 	for _, spec := range scopedModuleSpecs {
 		for _, hostName := range orders[spec.module] {
 			declarations := records[spec.module][hostName]
@@ -327,14 +343,7 @@ func (v *pigstyValidator) validateScopedModuleIdentities(all *Group) {
 				continue
 			}
 			candidate := declarations[0]
-			conflict := false
-			for _, declaration := range declarations[1:] {
-				if !scopedModuleRecordsEquivalent(candidate, declaration) {
-					conflict = true
-					break
-				}
-			}
-			if conflict {
+			if scopedModuleDeclarationsConflict(declarations) {
 				v.add("UNVERIFIABLE", SeverityInfo, candidate.host.Path, nil, candidate.host.Range,
 					"conflicting declaration scopes prevent "+spec.module+" identity association")
 				continue
@@ -342,6 +351,18 @@ func (v *pigstyValidator) validateScopedModuleIdentities(all *Group) {
 			v.validateScopedModuleRecord(candidate)
 		}
 	}
+}
+
+func scopedModuleDeclarationsConflict(declarations []scopedModuleRecord) bool {
+	if len(declarations) < 2 {
+		return false
+	}
+	for _, declaration := range declarations[1:] {
+		if !scopedModuleRecordsEquivalent(declarations[0], declaration) {
+			return true
+		}
+	}
+	return false
 }
 
 func scopedModuleTriggered(spec scopedModuleSpec, scopes ...map[string]*Value) bool {
@@ -539,114 +560,140 @@ func (v *pigstyValidator) visitGroup(group *Group) {
 		}
 		return
 	}
+	state := v.prepareGroupValidation(group, groupVars, varsReadable)
+	for _, host := range group.Hosts {
+		v.visitGroupHost(group, host, &state)
+	}
+	v.finishGroupValidation(state)
+	for _, child := range group.Children {
+		v.visitGroup(child)
+	}
+}
 
+type groupValidationState struct {
+	vars            map[string]*Value
+	varsReadable    bool
+	pgDeclared      bool
+	pgIdentity      string
+	vipNeedsAddress bool
+	vipKnownMissing bool
+	modules         map[string]bool
+	identities      map[string]string
+}
+
+func (v *pigstyValidator) prepareGroupValidation(group *Group, groupVars map[string]*Value, varsReadable bool) groupValidationState {
+	state := groupValidationState{
+		vars: groupVars, varsReadable: varsReadable,
+		vipKnownMissing: len(group.Hosts) == 0,
+		modules:         make(map[string]bool), identities: make(map[string]string),
+	}
 	pgCluster, pgDeclared := groupVars["pg_cluster"]
-	pgIdentity := ""
+	state.pgDeclared = pgDeclared
 	if pgDeclared {
 		v.modulePresent["pgsql"] = true
-		pgIdentity = v.validateCluster(pgCluster, group.Name, true)
+		state.pgIdentity = v.validateCluster(pgCluster, group.Name, true)
 	}
-	groupVIPNeedsAddress := v.validateVIP(groupVars, false)
-	groupVIPKnownMissing := len(group.Hosts) == 0
-
-	groupModules := make(map[string]bool)
-	groupIdentities := make(map[string]string)
+	state.vipNeedsAddress = v.validateVIP(groupVars, false)
 	for _, spec := range pigstyModuleSpecs {
 		clusterValue, clusterDeclared := groupVars[spec.cluster]
-		groupModules[spec.module] = group.Name == spec.module || clusterDeclared
-		if !groupModules[spec.module] {
+		state.modules[spec.module] = group.Name == spec.module || clusterDeclared
+		if !state.modules[spec.module] {
 			continue
 		}
 		v.modulePresent[spec.module] = true
-		groupIdentities[spec.module] = group.Name
+		state.identities[spec.module] = group.Name
 		if spec.cluster != "" && clusterDeclared {
-			groupIdentities[spec.module] = v.validateModuleIdentity(clusterValue, spec.cluster, group.Name)
+			state.identities[spec.module] = v.validateModuleIdentity(clusterValue, spec.cluster, group.Name)
 		}
 	}
+	return state
+}
 
-	for _, host := range group.Hosts {
-		if host == nil {
-			continue
-		}
-		if !validIPv4(host.Name) {
-			v.add("PIG_HOST_IP", SeverityError, host.Path, nil, host.Range, fmt.Sprintf("host %q must be a valid IPv4 address", host.Name))
-		}
-		hostReadable := !v.unverifiable(&host.Vars, "host vars")
-		hostVars := mappingValues(&host.Vars)
-		if hostReadable {
-			v.validateDeclaredObjects(hostVars)
-			v.validateVIP(hostVars, true)
-		}
-		if groupVIPNeedsAddress && hostReadable {
-			_, exists := hostVars["pg_vip_address"]
-			if !exists {
-				groupVIPKnownMissing = true
-			}
-		}
-
-		hostPGCluster, hostPGDeclared := hostVars["pg_cluster"]
-		_, hasPGSeq := hostVars["pg_seq"]
-		_, hasPGRole := hostVars["pg_role"]
-		isPG := pgDeclared || hostPGDeclared || hasPGSeq || hasPGRole
-		if isPG {
-			v.modulePresent["pgsql"] = true
-			v.registerMember("pgsql", group, host)
-			identity := pgIdentity
-			identityDeclared := pgDeclared || !varsReadable
-			if hostPGDeclared {
-				identity = v.validateCluster(hostPGCluster, group.Name, false)
-				identityDeclared = true
-			}
-			if identity == "" {
-				identity = group.Name
-			}
-			if !identityDeclared {
-				v.add("PIG_IDENTITY_MISSING", SeverityError, host.Path, nil, host.Range, fmt.Sprintf("host %q has no pg_cluster identity", host.Name))
-			}
-			if hostReadable {
-				v.validatePGHost(host, hostVars, identity)
-			}
-		}
-
-		for _, spec := range pigstyModuleSpecs {
-			hostCluster, hostClusterDeclared := hostVars[spec.cluster]
-			seqValue, hasSeq := hostVars[spec.seq]
-			member := groupModules[spec.module] || hostClusterDeclared || hasSeq
-			if !member {
-				continue
-			}
-			v.modulePresent[spec.module] = true
-			v.registerMember(spec.module, group, host)
-			identity := groupIdentities[spec.module]
-			identityDeclared := groupModules[spec.module] || !varsReadable
-			if identity == "" {
-				identity = group.Name
-			}
-			if hostClusterDeclared {
-				identity = v.validateModuleIdentity(hostCluster, spec.cluster, group.Name)
-				identityDeclared = true
-			}
-			if spec.cluster != "" && !identityDeclared {
-				v.add("PIG_IDENTITY_MISSING", SeverityError, host.Path, nil, host.Range, fmt.Sprintf("host %q has no %s identity", host.Name, spec.cluster))
-			}
-			if !hostReadable {
-				continue
-			}
-			if !hasSeq {
-				v.add("PIG_SEQ_REQUIRED", SeverityError, host.Path.ChildKey(spec.seq), nil, host.Range, fmt.Sprintf("host %q requires %s", host.Name, spec.seq))
-			} else {
-				v.validateSequence(host, seqValue, spec.seq, identity)
-			}
+func (v *pigstyValidator) visitGroupHost(group *Group, host *Host, state *groupValidationState) {
+	if host == nil {
+		return
+	}
+	if !validIPv4(host.Name) {
+		v.add("PIG_HOST_IP", SeverityError, host.Path, nil, host.Range, fmt.Sprintf("host %q must be a valid IPv4 address", host.Name))
+	}
+	hostReadable := !v.unverifiable(&host.Vars, "host vars")
+	hostVars := mappingValues(&host.Vars)
+	if hostReadable {
+		v.validateDeclaredObjects(hostVars)
+		v.validateVIP(hostVars, true)
+	}
+	if state.vipNeedsAddress && hostReadable {
+		if _, exists := hostVars["pg_vip_address"]; !exists {
+			state.vipKnownMissing = true
 		}
 	}
-	if groupVIPNeedsAddress && groupVIPKnownMissing {
-		enabled := groupVars["pg_vip_enabled"]
+	v.validatePGMembership(group, host, hostVars, hostReadable, state)
+	for _, spec := range pigstyModuleSpecs {
+		v.validateModuleMembership(spec, group, host, hostVars, hostReadable, state)
+	}
+}
+
+func (v *pigstyValidator) validatePGMembership(group *Group, host *Host, hostVars map[string]*Value, hostReadable bool, state *groupValidationState) {
+	hostCluster, hostDeclared := hostVars["pg_cluster"]
+	_, hasSeq := hostVars["pg_seq"]
+	_, hasRole := hostVars["pg_role"]
+	if !state.pgDeclared && !hostDeclared && !hasSeq && !hasRole {
+		return
+	}
+	v.modulePresent["pgsql"] = true
+	v.registerMember("pgsql", group, host)
+	identity := state.pgIdentity
+	identityDeclared := state.pgDeclared || !state.varsReadable
+	if hostDeclared {
+		identity = v.validateCluster(hostCluster, group.Name, false)
+		identityDeclared = true
+	}
+	if identity == "" {
+		identity = group.Name
+	}
+	if !identityDeclared {
+		v.add("PIG_IDENTITY_MISSING", SeverityError, host.Path, nil, host.Range, fmt.Sprintf("host %q has no pg_cluster identity", host.Name))
+	}
+	if hostReadable {
+		v.validatePGHost(host, hostVars, identity)
+	}
+}
+
+func (v *pigstyValidator) validateModuleMembership(spec moduleSpec, group *Group, host *Host, hostVars map[string]*Value, hostReadable bool, state *groupValidationState) {
+	hostCluster, clusterDeclared := hostVars[spec.cluster]
+	seqValue, hasSeq := hostVars[spec.seq]
+	if !state.modules[spec.module] && !clusterDeclared && !hasSeq {
+		return
+	}
+	v.modulePresent[spec.module] = true
+	v.registerMember(spec.module, group, host)
+	identity := state.identities[spec.module]
+	identityDeclared := state.modules[spec.module] || !state.varsReadable
+	if identity == "" {
+		identity = group.Name
+	}
+	if clusterDeclared {
+		identity = v.validateModuleIdentity(hostCluster, spec.cluster, group.Name)
+		identityDeclared = true
+	}
+	if spec.cluster != "" && !identityDeclared {
+		v.add("PIG_IDENTITY_MISSING", SeverityError, host.Path, nil, host.Range, fmt.Sprintf("host %q has no %s identity", host.Name, spec.cluster))
+	}
+	if !hostReadable {
+		return
+	}
+	if !hasSeq {
+		v.add("PIG_SEQ_REQUIRED", SeverityError, host.Path.ChildKey(spec.seq), nil, host.Range, fmt.Sprintf("host %q requires %s", host.Name, spec.seq))
+	} else {
+		v.validateSequence(host, seqValue, spec.seq, identity)
+	}
+}
+
+func (v *pigstyValidator) finishGroupValidation(state groupValidationState) {
+	if state.vipNeedsAddress && state.vipKnownMissing {
+		enabled := state.vars["pg_vip_enabled"]
 		parent, _ := enabled.Path.Parent()
 		v.add("PIG_VIP_ADDRESS_REQUIRED", SeverityError, parent.ChildKey("pg_vip_address"), nil, enabled.Range, "pg_vip_address is required at group scope or for every declared host when pg_vip_enabled is true")
-	}
-
-	for _, child := range group.Children {
-		v.visitGroup(child)
 	}
 }
 
@@ -912,47 +959,45 @@ func (v *pigstyValidator) valueMatchesType(value *Value, expected string) bool {
 		text, ok := stringValue(value)
 		return ok && pigstyDate.MatchString(text)
 	case "string[]":
-		if value == nil || value.Kind != SequenceValue {
-			return false
-		}
-		valid := true
-		for index := range value.Sequence {
-			item := &value.Sequence[index]
-			if v.unverifiable(item, "sequence item") {
-				continue
-			}
-			if _, ok := stringValue(item); !ok {
-				valid = false
-			}
-		}
-		return valid
+		return v.sequenceMatchesType(value, "string")
 	case "mapping[]":
-		if value == nil || value.Kind != SequenceValue {
-			return false
-		}
-		valid := true
-		for index := range value.Sequence {
-			item := &value.Sequence[index]
-			if v.unverifiable(item, "sequence item") {
-				continue
-			}
-			if item.Kind != MappingValue {
-				valid = false
-			}
-		}
-		return valid
+		return v.sequenceMatchesType(value, "mapping")
 	}
 	if strings.HasPrefix(expected, "enum:") {
-		text, ok := stringValue(value)
-		if !ok {
-			return false
-		}
-		for _, allowed := range strings.Split(strings.TrimPrefix(expected, "enum:"), ",") {
-			if text == allowed {
-				return true
-			}
-		}
+		return valueMatchesEnum(value, strings.TrimPrefix(expected, "enum:"))
+	}
+	return false
+}
+
+func (v *pigstyValidator) sequenceMatchesType(value *Value, expected string) bool {
+	if value == nil || value.Kind != SequenceValue {
 		return false
+	}
+	valid := true
+	for index := range value.Sequence {
+		item := &value.Sequence[index]
+		if v.unverifiable(item, "sequence item") {
+			continue
+		}
+		if expected == "mapping" {
+			valid = valid && item.Kind == MappingValue
+		} else {
+			_, ok := stringValue(item)
+			valid = valid && ok
+		}
+	}
+	return valid
+}
+
+func valueMatchesEnum(value *Value, allowedValues string) bool {
+	text, ok := stringValue(value)
+	if !ok {
+		return false
+	}
+	for _, allowed := range strings.Split(allowedValues, ",") {
+		if text == allowed {
+			return true
+		}
 	}
 	return false
 }
@@ -963,53 +1008,79 @@ func (v *pigstyValidator) validateHBA(name string, value *Value) {
 		return
 	}
 	for index := range items {
-		item := &items[index]
-		if v.unverifiable(item, name+" item") {
-			continue
+		v.validateHBAItem(name, &items[index])
+	}
+}
+
+func (v *pigstyValidator) validateHBAItem(name string, item *Value) {
+	if v.unverifiable(item, name+" item") {
+		return
+	}
+	if item.Kind != MappingValue {
+		v.add("PIG_HBA_ITEM", SeverityError, item.Path, item, SourceRange{}, name+" items must be mappings")
+		return
+	}
+	fields := mappingValues(item)
+	if _, exists := fields["title"]; !exists {
+		v.add("PIG_HBA_TITLE_MISSING", SeverityWarning, item.Path.ChildKey("title"), nil, item.Range, name+" item does not declare title")
+	}
+	v.validateHBAFieldNames(name, item)
+	if v.validateHBARules(name, fields) {
+		return
+	}
+	v.validateHBARequiredFields(name, item, fields)
+	v.validateHBAAddress(name, fields["addr"])
+	v.validateHBAAuth(name, fields["auth"])
+}
+
+func (v *pigstyValidator) validateHBAFieldNames(name string, item *Value) {
+	for index := range item.Mapping {
+		entry := &item.Mapping[index]
+		field := fmt.Sprint(entry.Key.Value)
+		if _, known := hbaFields[field]; !known {
+			v.add("PIG_HBA_FIELD_UNKNOWN", SeverityWarning, entry.Path, &entry.Value, SourceRange{}, name+" item contains an unknown field "+field)
 		}
-		if item.Kind != MappingValue {
-			v.add("PIG_HBA_ITEM", SeverityError, item.Path, item, SourceRange{}, name+" items must be mappings")
-			continue
+	}
+}
+
+func (v *pigstyValidator) validateHBARules(name string, fields map[string]*Value) bool {
+	rules, exists := fields["rules"]
+	if !exists {
+		return false
+	}
+	if !v.unverifiable(rules, name+" rules") && !v.valueMatchesType(rules, "string[]") {
+		v.add("PIG_HBA_RULES_TYPE", SeverityError, rules.Path, rules, SourceRange{}, name+" rules must be a sequence of strings")
+	}
+	return true
+}
+
+func (v *pigstyValidator) validateHBARequiredFields(name string, item *Value, fields map[string]*Value) {
+	for _, required := range []string{"addr", "auth", "user", "db"} {
+		if _, exists := fields[required]; !exists {
+			v.add("PIG_HBA_FIELD_REQUIRED", SeverityError, item.Path.ChildKey(required), nil, item.Range, name+" item requires "+required)
 		}
-		fields := mappingValues(item)
-		if _, exists := fields["title"]; !exists {
-			v.add("PIG_HBA_TITLE_MISSING", SeverityWarning, item.Path.ChildKey("title"), nil, item.Range, name+" item does not declare title")
-		}
-		for fieldIndex := range item.Mapping {
-			entry := &item.Mapping[fieldIndex]
-			field := fmt.Sprint(entry.Key.Value)
-			if _, known := hbaFields[field]; !known {
-				v.add("PIG_HBA_FIELD_UNKNOWN", SeverityWarning, entry.Path, &entry.Value, SourceRange{}, name+" item contains an unknown field "+field)
-			}
-		}
-		if rules, exists := fields["rules"]; exists {
-			if v.unverifiable(rules, name+" rules") {
-				continue
-			}
-			if !v.valueMatchesType(rules, "string[]") {
-				v.add("PIG_HBA_RULES_TYPE", SeverityError, rules.Path, rules, SourceRange{}, name+" rules must be a sequence of strings")
-			}
-			continue
-		}
-		for _, required := range []string{"addr", "auth", "user", "db"} {
-			if _, exists := fields[required]; !exists {
-				v.add("PIG_HBA_FIELD_REQUIRED", SeverityError, item.Path.ChildKey(required), nil, item.Range, name+" item requires "+required)
-			}
-		}
-		if address, exists := fields["addr"]; exists && !v.unverifiable(address, name+" addr") {
-			text, stringType := stringValue(address)
-			_, alias := hbaAddressAliases[text]
-			if !stringType || !alias && !validIPv4CIDR(text) {
-				v.add("PIG_HBA_ADDR", SeverityError, address.Path, address, SourceRange{}, name+" addr must be a known alias or valid IPv4 CIDR")
-			}
-		}
-		if auth, exists := fields["auth"]; exists && !v.unverifiable(auth, name+" auth") {
-			text, stringType := stringValue(auth)
-			_, alias := hbaAuthAliases[text]
-			if !stringType || !alias {
-				v.add("PIG_HBA_AUTH", SeverityError, auth.Path, auth, SourceRange{}, name+" auth must be a supported alias")
-			}
-		}
+	}
+}
+
+func (v *pigstyValidator) validateHBAAddress(name string, address *Value) {
+	if address == nil || v.unverifiable(address, name+" addr") {
+		return
+	}
+	text, stringType := stringValue(address)
+	_, alias := hbaAddressAliases[text]
+	if !stringType || !alias && !validIPv4CIDR(text) {
+		v.add("PIG_HBA_ADDR", SeverityError, address.Path, address, SourceRange{}, name+" addr must be a known alias or valid IPv4 CIDR")
+	}
+}
+
+func (v *pigstyValidator) validateHBAAuth(name string, auth *Value) {
+	if auth == nil || v.unverifiable(auth, name+" auth") {
+		return
+	}
+	text, stringType := stringValue(auth)
+	_, alias := hbaAuthAliases[text]
+	if !stringType || !alias {
+		v.add("PIG_HBA_AUTH", SeverityError, auth.Path, auth, SourceRange{}, name+" auth must be a supported alias")
 	}
 }
 
