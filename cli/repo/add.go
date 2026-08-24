@@ -112,8 +112,9 @@ func (m *Manager) normalizeModules(modules ...string) []string {
 			return module == "pgdg"
 		})
 	}
-	modules = slices.Compact(modules)
+	// Compact only removes adjacent duplicates, so sort first.
 	slices.Sort(modules)
+	modules = slices.Compact(modules)
 	return modules
 }
 
@@ -189,16 +190,7 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 		Failed:           []*FailedRepoItem{},
 	}
 
-	// Validate modules exist
-	for _, module := range expandedModules {
-		if _, ok := manager.Module[module]; !ok {
-			data.Failed = append(data.Failed, &FailedRepoItem{
-				Module: module,
-				Error:  fmt.Sprintf("module not found: %s", module),
-				Code:   output.CodeRepoModuleNotFound,
-			})
-		}
-	}
+	data.Failed = missingRepoModules(manager, expandedModules)
 
 	// If all modules are invalid, return failure
 	if len(data.Failed) == len(expandedModules) {
@@ -217,11 +209,7 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 
 	// Resolve the repository route before moving active definitions. This keeps
 	// network detection outside the destructive replacement window.
-	if opts.Mirror {
-		applyPGDGMirrorRoute(manager)
-	} else {
-		manager.DetectRegion(opts.Region)
-	}
+	configureRepoRoute(manager, opts)
 	data.Region = manager.Region
 
 	if opts.GPGCheck {
@@ -246,41 +234,7 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 		}
 	}
 
-	// Add each module
-	for _, module := range expandedModules {
-		// Skip already failed modules
-		alreadyFailed := false
-		for _, f := range data.Failed {
-			if f.Module == module {
-				alreadyFailed = true
-				break
-			}
-		}
-		if alreadyFailed {
-			continue
-		}
-
-		// Get module info before adding
-		repoNames := manager.Module[module]
-		filePath := manager.getModulePath(module)
-
-		if err := addRepoModule(manager, module); err != nil {
-			data.Failed = append(data.Failed, &FailedRepoItem{
-				Module: module,
-				Error:  err.Error(),
-				Code:   output.CodeRepoAddFailed,
-			})
-			if opts.Remove {
-				break
-			}
-		} else {
-			data.AddedRepos = append(data.AddedRepos, &AddedRepoItem{
-				Module:   module,
-				FilePath: filePath,
-				Repos:    repoNames,
-			})
-		}
-	}
+	addRepoModules(manager, expandedModules, data, opts.Remove)
 	if opts.Remove && len(data.Failed) > 0 {
 		data.DurationMs = time.Since(startTime).Milliseconds()
 		result := output.Fail(output.CodeRepoAddFailed,
@@ -290,24 +244,7 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 
 	// Handle cache update if doUpdate is true
 	if opts.Update {
-		updateCmd := strings.Join(manager.UpdateCmd, " ")
-		run := runAddRepoCommand
-		if opts.Quiet {
-			run = runAddRepoCommandSummary
-		}
-		err := run(manager.UpdateCmd)
-		if err != nil {
-			data.UpdateResult = &UpdateCacheResult{
-				Command: updateCmd,
-				Success: false,
-				Error:   err.Error(),
-			}
-		} else {
-			data.UpdateResult = &UpdateCacheResult{
-				Command: updateCmd,
-				Success: true,
-			}
-		}
+		data.UpdateResult = updateRepoCache(manager, opts.Quiet)
 	}
 
 	data.DurationMs = time.Since(startTime).Milliseconds()
@@ -315,6 +252,65 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 	if opts.Remove && !result.Success {
 		return rollbackReplacement(manager, data, result, startTime)
 	}
+	return result
+}
+
+func missingRepoModules(manager *Manager, modules []string) []*FailedRepoItem {
+	var failed []*FailedRepoItem
+	for _, module := range modules {
+		if _, ok := manager.Module[module]; !ok {
+			failed = append(failed, &FailedRepoItem{
+				Module: module, Error: fmt.Sprintf("module not found: %s", module), Code: output.CodeRepoModuleNotFound,
+			})
+		}
+	}
+	return failed
+}
+
+func configureRepoRoute(manager *Manager, opts AddOptions) {
+	if opts.Mirror {
+		applyPGDGMirrorRoute(manager)
+	} else {
+		manager.DetectRegion(opts.Region)
+	}
+}
+
+func addRepoModules(manager *Manager, modules []string, data *RepoAddData, stopOnFailure bool) {
+	failed := make(map[string]bool, len(data.Failed))
+	for _, item := range data.Failed {
+		failed[item.Module] = true
+	}
+	for _, module := range modules {
+		if failed[module] {
+			continue
+		}
+		repos := manager.Module[module]
+		path := manager.getModulePath(module)
+		if err := addRepoModule(manager, module); err != nil {
+			data.Failed = append(data.Failed, &FailedRepoItem{Module: module, Error: err.Error(), Code: output.CodeRepoAddFailed})
+			failed[module] = true
+			if stopOnFailure {
+				return
+			}
+			continue
+		}
+		data.AddedRepos = append(data.AddedRepos, &AddedRepoItem{
+			Module: module, FilePath: path, Repos: repos,
+		})
+	}
+}
+
+func updateRepoCache(manager *Manager, quiet bool) *UpdateCacheResult {
+	run := runAddRepoCommand
+	if quiet {
+		run = runAddRepoCommandSummary
+	}
+	result := &UpdateCacheResult{Command: strings.Join(manager.UpdateCmd, " ")}
+	if err := run(manager.UpdateCmd); err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	result.Success = true
 	return result
 }
 

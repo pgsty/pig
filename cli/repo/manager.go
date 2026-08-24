@@ -126,36 +126,7 @@ func (m *Manager) LoadData(data []byte) error {
 
 	for _, repo := range m.Data {
 		repo.Distro = repo.InferOS()
-		switch repo.Distro {
-		case config.DistroEL:
-			// Preserve native DNF module filtering by default. Repositories that
-			// intentionally override module streams must opt in via repo.Meta.
-			// See config.PigstyGPGCheck for opt-in signature enforcement.
-			meta := map[string]string{"enabled": "1", "gpgcheck": "0"}
-			if repo.Meta != nil {
-				for k, v := range repo.Meta {
-					meta[k] = v
-				}
-			}
-			// EL7 has no DNF module support. Shared EL7/8/9/10 catalog rows may opt
-			// in for newer EL releases, but must not render this DNF-only key.
-			if GetMajorVersionFromCode(m.OsDistroCode) == 7 {
-				delete(meta, "module_hotfixes")
-			}
-			repo.Meta = meta
-		case config.DistroDEB:
-			// Intentionally permissive default for compatibility with offline/mirror repos.
-			// See config.PigstyGPGCheck for opt-in signature enforcement.
-			meta := map[string]string{"trusted": "yes"}
-			if repo.Meta != nil {
-				for k, v := range repo.Meta {
-					meta[k] = v
-				}
-			}
-			repo.Meta = meta
-		default:
-			logrus.Debugf("found unsupported distro in repo %s: %v", repo.Name, repo)
-		}
+		m.applyRepositoryDefaults(repo)
 
 		// It's user's responsibility to ensure the repo name is unique for all the combinations of os, arch
 		if repo.Available(m.OsDistroCode, m.OsArch) {
@@ -178,6 +149,29 @@ func (m *Manager) LoadData(data []byte) error {
 
 	logrus.Debugf("load %d %s repo, %d modules", len(m.Map), m.OsType, len(m.Module))
 	return nil
+}
+
+func (m *Manager) applyRepositoryDefaults(repo *Repository) {
+	switch repo.Distro {
+	case config.DistroEL:
+		repo.Meta = mergeRepoMeta(map[string]string{"enabled": "1", "gpgcheck": "0"}, repo.Meta)
+		// EL7 has no DNF module support.
+		if GetMajorVersionFromCode(m.OsDistroCode) == 7 {
+			delete(repo.Meta, "module_hotfixes")
+		}
+	case config.DistroDEB:
+		// Keep the historical permissive default for offline and mirror repos.
+		repo.Meta = mergeRepoMeta(map[string]string{"trusted": "yes"}, repo.Meta)
+	default:
+		logrus.Debugf("found unsupported distro in repo %s: %v", repo.Name, repo)
+	}
+}
+
+func mergeRepoMeta(defaults, overrides map[string]string) map[string]string {
+	for key, value := range overrides {
+		defaults[key] = value
+	}
+	return defaults
 }
 
 // adjustRepoMeta adjusts the repository metadata

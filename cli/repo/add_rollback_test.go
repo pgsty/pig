@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -48,6 +49,32 @@ func TestAddReposQuietUsesSummaryRunnerForCacheUpdate(t *testing.T) {
 	result := AddReposWithOptions([]string{"node"}, AddOptions{Update: true, Quiet: true})
 	if !result.Success || len(call) != 1 || call[0] != "cache-update" {
 		t.Fatalf("quiet cache update result = %+v call=%v", result, call)
+	}
+}
+
+func TestAddRepoModulesDoesNotRetryFailedDuplicate(t *testing.T) {
+	manager, _ := setupAddRollbackTest(t)
+	calls := 0
+	addRepoModule = func(*Manager, string) error {
+		calls++
+		return errors.New("write failed")
+	}
+	data := &RepoAddData{}
+	addRepoModules(manager, []string{"node", "node"}, data, false)
+	if calls != 1 {
+		t.Fatalf("failed duplicate module executed %d times, want 1", calls)
+	}
+	if len(data.Failed) != 1 || data.Failed[0].Module != "node" {
+		t.Fatalf("failed modules = %+v, want one node failure", data.Failed)
+	}
+}
+
+func TestNormalizeModulesDeduplicatesNonAdjacentInputs(t *testing.T) {
+	manager, _ := setupAddRollbackTest(t)
+	got := manager.normalizeModules("node", "pigsty", "node")
+	want := []string{"node", "pigsty"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("normalizeModules() = %v, want %v", got, want)
 	}
 }
 
