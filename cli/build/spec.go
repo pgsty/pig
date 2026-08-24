@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"pig/internal/archive"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"syscall"
@@ -111,36 +112,9 @@ func setupBuildDirs(spec *specConfig, force bool) error {
 // replaced by symlink to preserve data while keeping link semantics.
 func createSymlink(target, linkPath string, force bool) error {
 	if info, err := os.Lstat(linkPath); err == nil {
-		switch {
-		case info.Mode()&os.ModeSymlink != 0:
-			existingTarget, readErr := os.Readlink(linkPath)
-			if readErr == nil && existingTarget == target {
-				return nil
-			}
-			if err := os.Remove(linkPath); err != nil {
-				return fmt.Errorf("failed to replace existing symlink: %w", err)
-			}
-		case info.IsDir():
-			if !force {
-				// Preserve existing content by moving it into target before relinking.
-				if err := migrateDirIntoTarget(linkPath, target); err != nil {
-					return err
-				}
-				if err := os.Remove(linkPath); err != nil && !os.IsNotExist(err) {
-					return fmt.Errorf("failed to remove existing directory after migration: %w", err)
-				}
-				break
-			}
-			if err := os.RemoveAll(linkPath); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("failed to remove existing directory: %w", err)
-			}
-		default:
-			if !force {
-				return fmt.Errorf("existing path is not a symlink: %s (use --force to replace)", linkPath)
-			}
-			if err := os.RemoveAll(linkPath); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("failed to remove existing path: %w", err)
-			}
+		unchanged, err := prepareSymlinkPath(target, linkPath, info, force)
+		if err != nil || unchanged {
+			return err
 		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("failed to inspect existing path: %w", err)
@@ -161,6 +135,38 @@ func createSymlink(target, linkPath string, force bool) error {
 
 	// Create symlink: linkPath -> target
 	return os.Symlink(target, linkPath)
+}
+
+func prepareSymlinkPath(target, linkPath string, info os.FileInfo, force bool) (bool, error) {
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		existingTarget, err := os.Readlink(linkPath)
+		if err == nil && existingTarget == target {
+			return true, nil
+		}
+		if err := os.Remove(linkPath); err != nil {
+			return false, fmt.Errorf("failed to replace existing symlink: %w", err)
+		}
+	case info.IsDir() && !force:
+		if err := migrateDirIntoTarget(linkPath, target); err != nil {
+			return false, err
+		}
+		if err := os.Remove(linkPath); err != nil && !os.IsNotExist(err) {
+			return false, fmt.Errorf("failed to remove existing directory after migration: %w", err)
+		}
+	case info.IsDir():
+		if err := os.RemoveAll(linkPath); err != nil && !os.IsNotExist(err) {
+			return false, fmt.Errorf("failed to remove existing directory: %w", err)
+		}
+	default:
+		if !force {
+			return false, fmt.Errorf("existing path is not a symlink: %s (use --force to replace)", linkPath)
+		}
+		if err := os.RemoveAll(linkPath); err != nil && !os.IsNotExist(err) {
+			return false, fmt.Errorf("failed to remove existing path: %w", err)
+		}
+	}
+	return false, nil
 }
 
 func migrateDirIntoTarget(srcDir, targetDir string) error {
@@ -379,9 +385,8 @@ func extractToDir(tarballPath, targetDir string) error {
 		return fmt.Errorf("failed to create parent dir: %w", err)
 	}
 
-	logrus.Debugf("Extracting %s to %s", tarballPath, parentDir)
-	cmd := []string{"tar", "-xzf", tarballPath, "-C", parentDir}
-	return utils.Command(cmd)
+	logrus.Debugf("extracting %s to %s", tarballPath, parentDir)
+	return archive.ExtractTarGzRoot(tarballPath, parentDir, filepath.Base(targetDir))
 }
 
 // postSetup performs OS-specific post-installation setup

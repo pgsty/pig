@@ -116,11 +116,6 @@ func buildToolInstallCommand(mode string, includeBeta bool) ([]string, error) {
 	return installCmds, nil
 }
 
-// InstallBuildTools will install build dependencies for different distributions.
-func InstallBuildTools(mode string) error {
-	return InstallBuildToolsWithBeta(mode, false)
-}
-
 // InstallBuildToolsWithBeta will install build dependencies with optional beta PostgreSQL packages.
 func InstallBuildToolsWithBeta(mode string, includeBeta bool) error {
 	distro := config.OSCode

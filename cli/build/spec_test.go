@@ -1,11 +1,60 @@
 package build
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
 )
+
+func TestExtractToDirUsesRootedGoExtractor(t *testing.T) {
+	t.Setenv("PATH", "")
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "rpmbuild.tar.gz")
+	file, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(file)
+	tw := tar.NewWriter(gz)
+	body := []byte("Name: example\n")
+	for _, header := range []*tar.Header{
+		{Name: "rpmbuild/", Typeflag: tar.TypeDir, Mode: 0o755},
+		{Name: "rpmbuild/SPECS/example.spec", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))},
+	} {
+		if err := tw.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+		if header.Size > 0 {
+			if _, err := tw.Write(body); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(tmp, "rpmbuild")
+	if err := extractToDir(archivePath, target); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(target, "SPECS", "example.spec"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(body) {
+		t.Fatalf("extracted body = %q, want %q", got, body)
+	}
+}
 
 func TestCreateSymlinkNonForceMigratesDirectoryThenLinks(t *testing.T) {
 	tmp := t.TempDir()

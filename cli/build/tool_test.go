@@ -96,13 +96,6 @@ func TestBuildToolInstallCommandELEnumeratesExactPostgresPackages(t *testing.T) 
 	}
 }
 
-func TestInstallBuildToolsAPISignatures(t *testing.T) {
-	var install func(string) error = InstallBuildTools
-	var installBeta func(string, bool) error = InstallBuildToolsWithBeta
-	_ = install
-	_ = installBeta
-}
-
 func TestBuildToolInstallCommandUsesActivePGVersionList(t *testing.T) {
 	cleanup := withBuildToolTestEnv(t, config.DistroEL, "9", "el9", []int{16, 14})
 	defer cleanup()
