@@ -1,6 +1,10 @@
 package build
 
-import "testing"
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
 
 func TestParseRemoteTarget(t *testing.T) {
 	userID, host, port, err := parseRemoteTarget("alice@127.0.0.1:8080")
@@ -23,6 +27,17 @@ func TestParseRemoteTargetInvalid(t *testing.T) {
 		if _, _, _, err := parseRemoteTarget(input); err == nil {
 			t.Fatalf("expected error for input %q", input)
 		}
+	}
+}
+
+func TestParseRemoteTargetDoesNotEchoCredential(t *testing.T) {
+	const credential = "secret-proxy-credential"
+	_, _, _, err := parseRemoteTarget(credential)
+	if err == nil {
+		t.Fatal("malformed remote target was accepted")
+	}
+	if strings.Contains(err.Error(), credential) {
+		t.Fatalf("remote target error leaked credential: %v", err)
 	}
 }
 
@@ -73,5 +88,21 @@ func TestSetupProxyInvalidLocalNoPanic(t *testing.T) {
 
 	if err := SetupProxy("alice@127.0.0.1:8080", "invalid"); err == nil {
 		t.Fatalf("expected SetupProxy to return error on invalid local address")
+	}
+}
+
+func TestProxyInstallCommand(t *testing.T) {
+	for _, manager := range []string{"dnf", "yum", "apt-get"} {
+		got, err := proxyInstallCommand(manager)
+		if err != nil {
+			t.Fatalf("proxyInstallCommand(%q) returned error: %v", manager, err)
+		}
+		want := []string{manager, "install", "-y", "vray"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("proxyInstallCommand(%q) = %#v, want %#v", manager, got, want)
+		}
+	}
+	if command, err := proxyInstallCommand("brew"); err == nil || command != nil {
+		t.Fatalf("unsupported package manager result = %#v, %v; want nil and error", command, err)
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
+	"os/exec"
 	"pig/cli/ext"
 	"pig/internal/utils"
 	"strconv"
@@ -17,6 +17,8 @@ import (
 )
 
 const (
+	proxyConfigPath = "/etc/v2ray.json"
+
 	proxyConfigTemplate = `{
   "log": {"loglevel": "info"},
   "inbounds": [{"port": %s,"listen": "%s","protocol": "http","tag": "http-in","settings": {}}],
@@ -44,7 +46,7 @@ func SetupProxy(remote string, local string) error {
 	if err != nil {
 		return err
 	}
-	logrus.Infof("setting up proxy from local %s to remote %s", local, remote)
+	logrus.Infof("setting up proxy from local %s to remote %s", local, net.JoinHostPort(host, port))
 
 	// 2. Install or make sure proxy packages are installed
 	if err := InstallProxy(); err != nil {
@@ -53,12 +55,12 @@ func SetupProxy(remote string, local string) error {
 
 	// 3. Write proxy config
 	proxyConfig := fmt.Sprintf(proxyConfigTemplate, localPort, localHost, host, port, userID)
-	if err := utils.PutFile("/etc/v2ray.json", []byte(proxyConfig)); err != nil {
-		logrus.Debugf("fail to write /etc/v2ray.json content: %s", proxyConfig)
-		return fmt.Errorf("failed to write /etc/v2ray.json: %v", err)
+	if err := utils.PutFileMode(proxyConfigPath, []byte(proxyConfig), 0640); err != nil {
+		return fmt.Errorf("failed to write %s: %v", proxyConfigPath, err)
+	} else if err := utils.SudoCommand([]string{"chown", "root:v2ray", proxyConfigPath}); err != nil {
+		return fmt.Errorf("failed to grant the v2ray service access to %s: %v", proxyConfigPath, err)
 	} else {
 		logrus.Info("write proxy config to /etc")
-		logrus.Debugf("/etc/v2ray.json content: %s", proxyConfig)
 	}
 
 	// 4. Write proxy environment
@@ -80,8 +82,8 @@ func SetupProxy(remote string, local string) error {
 		logrus.Errorf("proxy is not working: %v", err)
 		logrus.Warn("check proxy status with:")
 		logrus.Warn("$ systemctl status v2ray")
-		logrus.Warn("$ cat /etc/v2ray.json")
-		return nil
+		logrus.Warn("$ journalctl -u v2ray -n 50")
+		return fmt.Errorf("proxy connectivity check failed: %w", err)
 	} else {
 		logrus.Info("proxy is working, turn on/off proxy with:")
 		logrus.Infof("Proxy On    : \t$ po")
@@ -95,7 +97,7 @@ func SetupProxy(remote string, local string) error {
 func parseRemoteTarget(remote string) (userID string, host string, port string, err error) {
 	parts := strings.SplitN(remote, "@", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", "", fmt.Errorf("invalid target format, expected user@host:port, got %s", remote)
+		return "", "", "", fmt.Errorf("invalid target format, expected user@host:port")
 	}
 	host, port, err = net.SplitHostPort(parts[1])
 	if err != nil {
@@ -143,18 +145,26 @@ func validatePort(port string) error {
 
 // InstallProxy will install build proxy via http
 func InstallProxy() error {
-	if _, err := os.Stat("/usr/local/bin/v2ray"); err == nil {
+	if _, err := exec.LookPath("v2ray"); err == nil {
 		logrus.Info("proxy binary is already installed")
 		return nil
 	}
 
 	manager := ext.PackageManagerCmd()
+	command, err := proxyInstallCommand(manager)
+	if err != nil {
+		return err
+	}
+	logrus.Infof("install proxy from configured package repositories with %s", manager)
+	return utils.SudoCommand(command)
+}
+
+func proxyInstallCommand(manager string) ([]string, error) {
 	switch manager {
 	case "dnf", "yum", "apt-get":
-		logrus.Infof("install proxy from configured package repositories with %s", manager)
-		return utils.SudoCommand([]string{manager, "install", "-y", "vray"})
+		return []string{manager, "install", "-y", "vray"}, nil
 	default:
-		return fmt.Errorf("proxy installation requires dnf, yum, or apt-get; configure the Pigsty repository first")
+		return nil, fmt.Errorf("proxy installation requires dnf, yum, or apt-get; configure the Pigsty repository first")
 	}
 }
 
