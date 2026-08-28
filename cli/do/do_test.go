@@ -135,6 +135,53 @@ func TestScalarExtraVarsAndClusterNamesRejectInjection(t *testing.T) {
 	if err := RemovePgmon("", []string{"../../etc/passwd"}); err == nil {
 		t.Fatal("RemovePgmon accepted an unsafe cluster path")
 	}
+	for name, build := range map[string]PlaybookBuilder{
+		"add": BuildPgsqlAddCommands,
+		"rm": func(args []string) ([][]string, error) {
+			return BuildPgsqlRmCommands(args, false)
+		},
+	} {
+		t.Run("pgsql-"+name, func(t *testing.T) {
+			if _, err := build([]string{"all:&pg-meta"}); err == nil {
+				t.Fatal("cluster pattern injection was accepted")
+			}
+		})
+	}
+}
+
+func TestPgsqlNamesFollowPigstyContracts(t *testing.T) {
+	for _, value := range []string{"pg-meta", "PG-META-1", "1"} {
+		if !validClusterName(value) {
+			t.Errorf("valid Pigsty cluster name %q was rejected", value)
+		}
+	}
+	for _, value := range []string{"root", "pg_meta", "pg meta", "pg:meta", ""} {
+		if validClusterName(value) {
+			t.Errorf("invalid Pigsty cluster name %q was accepted", value)
+		}
+	}
+
+	for _, value := range []string{"dbuser_meta", "app-user", "user.name", "user@example"} {
+		if !validPigstyUserName(value) {
+			t.Errorf("valid Pigsty username %q was rejected", value)
+		}
+	}
+	for _, value := range []string{"postgres", "DbUser", "user$role", "user name", "user'name", strings.Repeat("u", 64), ""} {
+		if validPigstyUserName(value) {
+			t.Errorf("invalid Pigsty username %q was accepted", value)
+		}
+	}
+
+	for _, value := range []string{"meta", "App-DB", "app.db", "app@db", "_maintenance"} {
+		if !validPigstyDatabaseName(value) {
+			t.Errorf("safe database name %q was rejected", value)
+		}
+	}
+	for _, value := range []string{"1app", "app db", "app/db", "app'db", strings.Repeat("d", 64), ""} {
+		if validPigstyDatabaseName(value) {
+			t.Errorf("unsafe database name %q was accepted", value)
+		}
+	}
 }
 
 func TestNodeRepoModuleUsesJSONScalar(t *testing.T) {

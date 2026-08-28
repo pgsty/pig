@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"pig/internal/utils"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,6 +32,9 @@ func BuildPgsqlAddCommands(args []string) ([][]string, error) {
 		return nil, err
 	}
 	cluster, ips := args[0], args[1:]
+	if !validClusterName(cluster) {
+		return nil, fmt.Errorf("invalid pgsql cluster name: %s", cluster)
+	}
 	if len(ips) == 0 {
 		return [][]string{{"pgsql.yml", "-l", cluster}}, nil
 	}
@@ -51,6 +53,9 @@ func BuildPgsqlRmCommands(args []string, uninstall bool) ([][]string, error) {
 		return nil, err
 	}
 	cluster, ips := args[0], args[1:]
+	if !validClusterName(cluster) {
+		return nil, fmt.Errorf("invalid pgsql cluster name: %s", cluster)
+	}
 	selector := cluster
 	if len(ips) > 0 {
 		target, _, err := buildPgsqlInstancePatterns(cluster, ips)
@@ -73,7 +78,7 @@ func BuildPgsqlUserCommands(args []string) ([][]string, error) {
 	if !validClusterName(args[0]) {
 		return nil, fmt.Errorf("invalid pgsql cluster name: %s", args[0])
 	}
-	if !utils.ValidateIdentifier(args[1]) {
+	if !validPigstyUserName(args[1]) {
 		return nil, fmt.Errorf("invalid PostgreSQL username: %s", args[1])
 	}
 	extra, err := encodeScalarExtraVar("username", args[1])
@@ -91,7 +96,7 @@ func BuildPgsqlDBCommands(args []string) ([][]string, error) {
 	if !validClusterName(args[0]) {
 		return nil, fmt.Errorf("invalid pgsql cluster name: %s", args[0])
 	}
-	if !utils.ValidateIdentifier(args[1]) {
+	if !validPigstyDatabaseName(args[1]) {
 		return nil, fmt.Errorf("invalid PostgreSQL database name: %s", args[1])
 	}
 	extra, err := encodeScalarExtraVar("dbname", args[1])
@@ -292,10 +297,22 @@ func encodeScalarExtraVar(key, value string) (string, error) {
 	return strings.TrimSuffix(encoded.String(), "\n"), nil
 }
 
-var clusterNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
+var (
+	clusterNamePattern        = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+	pigstyUserNamePattern     = regexp.MustCompile(`^[a-z_][a-z0-9_@.-]{0,62}$`)
+	pigstyDatabaseNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_@.-]{0,62}$`)
+)
 
 func validClusterName(value string) bool {
-	return clusterNamePattern.MatchString(value)
+	return value != "root" && clusterNamePattern.MatchString(value)
+}
+
+func validPigstyUserName(value string) bool {
+	return value != "postgres" && pigstyUserNamePattern.MatchString(value)
+}
+
+func validPigstyDatabaseName(value string) bool {
+	return pigstyDatabaseNamePattern.MatchString(value)
 }
 
 func requireArgs(args []string, count int, message string) error {
