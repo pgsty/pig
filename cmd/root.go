@@ -102,7 +102,7 @@ func initAllForCommand(cmd *cobra.Command) error {
 
 // Version reporting and the legacy pg_exporter HTTP client do not consume
 // Pigsty configuration. Keep them available even when ~/.pig/config.yml is
-// malformed so users can diagnose or repair the local installation.
+// malformed while the user repairs that file with another tool.
 func commandSkipsConfig(cmd *cobra.Command) bool {
 	if cmd == nil {
 		return false
