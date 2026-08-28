@@ -1168,7 +1168,7 @@ func TestNilResultDataSafety(t *testing.T) {
 }
 
 // TestNilResultMethods tests that Result methods handle nil receivers gracefully.
-// This validates the pattern warned about in CLAUDE.md - nil receiver checks.
+// This validates the nil-receiver regression pattern directly at the implementation boundary.
 func TestNilResultMethods(t *testing.T) {
 	// Test that constructors never return nil (they should always return a valid Result)
 	t.Run("StartOK never returns nil", func(t *testing.T) {

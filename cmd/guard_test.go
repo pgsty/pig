@@ -1,7 +1,7 @@
 package cmd
 
-// Guard tests (T1/T2/T11) enforcing docs/refactor/ops_cli_redesign_2026-07-02.md
-// house rules over the pg/pb/pt/pitr command surface.
+// Guard tests (T1/T2/T11) enforce the operations CLI safety contract documented at
+// https://pig.pgsty.com/design/ops-cli-safety/ over the pg/pb/pt/pitr command surface.
 
 import (
 	"strings"

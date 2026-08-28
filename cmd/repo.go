@@ -42,7 +42,7 @@ var repoCmd = &cobra.Command{
   pig repo cache                   # cache repo as offline package   (root)
 `,
 	Example: `
-  Get Started: https://pigsty.io/docs/pig/repo/
+  Get Started: https://pig.pgsty.com/repo/
   pig repo add -ru                 # add all repo and update cache (brute but effective)
   pig repo add pigsty -u           # gentle version, only add pigsty repo and update cache
   pig repo add node pgdg pigsty    # essential repo to install postgres packages

@@ -84,43 +84,6 @@ func TestPbListUsesMeaningfulPrimaryCommand(t *testing.T) {
 	}
 }
 
-func TestPbSpecOverviewMatchesAliasContract(t *testing.T) {
-	raw, err := os.ReadFile("../docs/spec/pb.md")
-	if err != nil {
-		t.Fatalf("read pb spec: %v", err)
-	}
-	spec := string(raw)
-	for _, want := range []string{
-		"| `pb info` | `i` |",
-		"| `pb list` | `ls` |",
-		"| `pb backup` | `b` |",
-		"| `pb restore` | `r` |",
-		"| `pb expire` | `e` |",
-		"| `pb create` | `c` |",
-		"| `pb upgrade` | `u` |",
-		"| `pb delete` | `d` |",
-		"| `pb check` | `ck` |",
-		"| `pb start` | `up` |",
-		"| `pb stop` | `dw` |",
-		"| `pb log` | `l` |",
-	} {
-		if !strings.Contains(spec, want) {
-			t.Fatalf("pb spec missing alias contract row containing %q", want)
-		}
-	}
-	for _, forbidden := range []string{
-		"| `pb ls` |",
-		"`l, lg`",
-		"pb ls cluster",
-		"pb ls cls",
-		"aliases: `cluster`, `cls`",
-	} {
-		if strings.Contains(spec, forbidden) {
-			t.Fatalf("pb spec still contains deprecated contract fragment %q", forbidden)
-		}
-	}
-}
-
 func TestResolvePbInfoRawOutput(t *testing.T) {
 	origRawOutput := pbInfoRawOutput
 	origFormat := config.OutputFormat

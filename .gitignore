@@ -15,24 +15,11 @@ tmp/*
 dist/
 pig
 .DS_Store
-CLAUDE.md
 coverage.out
 .hugo_build.lock
 public/
-bin/
-docs/*
-!docs/spec/
-# Only the explicit allowlist below is versioned here as design contracts;
-# every other local docs/spec file remains untracked.
-docs/spec/*
-!docs/spec/pg.md
-!docs/spec/pb.md
-!docs/spec/pt.md
-!docs/spec/pitr.md
-!docs/spec/inventory.md
-!docs/spec/sty.md
-!docs/spec/sty-implementation-goal.md
-!docs/spec/sty-cmdb-rfc.md
+bin/*
+!bin/upload.sh
 
 _bmad
 _bmad-output

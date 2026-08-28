@@ -8,6 +8,7 @@ PIG_VERSION:=$(patsubst v%,%,$(VERSION))
 PIGSTY_VERSION:=4.5.0
 GORELEASER_VERSION:=v2.17.1
 GORELEASER:=go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
+DOCS_DIR?=../pig.pgsty.com
 
 # Build Variables
 BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -95,12 +96,21 @@ c: clean
 clean:
 	rm -rf pig
 
-docs-serve:
-	hugo serve
-docs-build:
-	hugo --minify
+docs-guard:
+	@test -f "$(DOCS_DIR)/hugo.yaml" -a -f "$(DOCS_DIR)/Makefile" || { \
+		echo "PIG documentation checkout not found at $(DOCS_DIR)" >&2; \
+		echo "set DOCS_DIR=/path/to/pig.pgsty.com or check out the companion repository" >&2; \
+		exit 1; \
+	}
+docs-serve: docs-guard
+	$(MAKE) -C "$(DOCS_DIR)" serve
+docs-build: docs-guard
+	$(MAKE) -C "$(DOCS_DIR)" build
+docs-check: docs-guard
+	$(MAKE) -C "$(DOCS_DIR)" check
 d: docs-serve
 db: docs-build
+dc: docs-check
 
 ###############################################################
 #                         Testing                            #
@@ -120,4 +130,4 @@ amd:
 
 .PHONY: run build clean rel release release-linux build-linux-amd64 build-linux-arm64 linux-amd64 linux-arm64 \
  gr-install gr-snapshot gr-build gr-local gr-release gr-prod-release gr-check release-new \
- upload tag docs-serve docs-build d db r b c arm amd 2m 2c 2a 2j
+ upload tag docs-guard docs-serve docs-build docs-check d db dc r b c arm amd 2m 2c 2a 2j
