@@ -73,6 +73,9 @@ func TestBuildRepoModulesAddsBeta(t *testing.T) {
 }
 
 func TestBuildProxyMachineContractMatchesSideEffects(t *testing.T) {
+	if buildProxyCmd.Use != "proxy [id@remote] [local]" {
+		t.Fatalf("build proxy use = %q, want optional operands", buildProxyCmd.Use)
+	}
 	want := map[string]string{
 		"type":       "action",
 		"volatility": "volatile",

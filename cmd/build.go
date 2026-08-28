@@ -133,7 +133,7 @@ func moduleArgsContain(args []string, target string) bool {
 
 // buildProxyCmd represents the `build proxy` command
 var buildProxyCmd = &cobra.Command{
-	Use:         "proxy <id@remote> <local>",
+	Use:         "proxy [id@remote] [local]",
 	Short:       "Initialize build proxy",
 	Annotations: ancsAnn("pig build proxy", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
 	Args:        cobra.MaximumNArgs(2),
