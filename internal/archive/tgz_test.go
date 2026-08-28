@@ -96,6 +96,29 @@ func TestExtractTarGz(t *testing.T) {
 	}
 }
 
+func TestExtractTarGzAllowsMultipleSafeRoots(t *testing.T) {
+	pkg := makeTarGz(t, "pigsty/", "pigsty/repo_complete", "docker/", "docker/metadata")
+	dst := t.TempDir()
+	if err := ExtractTarGz(pkg, dst); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"pigsty/repo_complete", "docker/metadata"} {
+		if _, err := os.Stat(filepath.Join(dst, path)); err != nil {
+			t.Fatalf("missing extracted %s: %v", path, err)
+		}
+	}
+}
+
+func TestExtractTarGzStillRejectsTraversalAndLinks(t *testing.T) {
+	if err := ExtractTarGz(makeTarGz(t, "../escape"), t.TempDir()); err == nil {
+		t.Fatal("multi-root extraction accepted traversal")
+	}
+	hdr := &tar.Header{Name: "pigsty/link", Linkname: "pigsty/target", Mode: 0o777, Typeflag: tar.TypeSymlink}
+	if err := ExtractTarGz(makeTarGzHeader(t, hdr, nil), t.TempDir()); err == nil {
+		t.Fatal("multi-root extraction accepted symlink")
+	}
+}
+
 func TestExtractTarGzRoot(t *testing.T) {
 	pkg := makeTarGz(t, "rpmbuild/", "rpmbuild/SPECS/", "rpmbuild/SPECS/example.spec")
 	dst := t.TempDir()
@@ -232,7 +255,7 @@ func TestExtractTarGzRootRejectsLinkEntries(t *testing.T) {
 }
 
 func TestExtractTarGzRejectsTraversalAndLinks(t *testing.T) {
-	for _, name := range []string{"../escape", "/absolute", "other/file"} {
+	for _, name := range []string{"../escape", "/absolute"} {
 		t.Run(name, func(t *testing.T) {
 			err := ExtractTarGz(makeTarGz(t, name), t.TempDir())
 			if err == nil {

@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -213,6 +215,9 @@ func TestCacheAtomicallyReplacesPackageWithValidArchive(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "hello.txt"), []byte("hello"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(repoDir, "repo_complete"), []byte("ok"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	target := filepath.Join(root, "pkg.tgz")
 	if err := os.WriteFile(target, []byte("old"), 0600); err != nil {
 		t.Fatal(err)
@@ -259,6 +264,120 @@ func TestCacheAtomicallyReplacesPackageWithValidArchive(t *testing.T) {
 		}
 	}
 	t.Fatal("hello.txt not found in archive")
+}
+
+func TestCacheRejectsAllMissingReposAndPreservesPackage(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "www")
+	if err := os.MkdirAll(base, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "pkg.tgz")
+	if err := os.WriteFile(target, []byte("previous-good-package"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Cache(base, target, []string{"missing"}); err == nil {
+		t.Fatal("Cache should fail when every requested repository is missing")
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "previous-good-package" {
+		t.Fatalf("failed cache changed existing package: %q", content)
+	}
+}
+
+func TestCacheRejectsSymlinkEntries(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "www")
+	repoDir := filepath.Join(base, "pigsty")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "repo_complete"), []byte("ok"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("repo_complete", filepath.Join(repoDir, "latest")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	if err := Cache(base, filepath.Join(root, "pkg.tgz"), []string{"pigsty"}); err == nil || !strings.Contains(err.Error(), "symbolic links") {
+		t.Fatalf("Cache symlink error = %v", err)
+	}
+}
+
+func TestCacheWithResultReportsOnlyIncludedRepos(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "www")
+	repoDir := filepath.Join(base, "pigsty")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "repo_complete"), []byte("ok"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := CacheWithResult(base, filepath.Join(root, "pkg.tgz"), []string{"pigsty", "missing"})
+	if !result.Success {
+		t.Fatalf("CacheWithResult failed: %+v", result)
+	}
+	data, ok := result.Data.(*RepoCacheData)
+	if !ok || len(data.IncludedRepos) != 1 || data.IncludedRepos[0] != "pigsty" {
+		t.Fatalf("included repos = %#v", result.Data)
+	}
+}
+
+func TestResolveCacheReposNormalizesAndDeduplicatesNames(t *testing.T) {
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "pigsty")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "repo_complete"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveCacheRepos(base, []string{"pigsty", "pigsty/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"pigsty"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("included repos = %v, want %v", got, want)
+	}
+}
+
+func TestResolveCacheReposRejectsOverlappingRoots(t *testing.T) {
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, "pigsty", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "pigsty", "repo_complete"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveCacheRepos(base, []string{"pigsty", "pigsty/nested"}); err == nil || !strings.Contains(err.Error(), "overlapping") {
+		t.Fatalf("overlapping roots error = %v", err)
+	}
+}
+
+func TestCacheRejectsFIFOEntries(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "www")
+	repoDir := filepath.Join(base, "pigsty")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "repo_complete"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(repoDir, "queue"), 0o600); err != nil {
+		t.Skipf("fifo unavailable: %v", err)
+	}
+	if err := Cache(base, filepath.Join(root, "pkg.tgz"), []string{"pigsty"}); err == nil || !strings.Contains(err.Error(), "unsupported file type") {
+		t.Fatalf("fifo cache error = %v", err)
+	}
 }
 
 func TestCacheResultAfterCommitToleratesMetadataFailure(t *testing.T) {

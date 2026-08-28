@@ -20,11 +20,11 @@ const (
 	maxStream  = int64(300 << 30)
 )
 
-// ExtractTarGz extracts a Pigsty offline package below dst without invoking a
-// host tar or gzip binary. Offline packages must contain one pigsty/ root and
-// only directories and regular files.
+// ExtractTarGz extracts a repository bundle below dst without invoking a host
+// tar or gzip binary. One or more safe top-level entries are accepted; callers
+// validate required content before committing the staged tree.
 func ExtractTarGz(filename, dst string) error {
-	return extractTarGzFile(filename, dst, extractionPolicy{label: "offline package", requiredRoot: "pigsty"})
+	return extractTarGzFile(filename, dst, extractionPolicy{label: "offline package"})
 }
 
 // ExtractTarGzRoot extracts a source archive whose directories and regular

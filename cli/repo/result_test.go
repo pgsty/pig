@@ -6,8 +6,10 @@ package repo
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/output"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1710,6 +1712,18 @@ func TestRepoBootDataText(t *testing.T) {
 	if !strings.Contains(textLocal, "/etc/yum.repos.d/local.repo") {
 		t.Errorf("Expected local_repo_path in text, got '%s'", textLocal)
 	}
+
+	reused := &RepoBootData{
+		SourcePkg:      "/tmp/not-inspected.tgz",
+		TargetDir:      "/www",
+		Reused:         true,
+		LocalRepoAdded: true,
+		LocalRepoPath:  "/etc/yum.repos.d/local.repo",
+	}
+	reusedText := reused.Text()
+	if !strings.Contains(reusedText, "Reused existing repo") || strings.Contains(reusedText, reused.SourcePkg) {
+		t.Fatalf("reuse text = %q", reusedText)
+	}
 }
 
 func TestRepoCacheDataSerialization(t *testing.T) {
@@ -2071,31 +2085,40 @@ func TestCacheWithResultPermissionDenied(t *testing.T) {
 	}
 }
 
-func TestBootWithResultDefaults(t *testing.T) {
-	// Test that BootWithResult uses default values when empty strings are passed
-	result := BootWithResult("", "")
+func TestBootDefaultsAndMissingPackageResult(t *testing.T) {
+	defaultPkg, defaultTarget := bootDefaults("", "")
+	if defaultPkg != "/tmp/pkg.tgz" || defaultTarget != "/www" {
+		t.Fatalf("boot defaults = %q, %q", defaultPkg, defaultTarget)
+	}
+
+	missingPkg := filepath.Join(t.TempDir(), "missing.tgz")
+	targetDir := filepath.Join(t.TempDir(), "target")
+	result := BootWithResult(missingPkg, targetDir)
 	if result == nil {
 		t.Fatal("BootWithResult should not return nil")
 	}
 
-	// Should fail (package doesn't exist) but with correct defaults
 	bootData, ok := result.Data.(*RepoBootData)
 	if !ok {
 		t.Fatalf("Result.Data should be *RepoBootData, got %T", result.Data)
 	}
-
-	// Check defaults are applied
-	if bootData.SourcePkg != "/tmp/pkg.tgz" {
-		t.Errorf("Expected default source_pkg '/tmp/pkg.tgz', got '%s'", bootData.SourcePkg)
+	if bootData.SourcePkg != missingPkg {
+		t.Errorf("Expected source_pkg %q, got %q", missingPkg, bootData.SourcePkg)
 	}
-	if bootData.TargetDir != "/www" {
-		t.Errorf("Expected default target_dir '/www', got '%s'", bootData.TargetDir)
+	if bootData.TargetDir != targetDir {
+		t.Errorf("Expected target_dir %q, got %q", targetDir, bootData.TargetDir)
 	}
 }
 
-func TestCacheWithResultDefaults(t *testing.T) {
-	// Test that CacheWithResult uses default values when empty/nil are passed
-	result := CacheWithResult("", "", nil)
+func TestCacheDefaultsAndFailedResult(t *testing.T) {
+	dirPath, pkgPath, repos := cacheDefaults("", "", nil)
+	if dirPath != "/www" || pkgPath != "/tmp/pkg.tgz" || !reflect.DeepEqual(repos, []string{"pigsty"}) {
+		t.Fatalf("cache defaults = %q, %q, %v", dirPath, pkgPath, repos)
+	}
+
+	missingDir := filepath.Join(t.TempDir(), "missing")
+	targetPkg := filepath.Join(t.TempDir(), "pkg.tgz")
+	result := CacheWithResult(missingDir, targetPkg, nil)
 	if result == nil {
 		t.Fatal("CacheWithResult should not return nil")
 	}
@@ -2106,15 +2129,17 @@ func TestCacheWithResultDefaults(t *testing.T) {
 		t.Fatalf("Result.Data should be *RepoCacheData, got %T", result.Data)
 	}
 
-	// Check defaults are applied
-	if cacheData.SourceDir != "/www" {
-		t.Errorf("Expected default source_dir '/www', got '%s'", cacheData.SourceDir)
+	if cacheData.SourceDir != missingDir {
+		t.Errorf("Expected source_dir %q, got %q", missingDir, cacheData.SourceDir)
 	}
-	if cacheData.TargetPkg != "/tmp/pkg.tgz" {
-		t.Errorf("Expected default target_pkg '/tmp/pkg.tgz', got '%s'", cacheData.TargetPkg)
+	if cacheData.TargetPkg != targetPkg {
+		t.Errorf("Expected target_pkg %q, got %q", targetPkg, cacheData.TargetPkg)
 	}
-	if len(cacheData.IncludedRepos) != 1 || cacheData.IncludedRepos[0] != "pigsty" {
-		t.Errorf("Expected default included_repos ['pigsty'], got %v", cacheData.IncludedRepos)
+	if len(cacheData.RequestedRepos) != 1 || cacheData.RequestedRepos[0] != "pigsty" {
+		t.Errorf("Expected default requested_repos ['pigsty'], got %v", cacheData.RequestedRepos)
+	}
+	if cacheData.IncludedRepos == nil || len(cacheData.IncludedRepos) != 0 {
+		t.Errorf("Failed cache should not report included repos, got %v", cacheData.IncludedRepos)
 	}
 }
 

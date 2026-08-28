@@ -17,6 +17,7 @@ import (
 const (
 	defaultRepoTargetDir = "/www"
 	defaultRepoDataDir   = "/data/nginx"
+	repoReuseDetail      = "existing pigsty repository reused; the offline package was not inspected and additional bundle roots were not committed"
 )
 
 // addLocalRepo adds local repo config for dnf/apt
@@ -88,14 +89,7 @@ func ExtractOfflineWithResult(offlinePkg, targetDir string) *output.Result {
 
 func bootWithResult(offlinePkg, targetDir string, configureLocal bool) *output.Result {
 	startTime := time.Now()
-
-	// Use defaults if not provided
-	if targetDir == "" {
-		targetDir = defaultRepoTargetDir
-	}
-	if offlinePkg == "" {
-		offlinePkg = "/tmp/pkg.tgz"
-	}
+	offlinePkg, targetDir = bootDefaults(offlinePkg, targetDir)
 
 	// Build OS environment info
 	osEnv := &OSEnvironment{
@@ -141,49 +135,105 @@ func bootWithResult(offlinePkg, targetDir string, configureLocal bool) *output.R
 
 	// Stream through Go's gzip/tar readers. Neither native sty boot nor direct
 	// repo boot invokes or installs host tar/gzip executables.
-	reusedExisting, extractErr := extractOfflineRepo(offlinePkg, targetDir, pigstyDir, reuseCommitted)
+	reusedExisting, extractedRoots, extractErr := extractOfflineRepo(offlinePkg, targetDir, pigstyDir, reuseCommitted)
 	if extractErr != nil {
 		data.DurationMs = time.Since(startTime).Milliseconds()
 		return output.Fail(output.CodeRepoBootFailed,
 			fmt.Sprintf("failed to extract package: %v", extractErr)).WithData(data)
 	}
 
-	// List extracted directories (top-level only for brevity)
-	entries, _ := os.ReadDir(targetDir)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			data.ExtractedFiles = append(data.ExtractedFiles, entry.Name())
-		}
-	}
+	data.Reused = reusedExisting
+	data.ExtractedFiles = extractedRoots
 
 	return finishRepoBoot(data, offlinePkg, targetDir, pigstyDir, configureLocal, reusedExisting, startTime)
 }
 
-func extractOfflineRepo(offlinePkg, targetDir, pigstyDir string, reuseCommitted bool) (bool, error) {
+func extractOfflineRepo(offlinePkg, targetDir, pigstyDir string, reuseCommitted bool) (bool, []string, error) {
 	if reuseCommitted {
-		return true, nil
+		return true, nil, nil
 	}
 	if info, err := os.Lstat(pigstyDir); err == nil {
 		if info.IsDir() && regularFileAt(filepath.Join(pigstyDir, "repo_complete")) {
-			return true, nil
+			return true, nil, nil
 		}
-		return false, fmt.Errorf("target already exists without a valid repo; remove or move it before retrying: %s", pigstyDir)
+		return false, nil, fmt.Errorf("target already exists without a valid repo; remove or move it before retrying: %s", pigstyDir)
 	} else if !os.IsNotExist(err) {
-		return false, err
+		return false, nil, err
 	}
 	stage, err := os.MkdirTemp(targetDir, ".pig-repo-*")
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	defer os.RemoveAll(stage)
 	if err := archive.ExtractTarGz(offlinePkg, stage); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	stagedRepo := filepath.Join(stage, "pigsty")
 	if !regularFileAt(filepath.Join(stagedRepo, "repo_complete")) {
-		return false, fmt.Errorf("offline package is missing pigsty/repo_complete")
+		return false, nil, fmt.Errorf("offline package is missing pigsty/repo_complete")
 	}
-	return false, os.Rename(stagedRepo, pigstyDir)
+	moved, err := commitStagedRepoTree(stage, targetDir)
+	if err != nil {
+		return false, nil, err
+	}
+	return false, moved, nil
+}
+
+func commitStagedRepoTree(stage, targetDir string) ([]string, error) {
+	entries, err := os.ReadDir(stage)
+	if err != nil {
+		return nil, fmt.Errorf("read staged repository tree: %w", err)
+	}
+	for _, entry := range entries {
+		target := filepath.Join(targetDir, entry.Name())
+		if _, err := os.Lstat(target); err == nil {
+			return nil, fmt.Errorf("offline package target already exists; remove or move it before retrying: %s", target)
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("inspect offline package target %s: %w", target, err)
+		}
+	}
+	// pigsty/repo_complete is the legacy signal used to reuse a committed
+	// repository. Move pigsty last so that signal cannot become visible before
+	// every additional top-level repository has been committed.
+	entries = repoCommitOrder(entries)
+
+	moved := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if err := os.Rename(filepath.Join(stage, name), filepath.Join(targetDir, name)); err != nil {
+			var rollbackFailure error
+			for i := len(moved) - 1; i >= 0; i-- {
+				rollbackName := moved[i]
+				if rollbackErr := os.Rename(filepath.Join(targetDir, rollbackName), filepath.Join(stage, rollbackName)); rollbackErr != nil {
+					if rollbackFailure == nil {
+						rollbackFailure = fmt.Errorf("rollback %s failed: %w", rollbackName, rollbackErr)
+					}
+				}
+			}
+			if rollbackFailure != nil {
+				return nil, fmt.Errorf("commit offline package entry %s: %w; rollback incomplete: %v", name, err, rollbackFailure)
+			}
+			return nil, fmt.Errorf("commit offline package entry %s: %w", name, err)
+		}
+		moved = append(moved, name)
+	}
+	return moved, nil
+}
+
+func repoCommitOrder(entries []os.DirEntry) []os.DirEntry {
+	ordered := make([]os.DirEntry, 0, len(entries))
+	var pigsty os.DirEntry
+	for _, entry := range entries {
+		if entry.Name() == "pigsty" {
+			pigsty = entry
+			continue
+		}
+		ordered = append(ordered, entry)
+	}
+	if pigsty != nil {
+		ordered = append(ordered, pigsty)
+	}
+	return ordered
 }
 
 func finishRepoBoot(data *RepoBootData, offlinePkg, targetDir, pigstyDir string, configureLocal, reusedExisting bool, startTime time.Time) *output.Result {
@@ -194,7 +244,11 @@ func finishRepoBoot(data *RepoBootData, offlinePkg, targetDir, pigstyDir string,
 	}
 	if !configureLocal {
 		data.DurationMs = time.Since(startTime).Milliseconds()
-		return output.OK(repoBootMessage("Extracted", offlinePkg, targetDir, reusedExisting), data)
+		result := output.OK(repoBootMessage("Extracted", offlinePkg, targetDir, reusedExisting), data)
+		if reusedExisting {
+			result.WithDetail(repoReuseDetail)
+		}
+		return result
 	}
 	data.LocalRepoPath = getLocalRepoPath()
 	if err := repoBootAddLocal(pigstyDir); err != nil {
@@ -204,7 +258,21 @@ func finishRepoBoot(data *RepoBootData, offlinePkg, targetDir, pigstyDir string,
 	data.LocalRepoAdded = true
 	data.DurationMs = time.Since(startTime).Milliseconds()
 	message := repoBootMessage("Bootstrapped", offlinePkg, targetDir, reusedExisting)
-	return output.OK(message+fmt.Sprintf(", local repo config added: %s", data.LocalRepoPath), data)
+	result := output.OK(message+fmt.Sprintf(", local repo config added: %s", data.LocalRepoPath), data)
+	if reusedExisting {
+		result.WithDetail(repoReuseDetail)
+	}
+	return result
+}
+
+func bootDefaults(offlinePkg, targetDir string) (string, string) {
+	if offlinePkg == "" {
+		offlinePkg = "/tmp/pkg.tgz"
+	}
+	if targetDir == "" {
+		targetDir = defaultRepoTargetDir
+	}
+	return offlinePkg, targetDir
 }
 
 func repoBootMessage(verb, offlinePkg, targetDir string, reusedExisting bool) string {

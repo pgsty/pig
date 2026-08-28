@@ -96,7 +96,7 @@ func createRepoWithCreaterepo(dir string) error {
 	logrus.Debugf("generate create el repo tmp script: %s", scriptPath)
 	defer os.Remove(scriptPath)
 
-	if err = utils.SudoCommand([]string{"sh", scriptPath}); err != nil {
+	if err = utils.SudoCommand([]string{"bash", scriptPath}); err != nil {
 		return fmt.Errorf("failed to create el repo with createrepo_c: %w", err)
 	}
 	return verifyRepoComplete(dir)
@@ -114,7 +114,7 @@ func createRepoWithDpkg(dir string) error {
 	logrus.Debugf("generate create deb repo tmp script: %s", scriptPath)
 	defer os.Remove(scriptPath)
 
-	if err = utils.SudoCommand([]string{"sh", scriptPath}); err != nil {
+	if err = utils.SudoCommand([]string{"bash", scriptPath}); err != nil {
 		return fmt.Errorf("failed to create deb repo with dpkg-scanpackages: %w", err)
 	}
 	return verifyRepoComplete(dir)
@@ -141,15 +141,25 @@ func createRepoCmdEL(dir string) string {
 	dirQ := utils.ShellQuoteArgs([]string{dir})
 	completeQ := utils.ShellQuoteArgs([]string{filepath.Join(dir, "repo_complete")})
 	return fmt.Sprintf(`#!/bin/bash
-cd -- %s;
-rm -rf proj-data*;
-rm -rf patroni*3.0.4*;
-rm -rf *docs*;
-createrepo_c . ;
-repo2module -s stable . modules.yaml;
-modifyrepo_c --mdtype=modules modules.yaml repodata/;
-md5sum *.rpm > %s
-	`, dirQ, completeQ)
+		set -euo pipefail
+		cd -- %s
+		marker=%s
+		marker_tmp="${marker}.tmp.$$"
+		rm -f -- "$marker" "$marker_tmp"
+		trap 'rm -f -- "$marker_tmp"' EXIT
+		rm -rf proj-data*
+		rm -rf patroni*3.0.4*
+		rm -rf *docs*
+		createrepo_c .
+		if command -v repo2module >/dev/null 2>&1 && command -v modifyrepo_c >/dev/null 2>&1; then
+			if ! repo2module -s stable . modules.yaml || ! modifyrepo_c --mdtype=modules modules.yaml repodata/; then
+				echo "warning: optional module metadata was not generated" >&2
+			fi
+		fi
+		md5sum *.rpm > "$marker_tmp"
+		mv -f -- "$marker_tmp" "$marker"
+		trap - EXIT
+			`, dirQ, completeQ)
 }
 
 // createRepoCmdEL7 will create a local RPM repository in the specified directory
@@ -157,13 +167,20 @@ func createRepoCmdEL7(dir string) string {
 	dirQ := utils.ShellQuoteArgs([]string{dir})
 	completeQ := utils.ShellQuoteArgs([]string{filepath.Join(dir, "repo_complete")})
 	return fmt.Sprintf(`#!/bin/bash
-cd -- %s;
-rm -f *.i686.rpm;
-rm -rf patroni*3.0.4*;
-rm -rf *docs*;
-createrepo_c . ;
-md5sum *.rpm > %s
-	`, dirQ, completeQ)
+		set -euo pipefail
+		cd -- %s
+		marker=%s
+		marker_tmp="${marker}.tmp.$$"
+		rm -f -- "$marker" "$marker_tmp"
+		trap 'rm -f -- "$marker_tmp"' EXIT
+		rm -f *.i686.rpm
+		rm -rf patroni*3.0.4*
+		rm -rf *docs*
+		createrepo_c .
+		md5sum *.rpm > "$marker_tmp"
+		mv -f -- "$marker_tmp" "$marker"
+		trap - EXIT
+			`, dirQ, completeQ)
 }
 
 // createRepoCmdDEB will create a local APT repository in the specified directory
@@ -171,12 +188,19 @@ func createRepoCmdDEB(dir string) string {
 	dirQ := utils.ShellQuoteArgs([]string{dir})
 	completeQ := utils.ShellQuoteArgs([]string{filepath.Join(dir, "repo_complete")})
 	return fmt.Sprintf(`#!/bin/bash
-cd -- %s;
-rm -f *i386.deb;
-rm -rf Packages.gz;
-dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz;
-md5sum *.deb > %s;
-	`, dirQ, completeQ)
+		set -euo pipefail
+		cd -- %s
+		marker=%s
+		marker_tmp="${marker}.tmp.$$"
+		rm -f -- "$marker" "$marker_tmp"
+		trap 'rm -f -- "$marker_tmp"' EXIT
+		rm -f *i386.deb
+		rm -rf Packages.gz
+		dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz
+		md5sum *.deb > "$marker_tmp"
+		mv -f -- "$marker_tmp" "$marker"
+		trap - EXIT
+			`, dirQ, completeQ)
 }
 
 func writeTempRepoScript(script string) (string, error) {
@@ -249,17 +273,15 @@ func CreateReposWithResult(repos []string) *output.Result {
 	successCount := len(data.CreatedRepos)
 	failCount := len(data.FailedRepos)
 
-	if successCount == 0 && failCount > 0 {
+	if failCount > 0 {
 		return output.Fail(output.CodeRepoCreateFailed,
-			fmt.Sprintf("failed to create all %d repos", failCount)).WithData(data)
+			fmt.Sprintf("created %d local repository(s), but %d requested path(s) failed", successCount, failCount)).
+			WithData(data).
+			WithDetail("partial repository metadata was created; inspect failed entries before retrying")
 	}
 
 	message := fmt.Sprintf("Created %d local repository(s)", successCount)
-	result := output.OK(message, data)
-	if failCount > 0 {
-		result.Detail = fmt.Sprintf("failed: %d repo(s)", failCount)
-	}
-	return result
+	return output.OK(message, data)
 }
 
 // createRepoWithItem creates a single local repo and returns CreatedRepoItem

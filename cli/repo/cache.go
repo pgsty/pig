@@ -41,6 +41,12 @@ func (c *cacheWalkContext) walk(filePath string, info os.FileInfo, walkErr error
 	if err != nil {
 		return fmt.Errorf("failed to get abs path for %s: %v", filePath, err)
 	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("symbolic links are not supported in offline packages: %s", filePath)
+	}
+	if !info.IsDir() && !info.Mode().IsRegular() {
+		return fmt.Errorf("unsupported file type in offline package: %s", filePath)
+	}
 
 	// Compute tar header name (relative to base dir).
 	relPath, err := filepath.Rel(c.absBase, absFilePath)
@@ -56,17 +62,9 @@ func (c *cacheWalkContext) walk(filePath string, info os.FileInfo, walkErr error
 		}
 	}
 
-	linkTarget := ""
-	if info.Mode()&os.ModeSymlink != 0 {
-		linkTarget, err = os.Readlink(filePath)
-		if err != nil {
-			return fmt.Errorf("failed to read symlink %s: %v", filePath, err)
-		}
-	}
-
 	// Create the header only after a regular source file has been opened. This
 	// prevents a tar entry from promising bytes that can no longer be read.
-	header, err := tar.FileInfoHeader(info, linkTarget)
+	header, err := tar.FileInfoHeader(info, "")
 	if err != nil {
 		if file != nil {
 			_ = file.Close()
@@ -102,30 +100,26 @@ func (c *cacheWalkContext) walk(filePath string, info os.FileInfo, walkErr error
 }
 
 // Cache creates a compressed tarball of specified subdirectories under dirPath.
-// 1) Closes source files immediately and propagates all close errors.
-// 2) Preserves symbolic links and empty directories in the tarball.
-// 3) Ensures no upper-level references (e.g. "../../") are included.
-// 4) Prints a warning if a specified subdirectory or file does not exist, then skips it.
-// 5) Shows progress based on the total number of regular files and prints the file being processed.
-// 6) Prints total file size in GiB before starting the compression process.
+//  1. Closes source files immediately and propagates all close errors.
+//  2. Preserves empty directories and rejects symbolic links, matching the
+//     native boot extractor contract.
+//  3. Ensures no upper-level references (e.g. "../../") are included.
+//  4. Prints a warning if a specified subdirectory or file does not exist, then skips it.
+//  5. Shows progress based on the total number of regular files and prints the file being processed.
+//  6. Prints total file size in GiB before starting the compression process.
 func Cache(dirPath, pkgPath string, repos []string) error {
-	logrus.Infof("caching repo %s %s to %s", dirPath, strings.Join(repos, ","), pkgPath)
+	_, err := cacheWithIncluded(dirPath, pkgPath, repos)
+	return err
+}
 
-	// Use defaults if not provided
-	if dirPath == "" {
-		dirPath = "/www"
-	}
-	if pkgPath == "" {
-		pkgPath = "/tmp/pkg.tgz"
-	}
-	if len(repos) == 0 {
-		repos = []string{"pigsty"}
-	}
+func cacheWithIncluded(dirPath, pkgPath string, repos []string) ([]string, error) {
+	dirPath, pkgPath, repos = cacheDefaults(dirPath, pkgPath, repos)
+	logrus.Infof("caching repo %s %s to %s", dirPath, strings.Join(repos, ","), pkgPath)
 
 	// Get absolute base directory (used to prevent upper-level references)
 	absBase, err := filepath.Abs(dirPath)
 	if err != nil {
-		return fmt.Errorf("failed to determine abs path of dirPath %s: %v", dirPath, err)
+		return nil, fmt.Errorf("failed to determine abs path of dirPath %s: %v", dirPath, err)
 	}
 
 	// Check if base dir exists
@@ -133,22 +127,26 @@ func Cache(dirPath, pkgPath string, repos []string) error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			logrus.Warnf("base directory does not exist: %s", absBase)
-			return fmt.Errorf("invalid base directory: %s", absBase)
+			return nil, fmt.Errorf("invalid base directory: %s", absBase)
 		}
-		return fmt.Errorf("failed to access base directory %s: %w", absBase, err)
+		return nil, fmt.Errorf("failed to access base directory %s: %w", absBase, err)
 	}
 	if !baseInfo.IsDir() {
 		logrus.Warnf("base directory is not a directory: %s", absBase)
-		return fmt.Errorf("invalid base directory: %s", absBase)
+		return nil, fmt.Errorf("invalid base directory: %s", absBase)
 	}
 	if err := ensurePackageOutsideRepos(absBase, pkgPath, repos); err != nil {
-		return err
+		return nil, err
+	}
+	includedRepos, err := resolveCacheRepos(absBase, repos)
+	if err != nil {
+		return nil, err
 	}
 
 	// Count the total number of regular files and total size for progress & estimate
-	totalFiles, totalSize, err := countFiles(absBase, repos)
+	totalFiles, totalSize, err := countFiles(absBase, includedRepos)
 	if err != nil {
-		return fmt.Errorf("failed to count files: %v", err)
+		return nil, fmt.Errorf("failed to count files: %v", err)
 	}
 
 	// Print estimated total file size in GiB (1 GiB = 1024^3 bytes)
@@ -157,13 +155,13 @@ func Cache(dirPath, pkgPath string, repos []string) error {
 	// Validate the output path without removing a previous good package.
 	packageMode, err := preparePackageOutput(pkgPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := utils.AtomicWrite(pkgPath, packageMode, func(out io.Writer) error {
-		return writeCacheArchive(out, absBase, repos, totalFiles)
+		return writeCacheArchive(out, absBase, includedRepos, totalFiles)
 	}); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Only print newline and package info in text mode
@@ -174,10 +172,66 @@ func Cache(dirPath, pkgPath string, repos []string) error {
 			// The atomic replacement has already committed at this point. Metadata
 			// is useful diagnostics, but failing to read it must not turn a
 			// successfully created package into a reported cache failure.
-				logrus.Warnf("offline package created but metadata inspection failed: %v", err)
+			logrus.Warnf("offline package created but metadata inspection failed: %v", err)
 		}
 	}
-	return nil
+	return includedRepos, nil
+}
+
+func resolveCacheRepos(absBase string, repos []string) ([]string, error) {
+	included := make([]string, 0, len(repos))
+	seen := make(map[string]struct{}, len(repos))
+	hasPigsty := false
+	for _, name := range repos {
+		path, err := repoPath(absBase, name)
+		if err != nil {
+			return nil, err
+		}
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			logrus.Warnf("repository does not exist, skipping: %s", path)
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to inspect repository path %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("repository path is a symbolic link: %s", path)
+		}
+		rel, err := filepath.Rel(absBase, path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to normalize repository path %s: %w", path, err)
+		}
+		rel = filepath.Clean(rel)
+		if rel == "." {
+			return nil, fmt.Errorf("repository path must not be the cache root: %s", name)
+		}
+		separator := string(os.PathSeparator)
+		for existing := range seen {
+			if strings.HasPrefix(rel, existing+separator) || strings.HasPrefix(existing, rel+separator) {
+				return nil, fmt.Errorf("overlapping repository paths are not supported: %s and %s", existing, rel)
+			}
+		}
+		if _, exists := seen[rel]; exists {
+			continue
+		}
+		seen[rel] = struct{}{}
+		included = append(included, rel)
+		if rel == "pigsty" {
+			hasPigsty = true
+		}
+	}
+	if len(included) == 0 {
+		return nil, fmt.Errorf("none of the requested repositories exist under %s", absBase)
+	}
+	if !hasPigsty {
+		return nil, fmt.Errorf("offline package must include the pigsty repository")
+	}
+	marker := filepath.Join(absBase, "pigsty", "repo_complete")
+	if !regularFileAt(marker) {
+		return nil, fmt.Errorf("pigsty repository is missing a regular repo_complete marker: %s", marker)
+	}
+	return included, nil
 }
 
 func writeCacheArchive(out io.Writer, absBase string, repos []string, totalFiles int) (err error) {
@@ -201,9 +255,8 @@ func writeCacheArchive(out io.Writer, absBase string, repos []string, totalFiles
 		if pathErr != nil {
 			return pathErr
 		}
-		if _, statErr := os.Stat(subDirPath); os.IsNotExist(statErr) {
-			logrus.Warnf("subdirectory does not exist, skipping: %s", subDirPath)
-			continue
+		if _, statErr := os.Lstat(subDirPath); os.IsNotExist(statErr) {
+			return fmt.Errorf("repository disappeared while caching: %s", subDirPath)
 		} else if statErr != nil {
 			return fmt.Errorf("failed to access repository path %s: %w", subDirPath, statErr)
 		}
@@ -259,10 +312,11 @@ func countFiles(absBase string, repos []string) (int, int64, error) {
 
 		// If the path is actually a file, count it as well
 		if !info.IsDir() {
-			if info.Mode().IsRegular() {
-				totalFiles++
-				totalSize += info.Size()
+			if !info.Mode().IsRegular() {
+				return 0, 0, fmt.Errorf("unsupported file type in offline package: %s", subDirPath)
 			}
+			totalFiles++
+			totalSize += info.Size()
 			continue
 		}
 
@@ -270,6 +324,12 @@ func countFiles(absBase string, repos []string) (int, int64, error) {
 		err = filepath.Walk(subDirPath, func(filePath string, info os.FileInfo, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("symbolic links are not supported in offline packages: %s", filePath)
+			}
+			if !info.IsDir() && !info.Mode().IsRegular() {
+				return fmt.Errorf("unsupported file type in offline package: %s", filePath)
 			}
 			if info.Mode().IsRegular() {
 				totalFiles++
@@ -464,17 +524,7 @@ func packageInfo(pkgPath string) (string, int64, string, error) {
 // This function is used for YAML/JSON output modes
 func CacheWithResult(dirPath, pkgPath string, repos []string) *output.Result {
 	startTime := time.Now()
-
-	// Use defaults if not provided
-	if dirPath == "" {
-		dirPath = "/www"
-	}
-	if pkgPath == "" {
-		pkgPath = "/tmp/pkg.tgz"
-	}
-	if len(repos) == 0 {
-		repos = []string{"pigsty"}
-	}
+	dirPath, pkgPath, repos = cacheDefaults(dirPath, pkgPath, repos)
 
 	// Build OS environment info
 	osEnv := &OSEnvironment{
@@ -486,10 +536,11 @@ func CacheWithResult(dirPath, pkgPath string, repos []string) *output.Result {
 
 	// Prepare data structure
 	data := &RepoCacheData{
-		OSEnv:         osEnv,
-		SourceDir:     dirPath,
-		TargetPkg:     pkgPath,
-		IncludedRepos: repos,
+		OSEnv:          osEnv,
+		SourceDir:      dirPath,
+		TargetPkg:      pkgPath,
+		RequestedRepos: append([]string(nil), repos...),
+		IncludedRepos:  []string{},
 	}
 
 	// Get absolute base directory
@@ -517,13 +568,15 @@ func CacheWithResult(dirPath, pkgPath string, repos []string) *output.Result {
 			fmt.Sprintf("invalid base directory: %s", absBase)).WithData(data)
 	}
 
-	// Perform the cache operation (reuse existing Cache function logic, but capture result)
-	err = Cache(dirPath, pkgPath, repos)
+	// Perform the cache operation and retain the repositories that were actually
+	// included after missing entries were filtered.
+	includedRepos, err := cacheWithIncluded(dirPath, pkgPath, repos)
 	data.DurationMs = time.Since(startTime).Milliseconds()
 
 	if err != nil {
 		return output.Fail(output.CodeRepoCacheFailed, err.Error()).WithData(data)
 	}
+	data.IncludedRepos = includedRepos
 
 	// Cache has already atomically committed the package. Resolve its target
 	// path independently so it remains useful even when optional metadata
@@ -539,6 +592,19 @@ func CacheWithResult(dirPath, pkgPath string, repos []string) *output.Result {
 		data.PackageMD5 = checksum
 	}
 	return cacheResultAfterCommit(data, inspectErr)
+}
+
+func cacheDefaults(dirPath, pkgPath string, repos []string) (string, string, []string) {
+	if dirPath == "" {
+		dirPath = "/www"
+	}
+	if pkgPath == "" {
+		pkgPath = "/tmp/pkg.tgz"
+	}
+	if len(repos) == 0 {
+		repos = []string{"pigsty"}
+	}
+	return dirPath, pkgPath, repos
 }
 
 // cacheResultAfterCommit applies the post-commit reporting policy. Once the

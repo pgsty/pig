@@ -2,8 +2,10 @@ package repo
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"pig/internal/config"
+	"pig/internal/output"
 	"strings"
 	"testing"
 )
@@ -15,6 +17,114 @@ func writeRepoTestCommand(t *testing.T, dir, name, script string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestLegacyRepoScriptsAreFailFast(t *testing.T) {
+	for name, script := range map[string]string{
+		"el":  createRepoCmdEL("/srv/repo"),
+		"el7": createRepoCmdEL7("/srv/repo"),
+		"deb": createRepoCmdDEB("/srv/repo"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(script, "set -euo pipefail") || !strings.Contains(script, "cd -- /srv/repo\n") ||
+				!strings.Contains(script, "marker_tmp=") || !strings.Contains(script, `mv -f -- "$marker_tmp" "$marker"`) {
+				t.Fatalf("legacy script is not fail-fast:\n%s", script)
+			}
+			if name == "el" && !strings.Contains(script, "command -v repo2module") {
+				t.Fatalf("EL module metadata tools are not explicitly optional:\n%s", script)
+			}
+		})
+	}
+}
+
+func TestCreateReposWithResultFailsOnPartialSuccess(t *testing.T) {
+	oldType := config.OSType
+	oldVendor := config.OSVendor
+	oldUser := config.CurrentUser
+	config.OSType = config.DistroMAC
+	config.OSVendor = "macos"
+	config.CurrentUser = "repo-test-user"
+	t.Cleanup(func() {
+		config.OSType = oldType
+		config.OSVendor = oldVendor
+		config.CurrentUser = oldUser
+	})
+
+	binDir := t.TempDir()
+	writeRepoTestCommand(t, binDir, "sow", `#!/bin/sh
+repo_dir=
+for arg in "$@"; do repo_dir=$arg; done
+case "$repo_dir" in
+  *fail*) exit 23 ;;
+esac
+printf 'ok\n' > "$repo_dir/repo_complete"
+`)
+	t.Setenv("PATH", binDir)
+	t.Setenv("PIG_NO_SUDO", "1")
+
+	root := t.TempDir()
+	result := CreateReposWithResult([]string{
+		filepath.Join(root, "good"),
+		filepath.Join(root, "fail"),
+	})
+	if result.Success || result.Code != output.CodeRepoCreateFailed {
+		t.Fatalf("partial create result = %+v", result)
+	}
+	data, ok := result.Data.(*RepoCreateData)
+	if !ok || len(data.CreatedRepos) != 1 || len(data.FailedRepos) != 1 {
+		t.Fatalf("partial create data = %#v", result.Data)
+	}
+}
+
+func TestLegacyRepoScriptDoesNotLeaveMarkerWhenChecksumFails(t *testing.T) {
+	repoDir := t.TempDir()
+	marker := filepath.Join(repoDir, "repo_complete")
+	if err := os.WriteFile(marker, []byte("stale"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	writeRepoTestCommand(t, binDir, "createrepo_c", "#!/bin/sh\nexit 0\n")
+	writeRepoTestCommand(t, binDir, "md5sum", "#!/bin/sh\nexit 1\n")
+	scriptPath := filepath.Join(t.TempDir(), "create.sh")
+	if err := os.WriteFile(scriptPath, []byte(createRepoCmdEL7(repoDir)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := cmd.Run(); err == nil {
+		t.Fatal("checksum failure unexpectedly succeeded")
+	}
+	if _, err := os.Lstat(marker); !os.IsNotExist(err) {
+		t.Fatalf("failed script left completion marker: %v", err)
+	}
+}
+
+func TestLegacyELRepoTreatsModuleMetadataAsOptional(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, "package.rpm"), []byte("rpm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	writeRepoTestCommand(t, binDir, "createrepo_c", "#!/bin/sh\nexit 0\n")
+	writeRepoTestCommand(t, binDir, "repo2module", "#!/bin/sh\nexit 1\n")
+	writeRepoTestCommand(t, binDir, "modifyrepo_c", "#!/bin/sh\nexit 99\n")
+	writeRepoTestCommand(t, binDir, "md5sum", "#!/bin/sh\nprintf 'hash  %s\\n' \"$1\"\n")
+	scriptPath := filepath.Join(t.TempDir(), "create.sh")
+	if err := os.WriteFile(scriptPath, []byte(createRepoCmdEL(repoDir)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("optional module metadata failure aborted repo creation: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "optional module metadata was not generated") {
+		t.Fatalf("missing module warning: %s", output)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "repo_complete")); err != nil {
+		t.Fatalf("completion marker missing: %v", err)
+	}
 }
 
 func TestCreateRepoPrefersSow(t *testing.T) {
@@ -43,12 +153,12 @@ func TestCreateRepoPrefersSow(t *testing.T) {
 printf '%s\n' "$@" > "$SOW_TEST_LOG"
 repo_dir=
 for arg in "$@"; do repo_dir=$arg; done
-: > "$repo_dir/repo_complete"
+printf 'ok\n' > "$repo_dir/repo_complete"
 `)
 			writeRepoTestCommand(t, binDir, tt.legacyTool, "#!/bin/sh\nexit 0\n")
-			writeRepoTestCommand(t, binDir, "sh", `#!/bin/sh
+			writeRepoTestCommand(t, binDir, "bash", `#!/bin/sh
 printf 'called\n' > "$LEGACY_TEST_LOG"
-: > "$REPO_COMPLETE"
+printf 'ok\n' > "$REPO_COMPLETE"
 `)
 			t.Setenv("PATH", binDir)
 			t.Setenv("PIG_NO_SUDO", "1")
@@ -95,9 +205,9 @@ func TestCreateRepoReportsSowFailureWithoutFallback(t *testing.T) {
 			}
 			writeRepoTestCommand(t, binDir, "sow", "#!/bin/sh\nexit 23\n")
 			writeRepoTestCommand(t, binDir, tt.legacyTool, "#!/bin/sh\nexit 0\n")
-			writeRepoTestCommand(t, binDir, "sh", `#!/bin/sh
+			writeRepoTestCommand(t, binDir, "bash", `#!/bin/sh
 printf 'called\n' > "$LEGACY_TEST_LOG"
-: > "$REPO_COMPLETE"
+printf 'ok\n' > "$REPO_COMPLETE"
 `)
 			t.Setenv("PATH", binDir)
 			t.Setenv("PIG_NO_SUDO", "1")
@@ -151,11 +261,11 @@ func TestCreateRepoFallsBackToLegacyTools(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			writeRepoTestCommand(t, binDir, "sh", `#!/bin/sh
+			writeRepoTestCommand(t, binDir, "bash", `#!/bin/sh
 while IFS= read -r line || [ -n "$line" ]; do
   printf '%s\n' "$line"
 done < "$1" > "$SCRIPT_TEST_LOG"
-: > "$REPO_COMPLETE"
+printf 'ok\n' > "$REPO_COMPLETE"
 `)
 			t.Setenv("PATH", binDir)
 			t.Setenv("PIG_NO_SUDO", "1")
@@ -240,7 +350,7 @@ func TestCreateReposWithResultUsesSowOnMAC(t *testing.T) {
 printf '%s\n' "$@" > "$SOW_TEST_LOG"
 repo_dir=
 for arg in "$@"; do repo_dir=$arg; done
-: > "$repo_dir/repo_complete"
+printf 'ok\n' > "$repo_dir/repo_complete"
 `)
 	writeRepoTestCommand(t, binDir, "sudo", `#!/bin/sh
 printf 'called\n' > "$SUDO_TEST_LOG"
@@ -300,7 +410,7 @@ func TestCreateReposWithResultCreatesMACDirWithoutSudo(t *testing.T) {
 	writeRepoTestCommand(t, binDir, "sow", `#!/bin/sh
 repo_dir=
 for arg in "$@"; do repo_dir=$arg; done
-: > "$repo_dir/repo_complete"
+printf 'ok\n' > "$repo_dir/repo_complete"
 `)
 	writeRepoTestCommand(t, binDir, "sudo", `#!/bin/sh
 printf 'called\n' > "$SUDO_TEST_LOG"
@@ -376,7 +486,7 @@ func TestCreateRepoRejectsInvalidCompletionMarker(t *testing.T) {
 			legacyLog := filepath.Join(testDir, "legacy-called")
 			writeRepoTestCommand(t, binDir, "sow", "#!/bin/sh\nexit 0\n")
 			writeRepoTestCommand(t, binDir, "createrepo_c", "#!/bin/sh\nexit 0\n")
-			writeRepoTestCommand(t, binDir, "sh", `#!/bin/sh
+			writeRepoTestCommand(t, binDir, "bash", `#!/bin/sh
 printf 'called\n' > "$LEGACY_TEST_LOG"
 exit 42
 `)
@@ -392,5 +502,15 @@ exit 42
 				t.Fatalf("legacy tool was called after invalid sow marker: %v", err)
 			}
 		})
+	}
+}
+
+func TestVerifyRepoCompleteAcceptsEmptyRegularMarker(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "repo_complete"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyRepoComplete(dir); err != nil {
+		t.Fatalf("empty regular marker was rejected: %v", err)
 	}
 }

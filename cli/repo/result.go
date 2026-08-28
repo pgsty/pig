@@ -788,6 +788,7 @@ type RepoBootData struct {
 	SourcePkg      string         `json:"source_pkg" yaml:"source_pkg"`
 	TargetDir      string         `json:"target_dir" yaml:"target_dir"`
 	ExtractedFiles []string       `json:"extracted_files,omitempty" yaml:"extracted_files,omitempty"`
+	Reused         bool           `json:"reused,omitempty" yaml:"reused,omitempty"`
 	LocalRepoAdded bool           `json:"local_repo_added" yaml:"local_repo_added"`
 	LocalRepoPath  string         `json:"local_repo_path,omitempty" yaml:"local_repo_path,omitempty"`
 	DurationMs     int64          `json:"duration_ms" yaml:"duration_ms"`
@@ -797,6 +798,13 @@ type RepoBootData struct {
 func (r *RepoBootData) Text() string {
 	if r == nil {
 		return ""
+	}
+	if r.Reused {
+		message := fmt.Sprintf("Reused existing repo at %s", filepath.Join(r.TargetDir, "pigsty"))
+		if r.LocalRepoAdded {
+			message += fmt.Sprintf(", local repo added: %s", r.LocalRepoPath)
+		}
+		return message
 	}
 	if r.LocalRepoAdded {
 		return fmt.Sprintf("Bootstrapped from %s to %s, local repo added: %s", r.SourcePkg, r.TargetDir, r.LocalRepoPath)
@@ -810,13 +818,14 @@ func (r *RepoBootData) Text() string {
 
 // RepoCacheData is the DTO for repo cache command
 type RepoCacheData struct {
-	OSEnv         *OSEnvironment `json:"os_env" yaml:"os_env"`
-	SourceDir     string         `json:"source_dir" yaml:"source_dir"`
-	TargetPkg     string         `json:"target_pkg" yaml:"target_pkg"`
-	IncludedRepos []string       `json:"included_repos" yaml:"included_repos"`
-	PackageSize   int64          `json:"package_size" yaml:"package_size"`
-	PackageMD5    string         `json:"package_md5,omitempty" yaml:"package_md5,omitempty"`
-	DurationMs    int64          `json:"duration_ms" yaml:"duration_ms"`
+	OSEnv          *OSEnvironment `json:"os_env" yaml:"os_env"`
+	SourceDir      string         `json:"source_dir" yaml:"source_dir"`
+	TargetPkg      string         `json:"target_pkg" yaml:"target_pkg"`
+	RequestedRepos []string       `json:"requested_repos,omitempty" yaml:"requested_repos,omitempty"`
+	IncludedRepos  []string       `json:"included_repos" yaml:"included_repos"`
+	PackageSize    int64          `json:"package_size" yaml:"package_size"`
+	PackageMD5     string         `json:"package_md5,omitempty" yaml:"package_md5,omitempty"`
+	DurationMs     int64          `json:"duration_ms" yaml:"duration_ms"`
 }
 
 // Text returns a human-readable representation of RepoCacheData

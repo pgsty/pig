@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"pig/internal/config"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -68,6 +69,13 @@ func TestBootWithResultReusesCommittedRepoAsRoot(t *testing.T) {
 	if !result.Success || !called || !strings.Contains(result.Message, "Reused existing repo") {
 		t.Fatalf("unexpected reuse result: %+v", result)
 	}
+	if !strings.Contains(result.Detail, "offline package was not inspected") {
+		t.Fatalf("reuse detail = %q", result.Detail)
+	}
+	data, ok := result.Data.(*RepoBootData)
+	if !ok || !data.Reused || len(data.ExtractedFiles) != 0 {
+		t.Fatalf("reuse reported extracted files: %#v", result.Data)
+	}
 }
 
 func TestRegularFileAtRejectsSymlinkMarker(t *testing.T) {
@@ -82,6 +90,16 @@ func TestRegularFileAtRejectsSymlinkMarker(t *testing.T) {
 	}
 	if regularFileAt(link) {
 		t.Fatal("repo_complete symlink was accepted as a committed repository marker")
+	}
+}
+
+func TestRegularFileAtAcceptsEmptyMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "repo_complete")
+	if err := os.WriteFile(path, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if !regularFileAt(path) {
+		t.Fatal("empty regular repo_complete marker was rejected")
 	}
 }
 
@@ -197,6 +215,79 @@ func TestBootWithResultStreamsArchiveWithGo(t *testing.T) {
 	content, readErr := os.ReadFile(filepath.Join(target, "pigsty", "Packages"))
 	if !result.Success || readErr != nil || string(content) != "metadata" {
 		t.Fatalf("unexpected Go extraction result: %+v content=%q err=%v", result, content, readErr)
+	}
+}
+
+func TestCacheBootRoundTripWithMultipleRepos(t *testing.T) {
+	origEUID, origAddLocal := repoBootEUID, repoBootAddLocal
+	t.Cleanup(func() {
+		repoBootEUID, repoBootAddLocal = origEUID, origAddLocal
+	})
+	repoBootEUID = func() int { return 0 }
+	repoBootAddLocal = func(string) error { return nil }
+
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	for name, files := range map[string]map[string]string{
+		"pigsty": {"repo_complete": "ok", "Packages": "packages"},
+		"docker": {"metadata": "docker"},
+	} {
+		for file, body := range files {
+			path := filepath.Join(source, name, file)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	pkg := filepath.Join(root, "pkg.tgz")
+	if err := Cache(source, pkg, []string{"pigsty", "docker"}); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result := BootWithResult(pkg, target)
+	if !result.Success {
+		t.Fatalf("round-trip boot failed: %+v", result)
+	}
+	data, ok := result.Data.(*RepoBootData)
+	if !ok || data.Reused || !reflect.DeepEqual(data.ExtractedFiles, []string{"docker", "pigsty"}) {
+		t.Fatalf("round-trip extraction data = %#v", result.Data)
+	}
+	for path, want := range map[string]string{
+		"pigsty/Packages": "packages",
+		"docker/metadata": "docker",
+	} {
+		content, err := os.ReadFile(filepath.Join(target, path))
+		if err != nil || string(content) != want {
+			t.Fatalf("round-trip %s = %q, err=%v", path, content, err)
+		}
+	}
+}
+
+func TestRepoCommitOrderMovesPigstyLast(t *testing.T) {
+	stage := t.TempDir()
+	for _, name := range []string{"pigsty", "zeta", "docker"} {
+		if err := os.Mkdir(filepath.Join(stage, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := os.ReadDir(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordered := repoCommitOrder(entries)
+	got := make([]string, 0, len(ordered))
+	for _, entry := range ordered {
+		got = append(got, entry.Name())
+	}
+	want := []string{"docker", "zeta", "pigsty"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("commit order = %v, want %v", got, want)
 	}
 }
 
