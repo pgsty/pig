@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
+
+	"pig/internal/config"
 
 	"github.com/spf13/cobra"
 )
@@ -65,5 +69,46 @@ func TestBuildRepoModulesAddsBeta(t *testing.T) {
 				t.Fatalf("buildRepoModules(%v, %v) = %v, want %v", tt.args, tt.beta, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildProxyMachineContractMatchesSideEffects(t *testing.T) {
+	want := map[string]string{
+		"type":       "action",
+		"volatility": "volatile",
+		"parallel":   "unsafe",
+		"os_user":    "root",
+	}
+	for key, expected := range want {
+		if got := buildProxyCmd.Annotations[key]; got != expected {
+			t.Errorf("build proxy annotation %s = %q, want %q", key, got, expected)
+		}
+	}
+}
+
+func TestBuildProxyStructuredOutputRedactsCredential(t *testing.T) {
+	original := config.OutputFormat
+	config.OutputFormat = config.OUTPUT_JSON
+	t.Cleanup(func() { config.OutputFormat = original })
+
+	const credential = "SECRET-UUID-abcd-1234"
+	var runErr error
+	raw := captureStdout(t, func() {
+		runErr = buildProxyCmd.RunE(buildProxyCmd, []string{credential})
+	})
+	if runErr == nil {
+		t.Fatal("malformed proxy target unexpectedly succeeded")
+	}
+	if strings.Contains(raw, credential) {
+		t.Fatalf("structured proxy result leaked credential: %s", raw)
+	}
+	var payload struct {
+		Data legacyCommandData `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("decode structured proxy result: %v\n%s", err, raw)
+	}
+	if !reflect.DeepEqual(payload.Data.Args, []string{"<redacted>"}) {
+		t.Fatalf("structured proxy args = %#v, want explicit redaction", payload.Data.Args)
 	}
 }

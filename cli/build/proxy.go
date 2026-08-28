@@ -55,6 +55,7 @@ func SetupProxy(remote string, local string) error {
 
 	// 3. Write proxy config
 	proxyConfig := fmt.Sprintf(proxyConfigTemplate, localPort, localHost, host, port, userID)
+	// The packaged unit runs as v2ray:v2ray on both RPM and DEB systems.
 	if err := utils.PutFileMode(proxyConfigPath, []byte(proxyConfig), 0640); err != nil {
 		return fmt.Errorf("failed to write %s: %v", proxyConfigPath, err)
 	} else if err := utils.SudoCommand([]string{"chown", "root:v2ray", proxyConfigPath}); err != nil {

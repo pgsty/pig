@@ -47,7 +47,8 @@ Environment Setup:
   pig build tool  [mini|full|...]  # init build toolset
   pig build rust  [-y] [-m]        # install Rust toolchain
   pig build pgrx  [-v <ver>] [-b]  # install & init pgrx (` + build.DefaultPgrxVersion + `)
-  pig build proxy [id@host:port ]  # init build proxy (optional)
+  pig build proxy                  # install or verify the vray package
+  pig build proxy id@host:port     # configure the optional build proxy
 
 Package Building:
   pig build pkg   [ext|pkg...]     # complete pipeline: get + dep + ext
@@ -134,11 +135,15 @@ func moduleArgsContain(args []string, target string) bool {
 var buildProxyCmd = &cobra.Command{
 	Use:         "proxy <id@remote> <local>",
 	Short:       "Initialize build proxy",
-	Annotations: ancsAnn("pig build proxy", "action", "stable", "safe", true, "low", "none", "current", 5000),
+	Annotations: ancsAnn("pig build proxy", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
 	Args:        cobra.MaximumNArgs(2),
 	Aliases:     []string{"x"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModuleBuild, "pig build proxy", args, nil, func() error {
+		structuredArgs := append([]string(nil), args...)
+		if len(structuredArgs) > 0 {
+			structuredArgs[0] = "<redacted>"
+		}
+		return runLegacyStructured(legacyModuleBuild, "pig build proxy", structuredArgs, nil, func() error {
 			var remote, local string
 			if len(args) == 0 {
 				return build.InstallProxy()
