@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"pig/internal/utils"
@@ -48,11 +49,13 @@ func DetectRole(cfg *Config, opts *RoleOptions) (*RoleResult, error) {
 	dbsu := GetDbSU(cfg)
 	verbose := opts != nil && opts.Verbose
 
-	// Strategy 1: Check processes first (quick, non-invasive)
+	// Strategy 1: Bind process evidence to the requested postmaster.pid.
 	if verbose {
 		fmt.Printf("%s[1] Checking PostgreSQL processes...%s\n", utils.ColorCyan, utils.ColorReset)
 	}
-	psResult := roleFromProcesses(dbsu, verbose)
+	running, targetPID := CheckPostgresRunningAsDBSU(dbsu, dataDir)
+	psResult := roleFromProcesses(dbsu, targetPID, verbose)
+	psResult.Alive = running
 	if verbose {
 		fmt.Printf("    Process check: alive=%v, role=%s\n", psResult.Alive, psResult.Role)
 	}
@@ -114,16 +117,18 @@ func DetectRole(cfg *Config, opts *RoleOptions) (*RoleResult, error) {
 	}, nil
 }
 
-// roleFromProcesses checks PostgreSQL processes to determine role
-func roleFromProcesses(dbsu string, verbose bool) *RoleResult {
+// roleFromProcesses checks only the requested postmaster and its descendants.
+func roleFromProcesses(dbsu string, targetPID int, verbose bool) *RoleResult {
 	result := &RoleResult{
 		Role:   RoleUnknown,
 		Alive:  false,
 		Source: "ps",
 	}
 
-	// Get processes for postgres user
-	cmd := exec.Command("ps", "h", "-u", dbsu, "-o", "command")
+	if targetPID <= 0 {
+		return result
+	}
+	cmd := exec.Command("ps", "h", "-u", dbsu, "-o", "pid=,ppid=,command=")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = nil
@@ -135,7 +140,7 @@ func roleFromProcesses(dbsu string, verbose bool) *RoleResult {
 		return result
 	}
 
-	evidence := inspectPostgresProcesses(out.String())
+	evidence := inspectPostgresProcessTree(out.String(), targetPID)
 
 	if verbose {
 		fmt.Printf("    hasMainProcess=%v, hasRecovery=%v, hasWalreceiver=%v\n",
@@ -160,42 +165,56 @@ type postgresProcessEvidence struct {
 	walreceiver bool
 }
 
-var postgresBackgroundProcesses = []string{"logger", "checkpointer", "background writer", "stats collector", "walwriter"}
+type postgresProcess struct {
+	pid     int
+	ppid    int
+	command string
+}
 
-func inspectPostgresProcesses(output string) postgresProcessEvidence {
-	var evidence postgresProcessEvidence
+func inspectPostgresProcessTree(output string, targetPID int) postgresProcessEvidence {
+	processes := make(map[int]postgresProcess)
 	for _, raw := range strings.Split(output, "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" {
+		fields := strings.Fields(raw)
+		if len(fields) < 3 {
 			continue
 		}
-		if strings.Contains(line, "post") && strings.Contains(line, "-D") {
-			evidence.alive = true
-		}
-		if !strings.Contains(line, "postgres:") {
+		pid, pidErr := strconv.Atoi(fields[0])
+		ppid, ppidErr := strconv.Atoi(fields[1])
+		if pidErr != nil || ppidErr != nil {
 			continue
 		}
-		if containsAny(line, postgresBackgroundProcesses) || strings.Contains(line, "walsender") {
-			evidence.alive = true
+		processes[pid] = postgresProcess{pid: pid, ppid: ppid, command: strings.Join(fields[2:], " ")}
+	}
+	if _, exists := processes[targetPID]; !exists {
+		return postgresProcessEvidence{}
+	}
+
+	selected := map[int]struct{}{targetPID: {}}
+	for changed := true; changed; {
+		changed = false
+		for pid, process := range processes {
+			if _, exists := selected[pid]; exists {
+				continue
+			}
+			if _, parentSelected := selected[process.ppid]; parentSelected {
+				selected[pid] = struct{}{}
+				changed = true
+			}
 		}
-		if strings.Contains(line, "walreceiver") {
+	}
+
+	evidence := postgresProcessEvidence{alive: true}
+	for pid := range selected {
+		command := strings.ToLower(processes[pid].command)
+		if strings.Contains(command, "walreceiver") {
 			evidence.walreceiver = true
 			evidence.recovery = true
 		}
-		if strings.Contains(line, "recovering") {
+		if strings.Contains(command, "recovering") {
 			evidence.recovery = true
 		}
 	}
 	return evidence
-}
-
-func containsAny(value string, substrings []string) bool {
-	for _, substring := range substrings {
-		if strings.Contains(value, substring) {
-			return true
-		}
-	}
-	return false
 }
 
 // roleFromSQL queries PostgreSQL to determine role
@@ -215,8 +234,15 @@ func roleFromSQL(cfg *Config, dbsu string, verbose bool) *RoleResult {
 		return result
 	}
 
-	// Build psql command to check pg_is_in_recovery()
-	cmdArgs := []string{pg.Psql(), "-AXtqw", "-d", "postgres", "-c", "SELECT pg_is_in_recovery()"}
+	dataDir := GetPgData(cfg)
+	postmaster, err := ReadPostmasterPidInfoAsDBSU(dbsu, dataDir)
+	if err != nil {
+		if verbose {
+			fmt.Printf("    cannot read target postmaster.pid: %v\n", err)
+		}
+		return result
+	}
+	cmdArgs := roleSQLArgs(pg.Psql(), postmaster)
 
 	// Capture stdout only so diagnostics cannot corrupt the scalar result.
 	output, err := utils.DBSUCommandStdout(dbsu, cmdArgs)
@@ -227,21 +253,55 @@ func roleFromSQL(cfg *Config, dbsu string, verbose bool) *RoleResult {
 		return result
 	}
 
-	output = strings.TrimSpace(output)
-	result.Alive = true
-
-	switch output {
-	case "f":
-		result.Role = RolePrimary
-	case "t":
-		result.Role = RoleReplica
-	default:
+	connectedDataDir, role, ok := parseRoleSQLResult(output)
+	if !ok {
 		if verbose {
 			fmt.Printf("    unexpected pg_is_in_recovery() result: %q\n", output)
 		}
+		return result
 	}
-
+	if !sameDataDirAsDBSU(dbsu, connectedDataDir, dataDir) {
+		if verbose {
+			fmt.Printf("    connected data directory %s does not match target %s\n", connectedDataDir, dataDir)
+		}
+		return result
+	}
+	result.Alive = true
+	result.Role = role
 	return result
+}
+
+func roleSQLArgs(psql string, info PostmasterPidInfo) []string {
+	args := []string{psql, "-AXtqw", "-F", "\t", "-p", strconv.Itoa(info.Port)}
+	if info.SocketDir != "" {
+		args = append(args, "-h", info.SocketDir)
+	}
+	return append(args, "-d", "postgres", "-c", "SELECT current_setting('data_directory'), pg_is_in_recovery()")
+}
+
+func parseRoleSQLResult(output string) (string, Role, bool) {
+	fields := strings.Split(strings.TrimSpace(output), "\t")
+	if len(fields) != 2 || strings.TrimSpace(fields[0]) == "" {
+		return "", RoleUnknown, false
+	}
+	switch strings.TrimSpace(fields[1]) {
+	case "f":
+		return strings.TrimSpace(fields[0]), RolePrimary, true
+	case "t":
+		return strings.TrimSpace(fields[0]), RoleReplica, true
+	default:
+		return "", RoleUnknown, false
+	}
+}
+
+func sameDataDirAsDBSU(dbsu, left, right string) bool {
+	if filepath.Clean(left) == filepath.Clean(right) {
+		return true
+	}
+	leftResolved, leftErr := resolvePathAsDBSU(dbsu, left)
+	rightResolved, rightErr := resolvePathAsDBSU(dbsu, right)
+	return leftErr == nil && rightErr == nil && leftResolved != "" && rightResolved != "" &&
+		filepath.Clean(leftResolved) == filepath.Clean(rightResolved)
 }
 
 // roleFromDataDir checks data directory files to determine role
