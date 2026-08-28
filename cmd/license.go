@@ -142,7 +142,7 @@ var licenseIssueCmd = &cobra.Command{
 				return err
 			}
 
-			license.Manager.Describe(lic)
+			license.Manager.DescribeWithToken(lic)
 			return nil
 		})
 	},
@@ -156,7 +156,7 @@ var licenseVerifyCmd = &cobra.Command{
 	Aliases:     []string{"v"},
 	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModuleSty, "pig license verify", args, nil, func() error {
+		return runLegacyStructured(legacyModuleSty, "pig license verify", []string{"<redacted>"}, nil, func() error {
 			logrus.Debug("Starting license verification process")
 			lic, err := license.GetLicense(args[0])
 			if err != nil {
@@ -202,7 +202,7 @@ var licenseAddCmd = &cobra.Command{
 	Aliases:     []string{"a"},
 	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLegacyStructured(legacyModuleSty, "pig license add", args, nil, func() error {
+		return runLegacyStructured(legacyModuleSty, "pig license add", []string{"<redacted>"}, nil, func() error {
 			logrus.Debug("Starting license add process")
 			// Get and validate the license
 			lic, err := license.GetLicense(args[0])

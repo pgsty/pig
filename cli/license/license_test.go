@@ -2,6 +2,10 @@ package license
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,13 +275,14 @@ func TestDescribe(t *testing.T) {
 	}
 
 	validClaims := jwt.MapClaims{
-		"aud": "test-user",
-		"iss": "test-issuer",
-		"sub": "type=pro,node=1",
-		"exp": time.Now().Add(24 * time.Hour).Unix(),
-		"nbf": time.Now().Add(-1 * time.Hour).Unix(),
-		"iat": time.Now().Unix(),
-		"jti": "test-id",
+		"aud":          "test-user",
+		"iss":          "test-issuer",
+		"sub":          "type=pro,node=1",
+		"exp":          time.Now().Add(24 * time.Hour).Unix(),
+		"nbf":          time.Now().Add(-1 * time.Hour).Unix(),
+		"iat":          time.Now().Unix(),
+		"jti":          "test-id",
+		"private_note": "do-not-disclose",
 	}
 	validToken, err := IssueJWT(privKey, validClaims)
 	if err != nil {
@@ -307,6 +312,15 @@ func TestDescribe(t *testing.T) {
 		{"Unsupported Algorithm", unsupportedToken},
 	}
 
+	hidden := captureLicenseStdout(t, func() { lm.Describe(validToken) })
+	if strings.Contains(hidden, validToken) || strings.Contains(hidden, "raw :") || strings.Contains(hidden, "do-not-disclose") {
+		t.Fatalf("Describe exposed raw token: %q", hidden)
+	}
+	revealed := captureLicenseStdout(t, func() { lm.DescribeWithToken(validToken) })
+	if !strings.Contains(revealed, validToken) {
+		t.Fatalf("DescribeWithToken did not return newly issued token: %q", revealed)
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// We can't easily assert the output since it goes to logrus
@@ -314,4 +328,56 @@ func TestDescribe(t *testing.T) {
 			lm.Describe(tt.token)
 		})
 	}
+}
+
+func TestWriteHistoryProtectsAndFingerprintsToken(t *testing.T) {
+	originalHome := HomeDir
+	HomeDir = t.TempDir()
+	t.Cleanup(func() { HomeDir = originalHome })
+
+	token := "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJl"
+	history := filepath.Join(HomeDir, issueHistory)
+	if err := os.WriteFile(history, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	WriteHistory("now", token)
+
+	info, err := os.Stat(history)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("history mode = %04o, want 0600", info.Mode().Perm())
+	}
+	content, err := os.ReadFile(history)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), token) || !strings.Contains(string(content), tokenFingerprint(token)) {
+		t.Fatalf("history did not replace token with fingerprint: %q", content)
+	}
+}
+
+func captureLicenseStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	original := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = original }()
+
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

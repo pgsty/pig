@@ -76,6 +76,45 @@ func TestRunLegacyStructuredCapturesCommandOutput(t *testing.T) {
 	}
 }
 
+func TestRunLegacyStructuredSensitiveRedactsCapturedOutput(t *testing.T) {
+	origFormat := config.OutputFormat
+	config.OutputFormat = config.OUTPUT_JSON
+	t.Cleanup(func() { config.OutputFormat = origFormat })
+
+	const secret = "password=do-not-emit"
+	raw := captureStdout(t, func() {
+		err := runLegacyStructuredSensitiveWithNextActions(
+			990000,
+			"test sensitive",
+			[]string{"password=<redacted>"},
+			nil,
+			nil,
+			func() error {
+				fmt.Println(secret)
+				return nil
+			},
+		)
+		if err != nil {
+			t.Fatalf("sensitive wrapper returned error: %v", err)
+		}
+	})
+	if strings.Contains(raw, secret) {
+		t.Fatalf("sensitive output leaked: %s", raw)
+	}
+	var payload struct {
+		Data legacyCommandData `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("decode structured output: %v; raw=%q", err, raw)
+	}
+	if !payload.Data.OutputRedacted || payload.Data.CapturedOutput != "" || payload.Data.OutputTruncated {
+		t.Fatalf("unexpected sensitive data envelope: %+v", payload.Data)
+	}
+	if len(payload.Data.Args) != 1 || payload.Data.Args[0] != "password=<redacted>" {
+		t.Fatalf("redacted args = %#v", payload.Data.Args)
+	}
+}
+
 func TestRunLegacyStructuredUsesExecutorStatusCode(t *testing.T) {
 	original := config.OutputFormat
 	config.OutputFormat = config.OUTPUT_JSON

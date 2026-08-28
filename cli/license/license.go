@@ -3,6 +3,7 @@ package license
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/csv"
 	"encoding/pem"
@@ -58,7 +59,6 @@ type LicenseManager struct {
 	Active     *jwt.Token
 	License    string
 	Valid      bool
-	Hide       bool
 	publicKeys []*ecdsa.PublicKey
 	privateKey *ecdsa.PrivateKey
 }
@@ -172,10 +172,13 @@ func (lm *LicenseManager) IssueLicense(iss, name string, start time.Time, month 
 		"jti": jti.String(),
 	}
 	lic, err := IssueJWT(lm.privateKey, claims)
+	if err != nil {
+		return "", err
+	}
 	WriteHistory([]string{now.Format(time.DateTime), jti.String(), name, iss, ltype,
 		fmt.Sprintf("%d month", month), fmt.Sprintf("%d node", node),
-		nbf.Format(time.DateOnly), exp.Format(time.DateOnly), lic}...)
-	return lic, err
+		nbf.Format(time.DateOnly), exp.Format(time.DateOnly), tokenFingerprint(lic)}...)
+	return lic, nil
 }
 
 // Validate JWT from all public keys
@@ -202,6 +205,16 @@ func (lm *LicenseManager) DescribeDefault() {
 
 // Describe will print license information
 func (lm *LicenseManager) Describe(tokenString string) {
+	lm.describe(tokenString, false)
+}
+
+// DescribeWithToken prints license information and the raw token. It is only
+// appropriate when returning a newly issued credential to its caller.
+func (lm *LicenseManager) DescribeWithToken(tokenString string) {
+	lm.describe(tokenString, true)
+}
+
+func (lm *LicenseManager) describe(tokenString string, revealToken bool) {
 	t, err := lm.Validate(tokenString)
 	if err != nil {
 		logrus.Debugf("invalid token: %v", err)
@@ -222,7 +235,7 @@ func (lm *LicenseManager) Describe(tokenString string) {
 		logrus.Error("failed to parse claims")
 		return
 	}
-	if !lm.Hide {
+	if revealToken {
 		fmt.Printf("raw : %s\n", tokenString)
 	}
 	sig := "invalid"
@@ -251,10 +264,11 @@ func (lm *LicenseManager) Describe(tokenString string) {
 	if jti, ok := claims["jti"]; ok {
 		fmt.Printf("jti : %-36s %s\n", jti, "(Token ID)")
 	}
-	// iterate other claims
-	for k, v := range claims {
-		if _, found := JwtClaimList[k]; !found {
-			fmt.Printf("    %s: %v\n", k, v)
+	if revealToken {
+		for k, v := range claims {
+			if _, found := JwtClaimList[k]; !found {
+				fmt.Printf("    %s: %v\n", k, v)
+			}
 		}
 	}
 }
@@ -294,17 +308,34 @@ func (lm *LicenseManager) LicenseType() string {
 
 // WriteHistory writes a license history record to a CSV file, it's ok to skip error
 func WriteHistory(record ...string) {
+	record = append([]string(nil), record...)
+	if last := len(record) - 1; last >= 0 && IsValidJWT(record[last]) {
+		record[last] = tokenFingerprint(record[last])
+	}
 	home := HomeDir
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
 	historyFile := filepath.Join(home, issueHistory)
-	f, err := os.OpenFile(historyFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if info, err := os.Lstat(historyFile); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			logrus.Errorf("license history is not a regular file: %s", historyFile)
+			return
+		}
+	} else if !os.IsNotExist(err) {
+		logrus.Errorf("failed to inspect history file: %v", err)
+		return
+	}
+	f, err := os.OpenFile(historyFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		logrus.Errorf("failed to open history file: %v", err)
 		return
 	}
 	defer f.Close()
+	if err := f.Chmod(0600); err != nil {
+		logrus.Errorf("failed to protect history file: %v", err)
+		return
+	}
 
 	// Write CSV record
 	writer := csv.NewWriter(f)
@@ -312,8 +343,13 @@ func WriteHistory(record ...string) {
 	if err := writer.Write(record); err != nil {
 		logrus.Errorf("failed to write history: %v", err)
 	} else {
-		logrus.Debugf("wrote license history %s: %s", historyFile, strings.Join(record, ","))
+		logrus.Debugf("wrote license history: %s", historyFile)
 	}
+}
+
+func tokenFingerprint(token string) string {
+	digest := sha256.Sum256([]byte(token))
+	return fmt.Sprintf("sha256:%x", digest[:])
 }
 
 // ReadHistory will tabulate the license issue history
@@ -323,6 +359,10 @@ func ReadHistory() {
 		home, _ = os.UserHomeDir()
 	}
 	historyFile := filepath.Join(home, issueHistory)
+	if info, err := os.Lstat(historyFile); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular()) {
+		logrus.Errorf("license history is not a regular file: %s", historyFile)
+		return
+	}
 
 	f, err := os.Open(historyFile)
 	if err != nil {
@@ -333,12 +373,21 @@ func ReadHistory() {
 		return
 	}
 	defer f.Close()
+	if err := f.Chmod(0600); err != nil {
+		logrus.Errorf("failed to protect history file: %v", err)
+		return
+	}
 
 	reader := csv.NewReader(f)
 	records, err := reader.ReadAll()
 	if err != nil {
 		logrus.Errorf("failed to read history: %v", err)
 		return
+	}
+	for _, record := range records {
+		if last := len(record) - 1; last >= 0 && IsValidJWT(record[last]) {
+			record[last] = tokenFingerprint(record[last])
+		}
 	}
 
 	if len(records) == 0 {
@@ -471,5 +520,13 @@ func PublicKeysEqual(k1, k2 *ecdsa.PublicKey) bool {
 
 func AddLicense(license string) error {
 	viper.Set("license", license)
-	return viper.WriteConfig()
+	if err := viper.WriteConfig(); err != nil {
+		return err
+	}
+	if path := viper.ConfigFileUsed(); path != "" {
+		if err := os.Chmod(path, 0600); err != nil {
+			return fmt.Errorf("failed to protect config file: %w", err)
+		}
+	}
+	return nil
 }

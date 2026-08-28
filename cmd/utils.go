@@ -37,7 +37,12 @@ type legacyCommandData struct {
 	Args            []string               `json:"args,omitempty" yaml:"args,omitempty"`
 	Params          map[string]interface{} `json:"params,omitempty" yaml:"params,omitempty"`
 	CapturedOutput  string                 `json:"captured_output,omitempty" yaml:"captured_output,omitempty"`
+	OutputRedacted  bool                   `json:"output_redacted,omitempty" yaml:"output_redacted,omitempty"`
 	OutputTruncated bool                   `json:"output_truncated,omitempty" yaml:"output_truncated,omitempty"`
+}
+
+type legacyStructuredPolicy struct {
+	RedactCapturedOutput bool
 }
 
 type captureResult struct {
@@ -147,15 +152,19 @@ func runLegacyStructured(module int, command string, args []string, params map[s
 	return runLegacyStructuredContract(module, command, "", args, params, nil, fn)
 }
 
-func runLegacyStructuredWithNextActions(module int, command string, args []string, params map[string]interface{}, nextActions []output.NextAction, fn func() error) error {
-	return runLegacyStructuredContract(module, command, "", args, params, nextActions, fn)
-}
-
 func runLegacyStructuredKind(module int, command, kind string, args []string, params map[string]interface{}, fn func() error) error {
 	return runLegacyStructuredContract(module, command, kind, args, params, nil, fn)
 }
 
+func runLegacyStructuredSensitiveWithNextActions(module int, command string, args []string, params map[string]interface{}, nextActions []output.NextAction, fn func() error) error {
+	return runLegacyStructuredContractWithPolicy(module, command, "", args, params, nextActions, legacyStructuredPolicy{RedactCapturedOutput: true}, fn)
+}
+
 func runLegacyStructuredContract(module int, command, kind string, args []string, params map[string]interface{}, nextActions []output.NextAction, fn func() error) error {
+	return runLegacyStructuredContractWithPolicy(module, command, kind, args, params, nextActions, legacyStructuredPolicy{}, fn)
+}
+
+func runLegacyStructuredContractWithPolicy(module int, command, kind string, args []string, params map[string]interface{}, nextActions []output.NextAction, policy legacyStructuredPolicy, fn func() error) error {
 	if fn == nil {
 		return fmt.Errorf("nil command executor for %s", command)
 	}
@@ -173,11 +182,12 @@ func runLegacyStructuredContract(module int, command, kind string, args []string
 	}
 
 	captured, truncated, err := captureLegacyOutputUnlocked(fn, legacyOutputCaptureLimit)
-	if outputText := strings.TrimSpace(ansiColorSequence.ReplaceAllString(captured, "")); outputText != "" {
+	outputText := strings.TrimSpace(ansiColorSequence.ReplaceAllString(captured, ""))
+	if policy.RedactCapturedOutput {
+		data.OutputRedacted = outputText != "" || truncated
+	} else {
 		data.CapturedOutput = outputText
-	}
-	if truncated {
-		data.OutputTruncated = true
+		data.OutputTruncated = truncated
 	}
 
 	if err != nil {
