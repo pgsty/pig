@@ -96,8 +96,8 @@ release:
     name: pig
   draft: false
   prerelease: false
-  mode: replace
-  replace_existing_artifacts: true
+  mode: keep-existing
+  replace_existing_artifacts: false
   name_template: "{{.ProjectName}}-v{{.Version}}"
   disable: false
 

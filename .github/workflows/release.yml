@@ -25,6 +25,21 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Run tests
+        run: go test -shuffle=on -count=1 ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Install vulnerability scanner
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+
+      - name: Run vulnerability scan
+        run: govulncheck ./...
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7.2.3
         with:

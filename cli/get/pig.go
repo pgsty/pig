@@ -1,9 +1,13 @@
 package get
 
 import (
+	"bufio"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/utils"
 	"regexp"
@@ -38,6 +42,7 @@ func UpdatePig(pigVer, region string) error {
 		}
 		logrus.Infof("update pig to desired version %s", pigVer)
 	}
+	pigVer = strings.TrimPrefix(pigVer, "v")
 
 	if pigVer == config.PigVersion {
 		logrus.Infof("pig %s already installed, reinstall", pigVer)
@@ -80,25 +85,91 @@ func UpdatePig(pigVer, region string) error {
 	if err := utils.DownloadFile(packageURL, downloadTo); err != nil {
 		return fmt.Errorf("failed to download package: %v", err)
 	}
+	checksumsURLs := []string{
+		fmt.Sprintf("%s/pkg/pig/v%s/checksums.txt", baseURL, pigVer),
+		fmt.Sprintf("https://github.com/pgsty/pig/releases/download/v%s/checksums.txt", pigVer),
+	}
+	if err := verifyReleaseChecksum(checksumsURLs, filename, downloadTo); err != nil {
+		return fmt.Errorf("failed to verify package checksum: %w", err)
+	}
 	logrus.Infof("pig %s package downloaded to %s", config.OSType, downloadTo)
 
-	// run sudo shell command to remove current package and install the new one
-	switch config.OSType {
-	case config.DistroEL:
-		pkgManager := "dnf"
-		if config.OSMajor == 7 {
-			pkgManager = "yum"
-		}
-		if err := utils.SudoCommand([]string{pkgManager, "remove", "-y", "pig"}); err != nil {
-			logrus.Warnf("failed to remove current package: %v", err)
-		}
-		return utils.SudoCommand([]string{"rpm", "-i", downloadTo})
-	case config.DistroDEB:
-		if err := utils.SudoCommand([]string{"apt", "remove", "-y", "pig"}); err != nil {
-			logrus.Warnf("failed to remove current package: %v", err)
-		}
-		return utils.SudoCommand([]string{"dpkg", "-i", downloadTo})
+	installCommand, err := utils.LocalPackageUpgradeCommand(config.OSType, downloadTo)
+	if err != nil {
+		return err
+	}
+	return utils.SudoCommand(installCommand)
+}
 
+const maxReleaseChecksumsBytes = 1 << 20
+
+var sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+func verifyReleaseChecksum(checksumsURLs []string, filename, packagePath string) error {
+	var failures []string
+	for _, checksumsURL := range checksumsURLs {
+		expected, err := fetchReleaseChecksum(checksumsURL, filename)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", checksumsURL, err))
+			continue
+		}
+		return verifyFileSHA256(packagePath, filename, expected)
+	}
+	return fmt.Errorf("no usable checksum source for %s: %s", filename, strings.Join(failures, "; "))
+}
+
+func fetchReleaseChecksum(checksumsURL, filename string) (string, error) {
+	resp, err := utils.DefaultClient().Get(checksumsURL)
+	if err != nil {
+		return "", fmt.Errorf("download checksums: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download checksums: unexpected HTTP status %s", resp.Status)
+	}
+	content, err := io.ReadAll(io.LimitReader(resp.Body, maxReleaseChecksumsBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read checksums: %w", err)
+	}
+	if len(content) > maxReleaseChecksumsBytes {
+		return "", fmt.Errorf("checksums file exceeds %d bytes", maxReleaseChecksumsBytes)
+	}
+
+	expected := ""
+	scanner := bufio.NewScanner(strings.NewReader(string(content)))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		candidate := strings.TrimPrefix(fields[len(fields)-1], "*")
+		if filepath.Base(candidate) == filename {
+			expected = strings.ToLower(fields[0])
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("parse checksums: %w", err)
+	}
+	if !sha256Pattern.MatchString(expected) {
+		return "", fmt.Errorf("no valid SHA-256 checksum found for %s", filename)
+	}
+	return expected, nil
+}
+
+func verifyFileSHA256(packagePath, filename, expected string) error {
+	f, err := os.Open(packagePath)
+	if err != nil {
+		return fmt.Errorf("open package: %w", err)
+	}
+	defer f.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return fmt.Errorf("hash package: %w", err)
+	}
+	actual := fmt.Sprintf("%x", hash.Sum(nil))
+	if actual != expected {
+		return fmt.Errorf("SHA-256 mismatch for %s: got %s, expected %s", filename, actual, expected)
 	}
 	return nil
 }

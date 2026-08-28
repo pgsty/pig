@@ -13,11 +13,15 @@ DOCS_DIR?=../pig.pgsty.com
 # Build Variables
 BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 REVISION=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+EXACT_TAG=$(shell git describe --tags --exact-match 2>/dev/null || true)
+WORKTREE_STATE=$(shell test -z "$$(git status --porcelain 2>/dev/null)" && echo clean || echo dirty)
 BUILD_DATE=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 GO_VERSION=$(shell go version | awk '{print $$3}')
+DEV_DIRTY_SUFFIX=$(if $(filter dirty,$(WORKTREE_STATE)),.dirty)
+BUILD_PIG_VERSION=$(if $(and $(filter $(VERSION),$(EXACT_TAG)),$(filter clean,$(WORKTREE_STATE))),$(PIG_VERSION),$(PIG_VERSION)-dev.$(REVISION)$(DEV_DIRTY_SUFFIX))
 
 # LD Flags for injecting build-time variables
-LD_FLAGS=-X 'pig/internal/config.PigVersion=$(PIG_VERSION)' \
+LD_FLAGS=-X 'pig/internal/config.PigVersion=$(BUILD_PIG_VERSION)' \
         -X 'pig/internal/config.PigstyVersion=$(PIGSTY_VERSION)' \
         -X 'pig/internal/config.Branch=$(BRANCH)' \
         -X 'pig/internal/config.Revision=$(REVISION)' \
@@ -61,11 +65,18 @@ gr-local:
 	$(GORELEASER) release --clean --skip=publish
 
 # Release with goreleaser (requires git tag)
-gr-release:
+release-guard:
+	@test "$(EXACT_TAG)" = "$(VERSION)" || { echo "release requires HEAD at exact tag $(VERSION), got $(EXACT_TAG)" >&2; exit 1; }
+	@test -z "$$(git status --porcelain)" || { echo "release requires a clean worktree" >&2; exit 1; }
+	go mod verify
+	go test ./...
+	go vet ./...
+
+gr-release: release-guard
 	$(GORELEASER) release --clean
 
 # Production release (set prerelease to false in config first)
-gr-prod-release:
+gr-prod-release: release-guard
 	@echo "Creating production release (will notify subscribers if announce.skip is false)..."
 	$(GORELEASER) release --clean
 
@@ -81,11 +92,13 @@ release-new: gr-release
 #                       Development                           #
 ###############################################################
 u: upload
-upload:
+upload: release-guard
 	bin/upload.sh $(VERSION)
 tag:
-	git tag -d $(VERSION) || true
-	git tag $(VERSION)
+	@printf '%s\n' "$(VERSION)" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "invalid release version: $(VERSION)" >&2; exit 2; }
+	@test -z "$$(git status --porcelain)" || { echo "tag requires a clean worktree" >&2; exit 1; }
+	@if git rev-parse -q --verify "refs/tags/$(VERSION)" >/dev/null; then echo "refusing to move existing tag $(VERSION)" >&2; exit 1; fi
+	git tag -a $(VERSION) -m "Release $(VERSION)"
 run:
 	go run .
 r: run
