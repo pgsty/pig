@@ -3,6 +3,7 @@ package build
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"pig/internal/config"
@@ -245,16 +246,22 @@ func dedupeSources(sources []string) []string {
 
 // Download a single file
 func downloadFile(filename, dstDir string, force bool, baseURLs []string) error {
-	dstPath := filepath.Join(dstDir, filename)
+	dstPath, err := resolveSourceDestination(dstDir, filename)
+	if err != nil {
+		return err
+	}
 
 	// Check if exists
-	if !force {
-		if _, err := os.Stat(dstPath); err == nil {
+	if info, statErr := os.Lstat(dstPath); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("source destination is not a regular file: %s", dstPath)
+		}
+		if !force {
 			logrus.Infof("Already exists: %s", dstPath)
 			return nil
 		}
-	} else {
-		os.Remove(dstPath)
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("failed to inspect source destination %s: %w", dstPath, statErr)
 	}
 
 	if len(baseURLs) == 0 {
@@ -262,12 +269,13 @@ func downloadFile(filename, dstDir string, force bool, baseURLs []string) error 
 	}
 
 	var lastErr error
+	escapedFilename := url.PathEscape(filename)
 	for _, baseURL := range baseURLs {
-		url := fmt.Sprintf("%s/ext/src/%s", baseURL, filename)
-		logrus.Infof("Downloading from %s", url)
-		if err := utils.DownloadFile(url, dstPath); err != nil {
+		sourceURL := fmt.Sprintf("%s/ext/src/%s", strings.TrimRight(baseURL, "/"), escapedFilename)
+		logrus.Infof("Downloading from %s", sourceURL)
+		if err := utils.DownloadFile(sourceURL, dstPath); err != nil {
 			lastErr = err
-			logrus.Debugf("download attempt failed: %s: %v", url, err)
+			logrus.Debugf("download attempt failed: %s: %v", sourceURL, err)
 			continue
 		}
 		logrus.Infof("Downloaded to %s", dstPath)
@@ -275,4 +283,32 @@ func downloadFile(filename, dstDir string, force bool, baseURLs []string) error 
 	}
 
 	return fmt.Errorf("failed to download %s from %s: %v", filename, strings.Join(baseURLs, ", "), lastErr)
+}
+
+func resolveSourceDestination(dstDir, filename string) (string, error) {
+	if filename == "" || filename == "." || filename == ".." || strings.TrimSpace(filename) != filename {
+		return "", fmt.Errorf("invalid source filename %q", filename)
+	}
+	if filepath.IsAbs(filename) || filepath.Base(filename) != filename ||
+		strings.Contains(filename, "/") || strings.Contains(filename, `\`) || strings.ContainsRune(filename, 0) {
+		return "", fmt.Errorf("invalid source filename %q: only a basename is allowed", filename)
+	}
+
+	absDir, err := filepath.Abs(dstDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve source directory %s: %w", dstDir, err)
+	}
+	realDir, err := filepath.EvalSymlinks(absDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve source directory %s: %w", absDir, err)
+	}
+	realTarget := filepath.Join(realDir, filename)
+	inside, err := utils.IsPathWithin(realDir, realTarget)
+	if err != nil {
+		return "", err
+	}
+	if !inside {
+		return "", fmt.Errorf("source destination escapes %s: %s", realDir, filename)
+	}
+	return filepath.Join(absDir, filename), nil
 }

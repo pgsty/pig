@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"pig/internal/config"
+	"pig/cli/ext"
 	"pig/internal/utils"
 	"strconv"
 	"strings"
@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	proxyVer            = "5.28.0"
 	proxyConfigTemplate = `{
   "log": {"loglevel": "info"},
   "inbounds": [{"port": %s,"listen": "%s","protocol": "http","tag": "http-in","settings": {}}],
@@ -149,54 +148,14 @@ func InstallProxy() error {
 		return nil
 	}
 
-	var filename, packageURL, downloadTo string
-	switch config.OSType {
-	case config.DistroEL:
-		osarch := config.OSArch
-		switch osarch {
-		case "amd64", "x86_64":
-			osarch = "x86_64"
-		case "arm64", "aarch64":
-			osarch = "aarch64"
-		default:
-			return fmt.Errorf("unsupported arch: %s on %s %s", osarch, config.OSType, config.OSCode)
-		}
-		logrus.Debugf("osarch=%s, proxyVer=%s", osarch, proxyVer)
-		filename = fmt.Sprintf("vray-%s-1.%s.rpm", proxyVer, osarch)
-		packageURL = fmt.Sprintf("%s/pkg/ray/%s", config.RepoPigstyCC, filename)
-	case config.DistroDEB:
-		logrus.Debugf("osarch=%s, proxy=%s", config.OSArch, proxyVer)
-		filename = fmt.Sprintf("vray_%s-1_%s.deb", proxyVer, config.OSArch)
-		packageURL = fmt.Sprintf("%s/pkg/ray/%s", config.RepoPigstyCC, filename)
-	case config.DistroMAC:
-		return fmt.Errorf("macos is not supported yet")
+	manager := ext.PackageManagerCmd()
+	switch manager {
+	case "dnf", "yum", "apt-get":
+		logrus.Infof("install proxy from configured package repositories with %s", manager)
+		return utils.SudoCommand([]string{manager, "install", "-y", "vray"})
+	default:
+		return fmt.Errorf("proxy installation requires dnf, yum, or apt-get; configure the Pigsty repository first")
 	}
-	downloadTo = fmt.Sprintf("/tmp/%s", filename)
-
-	logrus.Debugf("wipe destination file %s", downloadTo)
-	if err := utils.DelFile(downloadTo); err != nil {
-		return fmt.Errorf("failed to wipe destination file: %v", err)
-	}
-	logrus.Debugf("downloading proxy %s package from %s to %s", config.OSType, packageURL, downloadTo)
-	if err := utils.DownloadFile(packageURL, downloadTo); err != nil {
-		return fmt.Errorf("failed to download package: %v", err)
-	}
-
-	// run sudo shell command to remove current package and install the new one
-	logrus.Debugf("reinstall proxy via package manager")
-	switch config.OSType {
-	case config.DistroEL:
-		pkgManager := "dnf"
-		if config.OSMajor == 7 {
-			pkgManager = "yum"
-		}
-		_ = utils.QuietSudoCommand([]string{pkgManager, "remove", "-q", "-y", "vray"})
-		return utils.SudoCommand([]string{"rpm", "-i", downloadTo})
-	case config.DistroDEB:
-		_ = utils.QuietSudoCommand([]string{"apt", "remove", "-qq", "-y", "vray"})
-		return utils.SudoCommand([]string{"dpkg", "-i", downloadTo})
-	}
-	return nil
 }
 
 // testProxy tests if the proxy is working by trying to access google.com

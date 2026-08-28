@@ -157,6 +157,14 @@ func TestBuildInstallPlanNoTranslationRisk(t *testing.T) {
 	}
 }
 
+func TestBuildInstallPlanQuotesReplayCommand(t *testing.T) {
+	got := buildInstallCommand([]string{"ordinary", "name with spaces", "quote'value"}, true, true)
+	want := "pig install -y -n ordinary 'name with spaces' 'quote'\"'\"'value'"
+	if got != want {
+		t.Fatalf("quoted install command = %q, want %q", got, want)
+	}
+}
+
 func TestBuildInstallPlanNoPackageAvailable(t *testing.T) {
 	cleanup := withInstallPlanTestEnv(t, config.DistroDEB, "12", newInstallPlanCatalog(&ext.Extension{
 		Name: "no_pkg",

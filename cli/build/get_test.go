@@ -1,8 +1,13 @@
 package build
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"pig/cli/ext"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -279,6 +284,74 @@ func TestGetSourceFilesFallbackToFilename(t *testing.T) {
 	expected := []string{pkg}
 	if !reflect.DeepEqual(got, expected) {
 		t.Fatalf("getSourceFiles(%q) = %v, expected %v", pkg, got, expected)
+	}
+}
+
+func TestResolveSourceDestinationRejectsUnsafeFilename(t *testing.T) {
+	dst := t.TempDir()
+	for _, filename := range []string{"", ".", "..", "../escape.tgz", "nested/source.tgz", `/tmp/source.tgz`, `nested\source.tgz`, " source.tgz"} {
+		t.Run(strings.ReplaceAll(filename, "/", "_"), func(t *testing.T) {
+			if _, err := resolveSourceDestination(dst, filename); err == nil {
+				t.Fatalf("unsafe filename %q was accepted", filename)
+			}
+		})
+	}
+	got, err := resolveSourceDestination(dst, "source-1.0.tgz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != filepath.Join(dst, "source-1.0.tgz") {
+		t.Fatalf("destination = %q", got)
+	}
+}
+
+func TestDownloadFileForcePreservesExistingFileOnFailure(t *testing.T) {
+	dst := t.TempDir()
+	target := filepath.Join(dst, "source.tgz")
+	if err := os.WriteFile(target, []byte("previous-good-source"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	if err := downloadFile("source.tgz", dst, true, []string{server.URL}); err == nil {
+		t.Fatal("failed forced download should return an error")
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "previous-good-source" {
+		t.Fatalf("failed forced download changed prior source: %q", content)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("source mode = %04o, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestDownloadFileEscapesURLPathSegment(t *testing.T) {
+	dst := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ext/src/source #1.tgz" {
+			http.Error(w, r.URL.Path, http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte("source"))
+	}))
+	t.Cleanup(server.Close)
+
+	if err := downloadFile("source #1.tgz", dst, false, []string{server.URL + "/"}); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(dst, "source #1.tgz"))
+	if err != nil || string(content) != "source" {
+		t.Fatalf("downloaded content = %q, err=%v", content, err)
 	}
 }
 

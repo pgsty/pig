@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"pig/internal/config"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"pig/cli/ext"
 )
@@ -81,6 +83,66 @@ func TestBuildFailureLabels(t *testing.T) {
 				t.Fatalf("buildFailureLabels() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFindArtifactRejectsStaleAndAcceptsChangedPackage(t *testing.T) {
+	home := t.TempDir()
+	builder := &ExtensionBuilder{
+		OSType:  config.DistroEL,
+		OSArch:  "x86_64",
+		HomeDir: home,
+		Extension: &ext.Extension{
+			RpmPkg: "test_$v",
+		},
+	}
+	dir := filepath.Join(home, "rpmbuild", "RPMS", "x86_64")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(dir, "test_17-1.x86_64.rpm")
+	if err := os.WriteFile(artifact, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	task := &BuildTask{BeginTime: time.Now(), baseline: builder.snapshotArtifacts([]int{17})}
+	if err := builder.findArtifact(17, task); err == nil {
+		t.Fatal("stale artifact was accepted")
+	}
+	if err := os.WriteFile(artifact, []byte("new-package"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.findArtifact(17, task); err != nil {
+		t.Fatalf("changed artifact was rejected: %v", err)
+	}
+	if task.Artifact != artifact || task.Size != int64(len("new-package")) {
+		t.Fatalf("artifact result = %q size=%d", task.Artifact, task.Size)
+	}
+}
+
+func TestFindDebianArtifactsRequiresEveryExpectedVersion(t *testing.T) {
+	home := t.TempDir()
+	builder := &ExtensionBuilder{
+		OSType:     config.DistroDEB,
+		HomeDir:    home,
+		PGVersions: []int{17, 18},
+		Extension: &ext.Extension{
+			DebPkg: "postgresql-$v-test",
+		},
+	}
+	task := &BuildTask{baseline: builder.snapshotArtifacts(builder.PGVersions)}
+	dir := filepath.Join(home, "ext", "pkg")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(dir, "postgresql-17-test_1_amd64.deb")
+	if err := os.WriteFile(artifact, []byte("package"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.findDebianArtifacts(task); err == nil || !strings.Contains(err.Error(), "18") {
+		t.Fatalf("partial Debian artifact error = %v", err)
+	}
+	if task.Artifact != artifact {
+		t.Fatalf("partial artifact reporting = %q", task.Artifact)
 	}
 }
 

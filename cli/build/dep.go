@@ -83,6 +83,7 @@ func InstallDepsList(packages []string, pgVersionsStr string) error {
 
 	if len(failed) > 0 {
 		logrus.Warnf("[DEPENDENCE] %d dependency installation warning(s): %s", len(failed), strings.Join(failed, ", "))
+		return fmt.Errorf("dependency installation failed for %d target(s): %s", len(failed), strings.Join(failed, ", "))
 	}
 
 	return nil

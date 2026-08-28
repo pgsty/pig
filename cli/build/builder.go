@@ -32,6 +32,7 @@ type BuildTask struct {
 	EndTime   time.Time         // Build end time
 	Error     string            // Error message if failed
 	Builder   *ExtensionBuilder // Parent
+	baseline  map[string]os.FileInfo
 }
 
 // ExtensionBuilder encapsulates the state and operations for building extensions
@@ -560,6 +561,7 @@ func (b *ExtensionBuilder) buildForPGVersion(pgVer int) {
 		BeginTime: beginTime,
 		LogPath:   b.LogPath,
 		Builder:   b,
+		baseline:  b.snapshotArtifacts([]int{pgVer}),
 	}
 	b.Builds[pgVer] = task
 
@@ -592,9 +594,10 @@ func (b *ExtensionBuilder) buildForPGVersion(pgVer int) {
 	// Execute build command
 	if err := b.executeBuildCommand(cmd, pgVer, task); err != nil {
 		task.Error = err.Error()
+	} else if err := b.findArtifact(pgVer, task); err != nil {
+		task.Error = err.Error()
 	} else {
 		task.Success = true
-		b.findArtifact(pgVer, task)
 	}
 
 	// Set end time
@@ -627,6 +630,7 @@ func (b *ExtensionBuilder) buildForAll() {
 		BeginTime: beginTime,
 		LogPath:   b.LogPath,
 		Builder:   b,
+		baseline:  b.snapshotArtifacts(b.PGVersions),
 	}
 	b.Builds[0] = task // Use 0 as key for "all versions" build
 
@@ -662,21 +666,10 @@ func (b *ExtensionBuilder) buildForAll() {
 	// Execute build command
 	if err := b.executeBuildCommand(cmd, 0, task); err != nil {
 		task.Error = err.Error()
+	} else if err := b.findDebianArtifacts(task); err != nil {
+		task.Error = err.Error()
 	} else {
-		// Build success is determined by command exit code. Artifact discovery is
-		// best-effort and should not flip an otherwise successful build to failure.
 		task.Success = true
-		b.findDebianArtifacts(task)
-
-		expected := len(b.PGVersions)
-		found := countNonEmptyLines(task.Artifact)
-		if found == 0 {
-			logrus.Warnf("Build command succeeded but no package artifacts were discovered under %s",
-				filepath.Join(b.HomeDir, "ext", "pkg"))
-		} else if expected > 0 && found < expected {
-			logrus.Warnf("Build command succeeded with partial package artifacts: got %d of %d",
-				found, expected)
-		}
 	}
 
 	// Set end time
@@ -864,8 +857,30 @@ func (b *ExtensionBuilder) processCommandOutput(stdout, stderr io.Reader, pgVer 
 	return errorOutput
 }
 
-// findArtifact finds the build artifact
-func (b *ExtensionBuilder) findArtifact(pgVer int, task *BuildTask) {
+// findArtifact finds a fresh, non-empty build artifact.
+func (b *ExtensionBuilder) findArtifact(pgVer int, task *BuildTask) error {
+	candidates, globPattern := b.artifactCandidates(pgVer)
+	candidates = freshArtifacts(candidates, task.baseline)
+	if len(candidates) == 0 {
+		return fmt.Errorf("build command succeeded but produced no fresh artifact matching %s (PG%d)", globPattern, pgVer)
+	}
+
+	// Select the shortest filename (usually the main package)
+	artifact := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if len(filepath.Base(candidate)) < len(filepath.Base(artifact)) {
+			artifact = candidate
+		}
+	}
+
+	task.Artifact = artifact
+	if info, err := os.Stat(artifact); err == nil {
+		task.Size = info.Size()
+	}
+	return nil
+}
+
+func (b *ExtensionBuilder) artifactCandidates(pgVer int) ([]string, string) {
 	var globPattern string
 	var globPaths []string
 
@@ -886,7 +901,7 @@ func (b *ExtensionBuilder) findArtifact(pgVer int, task *BuildTask) {
 			filepath.Join(debDir, "pool", "*", "*", "*", globPattern),
 		}
 	default:
-		return
+		return nil, ""
 	}
 
 	// Find all matching files across possible output layouts.
@@ -906,33 +921,16 @@ func (b *ExtensionBuilder) findArtifact(pgVer int, task *BuildTask) {
 			candidates = append(candidates, m)
 		}
 	}
-	if len(candidates) == 0 {
-		logrus.Debugf("no artifacts found matching %s (PG%d)", globPattern, pgVer)
-		return
-	}
-
-	// Select the shortest filename (usually the main package)
-	artifact := candidates[0]
-	for _, candidate := range candidates[1:] {
-		if len(filepath.Base(candidate)) < len(filepath.Base(artifact)) {
-			artifact = candidate
-		}
-	}
-
-	task.Artifact = artifact
-	if info, err := os.Stat(artifact); err == nil {
-		task.Size = info.Size()
-	}
+	return candidates, globPattern
 }
 
 // findDebianArtifacts finds all build artifacts for Debian (all PG versions)
-func (b *ExtensionBuilder) findDebianArtifacts(task *BuildTask) {
+func (b *ExtensionBuilder) findDebianArtifacts(task *BuildTask) error {
 	artifactDir := filepath.Join(b.HomeDir, "ext", "pkg")
 
 	// Check if directory exists
 	if _, err := os.Stat(artifactDir); err != nil {
-		logrus.Debugf("artifact directory not found: %s", artifactDir)
-		return
+		return fmt.Errorf("build command succeeded but artifact directory is unavailable: %s", artifactDir)
 	}
 
 	// Find packages for each PG version
@@ -941,31 +939,8 @@ func (b *ExtensionBuilder) findDebianArtifacts(task *BuildTask) {
 	var totalSize int64
 
 	for _, pgVer := range b.PGVersions {
-		// Build glob pattern for this PG version
-		globPattern := b.resolvePackageGlob(b.Extension.DebPkg, pgVer, "deb")
-
-		// Try a few likely layouts under ~/ext/pkg.
-		globPaths := []string{
-			filepath.Join(artifactDir, globPattern),
-			filepath.Join(artifactDir, "pool", "*", "*", "*", globPattern),
-		}
-
-		seen := make(map[string]struct{})
-		var candidates []string
-		for _, p := range globPaths {
-			matches, err := filepath.Glob(p)
-			if err != nil {
-				logrus.Debugf("glob pattern error for PG%d: %v", pgVer, err)
-				continue
-			}
-			for _, m := range matches {
-				if _, ok := seen[m]; ok {
-					continue
-				}
-				seen[m] = struct{}{}
-				candidates = append(candidates, m)
-			}
-		}
+		candidates, globPattern := b.artifactCandidates(pgVer)
+		candidates = freshArtifacts(candidates, task.baseline)
 
 		if len(candidates) == 0 {
 			logrus.Debugf("no artifacts found for PG%d matching %s", pgVer, globPattern)
@@ -993,14 +968,45 @@ func (b *ExtensionBuilder) findDebianArtifacts(task *BuildTask) {
 		task.Size = totalSize
 	}
 
-	// Log missing versions if any
 	if len(missingVersions) > 0 {
 		var missingStrs []string
 		for _, v := range missingVersions {
 			missingStrs = append(missingStrs, fmt.Sprintf("%d", v))
 		}
-		logrus.Warnf("Missing packages for PG versions: %s", strings.Join(missingStrs, ", "))
+		return fmt.Errorf("build command succeeded but produced no fresh package for PG versions: %s", strings.Join(missingStrs, ", "))
 	}
+	if len(foundArtifacts) == 0 {
+		return fmt.Errorf("build command succeeded but produced no fresh package artifacts under %s", artifactDir)
+	}
+	return nil
+}
+
+func (b *ExtensionBuilder) snapshotArtifacts(pgVersions []int) map[string]os.FileInfo {
+	baseline := make(map[string]os.FileInfo)
+	for _, pgVer := range pgVersions {
+		candidates, _ := b.artifactCandidates(pgVer)
+		for _, candidate := range candidates {
+			if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
+				baseline[candidate] = info
+			}
+		}
+	}
+	return baseline
+}
+
+func freshArtifacts(candidates []string, baseline map[string]os.FileInfo) []string {
+	fresh := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		current, err := os.Stat(candidate)
+		if err != nil || !current.Mode().IsRegular() || current.Size() <= 0 {
+			continue
+		}
+		previous, existed := baseline[candidate]
+		if !existed || !os.SameFile(previous, current) || previous.Size() != current.Size() || !previous.ModTime().Equal(current.ModTime()) {
+			fresh = append(fresh, candidate)
+		}
+	}
+	return fresh
 }
 
 // resolvePackageGlob resolves the package glob pattern from pkg pattern

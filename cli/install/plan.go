@@ -5,6 +5,7 @@ import (
 	"pig/cli/ext"
 	"pig/internal/config"
 	"pig/internal/output"
+	"pig/internal/utils"
 	"strings"
 )
 
@@ -172,7 +173,7 @@ func buildInstallRisks(resolved *ext.PackageResolveResult, noTranslation bool) [
 }
 
 func buildInstallCommand(names []string, yes bool, noTranslation bool) string {
-	parts := []string{"pig install"}
+	parts := []string{"pig", "install"}
 	if yes {
 		parts = append(parts, "-y")
 	}
@@ -180,7 +181,7 @@ func buildInstallCommand(names []string, yes bool, noTranslation bool) string {
 		parts = append(parts, "-n")
 	}
 	if len(names) > 0 {
-		parts = append(parts, strings.Join(names, " "))
+		parts = append(parts, names...)
 	}
-	return strings.Join(parts, " ")
+	return utils.ShellQuoteArgs(parts)
 }

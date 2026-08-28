@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"pig/internal/config"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -194,7 +195,7 @@ func TestIntersectStringSets(t *testing.T) {
 	}
 }
 
-func TestInstallDepsListReturnsNilOnDependencyFailures(t *testing.T) {
+func TestInstallDepsListReturnsAggregateErrorOnDependencyFailures(t *testing.T) {
 	oldOSType := config.OSType
 	t.Cleanup(func() {
 		config.OSType = oldOSType
@@ -203,7 +204,7 @@ func TestInstallDepsListReturnsNilOnDependencyFailures(t *testing.T) {
 	// Force InstallDeps to fail fast without invoking package managers.
 	config.OSType = "unsupported-test-os"
 
-	if err := InstallDepsList([]string{"nonexistent-pkg-for-warning-path"}, ""); err != nil {
-		t.Fatalf("InstallDepsList() should keep warning-only behavior, got error: %v", err)
+	if err := InstallDepsList([]string{"nonexistent-pkg-for-warning-path"}, ""); err == nil || !strings.Contains(err.Error(), "nonexistent-pkg-for-warning-path") {
+		t.Fatalf("InstallDepsList() aggregate error = %v", err)
 	}
 }
