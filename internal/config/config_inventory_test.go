@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -322,7 +323,9 @@ func TestInitConfigWithoutPersistentWrite(t *testing.T) {
 	viper.Reset()
 
 	OSCode = "sentinel-no-probe"
-	InitConfigWithOptions("", pigstyHome, InitOptions{CreateConfig: false, SkipEnvironment: true})
+	if err := InitConfigWithOptions("", pigstyHome, InitOptions{CreateConfig: false, SkipEnvironment: true}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Lstat(filepath.Join(userHome, ".pig")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("read-only initialization created ~/.pig: %v", err)
 	}
@@ -331,5 +334,30 @@ func TestInitConfigWithoutPersistentWrite(t *testing.T) {
 	}
 	if OSCode != "sentinel-no-probe" {
 		t.Fatalf("read-only Inventory initialization probed the environment: OSCode=%q", OSCode)
+	}
+}
+
+func TestInitConfigRejectsMalformedExistingFile(t *testing.T) {
+	original := struct {
+		homeDir, configDir, configFile, pigstyHome, pigstyConfig string
+		source                                                   InventorySourceDescriptor
+	}{HomeDir, ConfigDir, ConfigFile, PigstyHome, PigstyConfig, PigstyInventorySource}
+	t.Cleanup(func() {
+		HomeDir, ConfigDir, ConfigFile = original.homeDir, original.configDir, original.configFile
+		PigstyHome, PigstyConfig, PigstyInventorySource = original.pigstyHome, original.pigstyConfig, original.source
+		viper.Reset()
+	})
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".pig")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.yml"), []byte("inventory: [broken\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	viper.Reset()
+	if err := InitConfigWithOptions("", "", InitOptions{CreateConfig: false, SkipEnvironment: true}); err == nil || !strings.Contains(err.Error(), "failed to read config file") {
+		t.Fatalf("malformed config error = %v", err)
 	}
 }

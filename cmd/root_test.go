@@ -153,6 +153,17 @@ func TestStyInitializationIsSideEffectFreeAndProbeScoped(t *testing.T) {
 	}
 }
 
+func TestQueryCommandsNeverCreatePersistentConfig(t *testing.T) {
+	for _, command := range []*cobra.Command{versionCmd, statusCmd, repoListCmd, pgRoleCmd, peCmd} {
+		if !commandAvoidsPersistentConfig(command) || commandInitOptions(command).CreateConfig {
+			t.Fatalf("query command %s creates persistent config", command.CommandPath())
+		}
+	}
+	if commandAvoidsPersistentConfig(installCmd) || !commandInitOptions(installCmd).CreateConfig {
+		t.Fatal("action command unexpectedly inherited query initialization policy")
+	}
+}
+
 func TestValidateOutputFormat(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -212,7 +223,16 @@ func TestInitOutputFormat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			outputFormat = tt.input
-			initOutputFormat()
+			err := initOutputFormat()
+			if tt.input == "invalid" {
+				if err == nil {
+					t.Fatal("invalid output format was accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
 			if config.OutputFormat != tt.expected {
 				t.Errorf("initOutputFormat() with %q: config.OutputFormat = %q, want %q",
 					tt.input, config.OutputFormat, tt.expected)
@@ -231,7 +251,9 @@ func TestOutputFlagYaml(t *testing.T) {
 	}()
 
 	outputFormat = "yaml"
-	initOutputFormat()
+	if err := initOutputFormat(); err != nil {
+		t.Fatal(err)
+	}
 
 	if config.OutputFormat != "yaml" {
 		t.Errorf("-o yaml: config.OutputFormat = %q, want %q", config.OutputFormat, "yaml")
@@ -248,7 +270,9 @@ func TestOutputFlagJson(t *testing.T) {
 	}()
 
 	outputFormat = "json"
-	initOutputFormat()
+	if err := initOutputFormat(); err != nil {
+		t.Fatal(err)
+	}
 
 	if config.OutputFormat != "json" {
 		t.Errorf("-o json: config.OutputFormat = %q, want %q", config.OutputFormat, "json")
@@ -265,7 +289,9 @@ func TestOutputFlagText(t *testing.T) {
 	}()
 
 	outputFormat = "text"
-	initOutputFormat()
+	if err := initOutputFormat(); err != nil {
+		t.Fatal(err)
+	}
 
 	if config.OutputFormat != "text" {
 		t.Errorf("-o text: config.OutputFormat = %q, want %q", config.OutputFormat, "text")
@@ -283,8 +309,7 @@ func TestOutputFlagDefault(t *testing.T) {
 	}
 }
 
-// TestOutputFlagInvalidFallback tests invalid format fallback to text (AC: 5.5)
-func TestOutputFlagInvalidFallback(t *testing.T) {
+func TestOutputFlagInvalidReturnsError(t *testing.T) {
 	origFormat := outputFormat
 	origConfigFormat := config.OutputFormat
 	defer func() {
@@ -295,10 +320,8 @@ func TestOutputFlagInvalidFallback(t *testing.T) {
 	invalidFormats := []string{"xml", "csv", "html", "markdown", ""}
 	for _, format := range invalidFormats {
 		outputFormat = format
-		initOutputFormat()
-		if config.OutputFormat != "text" {
-			t.Errorf("invalid format %q: config.OutputFormat = %q, want %q",
-				format, config.OutputFormat, "text")
+		if err := initOutputFormat(); err == nil {
+			t.Errorf("invalid format %q was accepted", format)
 		}
 	}
 }

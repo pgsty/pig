@@ -84,12 +84,16 @@ func initAllForCommand(cmd *cobra.Command) error {
 	if err := initLogger(logLevel, logPath); err != nil {
 		return err
 	}
-	config.InitConfigWithOptions(inventory, pigstyHome, commandInitOptions(cmd))
+	if err := initOutputFormat(); err != nil {
+		return err
+	}
+	if err := config.InitConfigWithOptions(inventory, pigstyHome, commandInitOptions(cmd)); err != nil {
+		return err
+	}
 	license.HomeDir = config.HomeDir
 	if configuredLicense := viper.GetString("license"); configuredLicense != "" {
 		license.InitLicense(configuredLicense)
 	}
-	initOutputFormat()
 	return nil
 }
 
@@ -100,12 +104,14 @@ func commandInitOptions(cmd *cobra.Command) config.InitOptions {
 	}
 }
 
-// Inventory and Sty resolve their state for the current invocation. Inspecting
-// or running either namespace must not manufacture ~/.pig/config.yml. Existing
-// configuration is still read when present.
+// Query commands and the side-effect-free Inventory/Sty workflows may read an
+// existing config but must not manufacture ~/.pig/config.yml.
 func commandAvoidsPersistentConfig(cmd *cobra.Command) bool {
 	if cmd == nil {
 		return false
+	}
+	if cmd.Annotations != nil && cmd.Annotations["type"] == "query" {
+		return true
 	}
 	path := cmd.CommandPath()
 	return path == "pig inventory" || strings.HasPrefix(path, "pig inventory ") ||
@@ -136,20 +142,28 @@ func commandSkipsEnvironment(cmd *cobra.Command) bool {
 // validateOutputFormat validates and normalizes the output format.
 // Returns the normalized format (lowercase) if valid, otherwise returns "text".
 func validateOutputFormat(format string) string {
-	normalized := strings.ToLower(strings.TrimSpace(format))
-	for _, valid := range config.ValidOutputFormats {
-		if normalized == valid {
-			return normalized
-		}
+	normalized, valid := normalizeOutputFormat(format)
+	if valid {
+		return normalized
 	}
 	return config.OUTPUT_TEXT
 }
 
+func normalizeOutputFormat(format string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(format))
+	for _, valid := range config.ValidOutputFormats {
+		if normalized == valid {
+			return normalized, true
+		}
+	}
+	return normalized, false
+}
+
 // initOutputFormat validates the outputFormat flag and syncs it to config.OutputFormat.
-func initOutputFormat() {
-	validated := validateOutputFormat(outputFormat)
-	if validated != strings.ToLower(outputFormat) && outputFormat != "" {
-		logrus.Warnf("invalid output format %q, using %q", outputFormat, validated)
+func initOutputFormat() error {
+	validated, valid := normalizeOutputFormat(outputFormat)
+	if !valid {
+		return fmt.Errorf("invalid output format %q (expected one of: %s)", outputFormat, strings.Join(config.ValidOutputFormats, ", "))
 	}
 	config.OutputFormat = validated
 
@@ -157,6 +171,7 @@ func initOutputFormat() {
 	if config.IsStructuredOutput() && os.Getenv("PIG_NON_INTERACTIVE") == "" {
 		_ = os.Setenv("PIG_NON_INTERACTIVE", "1")
 	}
+	return nil
 }
 
 // applyStructuredOutputSilence toggles Cobra error/usage printing based on

@@ -44,13 +44,9 @@ const (
 	PigstyCC     = "https://pigsty.cc"
 	RepoPigstyIO = "https://repo.pigsty.io"
 	RepoPigstyCC = "https://repo.pigsty.cc"
-	// PigstyGPGCheck intentionally defaults to false.
-	// This project supports offline/mirror environments where enforcing signatures
-	// and HTTPS-only repos is operationally incompatible by default.
-	PigstyGPGCheck = false
-	DistroEL       = "rpm"
-	DistroDEB      = "deb"
-	DistroMAC      = "brew"
+	DistroEL     = "rpm"
+	DistroDEB    = "deb"
+	DistroMAC    = "brew"
 )
 
 // Output format constants
@@ -96,20 +92,13 @@ type InitOptions struct {
 // InitConfigWithOptions initializes source selection. Read-only Inventory
 // commands pass CreateConfig=false so discovery never creates ~/.pig or its
 // config file.
-func InitConfigWithOptions(inventory, pigstyHome string, options InitOptions) {
+func InitConfigWithOptions(inventory, pigstyHome string, options InitOptions) error {
 	if !options.SkipEnvironment {
 		DetectEnvironment()
 	}
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := resolveUserHome()
 	if err != nil {
-		logrus.Debugf("failed to get user home directory, trying user.Current()")
-		if usr, err := user.Current(); err == nil {
-			homeDir = "/home/" + usr.Username
-		} else if os.Getuid() == 0 {
-			homeDir = "/root"
-		} else {
-			logrus.Fatalf("failed to determine user home directory: %v", err)
-		}
+		return err
 	}
 
 	// set home dir, config dir, config file
@@ -117,20 +106,8 @@ func InitConfigWithOptions(inventory, pigstyHome string, options InitOptions) {
 	ConfigDir = filepath.Join(HomeDir, ".pig")
 	ConfigFile = filepath.Join(ConfigDir, "config.yml")
 	if options.CreateConfig {
-		// create that directory if not exists
-		if _, err := os.Stat(ConfigDir); os.IsNotExist(err) {
-			if err := os.MkdirAll(ConfigDir, 0750); err != nil {
-				logrus.Warnf("failed to create config directory %s: %v", ConfigDir, err)
-			}
-		}
-		// touch config file if not exists
-		if _, err := os.Stat(ConfigFile); os.IsNotExist(err) {
-			f, err := os.Create(ConfigFile)
-			if err != nil {
-				logrus.Warnf("failed to create config file %s: %v", ConfigFile, err)
-			} else {
-				_ = f.Close()
-			}
+		if err := prepareConfigFile(); err != nil {
+			return err
 		}
 	}
 
@@ -143,21 +120,16 @@ func InitConfigWithOptions(inventory, pigstyHome string, options InitOptions) {
 	viper.AutomaticEnv()
 
 	// load config file
-	if err := viper.ReadInConfig(); err != nil {
-		var configFileNotFoundError viper.ConfigFileNotFoundError
-		if errors.As(err, &configFileNotFoundError) {
-			logrus.Debugf("config file not found, using environment variables and defaults")
-		} else {
-			logrus.Debugf("failed to read config file %s: %v", ConfigFile, err)
-		}
-	} else {
-		logrus.Debugf("config loaded: %s", ConfigFile)
+	if err := readDefaultConfig(); err != nil {
+		return err
 	}
 
 	// load specified config file if provided
 	cfgPath := viper.GetString("config")
 	if cfgPath != "" {
-		InitConfigFile(cfgPath)
+		if err := InitConfigFile(cfgPath); err != nil {
+			return err
+		}
 	}
 
 	// setup pigsty home
@@ -166,6 +138,67 @@ func InitConfigWithOptions(inventory, pigstyHome string, options InitOptions) {
 	// setup inventory and retain its value-free provenance/status descriptor
 	PigstyInventorySource = resolveInventorySource(inventory, PigstyHome)
 	PigstyConfig = PigstyInventorySource.Path
+	return nil
+}
+
+func resolveUserHome() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		return homeDir, nil
+	}
+	logrus.Debugf("failed to get user home directory, trying user.Current()")
+	if usr, userErr := user.Current(); userErr == nil {
+		return "/home/" + usr.Username, nil
+	}
+	if os.Getuid() == 0 {
+		return "/root", nil
+	}
+	return "", fmt.Errorf("failed to determine user home directory: %w", err)
+}
+
+func prepareConfigFile() error {
+	if info, err := os.Lstat(ConfigDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(ConfigDir, 0700); err != nil {
+			return fmt.Errorf("failed to create config directory %s: %w", ConfigDir, err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to inspect config directory %s: %w", ConfigDir, err)
+	} else if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("config directory is not a real directory: %s", ConfigDir)
+	}
+	if err := os.Chmod(ConfigDir, 0700); err != nil {
+		return fmt.Errorf("failed to protect config directory %s: %w", ConfigDir, err)
+	}
+	if info, err := os.Lstat(ConfigFile); os.IsNotExist(err) {
+		f, createErr := os.OpenFile(ConfigFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if createErr != nil {
+			return fmt.Errorf("failed to create config file %s: %w", ConfigFile, createErr)
+		}
+		if closeErr := f.Close(); closeErr != nil {
+			return fmt.Errorf("failed to close config file %s: %w", ConfigFile, closeErr)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to inspect config file %s: %w", ConfigFile, err)
+	} else if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("config file is not a regular file: %s", ConfigFile)
+	}
+	if err := os.Chmod(ConfigFile, 0600); err != nil {
+		return fmt.Errorf("failed to protect config file %s: %w", ConfigFile, err)
+	}
+	return nil
+}
+
+func readDefaultConfig() error {
+	if err := viper.ReadInConfig(); err != nil {
+		var configFileNotFoundError viper.ConfigFileNotFoundError
+		if errors.As(err, &configFileNotFoundError) || errors.Is(err, os.ErrNotExist) {
+			logrus.Debugf("config file not found, using environment variables and defaults")
+			return nil
+		}
+		return fmt.Errorf("failed to read config file %s: %w", ConfigFile, err)
+	}
+	logrus.Debugf("config loaded: %s", ConfigFile)
+	return nil
 }
 
 func findPigstyHome(pigstyHome string) string {
@@ -234,7 +267,7 @@ func resolveInventoryCandidate(value, base string) string {
 }
 
 // InitConfigFile will init the config file with provided path
-func InitConfigFile(cfgPath string) {
+func InitConfigFile(cfgPath string) error {
 	viper.SetConfigType("yml")
 	viper.SetDefault("license", "")
 	viper.SetDefault("region", "default")
@@ -252,8 +285,10 @@ func InitConfigFile(cfgPath string) {
 		}
 	}
 	if cfgPath != "" && filepath.Ext(cfgPath) != ".yml" {
-		logrus.Errorf("Given config file '%s' does not have .yml extension, ignoring it", cfgPath)
-		cfgPath = ""
+		return fmt.Errorf("given config file %q does not have .yml extension", cfgPath)
+	}
+	if cfgPath == "" {
+		return nil
 	}
 
 	PigstyConfig = cfgPath
@@ -262,14 +297,14 @@ func InitConfigFile(cfgPath string) {
 	viper.AutomaticEnv()
 	if err := viper.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
-		if errors.As(err, &configFileNotFoundError) {
-			logrus.Debugf("config file not found, using environment variables and defaults")
-		} else {
-			logrus.Debugf("failed to read config file from %s: %v", cfgSource, err)
+		if errors.As(err, &configFileNotFoundError) || errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("config file from %s not found: %s", cfgSource, cfgPath)
 		}
+		return fmt.Errorf("failed to read config file from %s (%s): %w", cfgSource, cfgPath, err)
 	} else {
 		logrus.Debugf("config loaded from %s: %s", cfgSource, cfgPath)
 	}
+	return nil
 }
 
 type osReleaseInfo struct {
