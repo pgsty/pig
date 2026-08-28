@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 func TestOutputFlagExists(t *testing.T) {
@@ -161,6 +163,59 @@ func TestQueryCommandsNeverCreatePersistentConfig(t *testing.T) {
 	}
 	if commandAvoidsPersistentConfig(installCmd) || !commandInitOptions(installCmd).CreateConfig {
 		t.Fatal("action command unexpectedly inherited query initialization policy")
+	}
+}
+
+func TestOnlyConfigIndependentCommandsSkipMalformedConfig(t *testing.T) {
+	original := struct {
+		homeDir, configDir, configFile, pigstyHome, pigstyConfig string
+		outputFormat, configOutputFormat                         string
+	}{
+		config.HomeDir, config.ConfigDir, config.ConfigFile, config.PigstyHome, config.PigstyConfig,
+		outputFormat, config.OutputFormat,
+	}
+	t.Cleanup(func() {
+		config.HomeDir, config.ConfigDir, config.ConfigFile = original.homeDir, original.configDir, original.configFile
+		config.PigstyHome, config.PigstyConfig = original.pigstyHome, original.pigstyConfig
+		outputFormat, config.OutputFormat = original.outputFormat, original.configOutputFormat
+		viper.Reset()
+	})
+
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".pig")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.yml"), []byte("inventory: [broken\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	outputFormat = config.OUTPUT_TEXT
+	viper.Reset()
+
+	if err := initAllForCommand(versionCmd); err != nil {
+		t.Fatalf("version should ignore malformed user config: %v", err)
+	}
+	var exporterGet *cobra.Command
+	for _, command := range peCmd.Commands() {
+		if command.Name() == "get" {
+			exporterGet = command
+			break
+		}
+	}
+	if exporterGet == nil {
+		t.Fatal("pg_exporter get command not found")
+	}
+	if err := initAllForCommand(exporterGet); err != nil {
+		t.Fatalf("pg_exporter should ignore malformed user config: %v", err)
+	}
+
+	viper.Reset()
+	if err := initAllForCommand(statusCmd); err == nil || !strings.Contains(err.Error(), "failed to read config file") {
+		t.Fatalf("config-consuming status command error = %v, want malformed config failure", err)
+	}
+	if commandSkipsConfig(statusCmd) {
+		t.Fatal("status unexpectedly bypasses config initialization")
 	}
 }
 

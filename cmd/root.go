@@ -87,6 +87,9 @@ func initAllForCommand(cmd *cobra.Command) error {
 	if err := initOutputFormat(); err != nil {
 		return err
 	}
+	if commandSkipsConfig(cmd) {
+		return nil
+	}
 	if err := config.InitConfigWithOptions(inventory, pigstyHome, commandInitOptions(cmd)); err != nil {
 		return err
 	}
@@ -95,6 +98,17 @@ func initAllForCommand(cmd *cobra.Command) error {
 		license.InitLicense(configuredLicense)
 	}
 	return nil
+}
+
+// Version reporting and the legacy pg_exporter HTTP client do not consume
+// Pigsty configuration. Keep them available even when ~/.pig/config.yml is
+// malformed so users can diagnose or repair the local installation.
+func commandSkipsConfig(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	path := cmd.CommandPath()
+	return path == "pig version" || path == "pig pg_exporter" || strings.HasPrefix(path, "pig pg_exporter ")
 }
 
 func commandInitOptions(cmd *cobra.Command) config.InitOptions {
