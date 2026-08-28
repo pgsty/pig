@@ -227,10 +227,9 @@ var repoCacheCmd = &cobra.Command{
 	Args:         cobra.ArbitraryArgs,
 	Example: `
   pig repo cache                    # create /tmp/pkg.tgz offline package from /www/pigsty
-  pig repo cache -f                 # force overwrite existing package
   pig repo cache -d /srv            # overwrite default content dir /www to /srv
   pig repo cache pigsty docker      # create the tarball with both pigsty & docker repo
-  pig repo c -f                     # the simplest use case to make offline package
+  pig repo c                        # the simplest use case to make offline package
 
   (Beware that system repo management require sudo/root privilege)
 `,

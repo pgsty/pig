@@ -26,6 +26,15 @@ func TestRepoCreateDocumentsMacOSPrivilegeException(t *testing.T) {
 	}
 }
 
+func TestRepoCacheExamplesDoNotAdvertiseUnknownForceFlag(t *testing.T) {
+	if strings.Contains(repoCacheCmd.Example, " -f") {
+		t.Fatalf("repo cache examples advertise an undeclared -f flag:\n%s", repoCacheCmd.Example)
+	}
+	if flag := repoCacheCmd.Flags().Lookup("force"); flag != nil {
+		t.Fatalf("repo cache unexpectedly declares --force after help was corrected: %+v", flag)
+	}
+}
+
 func TestRepoSetDoesNotMutateGlobalFlags(t *testing.T) {
 	origType := config.OSType
 	origVendor := config.OSVendor
