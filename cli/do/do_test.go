@@ -93,12 +93,12 @@ func TestSimplePlaybookBuilders(t *testing.T) {
 		args  []string
 		want  [][]string
 	}{
-		{"pgsql-user", BuildPgsqlUserCommands, []string{"pg-meta", "dbuser_meta", "--check"}, [][]string{{"pgsql-user.yml", "-l", "pg-meta", "-e", "username=dbuser_meta", "--check"}}},
-		{"pgsql-db", BuildPgsqlDBCommands, []string{"pg-meta", "meta"}, [][]string{{"pgsql-db.yml", "-l", "pg-meta", "-e", "dbname=meta"}}},
+		{"pgsql-user", BuildPgsqlUserCommands, []string{"pg-meta", "dbuser_meta", "--check"}, [][]string{{"pgsql-user.yml", "-l", "pg-meta", "-e", `{"username":"dbuser_meta"}`, "--check"}}},
+		{"pgsql-db", BuildPgsqlDBCommands, []string{"pg-meta", "meta"}, [][]string{{"pgsql-db.yml", "-l", "pg-meta", "-e", `{"dbname":"meta"}`}}},
 		{"pgsql-ext", BuildPgsqlExtCommands, []string{"pg-meta", "postgis", "vector"}, [][]string{{"pgsql.yml", "-l", "pg-meta", "-t", "pg_extension", "-e", `{"pg_extensions":["postgis,vector"]}`}}},
 		{"pgsql-hba", BuildPgsqlHBACommands, []string{"pg-meta"}, [][]string{{"pgsql.yml", "-l", "pg-meta", "-t", "pg_hba,pg_reload,pgbouncer_hba,pgbouncer_reload"}}},
 		{"pgsql-svc", BuildPgsqlServiceCommands, []string{"pg-meta"}, [][]string{{"pgsql.yml", "-l", "pg-meta", "-t", "pg_service"}}},
-		{"pgmon-add", BuildPgmonAddCommands, []string{"pg-meta"}, [][]string{{"pgsql-monitor.yml", "-e", "clsname=pg-meta"}}},
+		{"pgmon-add", BuildPgmonAddCommands, []string{"pg-meta"}, [][]string{{"pgsql-monitor.yml", "-e", `{"clsname":"pg-meta"}`}}},
 		{"node-pkg", BuildNodePackageCommands, []string{"all", "duckdb", "restic"}, [][]string{{"node.yml", "-l", "all", "-t", "node_pkg_extra", "-e", `{"node_packages":["duckdb,restic"]}`}}},
 		{"repo-build", BuildRepoBuildCommands, nil, [][]string{{"infra.yml", "-l", "infra", "-t", "repo_build"}}},
 	}
@@ -113,6 +113,42 @@ func TestSimplePlaybookBuilders(t *testing.T) {
 				t.Fatalf("builder result = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestScalarExtraVarsAndClusterNamesRejectInjection(t *testing.T) {
+	for name, build := range map[string]PlaybookBuilder{
+		"user":  BuildPgsqlUserCommands,
+		"db":    BuildPgsqlDBCommands,
+		"pgmon": BuildPgmonAddCommands,
+	} {
+		t.Run(name, func(t *testing.T) {
+			args := []string{"pg-meta", "value is_admin=true"}
+			if name == "pgmon" {
+				args = []string{"pg-meta state=absent"}
+			}
+			if _, err := build(args); err == nil {
+				t.Fatal("injected scalar or cluster name was accepted")
+			}
+		})
+	}
+	if err := RemovePgmon("", []string{"../../etc/passwd"}); err == nil {
+		t.Fatal("RemovePgmon accepted an unsafe cluster path")
+	}
+}
+
+func TestNodeRepoModuleUsesJSONScalar(t *testing.T) {
+	commands, err := BuildNodeRepoCommands([]string{"all", "node is_admin=true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := commands[0][len(commands[0])-1]
+	var decoded map[string]string
+	if err := json.Unmarshal([]byte(encoded), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["node_repo_modules"] != "node is_admin=true" || len(decoded) != 1 {
+		t.Fatalf("decoded scalar = %#v", decoded)
 	}
 }
 

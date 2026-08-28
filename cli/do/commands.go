@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"pig/internal/utils"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -68,7 +70,17 @@ func BuildPgsqlUserCommands(args []string) ([][]string, error) {
 	if err := requireArgs(args, 2, "pgsql cluster and username are required"); err != nil {
 		return nil, err
 	}
-	command := []string{"pgsql-user.yml", "-l", args[0], "-e", fmt.Sprintf("username=%s", args[1])}
+	if !validClusterName(args[0]) {
+		return nil, fmt.Errorf("invalid pgsql cluster name: %s", args[0])
+	}
+	if !utils.ValidateIdentifier(args[1]) {
+		return nil, fmt.Errorf("invalid PostgreSQL username: %s", args[1])
+	}
+	extra, err := encodeScalarExtraVar("username", args[1])
+	if err != nil {
+		return nil, err
+	}
+	command := []string{"pgsql-user.yml", "-l", args[0], "-e", extra}
 	return singleCommand(append(command, args[2:]...)), nil
 }
 
@@ -76,7 +88,17 @@ func BuildPgsqlDBCommands(args []string) ([][]string, error) {
 	if err := requireArgs(args, 2, "pgsql cluster and database name are required"); err != nil {
 		return nil, err
 	}
-	command := []string{"pgsql-db.yml", "-l", args[0], "-e", fmt.Sprintf("dbname=%s", args[1])}
+	if !validClusterName(args[0]) {
+		return nil, fmt.Errorf("invalid pgsql cluster name: %s", args[0])
+	}
+	if !utils.ValidateIdentifier(args[1]) {
+		return nil, fmt.Errorf("invalid PostgreSQL database name: %s", args[1])
+	}
+	extra, err := encodeScalarExtraVar("dbname", args[1])
+	if err != nil {
+		return nil, err
+	}
+	command := []string{"pgsql-db.yml", "-l", args[0], "-e", extra}
 	return singleCommand(append(command, args[2:]...)), nil
 }
 
@@ -113,12 +135,22 @@ func BuildPgmonAddCommands(args []string) ([][]string, error) {
 	if err := requireExactArgs(args, 1, "exactly one pgsql cluster is required"); err != nil {
 		return nil, err
 	}
-	return singleCommand([]string{"pgsql-monitor.yml", "-e", fmt.Sprintf("clsname=%s", args[0])}), nil
+	if !validClusterName(args[0]) {
+		return nil, fmt.Errorf("invalid pgsql cluster name: %s", args[0])
+	}
+	extra, err := encodeScalarExtraVar("clsname", args[0])
+	if err != nil {
+		return nil, err
+	}
+	return singleCommand([]string{"pgsql-monitor.yml", "-e", extra}), nil
 }
 
 func RemovePgmon(inventory string, args []string) error {
 	if err := requireExactArgs(args, 1, "exactly one pgsql cluster is required"); err != nil {
 		return err
+	}
+	if !validClusterName(args[0]) {
+		return fmt.Errorf("invalid pgsql cluster name: %s", args[0])
 	}
 	target := fmt.Sprintf("/etc/prometheus/targets/pgrds/%s.yml", args[0])
 	logrus.Infof("removing pgsql monitor target %s", args[0])
@@ -150,7 +182,11 @@ func BuildNodeRepoCommands(args []string) ([][]string, error) {
 		command = append(command, "-l", args[0])
 	}
 	if len(args) == 2 && args[1] != "" {
-		command = append(command, "-e", fmt.Sprintf("node_repo_modules=%s", args[1]))
+		extra, err := encodeScalarExtraVar("node_repo_modules", args[1])
+		if err != nil {
+			return nil, err
+		}
+		command = append(command, "-e", extra)
 	}
 	return singleCommand(command), nil
 }
@@ -244,6 +280,22 @@ func encodeCommaListExtraVar(key string, values []string) (string, error) {
 		return "", fmt.Errorf("failed to encode %s extra variable: %w", key, err)
 	}
 	return strings.TrimSuffix(encoded.String(), "\n"), nil
+}
+
+func encodeScalarExtraVar(key, value string) (string, error) {
+	var encoded strings.Builder
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(map[string]string{key: value}); err != nil {
+		return "", fmt.Errorf("failed to encode %s extra variable: %w", key, err)
+	}
+	return strings.TrimSuffix(encoded.String(), "\n"), nil
+}
+
+var clusterNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
+
+func validClusterName(value string) bool {
+	return clusterNamePattern.MatchString(value)
 }
 
 func requireArgs(args []string, count int, message string) error {

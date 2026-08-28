@@ -33,11 +33,13 @@ type PostgresInstall struct {
 }
 
 var (
-	Installs map[int]*PostgresInstall    // All installed PostgreSQL installations
-	PathMap  map[string]*PostgresInstall // real pg_config path to pi map
-	Active   *PostgresInstall            // The active PostgreSQL installation (in PATH)
-	Postgres *PostgresInstall            // The designated PostgreSQL installation
-	Inited   = false                     // Whether the PostgreSQL installation has been initialized
+	Installs           map[int]*PostgresInstall    // All installed PostgreSQL installations
+	PathMap            map[string]*PostgresInstall // real pg_config path to pi map
+	Active             *PostgresInstall            // The active PostgreSQL installation (in PATH)
+	Postgres           *PostgresInstall            // The designated PostgreSQL installation
+	Inited             = false                     // Whether the PostgreSQL installation has been initialized
+	getActivePgConfig  = GetActivePgConfig
+	newPostgresInstall = NewPostgresInstall
 )
 
 // PostgresBetaMajorVersion is the current beta major accepted by opt-in build/install flows.
@@ -197,6 +199,8 @@ func GetActivePgConfig() (string, error) {
 // DetectPostgres detects all installed PostgreSQL versions on the system
 func DetectPostgres() error {
 	allPostgres := make(map[int]*PostgresInstall)
+	Active = nil
+	Postgres = nil
 	var searchPath []string
 
 	// Determine the search path based on the OS type
@@ -212,7 +216,7 @@ func DetectPostgres() error {
 	}
 
 	// Get the active pg_config path
-	activePhysicalPath, err := GetActivePgConfig()
+	activePhysicalPath, err := getActivePgConfig()
 	if err != nil {
 		logrus.Debugf("failed to detect active PostgreSQL: %v", err)
 		activePhysicalPath = ""
@@ -226,10 +230,6 @@ func DetectPostgres() error {
 
 	// Iterate over possible PostgreSQL major versions
 	for _, v := range PostgresInstallableMajorVersions {
-		if _, exists := Installs[v]; exists {
-			continue
-		}
-
 		// Search for pg_config in the determined paths
 		for _, pattern := range searchPath {
 			verStr := strconv.Itoa(v)
@@ -239,7 +239,7 @@ func DetectPostgres() error {
 			}
 
 			logrus.Debugf("found pg_config %s", pgConfigPath)
-			pi, err := NewPostgresInstall(pgConfigPath)
+			pi, err := newPostgresInstall(pgConfigPath)
 			if err != nil {
 				logrus.Debugf("failed to detect PostgreSQL %d at %s: %v", v, pgConfigPath, err)
 				continue
@@ -256,7 +256,7 @@ func DetectPostgres() error {
 
 	// If active is not found by iteration, try to find it by pg_config path
 	if Active == nil && activePhysicalPath != "" {
-		Active, err = NewPostgresInstall(activePhysicalPath)
+		Active, err = newPostgresInstall(activePhysicalPath)
 		if err != nil {
 			logrus.Debugf("failed to detect active PostgreSQL: %v", err)
 		}

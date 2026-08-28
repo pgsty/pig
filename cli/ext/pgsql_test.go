@@ -1,9 +1,54 @@
 package ext
 
 import (
+	"os"
+	"path/filepath"
+	"pig/internal/config"
 	"reflect"
 	"testing"
 )
+
+func TestDetectPostgresIsIdempotent(t *testing.T) {
+	originalOSType := config.OSType
+	originalSearch := PostgresElSearchPath
+	originalInstalls, originalPathMap := Installs, PathMap
+	originalActive, originalPostgres := Active, Postgres
+	originalInited := Inited
+	originalGetActive, originalNewInstall := getActivePgConfig, newPostgresInstall
+	t.Cleanup(func() {
+		config.OSType = originalOSType
+		PostgresElSearchPath = originalSearch
+		Installs, PathMap = originalInstalls, originalPathMap
+		Active, Postgres, Inited = originalActive, originalPostgres, originalInited
+		getActivePgConfig, newPostgresInstall = originalGetActive, originalNewInstall
+	})
+
+	root := t.TempDir()
+	pattern := filepath.Join(root, "%s", "pg_config")
+	path := filepath.Join(root, "18", "pg_config")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("stub"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	config.OSType = config.DistroEL
+	PostgresElSearchPath = []string{pattern}
+	Installs = map[int]*PostgresInstall{17: {MajorVersion: 17, PgConfigPath: "/stale"}}
+	getActivePgConfig = func() (string, error) { return path, nil }
+	newPostgresInstall = func(got string) (*PostgresInstall, error) {
+		return &PostgresInstall{PgConfig: got, PgConfigPath: got, MajorVersion: 18}, nil
+	}
+
+	for i := 0; i < 2; i++ {
+		if err := DetectPostgres(); err != nil {
+			t.Fatal(err)
+		}
+		if len(Installs) != 1 || Installs[18] == nil || len(PathMap) != 1 || Active == nil || Active.MajorVersion != 18 {
+			t.Fatalf("detection %d state: installs=%#v paths=%#v active=%#v", i+1, Installs, PathMap, Active)
+		}
+	}
+}
 
 func TestBetaPGIsInstallableButNotStableDefault(t *testing.T) {
 	if PostgresBetaMajorVersion != 19 {
