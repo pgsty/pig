@@ -145,7 +145,6 @@ func (m *Manager) LoadData(data []byte) error {
 	}
 
 	m.addDefaultModules()
-	m.adjustPigstyRepoMeta()
 
 	logrus.Debugf("load %d %s repo, %d modules", len(m.Map), m.OsType, len(m.Module))
 	return nil
@@ -190,14 +189,6 @@ func (m *Manager) addDefaultModules() {
 		m.Module["pgdg"] = m.Module["pgsql"]
 		m.Module["all"] = append([]string{"pigsty-infra"}, append(m.Module["pgsql"], m.Module["node"]...)...)
 	}
-}
-
-// adjustPigstyRepoMeta adjusts the Pigsty repository metadata if use GPG flag is set
-func (m *Manager) adjustPigstyRepoMeta() {
-	if !config.PigstyGPGCheck {
-		return
-	}
-	m.enablePigstyGPGCheck()
 }
 
 func (m *Manager) enablePigstyGPGCheck() {

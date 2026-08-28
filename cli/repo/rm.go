@@ -168,7 +168,7 @@ func RmRepos(modules []string, doUpdate bool) *output.Result {
 }
 
 // buildRmReposResult computes the final RmRepos result from collected operation data.
-func buildRmReposResult(data *RepoRmData, moduleCount int) *output.Result {
+func buildRmReposResult(data *RepoRmData, _ int) *output.Result {
 	successCount := 0
 	failCount := 0
 	for _, item := range data.RemovedRepos {
@@ -179,9 +179,11 @@ func buildRmReposResult(data *RepoRmData, moduleCount int) *output.Result {
 		}
 	}
 
-	if successCount == 0 && len(data.RemovedRepos) > 0 {
+	if failCount > 0 {
 		return output.Fail(output.CodeRepoRemoveFailed,
-			fmt.Sprintf("failed to remove all %d modules", moduleCount)).WithData(data)
+			fmt.Sprintf("removed %d module(s), but %d requested module(s) failed", successCount, failCount)).
+			WithData(data).
+			WithDetail("partial repository changes were applied; inspect failed entries before retrying")
 	}
 
 	// Keep update failure as a hard failure for automation safety.
@@ -198,11 +200,7 @@ func buildRmReposResult(data *RepoRmData, moduleCount int) *output.Result {
 	}
 
 	message := fmt.Sprintf("Removed %d module(s)", successCount)
-	result := output.OK(message, data)
-	if failCount > 0 {
-		result.Detail = fmt.Sprintf("failed: %d module(s)", failCount)
-	}
-	return result
+	return output.OK(message, data)
 }
 
 // UpdateCache updates the package manager cache and returns a structured Result

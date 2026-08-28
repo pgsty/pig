@@ -455,13 +455,15 @@ func buildAddReposResult(data *RepoAddData, expandedModules []string) *output.Re
 		}
 		return result
 	}
+	if len(data.Failed) > 0 {
+		return output.Fail(output.CodeRepoAddFailed,
+			fmt.Sprintf("added %d module(s), but %d requested module(s) failed", len(data.AddedRepos), len(data.Failed))).
+			WithData(data).
+			WithDetail("partial repository changes were applied; inspect failed entries before retrying")
+	}
 
 	message := fmt.Sprintf("Added %d modules (%d repos)", len(data.AddedRepos), countRepos(data.AddedRepos))
-	result := output.OK(message, data)
-	if len(data.Failed) > 0 {
-		result.Detail = fmt.Sprintf("failed: %d modules", len(data.Failed))
-	}
-	return result
+	return output.OK(message, data)
 }
 
 // backupReposStructured performs backup and returns structured info
