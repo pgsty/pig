@@ -59,3 +59,17 @@ func TestLogTextUsesLocalFileDirectlyWhenAlreadyDBSU(t *testing.T) {
 		t.Fatalf("LogCat output = %q, want local tail of log file", got)
 	}
 }
+
+func TestLogCatRejectsSymlink(t *testing.T) {
+	logDir := t.TempDir()
+	target := filepath.Join(logDir, "target.log")
+	if err := os.WriteFile(target, []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(logDir, DefaultLogFile)); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := LogCat(logDir, "postgres", 1); err == nil {
+		t.Fatal("Patroni log symlink was accepted")
+	}
+}

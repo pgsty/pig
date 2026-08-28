@@ -23,6 +23,9 @@ func ResolveLogFilePath(logDir, file string) (string, error) {
 	if file == "." || file == ".." {
 		return "", fmt.Errorf("invalid log file name: %s", file)
 	}
+	if strings.ContainsAny(file, "\x00\r\n") {
+		return "", fmt.Errorf("invalid log file name: control characters are not allowed")
+	}
 	if file != filepath.Base(file) || strings.Contains(file, string(os.PathSeparator)) || strings.Contains(file, "\\") {
 		return "", fmt.Errorf("invalid log file name: only file basename is allowed")
 	}
@@ -34,4 +37,30 @@ func ResolveLogFilePath(logDir, file string) (string, error) {
 		return "", fmt.Errorf("invalid log file path")
 	}
 	return logPath, nil
+}
+
+// RequireRegularFileAsDBSU rejects links and non-regular files. When the caller
+// cannot inspect the path directly, the same check is performed as the database
+// OS user without following symlinks.
+func RequireRegularFileAsDBSU(path, dbsu string) error {
+	info, err := os.Lstat(path)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("path is not a regular file: %s", path)
+		}
+		return nil
+	}
+	if !os.IsPermission(err) {
+		return fmt.Errorf("inspect file %s: %w", path, err)
+	}
+	output, dbsuErr := DBSUCommandStdout(dbsu, []string{
+		"sh", "-c", `test ! -L "$1" && test -f "$1" && printf '%s\n' "$1"`, "sh", path,
+	})
+	if dbsuErr != nil {
+		return fmt.Errorf("inspect file %s as %s: %w", path, dbsu, dbsuErr)
+	}
+	if strings.TrimSpace(output) != path {
+		return fmt.Errorf("path is not a regular file: %s", path)
+	}
+	return nil
 }

@@ -322,12 +322,6 @@ func RunCommandQuiet(dbsu string, args []string) {
 	}
 }
 
-// RunWithSudoFallback runs command directly first, retries with sudo if permission denied.
-// This is a convenience wrapper around utils.RunWithSudoFallback.
-func RunWithSudoFallback(args []string) error {
-	return utils.RunWithSudoFallback(args)
-}
-
 // FormatSize formats bytes into human-readable format
 func FormatSize(bytes int64) string {
 	const unit = 1024

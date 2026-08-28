@@ -70,7 +70,7 @@ func TestLogShowJSONLReadsThroughFallbackReader(t *testing.T) {
 
 	origOpen := openLogFileForRead
 	defer func() { openLogFileForRead = origOpen }()
-	openLogFileForRead = func(logFile string) (io.ReadCloser, error) {
+	openLogFileForRead = func(logFile, _ string) (io.ReadCloser, error) {
 		if logFile != path {
 			t.Fatalf("openLogFileForRead got %q, want %q", logFile, path)
 		}
@@ -212,10 +212,10 @@ func TestOpenLogFileFallbackStreamsWithoutBufferingCommandOutput(t *testing.T) {
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	start := time.Now()
-	rc, err := openLogFileWithSudoFallback(logPath)
+	rc, err := openLogFileAsDBSU(logPath, "postgres")
 	elapsed := time.Since(start)
 	if err != nil {
-		t.Fatalf("openLogFileWithSudoFallback returned error: %v", err)
+		t.Fatalf("openLogFileAsDBSU returned error: %v", err)
 	}
 	defer rc.Close()
 

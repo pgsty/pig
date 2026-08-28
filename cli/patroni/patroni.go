@@ -254,14 +254,14 @@ func ParseSetPairs(tokens []string) ([]SetPair, error) {
 		return nil, fmt.Errorf("at least one key=value pair is required")
 	}
 	pairs := make([]SetPair, 0, len(tokens))
-	for _, token := range tokens {
+	for index, token := range tokens {
 		equals := strings.IndexByte(token, '=')
 		if equals < 0 {
-			return nil, fmt.Errorf("expected key=value, got %q", token)
+			return nil, fmt.Errorf("configuration argument %d must use key=value syntax", index+1)
 		}
 		key := strings.TrimSpace(token[:equals])
 		if key == "" {
-			return nil, fmt.Errorf("configuration key must not be empty")
+			return nil, fmt.Errorf("configuration argument %d has an empty key", index+1)
 		}
 		for _, prefix := range rejectedStructuralPrefixes {
 			if strings.HasPrefix(key, prefix) {
@@ -422,6 +422,14 @@ func resolveCurrentLogFile(logDir string) string {
 	return filepath.Join(filepath.Clean(logDir), DefaultLogFile)
 }
 
+func currentLogFile(logDirOverride, dbsu string) (string, error) {
+	path := resolveCurrentLogFile(LogDir(logDirOverride, dbsu))
+	if err := utils.RequireRegularFileAsDBSU(path, dbsu); err != nil {
+		return "", fmt.Errorf("invalid Patroni log file: %w", err)
+	}
+	return path, nil
+}
+
 func LogTail(logDirOverride, dbsu string, lines int) error {
 	if lines <= 0 {
 		return fmt.Errorf("lines must be positive")
@@ -429,7 +437,10 @@ func LogTail(logDirOverride, dbsu string, lines int) error {
 	if dbsu == "" {
 		dbsu = utils.GetDBSU("")
 	}
-	logFile := resolveCurrentLogFile(LogDir(logDirOverride, dbsu))
+	logFile, err := currentLogFile(logDirOverride, dbsu)
+	if err != nil {
+		return err
+	}
 	args := []string{"tail", "-n", fmt.Sprintf("%d", lines), "-f", logFile}
 	utils.PrintHint(args)
 	return patroniDBSUCommand(dbsu, args)
@@ -442,7 +453,10 @@ func LogCat(logDirOverride, dbsu string, lines int) error {
 	if dbsu == "" {
 		dbsu = utils.GetDBSU("")
 	}
-	logFile := resolveCurrentLogFile(LogDir(logDirOverride, dbsu))
+	logFile, err := currentLogFile(logDirOverride, dbsu)
+	if err != nil {
+		return err
+	}
 	args := []string{"tail", "-n", fmt.Sprintf("%d", lines), logFile}
 	utils.PrintHint(args)
 	return patroniDBSUCommand(dbsu, args)
@@ -455,7 +469,10 @@ func LogShowJSONL(logDirOverride, dbsu string, lines int) error {
 	if dbsu == "" {
 		dbsu = utils.GetDBSU("")
 	}
-	logFile := resolveCurrentLogFile(LogDir(logDirOverride, dbsu))
+	logFile, err := currentLogFile(logDirOverride, dbsu)
+	if err != nil {
+		return err
+	}
 	out, err := patroniDBSUCommandStdout(dbsu, []string{"tail", "-n", fmt.Sprintf("%d", lines), logFile})
 	if err != nil {
 		return err
@@ -470,7 +487,10 @@ func LogGrep(logDirOverride, dbsu, pattern string, lines int) error {
 	if dbsu == "" {
 		dbsu = utils.GetDBSU("")
 	}
-	logFile := resolveCurrentLogFile(LogDir(logDirOverride, dbsu))
+	logFile, err := currentLogFile(logDirOverride, dbsu)
+	if err != nil {
+		return err
+	}
 	args := []string{"grep", "--color=auto", "-i", "--", pattern, logFile}
 	if lines > 0 {
 		if _, err := patroniDBSUCommandStdout(dbsu, []string{"test", "-r", logFile}); err != nil {
@@ -483,7 +503,7 @@ func LogGrep(logDirOverride, dbsu, pattern string, lines int) error {
 		}
 	}
 	utils.PrintHint(args)
-	err := patroniDBSUCommand(dbsu, args)
+	err = patroniDBSUCommand(dbsu, args)
 	var exitErr *utils.ExitCodeError
 	if errors.As(err, &exitErr) && exitErr.Code == 1 {
 		return &utils.ExitCodeError{Code: 1, Err: err, Silent: true}

@@ -15,6 +15,24 @@ import (
 	"github.com/spf13/pflag"
 )
 
+func TestRedactSetArgs(t *testing.T) {
+	got := redactSetArgs([]string{
+		"primary_conninfo=host=db password=secret",
+		"ttl=60",
+		"malformed-secret",
+		"=hidden",
+	})
+	want := []string{
+		"primary_conninfo=<redacted>",
+		"ttl=<redacted>",
+		"<redacted>",
+		"<redacted>",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("redactSetArgs() = %#v, want %#v", got, want)
+	}
+}
+
 func TestPatroniUnknownNativeCommandAndFlagsForwardUnchanged(t *testing.T) {
 	var got []string
 	withPatroniRunner(t, func(_ string, args []string) error {

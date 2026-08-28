@@ -104,9 +104,11 @@ func TestFindLatestLogUsesModificationTime(t *testing.T) {
 func TestGetLogFilesPrivilegedFallbackKeepsLsTimeOrder(t *testing.T) {
 	origReadDir := logReadDir
 	origOutput := logDBSUCommandStdout
+	origRequire := logRequireRegular
 	defer func() {
 		logReadDir = origReadDir
 		logDBSUCommandStdout = origOutput
+		logRequireRegular = origRequire
 	}()
 
 	logReadDir = func(string) ([]os.DirEntry, error) {
@@ -115,6 +117,7 @@ func TestGetLogFilesPrivilegedFallbackKeepsLsTimeOrder(t *testing.T) {
 	logDBSUCommandStdout = func(_ string, _ []string) (string, error) {
 		return "newest.log\nolder.log\nignored.txt\noldest.log\n", nil
 	}
+	logRequireRegular = func(_ string, _ string) error { return nil }
 
 	got, err := getLogFiles("/pg/log/pgbackrest", "postgres")
 	if err != nil {
@@ -123,6 +126,32 @@ func TestGetLogFilesPrivilegedFallbackKeepsLsTimeOrder(t *testing.T) {
 	want := []string{"newest.log", "older.log", "oldest.log"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("getLogFiles fallback = %v, want ls -1t order %v", got, want)
+	}
+}
+
+func TestGetLogFilesAndLogCatRejectSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.log")
+	if err := os.WriteFile(target, []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "latest.log")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	files, err := getLogFiles(dir, "postgres")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(files, []string{"target.log"}) {
+		t.Fatalf("log files = %#v", files)
+	}
+	configPath := filepath.Join(dir, "pgbackrest.conf")
+	if err := os.WriteFile(configPath, []byte("[global]\nlog-path="+dir+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := LogCat(configPath, "postgres", "latest.log", 1); err == nil {
+		t.Fatal("pgBackRest log symlink was accepted")
 	}
 }
 

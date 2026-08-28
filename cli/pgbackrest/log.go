@@ -13,6 +13,7 @@ import (
 var (
 	logReadDir           = os.ReadDir
 	logDBSUCommandStdout = utils.DBSUCommandStdout
+	logRequireRegular    = utils.RequireRegularFileAsDBSU
 )
 
 // ResolveLogDir returns the pgBackRest log directory. If requireConfig is true,
@@ -109,7 +110,7 @@ func getLogFiles(logDir, dbsu string) ([]string, error) {
 	if entries, err := logReadDir(logDir); err == nil {
 		var infos []os.FileInfo
 		for _, entry := range entries {
-			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".log") {
+			if !entry.IsDir() && entry.Type()&os.ModeSymlink == 0 && strings.HasSuffix(entry.Name(), ".log") {
 				if info, err := entry.Info(); err == nil {
 					infos = append(infos, info)
 				}
@@ -139,7 +140,7 @@ func getLogFiles(logDir, dbsu string) ([]string, error) {
 	var files []string
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if line != "" && strings.HasSuffix(line, ".log") {
+		if line != "" && strings.HasSuffix(line, ".log") && logRequireRegular(filepath.Join(logDir, line), dbsu) == nil {
 			files = append(files, line)
 		}
 	}
@@ -173,6 +174,9 @@ func LogTail(configPath, dbsu string, filename string, n int) error {
 			return err
 		}
 		logPath = filepath.Join(logDir, latestLog)
+	}
+	if err := logRequireRegular(logPath, dbsu); err != nil {
+		return fmt.Errorf("invalid pgBackRest log file: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Tailing: %s\n\n", logPath)
@@ -222,6 +226,9 @@ func LogCat(configPath, dbsu string, filename string, n int) error {
 	if !strings.HasPrefix(cleanLogPath, cleanLogDir+string(filepath.Separator)) {
 		return fmt.Errorf("invalid log file path")
 	}
+	if err := logRequireRegular(logPath, dbsu); err != nil {
+		return fmt.Errorf("invalid pgBackRest log file: %w", err)
+	}
 
 	args := []string{"tail", "-n", fmt.Sprintf("%d", n), logPath}
 	return utils.DBSUCommand(dbsu, args)
@@ -255,6 +262,9 @@ func LogShowJSONL(configPath, dbsu string, filename string, n int) error {
 		}
 	}
 	logPath := filepath.Join(logDir, logFile)
+	if err := logRequireRegular(logPath, dbsu); err != nil {
+		return fmt.Errorf("invalid pgBackRest log file: %w", err)
+	}
 
 	output, err := utils.DBSUCommandStdout(dbsu, []string{"tail", "-n", fmt.Sprintf("%d", n), logPath})
 	if err != nil {

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -223,54 +222,6 @@ func IsPathWithin(base, target string) (bool, error) {
 		return false, fmt.Errorf("failed to compare paths %q and %q: %w", base, target, err)
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))), nil
-}
-
-// RunWithSudoFallback runs command directly first, retries with sudo if permission denied.
-// This is useful for commands like tail, cat, less that may need elevated privileges
-// to read files owned by other users.
-func RunWithSudoFallback(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("no command specified")
-	}
-
-	// If already root, just run directly
-	if os.Geteuid() == 0 {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
-	}
-
-	// Try running directly first
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if err == nil {
-		return nil
-	}
-
-	// Check if it's a permission error
-	stderrStr := stderr.String()
-	if strings.Contains(stderrStr, "Permission denied") ||
-		strings.Contains(stderrStr, "permission denied") ||
-		strings.Contains(stderrStr, "Operation not permitted") {
-		// Retry with sudo
-		logrus.Debugf("permission denied, retrying with sudo")
-		sudoCmd := exec.Command("sudo", args...)
-		sudoCmd.Stdin = os.Stdin
-		sudoCmd.Stdout = os.Stdout
-		sudoCmd.Stderr = os.Stderr
-		return sudoCmd.Run()
-	}
-
-	// Not a permission error, print the stderr and return the error
-	fmt.Fprint(os.Stderr, stderrStr)
-	return err
 }
 
 // ReadFileAsDBSU reads a file using DBSU privilege escalation if needed.

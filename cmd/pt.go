@@ -165,6 +165,7 @@ var patroniSetCmd = &cobra.Command{
   pig pt set ttl=60 synchronous_mode=on --yes
   pig pt set shared_buffers=4GB --plan`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		redactedArgs := redactSetArgs(args)
 		pairs, err := patroni.ParseSetPairs(args)
 		if err != nil {
 			return structuredParamError(
@@ -172,7 +173,7 @@ var patroniSetCmd = &cobra.Command{
 				"pig patroni set",
 				"invalid configuration arguments",
 				err.Error(),
-				args,
+				redactedArgs,
 				nil,
 			)
 		}
@@ -197,10 +198,10 @@ var patroniSetCmd = &cobra.Command{
 		pgPairs := patroni.PostgreSQLSetTokens(pairs)
 		structured := config.IsStructuredOutput()
 		nextActions := patroni.SetNextActions(pgPairs)
-		return runtimeCommandError(cmd, runLegacyStructuredWithNextActions(
+		return runtimeCommandError(cmd, runLegacyStructuredSensitiveWithNextActions(
 			legacyModulePt,
 			"pig patroni set",
-			args,
+			redactedArgs,
 			map[string]interface{}{"count": len(pairs)},
 			nextActions,
 			func() error {
@@ -214,6 +215,21 @@ var patroniSetCmd = &cobra.Command{
 			},
 		))
 	},
+}
+
+func redactSetArgs(args []string) []string {
+	redacted := make([]string, len(args))
+	for i, arg := range args {
+		if equals := strings.IndexByte(arg, '='); equals >= 0 {
+			key := strings.TrimSpace(arg[:equals])
+			if key != "" {
+				redacted[i] = key + "=<redacted>"
+				continue
+			}
+		}
+		redacted[i] = "<redacted>"
+	}
+	return redacted
 }
 
 func printPatroniSetHints(pgPairs []string) {

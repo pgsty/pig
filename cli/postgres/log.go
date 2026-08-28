@@ -53,24 +53,28 @@ var csvLogFieldNames = []string{
 	"query_id",
 }
 
-var openLogFileForRead = openLogFileWithSudoFallback
+var (
+	openLogFileForRead         = openLogFileAsDBSU
+	postgresLogEUID            = os.Geteuid
+	postgresLogDBSUCommand     = utils.DBSUCommand
+	postgresLogDBSUPassthrough = utils.DBSUCommandPassthrough
+)
 
 const maxCSVLogRecordBytes = 10 * 1024 * 1024
 
-func openLogFileWithSudoFallback(logFile string) (io.ReadCloser, error) {
-	f, err := os.Open(logFile)
-	if err == nil {
-		return f, nil
+func openLogFileAsDBSU(logFile, dbsu string) (io.ReadCloser, error) {
+	if postgresLogEUID() != 0 {
+		f, err := os.Open(logFile)
+		if err == nil {
+			return f, nil
+		}
+		if !os.IsPermission(err) {
+			return nil, err
+		}
 	}
-	if !os.IsPermission(err) {
+	cmd, err := utils.BuildDBSUCommand(dbsu, []string{"cat", "--", logFile})
+	if err != nil {
 		return nil, err
-	}
-
-	var cmd *exec.Cmd
-	if os.Geteuid() == 0 {
-		cmd = exec.Command("cat", logFile)
-	} else {
-		cmd = exec.Command("sudo", "cat", logFile)
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -114,19 +118,19 @@ func resolveRequestedLogFile(logDir string, file string) (string, error) {
 }
 
 // getLatestLogFile finds the latest CSV log file in the log directory
-func getLatestLogFile(logDir string) (string, error) {
+func getLatestLogFile(logDir string, dbsuOverride ...string) (string, error) {
+	dbsu := logDBSU(dbsuOverride)
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
-		// Permission denied, try sudo ls
 		if os.IsPermission(err) {
-			return getLatestLogFileWithSudo(logDir)
+			return getLatestLogFileAsDBSU(logDir, dbsu)
 		}
 		return "", fmt.Errorf("cannot read log directory %s: %w", logDir, err)
 	}
 
 	var files []os.FileInfo
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			continue
 		}
 		if matched, _ := filepath.Match("*.csv", entry.Name()); matched {
@@ -150,37 +154,32 @@ func getLatestLogFile(logDir string) (string, error) {
 	return filepath.Join(logDir, files[0].Name()), nil
 }
 
-// getLatestLogFileWithSudo uses sudo/direct ls to find the latest CSV log file
-func getLatestLogFileWithSudo(logDir string) (string, error) {
-	// ls -t sorts by modification time (newest first), filter *.csv
-	var cmd *exec.Cmd
-	if os.Geteuid() == 0 {
-		cmd = exec.Command("ls", "-t", logDir)
-	} else {
-		cmd = exec.Command("sudo", "ls", "-t", logDir)
-	}
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
+// getLatestLogFileAsDBSU uses the database OS user and rejects link entries.
+func getLatestLogFileAsDBSU(logDir, dbsu string) (string, error) {
+	output, err := utils.DBSUCommandStdout(dbsu, []string{"ls", "-1t", "--", logDir})
+	if err != nil {
 		return "", fmt.Errorf("cannot read log directory %s: %w", logDir, err)
 	}
-
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for _, line := range lines {
-		if strings.HasSuffix(line, ".csv") {
-			return filepath.Join(logDir, line), nil
+		if !strings.HasSuffix(line, ".csv") {
+			continue
+		}
+		path, pathErr := resolveRequestedLogFile(logDir, line)
+		if pathErr == nil && ensureRegularLogFile(path, dbsu) == nil {
+			return path, nil
 		}
 	}
 	return "", fmt.Errorf("no CSV log files found in %s", logDir)
 }
 
 // LogList lists all log files in the log directory
-func LogList(logDir string) error {
+func LogList(logDir string, dbsuOverride ...string) error {
+	dbsu := logDBSU(dbsuOverride)
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
-		// Permission denied, try sudo ls
 		if os.IsPermission(err) {
-			return logListWithSudo(logDir)
+			return logListAsDBSU(logDir, dbsu)
 		}
 		return fmt.Errorf("cannot read log directory %s: %w", logDir, err)
 	}
@@ -188,7 +187,7 @@ func LogList(logDir string) error {
 	var files []os.FileInfo
 	var totalSize int64
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			continue
 		}
 		if info, err := entry.Info(); err == nil {
@@ -209,24 +208,19 @@ func LogList(logDir string) error {
 	return nil
 }
 
-// logListWithSudo uses sudo/direct ls to list log files when permission denied
-func logListWithSudo(logDir string) error {
-	cmdArgs := []string{"ls", "-lhtr", logDir}
-	var cmd *exec.Cmd
-	if os.Geteuid() == 0 {
-		PrintHint(cmdArgs)
-		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	} else {
-		PrintHint(append([]string{"sudo"}, cmdArgs...))
-		cmd = exec.Command("sudo", cmdArgs...)
+func logListAsDBSU(logDir, dbsu string) error {
+	args := []string{
+		"sh", "-c",
+		`for path in "$1"/*; do test -f "$path" && test ! -L "$path" && printf '%s\n' "${path##*/}"; done; true`,
+		"sh", logDir,
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	PrintHint(args)
+	return utils.DBSUCommand(dbsu, args)
 }
 
 // LogTail tails the latest log file (follow mode)
-func LogTail(logDir, file string, lines int) error {
+func LogTail(logDir, file string, lines int, dbsuOverride ...string) error {
+	dbsu := logDBSU(dbsuOverride)
 	if lines <= 0 {
 		return fmt.Errorf("lines must be positive")
 	}
@@ -239,19 +233,23 @@ func LogTail(logDir, file string, lines int) error {
 		}
 	} else {
 		var err error
-		logFile, err = getLatestLogFile(logDir)
+		logFile, err = getLatestLogFile(logDir, dbsu)
 		if err != nil {
 			return err
 		}
+	}
+	if err := ensureRegularLogFile(logFile, dbsu); err != nil {
+		return err
 	}
 
 	cmdArgs := []string{"tail", "-n", strconv.Itoa(lines), "-f", logFile}
 	PrintHint(cmdArgs)
-	return RunWithSudoFallback(cmdArgs)
+	return runPostgresLogCommand(dbsu, cmdArgs, true)
 }
 
 // LogCat outputs log file content
-func LogCat(logDir, file string, lines int) error {
+func LogCat(logDir, file string, lines int, dbsuOverride ...string) error {
+	dbsu := logDBSU(dbsuOverride)
 	if lines <= 0 {
 		return fmt.Errorf("lines must be positive")
 	}
@@ -264,39 +262,53 @@ func LogCat(logDir, file string, lines int) error {
 		}
 	} else {
 		var err error
-		logFile, err = getLatestLogFile(logDir)
+		logFile, err = getLatestLogFile(logDir, dbsu)
 		if err != nil {
 			return err
 		}
 	}
+	if err := ensureRegularLogFile(logFile, dbsu); err != nil {
+		return err
+	}
 
 	cmdArgs := []string{"tail", "-n", strconv.Itoa(lines), logFile}
 	PrintHint(cmdArgs)
-	return RunWithSudoFallback(cmdArgs)
+	return runPostgresLogCommand(dbsu, cmdArgs, false)
 }
 
 // LogShowJSONL outputs the latest PostgreSQL CSV log records as JSONL.
-func LogShowJSONL(logDir, file string, lines int) error {
-	logFile, err := resolveLogSelection(logDir, file)
+func LogShowJSONL(logDir, file string, lines int, dbsuOverride ...string) error {
+	dbsu := logDBSU(dbsuOverride)
+	logFile, err := resolveLogSelection(logDir, file, dbsu)
 	if err != nil {
 		return err
 	}
-	return writeCSVLogJSONL(os.Stdout, logFile, lines)
+	return writeCSVLogJSONL(os.Stdout, logFile, lines, dbsu)
 }
 
-func resolveLogSelection(logDir, file string) (string, error) {
+func resolveLogSelection(logDir, file, dbsu string) (string, error) {
+	var path string
+	var err error
 	if file != "" {
-		return resolveRequestedLogFile(logDir, file)
+		path, err = resolveRequestedLogFile(logDir, file)
+	} else {
+		path, err = getLatestLogFile(logDir, dbsu)
 	}
-	return getLatestLogFile(logDir)
+	if err != nil {
+		return "", err
+	}
+	if err := ensureRegularLogFile(path, dbsu); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
-func writeCSVLogJSONL(w io.Writer, logFile string, lines int) error {
+func writeCSVLogJSONL(w io.Writer, logFile string, lines int, dbsuOverride ...string) error {
 	if lines <= 0 {
 		return fmt.Errorf("lines must be positive")
 	}
 
-	f, err := openLogFileForRead(logFile)
+	f, err := openLogFileForRead(logFile, logDBSU(dbsuOverride))
 	if err != nil {
 		return err
 	}
@@ -447,7 +459,8 @@ func csvLogRecordToMap(record []string) map[string]string {
 }
 
 // LogLess opens the latest log file in less
-func LogLess(logDir, file string) error {
+func LogLess(logDir, file string, dbsuOverride ...string) error {
+	dbsu := logDBSU(dbsuOverride)
 	var logFile string
 	if file != "" {
 		var err error
@@ -457,19 +470,23 @@ func LogLess(logDir, file string) error {
 		}
 	} else {
 		var err error
-		logFile, err = getLatestLogFile(logDir)
+		logFile, err = getLatestLogFile(logDir, dbsu)
 		if err != nil {
 			return err
 		}
 	}
+	if err := ensureRegularLogFile(logFile, dbsu); err != nil {
+		return err
+	}
 
 	cmdArgs := []string{"less", "+G", logFile}
 	PrintHint(cmdArgs)
-	return RunWithSudoFallback(cmdArgs)
+	return runPostgresLogCommand(dbsu, cmdArgs, true)
 }
 
 // LogGrep searches log files
-func LogGrep(logDir, pattern, file string, ignoreCase bool, context int) error {
+func LogGrep(logDir, pattern, file string, ignoreCase bool, context int, dbsuOverride ...string) error {
+	dbsu := logDBSU(dbsuOverride)
 	var logFile string
 	if file != "" {
 		var err error
@@ -479,10 +496,13 @@ func LogGrep(logDir, pattern, file string, ignoreCase bool, context int) error {
 		}
 	} else {
 		var err error
-		logFile, err = getLatestLogFile(logDir)
+		logFile, err = getLatestLogFile(logDir, dbsu)
 		if err != nil {
 			return err
 		}
+	}
+	if err := ensureRegularLogFile(logFile, dbsu); err != nil {
+		return err
 	}
 
 	cmdArgs := []string{"grep", "--color=auto"}
@@ -494,11 +514,57 @@ func LogGrep(logDir, pattern, file string, ignoreCase bool, context int) error {
 	}
 	cmdArgs = append(cmdArgs, pattern, logFile)
 	PrintHint(cmdArgs)
-	err := RunWithSudoFallback(cmdArgs)
+	err := runPostgresLogCommand(dbsu, cmdArgs, false)
 	if isGrepNoMatch(err) {
 		return &utils.ExitCodeError{Code: 1, Err: err, Silent: true}
 	}
 	return err
+}
+
+func logDBSU(overrides []string) string {
+	if len(overrides) > 0 && strings.TrimSpace(overrides[0]) != "" {
+		return utils.GetDBSU(overrides[0])
+	}
+	return utils.GetDBSU("")
+}
+
+func ensureRegularLogFile(path, dbsu string) error {
+	if err := utils.RequireRegularFileAsDBSU(path, dbsu); err != nil {
+		return fmt.Errorf("invalid log file: %w", err)
+	}
+	return nil
+}
+
+func runPostgresLogCommand(dbsu string, args []string, passthrough bool) error {
+	runAsDBSU := func() error {
+		if passthrough {
+			return postgresLogDBSUPassthrough(dbsu, args)
+		}
+		return postgresLogDBSUCommand(dbsu, args)
+	}
+	if postgresLogEUID() == 0 {
+		return runAsDBSU()
+	}
+
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		return nil
+	} else if !isPermissionDiagnostic(stderr.String()) {
+		if stderr.Len() > 0 {
+			fmt.Fprint(os.Stderr, stderr.String())
+		}
+		return err
+	}
+	return runAsDBSU()
+}
+
+func isPermissionDiagnostic(value string) bool {
+	value = strings.ToLower(value)
+	return strings.Contains(value, "permission denied") || strings.Contains(value, "operation not permitted")
 }
 
 func isGrepNoMatch(err error) bool {

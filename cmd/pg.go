@@ -1473,18 +1473,20 @@ var pgLogCmd = &cobra.Command{
 		if pgLogFollow {
 			return runLogStream(output.MODULE_PG, "pig postgres log", "pig pg log show", pgLogNum, args,
 				map[string]interface{}{"follow": pgLogFollow, "lines": pgLogNum}, func() error {
-					return postgres.LogTail(postgres.GetLogDir(pgConfig), "", pgLogNum)
+					return postgres.LogTail(postgres.GetLogDir(pgConfig), "", pgLogNum, postgres.GetDbSU(pgConfig))
 				})
 		}
 		return runLogSnapshot("pig pg log", pgLogNum,
-			func() error { return postgres.LogShowJSONL(postgres.GetLogDir(pgConfig), "", pgLogNum) },
+			func() error {
+				return postgres.LogShowJSONL(postgres.GetLogDir(pgConfig), "", pgLogNum, postgres.GetDbSU(pgConfig))
+			},
 			func() error {
 				return runLegacyStructured(legacyModulePg, "pig postgres log", args, map[string]interface{}{
 					"log_dir": postgres.GetLogDir(pgConfig),
 					"follow":  pgLogFollow,
 					"lines":   pgLogNum,
 				}, func() error {
-					return postgres.LogCat(postgres.GetLogDir(pgConfig), "", pgLogNum)
+					return postgres.LogCat(postgres.GetLogDir(pgConfig), "", pgLogNum, postgres.GetDbSU(pgConfig))
 				})
 			})
 	},
@@ -1500,7 +1502,7 @@ var pgLogListCmd = &cobra.Command{
 		return runLegacyStructured(legacyModulePg, "pig postgres log list", args, map[string]interface{}{
 			"log_dir": postgres.GetLogDir(pgConfig),
 		}, func() error {
-			return postgres.LogList(postgres.GetLogDir(pgConfig))
+			return postgres.LogList(postgres.GetLogDir(pgConfig), postgres.GetDbSU(pgConfig))
 		})
 	},
 }
@@ -1518,7 +1520,7 @@ var pgLogTailCmd = &cobra.Command{
 		}
 		return runLogStream(output.MODULE_PG, "pig postgres log tail", "pig pg log show", pgLogNum, args,
 			map[string]interface{}{"file": file, "lines": pgLogNum}, func() error {
-				return postgres.LogTail(postgres.GetLogDir(pgConfig), file, pgLogNum)
+				return postgres.LogTail(postgres.GetLogDir(pgConfig), file, pgLogNum, postgres.GetDbSU(pgConfig))
 			})
 	},
 }
@@ -1535,14 +1537,16 @@ var pgLogCatCmd = &cobra.Command{
 			file = args[0]
 		}
 		return runLogSnapshot("pig pg log show", pgLogNum,
-			func() error { return postgres.LogShowJSONL(postgres.GetLogDir(pgConfig), file, pgLogNum) },
+			func() error {
+				return postgres.LogShowJSONL(postgres.GetLogDir(pgConfig), file, pgLogNum, postgres.GetDbSU(pgConfig))
+			},
 			func() error {
 				return runLegacyStructured(legacyModulePg, "pig postgres log show", args, map[string]interface{}{
 					"log_dir": postgres.GetLogDir(pgConfig),
 					"file":    file,
 					"lines":   pgLogNum,
 				}, func() error {
-					return postgres.LogCat(postgres.GetLogDir(pgConfig), file, pgLogNum)
+					return postgres.LogCat(postgres.GetLogDir(pgConfig), file, pgLogNum, postgres.GetDbSU(pgConfig))
 				})
 			})
 	},
@@ -1569,7 +1573,7 @@ var pgLogLessCmd = &cobra.Command{
 				map[string]interface{}{"file": file},
 			)
 		}
-		return postgres.LogLess(postgres.GetLogDir(pgConfig), file)
+		return postgres.LogLess(postgres.GetLogDir(pgConfig), file, postgres.GetDbSU(pgConfig))
 	},
 }
 
@@ -1611,7 +1615,7 @@ var pgLogGrepCmd = &cobra.Command{
 			"ignore_case": pgLogGrepIgnoreCase,
 			"context":     pgLogGrepContext,
 		}, func() error {
-			err := postgres.LogGrep(postgres.GetLogDir(pgConfig), args[0], file, pgLogGrepIgnoreCase, pgLogGrepContext)
+			err := postgres.LogGrep(postgres.GetLogDir(pgConfig), args[0], file, pgLogGrepIgnoreCase, pgLogGrepContext, postgres.GetDbSU(pgConfig))
 			if utils.IsSilentExit(err) {
 				cmd.SilenceErrors = true
 				cmd.SilenceUsage = true

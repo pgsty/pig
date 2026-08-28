@@ -342,6 +342,14 @@ func TestParseSetPairsRejectsMalformedAndStructuralPaths(t *testing.T) {
 	}
 }
 
+func TestParseSetPairsDoesNotEchoMalformedSecret(t *testing.T) {
+	const secret = "bare-secret-value"
+	_, err := ParseSetPairs([]string{secret})
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("malformed set error leaked input: %v", err)
+	}
+}
+
 func TestBuildSetArgsMixedOrderAndForce(t *testing.T) {
 	pairs, err := ParseSetPairs([]string{"ttl=60", "work_mem=a=b", "synchronous_mode=on", "custom.key="})
 	if err != nil {
