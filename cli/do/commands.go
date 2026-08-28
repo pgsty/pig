@@ -298,13 +298,13 @@ func encodeScalarExtraVar(key, value string) (string, error) {
 }
 
 var (
-	clusterNamePattern        = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+	clusterNamePattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
 	pigstyUserNamePattern     = regexp.MustCompile(`^[a-z_][a-z0-9_@.-]{0,62}$`)
 	pigstyDatabaseNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_@.-]{0,62}$`)
 )
 
 func validClusterName(value string) bool {
-	return value != "root" && clusterNamePattern.MatchString(value)
+	return value != "root" && value != "all" && value != "ungrouped" && clusterNamePattern.MatchString(value)
 }
 
 func validPigstyUserName(value string) bool {

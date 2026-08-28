@@ -155,7 +155,7 @@ func TestPgsqlNamesFollowPigstyContracts(t *testing.T) {
 			t.Errorf("valid Pigsty cluster name %q was rejected", value)
 		}
 	}
-	for _, value := range []string{"root", "pg_meta", "pg meta", "pg:meta", ""} {
+	for _, value := range []string{"root", "all", "ungrouped", "-pg-meta", "pg_meta", "pg meta", "pg:meta", ""} {
 		if validClusterName(value) {
 			t.Errorf("invalid Pigsty cluster name %q was accepted", value)
 		}
