@@ -38,10 +38,10 @@ type BuildTask struct {
 // ExtensionBuilder encapsulates the state and operations for building extensions
 type ExtensionBuilder struct {
 	// Package information
-	PackageName  string         // Original package name from user
-	Extension    *ext.Extension // The extension being built
-	PGVersions   []int          // PostgreSQL versions to build for
-	DebugPackage bool           // Include debug symbols
+	PackageName string         // Original package name from user
+	Extension   *ext.Extension // The extension being built
+	PGVersions  []int          // PostgreSQL versions to build for
+	NoDebug     bool           // Explicitly disable automatic debug packages
 
 	// System configuration
 	OSType   string // OS type (rpm/deb)
@@ -62,6 +62,54 @@ type ExtensionBuilder struct {
 }
 
 var debianPgLibDir = "/usr/lib/postgresql"
+
+const debNoAutoDebugOption = "noautodbgsym"
+
+// buildCommandEnvironment preserves the caller's environment while applying
+// the build policy selected by PIG. Native package tooling remains responsible
+// for generating debug packages; PIG only adds the platform opt-out when the
+// user explicitly requests --nodbg.
+func buildCommandEnvironment(base []string, osType string, noDebug bool, envPATH string) []string {
+	env := setEnvironmentValue(base, "PATH", envPATH)
+	if osType != config.DistroDEB || !noDebug {
+		return env
+	}
+
+	options, _ := environmentValue(base, "DEB_BUILD_OPTIONS")
+	options = appendEnvironmentOption(options, debNoAutoDebugOption)
+	return setEnvironmentValue(env, "DEB_BUILD_OPTIONS", options)
+}
+
+func environmentValue(env []string, key string) (string, bool) {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			return strings.TrimPrefix(env[i], prefix), true
+		}
+	}
+	return "", false
+}
+
+func setEnvironmentValue(env []string, key, value string) []string {
+	prefix := key + "="
+	result := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			result = append(result, entry)
+		}
+	}
+	return append(result, prefix+value)
+}
+
+func appendEnvironmentOption(options, option string) string {
+	fields := strings.Fields(options)
+	for _, field := range fields {
+		if field == option {
+			return strings.Join(fields, " ")
+		}
+	}
+	return strings.Join(append(fields, option), " ")
+}
 
 // NewExtensionBuilder creates a new ExtensionBuilder instance
 func NewExtensionBuilder(packageName string) (*ExtensionBuilder, error) {
@@ -643,7 +691,7 @@ func (b *ExtensionBuilder) buildForAll() {
 
 	// Set environment
 	envPATH := os.Getenv("PATH")
-	cmd.Env = append(os.Environ(), "PATH="+envPATH)
+	cmd.Env = buildCommandEnvironment(os.Environ(), b.OSType, b.NoDebug, envPATH)
 
 	// Prepare metadata
 	metadata := []string{
@@ -707,7 +755,7 @@ func (b *ExtensionBuilder) createRPMBuildCommand(pgVer int, task *BuildTask) (*e
 		"--define", fmt.Sprintf("pgpackageversion %d", pgVer),
 	}
 
-	if !b.DebugPackage {
+	if b.NoDebug {
 		args = append(args, "--define", "debug_package %{nil}")
 	}
 
@@ -718,7 +766,7 @@ func (b *ExtensionBuilder) createRPMBuildCommand(pgVer int, task *BuildTask) (*e
 
 	// Set environment
 	envPATH := b.buildPath(pgVer)
-	cmd.Env = append(os.Environ(), "PATH="+envPATH)
+	cmd.Env = buildCommandEnvironment(os.Environ(), b.OSType, b.NoDebug, envPATH)
 
 	// Special case for EL10
 	if config.OSVersionCode == "el10" {
@@ -747,7 +795,7 @@ func (b *ExtensionBuilder) createDEBBuildCommand(pgVer int, task *BuildTask) (*e
 
 	// Set environment
 	envPATH := b.buildPath(pgVer)
-	cmd.Env = append(os.Environ(), "PATH="+envPATH)
+	cmd.Env = buildCommandEnvironment(os.Environ(), b.OSType, b.NoDebug, envPATH)
 
 	metadata := []string{
 		fmt.Sprintf("BUILD: %s PG%d", b.Extension.Name, pgVer),

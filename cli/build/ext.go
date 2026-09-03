@@ -16,13 +16,13 @@ import (
 )
 
 // BuildExtensions processes multiple packages
-func BuildExtensions(packages []string, pgVersions string, debugPkg bool) error {
+func BuildExtensions(packages []string, pgVersions string, noDebug bool) error {
 	if len(packages) == 0 {
 		return fmt.Errorf("no packages specified")
 	}
 	var failed []string
 	for _, pkg := range packages {
-		if err := BuildExtension(pkg, pgVersions, debugPkg); err != nil {
+		if err := BuildExtension(pkg, pgVersions, noDebug); err != nil {
 			logrus.Errorf("Failed to build %s: %v", pkg, err)
 			failed = append(failed, pkg)
 		}
@@ -34,13 +34,13 @@ func BuildExtensions(packages []string, pgVersions string, debugPkg bool) error 
 }
 
 // BuildExtension is the main entry point for building a single package
-func BuildExtension(pkg string, pgVersions string, debugPkg bool) error {
+func BuildExtension(pkg string, pgVersions string, noDebug bool) error {
 	extension, err := resolveExtension(pkg)
 	if err != nil {
-		return BuildMake(pkg, pgVersions, debugPkg)
+		return BuildMake(pkg, pgVersions, noDebug)
 	}
 	if shouldUseMakeForKernelPackage(pkg, extension) {
-		return BuildMake(resolveMakeBuildTarget(pkg, extension), pgVersions, debugPkg)
+		return BuildMake(resolveMakeBuildTarget(pkg, extension), pgVersions, noDebug)
 	}
 
 	// run extension builder for postgres extension
@@ -48,7 +48,7 @@ func BuildExtension(pkg string, pgVersions string, debugPkg bool) error {
 	if err != nil {
 		return err
 	}
-	builder.DebugPackage = debugPkg
+	builder.NoDebug = noDebug
 	if err = builder.UpdateVersion(pgVersions); err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func splitPGMajorSuffix(pkg string) (string, string, bool) {
 }
 
 // BuildMake builds packages using Makefile
-func BuildMake(pkg string, pgVersions string, debugPkg bool) error {
+func BuildMake(pkg string, pgVersions string, noDebug bool) error {
 	target := strings.TrimSpace(pkg)
 
 	// Print header
@@ -157,6 +157,7 @@ func BuildMake(pkg string, pgVersions string, debugPkg bool) error {
 	// Execute make command
 	cmd := exec.Command("make", target)
 	cmd.Dir = makeDir
+	cmd.Env = buildCommandEnvironment(os.Environ(), config.OSType, noDebug, os.Getenv("PATH"))
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 

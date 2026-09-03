@@ -16,9 +16,9 @@ import (
 var cloudberryBuildComponents = []string{"cloudberry", "cloudberry-backup", "cloudberry-pxf"}
 
 // BuildPackage runs complete build pipeline for a single package
-func BuildPackage(pkg string, pgVersions string, withSymbol bool, mirror bool) error {
+func BuildPackage(pkg string, pgVersions string, noDebug bool, mirror bool) error {
 	if normalizeBuildName(pkg) == "cloudberry" {
-		return BuildCloudberryPackage(pgVersions, withSymbol, mirror)
+		return BuildCloudberryPackage(pgVersions, noDebug, mirror)
 	}
 
 	fmt.Printf("\n")
@@ -39,7 +39,7 @@ func BuildPackage(pkg string, pgVersions string, withSymbol bool, mirror bool) e
 	}
 
 	// Step 3: Build package
-	if err := BuildExtension(pkg, pgVersions, withSymbol); err != nil {
+	if err := BuildExtension(pkg, pgVersions, noDebug); err != nil {
 		return fmt.Errorf("build failed for %s: %w", pkg, err)
 	}
 
@@ -48,7 +48,7 @@ func BuildPackage(pkg string, pgVersions string, withSymbol bool, mirror bool) e
 }
 
 // BuildCloudberryPackage builds the Cloudberry suite in dependency order.
-func BuildCloudberryPackage(pgVersions string, withSymbol bool, mirror bool) error {
+func BuildCloudberryPackage(pgVersions string, noDebug bool, mirror bool) error {
 	fmt.Printf("\n")
 	logrus.Info(strings.Repeat("#", 58))
 	logrus.Info("[BUILD PKG] cloudberry suite")
@@ -62,7 +62,7 @@ func BuildCloudberryPackage(pgVersions string, withSymbol bool, mirror bool) err
 		if err := InstallDeps(component, pgVersions); err != nil {
 			logrus.Warnf("Dependency install error for %s: %v", component, err)
 		}
-		if err := BuildExtension(component, pgVersions, withSymbol); err != nil {
+		if err := BuildExtension(component, pgVersions, noDebug); err != nil {
 			return fmt.Errorf("build failed for %s: %w", component, err)
 		}
 		if component == "cloudberry" {
@@ -150,7 +150,7 @@ func findBuiltPackageArtifact(pkg string) (string, error) {
 }
 
 // BuildPackages processes multiple packages sequentially
-func BuildPackages(packages []string, pgVersions string, withSymbol bool, mirror bool) error {
+func BuildPackages(packages []string, pgVersions string, noDebug bool, mirror bool) error {
 	if len(packages) == 0 {
 		return fmt.Errorf("no packages specified")
 	}
@@ -161,7 +161,7 @@ func BuildPackages(packages []string, pgVersions string, withSymbol bool, mirror
 
 	// Process each package completely before moving to next
 	for _, pkg := range packages {
-		if err := BuildPackage(pkg, pgVersions, withSymbol, mirror); err != nil {
+		if err := BuildPackage(pkg, pgVersions, noDebug, mirror); err != nil {
 			failed = append(failed, pkg)
 			logrus.Errorf("Failed to build %s: %v", pkg, err)
 			continue

@@ -64,6 +64,34 @@ func TestBuildBetaFlagsVisible(t *testing.T) {
 	}
 }
 
+func TestBuildDebugPackageFlags(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		cmd  *cobra.Command
+	}{
+		{name: "pig build ext", cmd: buildExtCmd},
+		{name: "pig build pkg", cmd: buildPkgCmd},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			nodbg := tt.cmd.Flags().Lookup("nodbg")
+			if nodbg == nil {
+				t.Fatalf("%s missing --nodbg flag", tt.name)
+			}
+			if nodbg.DefValue != "false" || nodbg.Hidden {
+				t.Fatalf("%s --nodbg default=%q hidden=%v, want false and visible", tt.name, nodbg.DefValue, nodbg.Hidden)
+			}
+
+			symbol := tt.cmd.Flags().Lookup("symbol")
+			if symbol == nil {
+				t.Fatalf("%s should retain --symbol for command-line compatibility", tt.name)
+			}
+			if symbol.Shorthand != "s" || symbol.Deprecated == "" || !symbol.Hidden {
+				t.Fatalf("%s legacy --symbol shorthand=%q deprecated=%q hidden=%v", tt.name, symbol.Shorthand, symbol.Deprecated, symbol.Hidden)
+			}
+		})
+	}
+}
+
 func TestBuildRepoModulesAddsBeta(t *testing.T) {
 	tests := []struct {
 		name string

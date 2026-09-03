@@ -16,9 +16,11 @@ var (
 	buildPgrxBeta   bool
 	buildDepPg      string
 	buildPkgPg      string
-	buildPkgSymbol  bool
+	buildPkgNoDebug bool
+	buildPkgSymbol  bool // deprecated compatibility flag; debug packages are now the default
 	buildAllPg      string
-	buildAllSymbol  bool
+	buildAllNoDebug bool
+	buildAllSymbol  bool // deprecated compatibility flag; debug packages are now the default
 	buildGetForce   bool
 	buildSpecForce  bool
 	buildRustYes    bool
@@ -254,9 +256,10 @@ var buildExtCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleBuild, "pig build ext", args, map[string]interface{}{
 			"pg":     buildPkgPg,
-			"symbol": buildPkgSymbol,
+			"nodbg":  buildPkgNoDebug,
+			"symbol": !buildPkgNoDebug,
 		}, func() error {
-			return build.BuildExtensions(args, buildPkgPg, buildPkgSymbol)
+			return build.BuildExtensions(args, buildPkgPg, buildPkgNoDebug)
 		})
 	},
 }
@@ -272,10 +275,11 @@ var buildPkgCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleBuild, "pig build pkg", args, map[string]interface{}{
 			"pg":     buildAllPg,
-			"symbol": buildAllSymbol,
+			"nodbg":  buildAllNoDebug,
+			"symbol": !buildAllNoDebug,
 			"mirror": buildPkgMirror,
 		}, func() error {
-			return build.BuildPackages(args, buildAllPg, buildAllSymbol, buildPkgMirror)
+			return build.BuildPackages(args, buildAllPg, buildAllNoDebug, buildPkgMirror)
 		})
 	},
 }
@@ -306,11 +310,15 @@ func init() {
 
 	// Add ext specific flags (formerly pkg)
 	buildExtCmd.Flags().StringVar(&buildPkgPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
-	buildExtCmd.Flags().BoolVarP(&buildPkgSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
+	buildExtCmd.Flags().BoolVar(&buildPkgNoDebug, "nodbg", false, "disable automatic debug packages (RPM debuginfo/debugsource; DEB dbgsym)")
+	buildExtCmd.Flags().BoolVarP(&buildPkgSymbol, "symbol", "s", false, "build with debug symbols")
+	_ = buildExtCmd.Flags().MarkDeprecated("symbol", "debug packages are built by default; omit --symbol or use --nodbg to disable them")
 
 	// Add pkg specific flags (formerly all)
 	buildPkgCmd.Flags().StringVar(&buildAllPg, "pg", "", "comma-separated PG versions (e.g. '17,16'), auto-detect from extension if empty")
-	buildPkgCmd.Flags().BoolVarP(&buildAllSymbol, "symbol", "s", false, "build with debug symbols (RPM only)")
+	buildPkgCmd.Flags().BoolVar(&buildAllNoDebug, "nodbg", false, "disable automatic debug packages (RPM debuginfo/debugsource; DEB dbgsym)")
+	buildPkgCmd.Flags().BoolVarP(&buildAllSymbol, "symbol", "s", false, "build with debug symbols")
+	_ = buildPkgCmd.Flags().MarkDeprecated("symbol", "debug packages are built by default; omit --symbol or use --nodbg to disable them")
 	buildPkgCmd.Flags().BoolVarP(&buildPkgMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")
 
 	// Add subcommands
