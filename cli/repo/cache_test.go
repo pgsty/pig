@@ -13,6 +13,11 @@ import (
 	"testing"
 )
 
+func cacheForTest(dirPath, pkgPath string, repos []string) error {
+	_, err := cacheWithIncluded(dirPath, pkgPath, repos)
+	return err
+}
+
 func TestPreparePackageOutputRejectsRootPath(t *testing.T) {
 	if _, err := preparePackageOutput(string(os.PathSeparator)); err == nil {
 		t.Fatalf("preparePackageOutput('/') should fail")
@@ -100,7 +105,7 @@ func TestCacheRejectsEscapingRepoAndPreservesPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Cache(base, target, []string{"../outside"}); err == nil {
+	if err := cacheForTest(base, target, []string{"../outside"}); err == nil {
 		t.Fatal("Cache should reject a repository path outside the base directory")
 	}
 	got, err := os.ReadFile(target)
@@ -130,7 +135,7 @@ func TestCacheRejectsRepoPathThroughSymlinkOutsideBase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Cache(base, target, []string{"link/repo"}); err == nil {
+	if err := cacheForTest(base, target, []string{"link/repo"}); err == nil {
 		t.Fatal("Cache should reject a repository path resolving outside the base directory")
 	}
 	got, err := os.ReadFile(target)
@@ -153,7 +158,7 @@ func TestCacheRejectsPackageInsideInputTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Cache(base, target, []string{"pigsty"}); err == nil {
+	if err := cacheForTest(base, target, []string{"pigsty"}); err == nil {
 		t.Fatal("Cache should reject an output package inside its input tree")
 	}
 	got, err := os.ReadFile(target)
@@ -177,7 +182,7 @@ func TestCacheRejectsPackageThroughSymlinkIntoInputTree(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 
-	if err := Cache(base, filepath.Join(link, "pkg.tgz"), []string{"pigsty"}); err == nil {
+	if err := cacheForTest(base, filepath.Join(link, "pkg.tgz"), []string{"pigsty"}); err == nil {
 		t.Fatal("Cache should reject an output path resolving into its input tree")
 	}
 }
@@ -223,7 +228,7 @@ func TestCacheAtomicallyReplacesPackageWithValidArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Cache(base, target, []string{"pigsty"}); err != nil {
+	if err := cacheForTest(base, target, []string{"pigsty"}); err != nil {
 		t.Fatalf("Cache returned error: %v", err)
 	}
 	info, err := os.Stat(target)
@@ -277,7 +282,7 @@ func TestCacheRejectsAllMissingReposAndPreservesPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Cache(base, target, []string{"missing"}); err == nil {
+	if err := cacheForTest(base, target, []string{"missing"}); err == nil {
 		t.Fatal("Cache should fail when every requested repository is missing")
 	}
 	content, err := os.ReadFile(target)
@@ -303,7 +308,7 @@ func TestCacheRejectsSymlinkEntries(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 
-	if err := Cache(base, filepath.Join(root, "pkg.tgz"), []string{"pigsty"}); err == nil || !strings.Contains(err.Error(), "symbolic links") {
+	if err := cacheForTest(base, filepath.Join(root, "pkg.tgz"), []string{"pigsty"}); err == nil || !strings.Contains(err.Error(), "symbolic links") {
 		t.Fatalf("Cache symlink error = %v", err)
 	}
 }
@@ -375,7 +380,7 @@ func TestCacheRejectsFIFOEntries(t *testing.T) {
 	if err := syscall.Mkfifo(filepath.Join(repoDir, "queue"), 0o600); err != nil {
 		t.Skipf("fifo unavailable: %v", err)
 	}
-	if err := Cache(base, filepath.Join(root, "pkg.tgz"), []string{"pigsty"}); err == nil || !strings.Contains(err.Error(), "unsupported file type") {
+	if err := cacheForTest(base, filepath.Join(root, "pkg.tgz"), []string{"pigsty"}); err == nil || !strings.Contains(err.Error(), "unsupported file type") {
 		t.Fatalf("fifo cache error = %v", err)
 	}
 }

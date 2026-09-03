@@ -243,7 +243,7 @@ func TestCacheBootRoundTripWithMultipleRepos(t *testing.T) {
 		}
 	}
 	pkg := filepath.Join(root, "pkg.tgz")
-	if err := Cache(source, pkg, []string{"pigsty", "docker"}); err != nil {
+	if err := cacheForTest(source, pkg, []string{"pigsty", "docker"}); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(root, "target")

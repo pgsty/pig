@@ -99,19 +99,6 @@ func (c *cacheWalkContext) walk(filePath string, info os.FileInfo, walkErr error
 	return nil
 }
 
-// Cache creates a compressed tarball of specified subdirectories under dirPath.
-//  1. Closes source files immediately and propagates all close errors.
-//  2. Preserves empty directories and rejects symbolic links, matching the
-//     native boot extractor contract.
-//  3. Ensures no upper-level references (e.g. "../../") are included.
-//  4. Prints a warning if a specified subdirectory or file does not exist, then skips it.
-//  5. Shows progress based on the total number of regular files and prints the file being processed.
-//  6. Prints total file size in GiB before starting the compression process.
-func Cache(dirPath, pkgPath string, repos []string) error {
-	_, err := cacheWithIncluded(dirPath, pkgPath, repos)
-	return err
-}
-
 func cacheWithIncluded(dirPath, pkgPath string, repos []string) ([]string, error) {
 	dirPath, pkgPath, repos = cacheDefaults(dirPath, pkgPath, repos)
 	logrus.Infof("caching repo %s %s to %s", dirPath, strings.Join(repos, ","), pkgPath)
