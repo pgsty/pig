@@ -156,13 +156,73 @@ func TestStyInitializationIsSideEffectFreeAndProbeScoped(t *testing.T) {
 }
 
 func TestQueryCommandsNeverCreatePersistentConfig(t *testing.T) {
-	for _, command := range []*cobra.Command{versionCmd, statusCmd, repoListCmd, pgRoleCmd, peCmd} {
+	queryCount := 0
+	for _, command := range leafCommands(rootCmd) {
+		if command.Annotations["type"] != "query" {
+			continue
+		}
+		queryCount++
 		if !commandAvoidsPersistentConfig(command) || commandInitOptions(command).CreateConfig {
 			t.Fatalf("query command %s creates persistent config", command.CommandPath())
 		}
 	}
+	if queryCount == 0 {
+		t.Fatal("no query commands found")
+	}
 	if commandAvoidsPersistentConfig(installCmd) || !commandInitOptions(installCmd).CreateConfig {
 		t.Fatal("action command unexpectedly inherited query initialization policy")
+	}
+}
+
+func TestQueryModuleHooksDoNotPreparePersistentConfig(t *testing.T) {
+	original := struct {
+		homeDir, configDir, configFile, pigstyHome, pigstyConfig string
+		outputFormat, configOutputFormat                         string
+	}{
+		config.HomeDir, config.ConfigDir, config.ConfigFile, config.PigstyHome, config.PigstyConfig,
+		outputFormat, config.OutputFormat,
+	}
+	t.Cleanup(func() {
+		config.HomeDir, config.ConfigDir, config.ConfigFile = original.homeDir, original.configDir, original.configFile
+		config.PigstyHome, config.PigstyConfig = original.pigstyHome, original.pigstyConfig
+		outputFormat, config.OutputFormat = original.outputFormat, original.configOutputFormat
+		viper.Reset()
+	})
+
+	home := t.TempDir()
+	managedConfigDir := t.TempDir()
+	configLink := filepath.Join(home, ".pig")
+	if err := os.Symlink(managedConfigDir, configLink); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	t.Setenv("HOME", home)
+	outputFormat = config.OUTPUT_TEXT
+
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+		hook func(*cobra.Command, []string) error
+	}{
+		{name: "ext list", cmd: extListCmd, hook: extCmd.PersistentPreRunE},
+		{name: "context", cmd: contextCmd, hook: contextCmd.PersistentPreRunE},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			viper.Reset()
+			if test.hook == nil {
+				t.Fatal("module persistent pre-run hook is nil")
+			}
+			if err := test.hook(test.cmd, nil); err != nil {
+				t.Fatalf("query hook rejected managed config symlink: %v", err)
+			}
+			info, err := os.Lstat(configLink)
+			if err != nil || info.Mode()&os.ModeSymlink == 0 {
+				t.Fatalf("config directory link changed: info=%v err=%v", info, err)
+			}
+			if _, err := os.Lstat(filepath.Join(managedConfigDir, "config.yml")); !os.IsNotExist(err) {
+				t.Fatalf("query hook created persistent config: %v", err)
+			}
+		})
 	}
 }
 

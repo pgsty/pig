@@ -52,10 +52,9 @@ var extCmd = &cobra.Command{
 `,
 	Annotations: ancsAnn("pig ext", "query", "stable", "safe", true, "safe", "none", "current", 100),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if err := initAll(); err != nil {
+		if err := commandModulePreRun(cmd, args); err != nil {
 			return err
 		}
-		applyStructuredOutputSilence(cmd)
 		return ext.ReloadCatalog()
 	},
 }

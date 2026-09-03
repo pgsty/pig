@@ -121,13 +121,6 @@ The command uses the same execution privilege strategy as other pig commands:
   pig pitr -d -- --delta`,
 	Annotations: ancsAnn("pig pitr", "action", "volatile", "unsafe", false, "critical", "required", "root", 600000),
 	Args:        cobra.ArbitraryArgs,
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if err := initAll(); err != nil {
-			return err
-		}
-		applyStructuredOutputSilence(cmd)
-		return nil
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pitrOpts.ExtraArgs = append([]string(nil), args...)
 

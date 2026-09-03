@@ -58,10 +58,9 @@ Examples:
   pig context -m postgres,!host  # exclude host explicitly
 `,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if err := initAll(); err != nil {
+		if err := commandModulePreRun(cmd, args); err != nil {
 			return err
 		}
-		applyStructuredOutputSilence(cmd)
 		// Pre-detect PostgreSQL installations
 		if err := ext.DetectPostgres(); err != nil {
 			logrus.Debugf("DetectPostgres: %v", err)

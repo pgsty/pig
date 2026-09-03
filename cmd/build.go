@@ -61,10 +61,9 @@ Quick Start:
   pig build pkg citus              # build citus extension
 
 `, PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if err := initAll(); err != nil {
+		if err := commandModulePreRun(cmd, args); err != nil {
 			return err
 		}
-		applyStructuredOutputSilence(cmd)
 		return ext.ReloadCatalog()
 	},
 }

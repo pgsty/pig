@@ -73,10 +73,6 @@ func commandModulePreRun(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func initAll() error {
-	return initAllForCommand(nil)
-}
-
 func initAllForCommand(cmd *cobra.Command) error {
 	if debug {
 		logLevel = "debug"
