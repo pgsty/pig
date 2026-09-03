@@ -6,10 +6,25 @@ import (
 	"strings"
 	"testing"
 
+	"pig/cli/build"
 	"pig/internal/config"
 
 	"github.com/spf13/cobra"
 )
+
+func TestBuildPgrxDefaultVersion(t *testing.T) {
+	const want = "0.19.2"
+	if build.DefaultPgrxVersion != want {
+		t.Fatalf("default pgrx version = %q, want %q", build.DefaultPgrxVersion, want)
+	}
+	flag := buildPgrxCmd.PersistentFlags().Lookup("pgrx")
+	if flag == nil {
+		t.Fatal("pig build pgrx missing --pgrx flag")
+	}
+	if flag.DefValue != want {
+		t.Fatalf("pig build pgrx --pgrx default = %q, want %q", flag.DefValue, want)
+	}
+}
 
 func TestBuildRustMirrorFlagVisible(t *testing.T) {
 	flag := buildRustCmd.Flags().Lookup("mirror")

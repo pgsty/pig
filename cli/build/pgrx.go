@@ -15,7 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const DefaultPgrxVersion = "0.19.1"
+const DefaultPgrxVersion = "0.19.2"
 
 func SetupPgrx(pgrxVersion string, pgVersions string, includeBeta bool) error {
 	if pgrxVersion == "" {
