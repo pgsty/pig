@@ -10,14 +10,12 @@ package postgres
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"pig/cli/ext"
-	"pig/internal/config"
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
@@ -156,14 +154,12 @@ func ReadPgVersionAsDBSU(dbsu, dataDir string) (int, error) {
 func CheckDataDirAsDBSU(dbsu, dataDir string) (exists, initialized bool) {
 	// Use test command to check directory and file existence as dbsu
 	// test -d checks if directory exists
-	cmd := buildTestCmd(dbsu, "-d", dataDir)
-	if err := cmd.Run(); err != nil {
+	if _, err := utils.DBSUCommandStdout(dbsu, []string{"test", "-d", dataDir}); err != nil {
 		return false, false // directory doesn't exist
 	}
 
 	// test -f checks if PG_VERSION file exists
-	cmd = buildTestCmd(dbsu, "-f", filepath.Join(dataDir, "PG_VERSION"))
-	if err := cmd.Run(); err != nil {
+	if _, err := utils.DBSUCommandStdout(dbsu, []string{"test", "-f", filepath.Join(dataDir, "PG_VERSION")}); err != nil {
 		return true, false // directory exists but not initialized
 	}
 
@@ -263,27 +259,6 @@ func checkProcessRunningAsDBSU(dbsu string, pid int) bool {
 	return err == nil
 }
 
-// buildTestCmd creates a command to run 'test' as dbsu.
-// Uses the same 3-tier execution strategy as utils.DBSUCommand:
-//   - If current user is DBSU: execute directly
-//   - If current user is root: use "su - <dbsu> -c"
-//   - Otherwise: use "sudo -inu <dbsu> --"
-func buildTestCmd(dbsu string, flag, path string) *exec.Cmd {
-	args := []string{"test", flag, path}
-
-	if utils.IsDBSU(dbsu) {
-		return exec.Command(args[0], args[1:]...)
-	}
-
-	if config.CurrentUser == "root" {
-		cmdStr := utils.ShellQuoteArgs(args)
-		return exec.Command("su", "-", dbsu, "-c", cmdStr)
-	}
-
-	sudoArgs := append([]string{"-inu", dbsu, "--"}, args...)
-	return exec.Command("sudo", sudoArgs...)
-}
-
 // ============================================================================
 // Output Helpers
 // ============================================================================
@@ -300,25 +275,12 @@ func RunSystemctl(action, service string) error {
 	return utils.RunSystemctl(action, service)
 }
 
-// RunCommandQuiet runs a command as DBSU and prints output, does not fail on error.
-// Uses the same 3-tier execution strategy as utils.DBSUCommand:
-//   - If current user is DBSU: execute directly
-//   - If current user is root: use "su - <dbsu> -c"
-//   - Otherwise: use "sudo -inu <dbsu> --"
+// RunCommandQuiet runs a command as DBSU and prints output, but does not
+// propagate command failures to its diagnostic caller.
 func RunCommandQuiet(dbsu string, args []string) {
-	var cmd *exec.Cmd
-	if utils.IsDBSU(dbsu) {
-		cmd = exec.Command(args[0], args[1:]...)
-	} else if config.CurrentUser == "root" {
-		cmdStr := utils.ShellQuoteArgs(args)
-		cmd = exec.Command("su", "-", dbsu, "-c", cmdStr)
-	} else {
-		sudoArgs := append([]string{"-inu", dbsu, "--"}, args...)
-		cmd = exec.Command("sudo", sudoArgs...)
-	}
-	output, _ := cmd.CombinedOutput()
+	output, _ := utils.DBSUCommandOutput(dbsu, args)
 	if len(output) > 0 {
-		fmt.Print(string(output))
+		fmt.Print(output)
 	}
 }
 

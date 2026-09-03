@@ -75,7 +75,10 @@ func IsDBSU(dbsu string) bool {
 // Execution strategy based on current user:
 //   - If current user is DBSU: execute directly
 //   - If current user is root: use "su - <dbsu> -c" (no sudo needed, works in containers)
-//   - Otherwise: use "sudo -inu <dbsu> --" (requires sudo privileges)
+//   - Otherwise: use "sudo -H -u <dbsu> --" (requires sudo privileges)
+//
+// The sudo path deliberately avoids -i and -s. Both options serialize the
+// command through a shell and therefore cannot preserve arbitrary argv values.
 //
 // Returns ExitCodeError if the command exits with non-zero status.
 // Callers can use ExitCode(err) to get the exit code if needed.
@@ -259,9 +262,9 @@ func buildDBSUCmd(dbsu string, args []string) *exec.Cmd {
 		return exec.Command("su", "-", dbsu, "-c", cmdStr)
 	}
 
-	sudoArgs := []string{"-inu", dbsu, "--"}
+	sudoArgs := []string{"-H", "-u", dbsu, "--"}
 	if os.Getenv("PIG_NON_INTERACTIVE") != "" {
-		sudoArgs = []string{"-n", "-inu", dbsu, "--"}
+		sudoArgs = []string{"-n", "-H", "-u", dbsu, "--"}
 	}
 	sudoArgs = append(sudoArgs, args...)
 	logrus.Debugf("executing via sudo as %s: %s", dbsu, args[0])

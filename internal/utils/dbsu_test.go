@@ -138,14 +138,30 @@ func TestBuildDBSUCommandHonorsNonInteractiveMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildDBSUCommand returned error: %v", err)
 	}
-	want := []string{"sudo", "-n", "-inu", "postgres", "--", "psql", "-Atc", "select 1"}
-	if len(cmd.Args) != len(want) {
+	want := []string{"sudo", "-n", "-H", "-u", "postgres", "--", "psql", "-Atc", "select 1"}
+	if !reflect.DeepEqual(cmd.Args, want) {
 		t.Fatalf("sudo args = %q, want %q", cmd.Args, want)
 	}
-	for i := range want {
-		if cmd.Args[i] != want[i] {
-			t.Fatalf("sudo args = %q, want %q", cmd.Args, want)
-		}
+}
+
+func TestBuildDBSUCommandSudoPreservesShellArguments(t *testing.T) {
+	originalUser := config.CurrentUser
+	t.Cleanup(func() { config.CurrentUser = originalUser })
+	config.CurrentUser = "test-user"
+	t.Setenv("PIG_NON_INTERACTIVE", "")
+
+	args := []string{
+		"sh", "-c",
+		`test ! -L "$1" && test -f "$1" && printf '%s\n' "${1##*/}"`,
+		"sh", "/pg/log/postgres/log $name.csv",
+	}
+	cmd, err := BuildDBSUCommand("postgres", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := append([]string{"sudo", "-H", "-u", "postgres", "--"}, args...)
+	if !reflect.DeepEqual(cmd.Args, want) {
+		t.Fatalf("sudo argv = %#v, want exact argv %#v", cmd.Args, want)
 	}
 }
 
@@ -281,7 +297,7 @@ func TestBuildDBSUCommandSuPayloadPreservesArguments(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nfor arg do printf '%s\\n' \"$arg\"; done\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"with space", "single'quote", `double"quote`, "x=y=z", ""}
+	want := []string{"with space", "single'quote", `double"quote`, "dollar$sign", "$1", "${path##*/}", "x=y=z", ""}
 	cmd, err := BuildDBSUCommand("postgres", append([]string{script}, want...))
 	if err != nil {
 		t.Fatal(err)

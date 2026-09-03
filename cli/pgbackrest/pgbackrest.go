@@ -132,7 +132,7 @@ func GetPgPathFromConfig(configPath, stanza, dbsu string) string {
 // Uses the 3-tier execution strategy from utils.DBSUCommandStdout:
 //   - If current user is DBSU: read directly
 //   - If current user is root: use "su - <dbsu> -c cat"
-//   - Otherwise: use "sudo -inu <dbsu> cat"
+//   - Otherwise: use "sudo -H -u <dbsu> -- cat"
 func readConfigFile(configPath, dbsu string) (string, error) {
 	if dbsu == "" {
 		dbsu = utils.GetDBSU("")

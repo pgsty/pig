@@ -350,13 +350,15 @@ func Repack(cfg *Config, dbname string, opts *RepackOptions) error {
 
 	dbsu := GetDbSU(cfg)
 
-	// Check if pg_repack exists
-	if _, err := exec.LookPath("pg_repack"); err != nil {
+	// Resolve before changing OS identity so sudo's secure_path cannot select a
+	// different binary or hide the installation found for the invoking user.
+	repackPath, err := exec.LookPath("pg_repack")
+	if err != nil {
 		return fmt.Errorf("pg_repack not found in PATH (install with: pig ext add pg_repack)")
 	}
 
 	// Build pg_repack command
-	cmdArgs := []string{"pg_repack"}
+	cmdArgs := []string{repackPath}
 
 	if plan {
 		cmdArgs = append(cmdArgs, "-N") // pg_repack dry-run flag

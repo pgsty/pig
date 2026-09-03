@@ -78,7 +78,7 @@ Time Format:
 The command uses the same execution privilege strategy as other pig commands:
   - If running as DBSU (postgres): execute directly
   - If running as root: use "su - postgres -c"
-  - Otherwise: use "sudo -inu postgres --"
+  - Otherwise: use "sudo -H -u postgres --"
 `,
 	Example: `
   # Recover to latest (most common)

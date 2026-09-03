@@ -6,7 +6,7 @@ pg status structured output result and DTO.
 package postgres
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -289,26 +289,21 @@ func checkProcessRunningAsDBSUWithError(dbsu string, pid int) (bool, error) {
 }
 
 func testPathAsDBSU(dbsu, flag, path string) (bool, error) {
-	cmd := buildTestCmd(dbsu, flag, path)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	err := cmd.Run()
+	output, err := utils.DBSUCommandOutput(dbsu, []string{"test", flag, path})
 	if err == nil {
 		return true, nil
 	}
 
-	output := strings.TrimSpace(out.String())
+	output = strings.TrimSpace(output)
 	if isPermissionOutput(output) || isPermissionErr(err) {
 		return false, fmt.Errorf("permission denied: %s", output)
 	}
 	if isNotFoundOutput(output) {
 		return false, nil
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		if exitErr.ExitCode() == 1 {
-			return false, nil
-		}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
 	}
 	return false, fmt.Errorf("test %s %s failed: %s", flag, path, output)
 }
