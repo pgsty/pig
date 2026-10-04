@@ -90,6 +90,7 @@ var repoInfoCmd = &cobra.Command{
 var repoAddCmd = &cobra.Command{
 	Use:          "add [module...]",
 	Short:        "add new repository",
+	Long:         "Add repository modules. Pigsty signing key installation is best-effort unless repository metadata explicitly specifies a signing key. Automatic key failures warn and continue with signature verification disabled for the selected Pigsty repositories.",
 	Aliases:      []string{"a", "append"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo add", "action", "stable", "safe", true, "low", "none", "root", 2000),
@@ -128,6 +129,7 @@ var repoAddCmd = &cobra.Command{
 var repoSetCmd = &cobra.Command{
 	Use:          "set [module...]",
 	Short:        "wipe, overwrite, and update repository",
+	Long:         "Replace repository modules and update the cache. Pigsty signing key installation is best-effort unless repository metadata explicitly specifies a signing key. Automatic key failures warn and continue with signature verification disabled for the selected Pigsty repositories.",
 	Aliases:      []string{"overwrite"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo set", "action", "stable", "restricted", true, "medium", "recommended", "root", 5000),

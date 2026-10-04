@@ -23,6 +23,9 @@ func setupAddRollbackTest(t *testing.T) (*Manager, string) {
 	manager.RepoDir = repoDir
 	manager.BackupDir = filepath.Join(repoDir, "backup")
 	manager.UpdateCmd = []string{"cache-update"}
+	origKeyPath := pigstyRPMKeyPath
+	pigstyRPMKeyPath = filepath.Join(t.TempDir(), "rpm-gpg", "RPM-GPG-KEY-pigsty")
+	t.Cleanup(func() { pigstyRPMKeyPath = origKeyPath })
 
 	origManager, origRun, origSummary, origAdd := newAddRepoManager, runAddRepoCommand, runAddRepoCommandSummary, addRepoModule
 	t.Cleanup(func() {

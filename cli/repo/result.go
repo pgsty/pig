@@ -594,6 +594,7 @@ type RepoAddData struct {
 	ExpandedModules  []string           `json:"expanded_modules" yaml:"expanded_modules"`
 	AddedRepos       []*AddedRepoItem   `json:"added_repos" yaml:"added_repos"`
 	Failed           []*FailedRepoItem  `json:"failed,omitempty" yaml:"failed,omitempty"`
+	Warnings         []string           `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 	BackupInfo       *BackupInfo        `json:"backup_info,omitempty" yaml:"backup_info,omitempty"`
 	RollbackInfo     *RollbackInfo      `json:"rollback_info,omitempty" yaml:"rollback_info,omitempty"`
 	UpdateResult     *UpdateCacheResult `json:"update_result,omitempty" yaml:"update_result,omitempty"`

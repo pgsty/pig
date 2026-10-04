@@ -212,11 +212,14 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 	configureRepoRoute(manager, opts)
 	data.Region = manager.Region
 
-	if opts.GPGCheck {
-		if err := InstallPigstyKey(); err != nil {
-			return output.Fail(output.CodeRepoAddFailed, err.Error()).WithData(data)
-		}
-		manager.enablePigstyGPGCheck()
+	warning, err := manager.preparePigstyKey(expandedModules, opts.GPGCheck)
+	if err != nil {
+		data.DurationMs = time.Since(startTime).Milliseconds()
+		return output.Fail(output.CodeRepoAddFailed, err.Error()).WithData(data)
+	}
+	if warning != "" {
+		data.Warnings = append(data.Warnings, warning)
+		logrus.Warn(warning)
 	}
 
 	// Handle backup if doRemove is true

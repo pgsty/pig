@@ -195,19 +195,27 @@ func (m *Manager) enablePigstyGPGCheck() {
 	if repo, ok := m.Map["pigsty-pgsql"]; ok {
 		if m.OsType == config.DistroEL {
 			repo.Meta["gpgcheck"] = "1"
-			repo.Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
+			if strings.TrimSpace(repo.Meta["gpgkey"]) == "" {
+				repo.Meta["gpgkey"] = "file://" + pigstyRPMKeyPath
+			}
 		} else if m.OsType == config.DistroDEB {
 			delete(repo.Meta, "trusted")
-			repo.Meta["signed-by"] = pigstyAPTKeyPath
+			if strings.TrimSpace(repo.Meta["signed-by"]) == "" {
+				repo.Meta["signed-by"] = pigstyAPTKeyPath
+			}
 		}
 	}
 	if repo, ok := m.Map["pigsty-infra"]; ok {
 		if m.OsType == config.DistroEL {
 			repo.Meta["gpgcheck"] = "1"
-			repo.Meta["gpgkey"] = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-pigsty"
+			if strings.TrimSpace(repo.Meta["gpgkey"]) == "" {
+				repo.Meta["gpgkey"] = "file://" + pigstyRPMKeyPath
+			}
 		} else if m.OsType == config.DistroDEB {
 			delete(repo.Meta, "trusted")
-			repo.Meta["signed-by"] = pigstyAPTKeyPath
+			if strings.TrimSpace(repo.Meta["signed-by"]) == "" {
+				repo.Meta["signed-by"] = pigstyAPTKeyPath
+			}
 		}
 	}
 }

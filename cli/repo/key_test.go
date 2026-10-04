@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"pig/internal/config"
@@ -33,6 +34,64 @@ func TestEmbeddedAPTKeyUsesArmoredExtension(t *testing.T) {
 	}
 	if filepath.Ext(pigstyAPTKeyPath) != ".asc" {
 		t.Fatalf("ASCII-armored Pigsty key path = %q", pigstyAPTKeyPath)
+	}
+}
+
+func TestInstallPigstyKeyReusesExistingFile(t *testing.T) {
+	_, keyPath := setupAddKeyTest(t, config.DistroDEB, "d12", "x86_64")
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const content = "existing administrator-managed key\n"
+	if err := os.WriteFile(keyPath, []byte(content), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	putPigstyKey = func(string, []byte, os.FileMode) error {
+		t.Fatal("existing key reached the writer")
+		return nil
+	}
+	if err := InstallPigstyKey(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(keyPath)
+	if err != nil || string(got) != content {
+		t.Fatalf("existing key changed: %q, %v", got, err)
+	}
+}
+
+func TestInstallPigstyKeyAttemptsInstallWhenStatDenied(t *testing.T) {
+	_, keyPath := setupAddKeyTest(t, config.DistroDEB, "d12", "x86_64")
+	statPigstyKey = func(string) (os.FileInfo, error) { return nil, os.ErrPermission }
+	if err := InstallPigstyKey(); err != nil {
+		t.Fatal(err)
+	}
+	assertInstalledPigstyKey(t, keyPath)
+}
+
+func TestInstallPigstyKeyRejectsNonRegularDestination(t *testing.T) {
+	for _, kind := range []string{"directory", "symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			_, keyPath := setupAddKeyTest(t, config.DistroDEB, "d12", "aarch64")
+			if err := os.MkdirAll(filepath.Dir(keyPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if kind == "directory" {
+				err = os.Mkdir(keyPath, 0o755)
+			} else {
+				err = os.Symlink(filepath.Join(t.TempDir(), "missing"), keyPath)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			putPigstyKey = func(string, []byte, os.FileMode) error {
+				t.Fatal("non-regular key destination reached the writer")
+				return nil
+			}
+			if err := InstallPigstyKey(); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+				t.Fatalf("%s destination: %v", kind, err)
+			}
+		})
 	}
 }
 

@@ -313,6 +313,11 @@ func bootstrapAnsible(opts NativeBootstrapOptions, data *BootData, pkg string, h
 		if result == nil {
 			return output.Fail(output.CodeStyBootstrapFailed, "failed to configure Pigsty bootstrap repositories").WithData(data)
 		}
+		if repoData := bootRepoAddData(result); repoData != nil {
+			for _, warning := range repoData.Warnings {
+				appendBootWarningText(data, warning)
+			}
+		}
 		if !result.Success && (overwrite || result.Code != output.CodeRepoCacheUpdateFailed) {
 			message := "failed to configure Pigsty bootstrap repositories"
 			if result.Message != "" {

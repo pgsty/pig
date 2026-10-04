@@ -266,6 +266,22 @@ func TestBootstrapNativeKeepPreservesOnlineRepos(t *testing.T) {
 	}
 }
 
+func TestBootstrapNativeRetainsRepositoryKeyWarning(t *testing.T) {
+	setupBootTest(t)
+	bootInstall = func(int, []string, install.PackageOptions) error { return nil }
+	const warning = "Pigsty signing key unavailable; continuing with signature verification disabled"
+	bootRepos = func([]string, repo.AddOptions) *output.Result {
+		result := successfulBootstrapRepoResult()
+		result.Data.(*repo.RepoAddData).Warnings = []string{warning}
+		return result
+	}
+	result := BootstrapNative(context.Background(), NativeBootstrapOptions{Keep: true})
+	data := result.Data.(*BootData)
+	if !result.Success || len(data.Warnings) != 1 || data.Warnings[0] != warning {
+		t.Fatalf("repository warning was lost: %+v %+v", result, data)
+	}
+}
+
 func TestBootstrapNativeOfflineUsesStrictLocalScope(t *testing.T) {
 	setupBootTest(t)
 	pkg := filepath.Join(t.TempDir(), "pkg.tgz")
