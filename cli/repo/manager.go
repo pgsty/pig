@@ -191,32 +191,11 @@ func (m *Manager) addDefaultModules() {
 	}
 }
 
-func (m *Manager) enablePigstyGPGCheck() {
-	if repo, ok := m.Map["pigsty-pgsql"]; ok {
-		if m.OsType == config.DistroEL {
-			repo.Meta["gpgcheck"] = "1"
-			if strings.TrimSpace(repo.Meta["gpgkey"]) == "" {
-				repo.Meta["gpgkey"] = "file://" + pigstyRPMKeyPath
-			}
-		} else if m.OsType == config.DistroDEB {
-			delete(repo.Meta, "trusted")
-			if strings.TrimSpace(repo.Meta["signed-by"]) == "" {
-				repo.Meta["signed-by"] = pigstyAPTKeyPath
-			}
-		}
-	}
-	if repo, ok := m.Map["pigsty-infra"]; ok {
-		if m.OsType == config.DistroEL {
-			repo.Meta["gpgcheck"] = "1"
-			if strings.TrimSpace(repo.Meta["gpgkey"]) == "" {
-				repo.Meta["gpgkey"] = "file://" + pigstyRPMKeyPath
-			}
-		} else if m.OsType == config.DistroDEB {
-			delete(repo.Meta, "trusted")
-			if strings.TrimSpace(repo.Meta["signed-by"]) == "" {
-				repo.Meta["signed-by"] = pigstyAPTKeyPath
-			}
-		}
+func (m *Manager) enablePigstyGPGCheck(repository *Repository) {
+	if m.OsType == config.DistroEL {
+		repository.Meta["gpgcheck"] = "1"
+	} else if m.OsType == config.DistroDEB {
+		delete(repository.Meta, "trusted")
 	}
 }
 

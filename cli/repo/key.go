@@ -22,6 +22,7 @@ var (
 	pigstyAPTKeyPath = "/etc/apt/keyrings/pigsty.asc"
 	putPigstyKey     = utils.PutFileMode
 	statPigstyKey    = os.Stat
+	importPigstyKeys = utils.SudoCommand
 )
 
 func (m *Manager) selectedPigstyRepositories(modules []string) []*Repository {
@@ -49,42 +50,91 @@ func (r *Repository) hasExplicitSigningKey() bool {
 // explicitly in selected repository metadata makes preparation mandatory.
 func (m *Manager) preparePigstyKey(modules []string, check bool) (string, error) {
 	repositories := m.selectedPigstyRepositories(modules)
-	if len(repositories) == 0 {
-		return "", nil
-	}
-	if err := InstallPigstyKey(); err != nil {
-		for _, repository := range repositories {
-			if repository.hasExplicitSigningKey() {
+	var implicit []*Repository
+	for _, repository := range repositories {
+		if repository.hasExplicitSigningKey() {
+			if err := m.prepareExplicitPigstyKey(repository); err != nil {
 				return "", fmt.Errorf("%s explicitly configures a signing key: %w", repository.Name, err)
 			}
-		}
-		for _, repository := range repositories {
-			if m.OsType == config.DistroDEB {
-				delete(repository.Meta, "signed-by")
-				repository.Meta["trusted"] = "yes"
-			} else {
-				delete(repository.Meta, "gpgkey")
-				repository.Meta["gpgcheck"] = "0"
-				repository.Meta["repo_gpgcheck"] = "0"
+			if check {
+				m.enablePigstyGPGCheck(repository)
 			}
+		} else {
+			implicit = append(implicit, repository)
 		}
-		return fmt.Sprintf("Pigsty signing key unavailable; continuing with signature verification disabled for selected Pigsty repositories: %v", err), nil
 	}
-	// APT does not discover keys in /etc/apt/keyrings automatically. Reference
-	// the prepared file even when retaining the permissive signature policy.
+	if len(implicit) == 0 {
+		return "", nil
+	}
+	err := InstallPigstyKey()
+	// Keep the implicit reference stable even on failure: APT rejects two
+	// definitions of the same source with different Signed-By values.
 	field, key := "gpgkey", "file://"+pigstyRPMKeyPath
 	if m.OsType == config.DistroDEB {
 		field, key = "signed-by", pigstyAPTKeyPath
 	}
-	for _, repository := range repositories {
-		if strings.TrimSpace(repository.Meta[field]) == "" {
-			repository.Meta[field] = key
+	for _, repository := range implicit {
+		repository.Meta[field] = key
+		if err != nil {
+			if m.OsType == config.DistroDEB {
+				repository.Meta["trusted"] = "yes"
+			} else {
+				repository.Meta["gpgcheck"] = "0"
+				repository.Meta["repo_gpgcheck"] = "0"
+			}
+		} else if check {
+			m.enablePigstyGPGCheck(repository)
 		}
 	}
-	if check {
-		m.enablePigstyGPGCheck()
+	if err != nil {
+		return fmt.Sprintf("Pigsty signing key unavailable; continuing with signature verification disabled for selected Pigsty repositories: %v", err), nil
 	}
 	return "", nil
+}
+
+// Explicit references name the required key, not an unrelated default file.
+// RPM owns key acquisition/import; APT signed-by names local keyring files.
+func (m *Manager) prepareExplicitPigstyKey(repository *Repository) error {
+	if m.OsType == config.DistroEL {
+		if strings.TrimSpace(repository.Meta["signed-by"]) != "" {
+			return fmt.Errorf("use gpgkey for RPM repositories")
+		}
+		keys := strings.Fields(repository.Meta["gpgkey"])
+		for _, key := range keys {
+			if strings.TrimPrefix(key, "file://") == pigstyRPMKeyPath {
+				if err := InstallPigstyKey(); err != nil {
+					return err
+				}
+			}
+		}
+		if err := importPigstyKeys(append([]string{"rpm", "--import", "--"}, keys...)); err != nil {
+			return fmt.Errorf("import explicitly configured RPM signing key: %w", err)
+		}
+		return nil
+	}
+	if strings.TrimSpace(repository.Meta["gpgkey"]) != "" {
+		return fmt.Errorf("use signed-by for APT repositories")
+	}
+	for _, key := range strings.Split(repository.Meta["signed-by"], ",") {
+		key = strings.TrimSpace(key)
+		if key == pigstyAPTKeyPath {
+			if err := InstallPigstyKey(); err != nil {
+				return err
+			}
+			continue
+		}
+		if !filepath.IsAbs(key) {
+			return fmt.Errorf("signed-by must name an absolute keyring file: %q", key)
+		}
+		info, err := os.Stat(key)
+		if err != nil {
+			return fmt.Errorf("required signing key %q: %w", key, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("required signing key %q is not a regular file", key)
+		}
+	}
+	return nil
 }
 
 // InstallPigstyKey installs the embedded Pigsty signing key at the path used by

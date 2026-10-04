@@ -163,7 +163,7 @@ func writePrivateTempFile(pattern string, content []byte) (string, error) {
 // install plus rename when the destination directory is not writable.
 func PutFileMode(path string, content []byte, mode os.FileMode) error {
 	logrus.Debugf("put file %q with mode %04o", path, mode.Perm())
-	if _, err := existingFileMode(path, mode); err != nil {
+	if _, err := existingFileMode(path, mode); err != nil && !errors.Is(err, os.ErrPermission) {
 		return err
 	}
 
@@ -187,6 +187,12 @@ func PutFileMode(path string, content []byte, mode os.FileMode) error {
 
 	modeArg := fmt.Sprintf("%04o", mode.Perm())
 	privilegedTmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp-"+filepath.Base(tmpPath))
+	// Repeat the destination check with the privileges used for installation.
+	// This also covers directories the caller cannot traverse. Pass paths as
+	// arguments, never shell source, and continue to reject symlinks/special files.
+	if err := SudoCommand([]string{"sh", "-c", `[ ! -L "$1" ] && { [ ! -e "$1" ] || [ -f "$1" ]; }`, "pig-write", path}); err != nil {
+		return fmt.Errorf("refusing inaccessible or non-regular privileged destination %q: %w", path, err)
+	}
 	committed := false
 	defer func() {
 		if !committed {

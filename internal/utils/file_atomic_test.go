@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"pig/internal/config"
 )
 
 func TestAtomicWritePreservesPreviousFileOnFailure(t *testing.T) {
@@ -122,6 +124,76 @@ func TestWritePrivateTempFileUsesOwnerOnlyMode(t *testing.T) {
 	}
 	if got, err := os.ReadFile(path); err != nil || string(got) != "secret" {
 		t.Fatalf("staged content = %q, err=%v", got, err)
+	}
+}
+
+func TestPutFileModeRetriesDeniedInspectionWithSudo(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires an unprivileged caller for a real permission failure")
+	}
+	originalUser := config.CurrentUser
+	config.CurrentUser = "test-user"
+	t.Cleanup(func() { config.CurrentUser = originalUser })
+	t.Setenv("PIG_NO_SUDO", "")
+	for _, symlink := range []bool{false, true} {
+		name := "missing"
+		if symlink {
+			name = "hidden-symlink"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			protected := filepath.Join(dir, "protected")
+			if err := os.Mkdir(protected, 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(protected, 0700) })
+			path := filepath.Join(protected, "key.asc")
+			target := filepath.Join(dir, "target.asc")
+			if symlink {
+				if err := os.WriteFile(target, []byte("original"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Chmod(protected, 0000); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrPermission) {
+				t.Fatalf("inspection did not fail with permission denied: %v", err)
+			}
+			// Emulate privilege escalation by restoring directory access only
+			// after the writer invokes sudo, then run its actual commands.
+			t.Setenv("PIG_TEST_PROTECTED_DIR", protected)
+			fakeSudo := "#!/bin/sh\nchmod 0700 \"$PIG_TEST_PROTECTED_DIR\" || exit 1\nexec \"$@\"\n"
+			if err := os.WriteFile(filepath.Join(dir, "sudo"), []byte(fakeSudo), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			err := PutFileMode(path, []byte("new key"), 0644)
+			if symlink {
+				if err == nil {
+					t.Fatal("privileged write accepted a hidden symlink")
+				}
+				if got, err := os.Readlink(path); err != nil || got != target {
+					t.Fatalf("symlink changed: %q, %v", got, err)
+				}
+				if got, err := os.ReadFile(target); err != nil || string(got) != "original" {
+					t.Fatalf("target changed: %q, %v", got, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got, err := os.ReadFile(path); err != nil || string(got) != "new key" {
+					t.Fatalf("privileged key write: %q, %v", got, err)
+				}
+				if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0644 {
+					t.Fatalf("privileged key permissions: %v, %v", info, err)
+				}
+			}
+		})
 	}
 }
 

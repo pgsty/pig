@@ -96,14 +96,10 @@ func TestInstallPigstyKeyRejectsNonRegularDestination(t *testing.T) {
 }
 
 func TestManagerEnablesSignedPigstyRepos(t *testing.T) {
-	origType, origCode, origArch := config.OSType, config.OSCode, config.OSArch
-	t.Cleanup(func() { config.OSType, config.OSCode, config.OSArch = origType, origCode, origArch })
-	config.OSType, config.OSCode, config.OSArch = config.DistroDEB, "u26", "aarch64"
-	manager, err := NewManager()
-	if err != nil {
+	manager, _ := setupAddKeyTest(t, config.DistroDEB, "u26", "aarch64")
+	if _, err := manager.preparePigstyKey([]string{"pigsty"}, true); err != nil {
 		t.Fatal(err)
 	}
-	manager.enablePigstyGPGCheck()
 	for _, name := range []string{"pigsty-infra", "pigsty-pgsql"} {
 		repository := manager.Map[name]
 		if repository == nil || repository.Meta["signed-by"] != pigstyAPTKeyPath {

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -17,17 +18,21 @@ func setupAddKeyTest(t *testing.T, osType, code, arch string) (*Manager, string)
 	t.Helper()
 	origType, origCode, origArch, origDir := config.OSType, config.OSCode, config.OSArch, config.ConfigDir
 	origRPMPath, origAPTPath, origPut := pigstyRPMKeyPath, pigstyAPTKeyPath, putPigstyKey
-	origStat := statPigstyKey
+	origStat, origImport := statPigstyKey, importPigstyKeys
 	origManager, origRun, origAdd := newAddRepoManager, runAddRepoCommand, addRepoModule
 	t.Cleanup(func() {
 		config.OSType, config.OSCode, config.OSArch, config.ConfigDir = origType, origCode, origArch, origDir
 		pigstyRPMKeyPath, pigstyAPTKeyPath, putPigstyKey = origRPMPath, origAPTPath, origPut
-		statPigstyKey = origStat
+		statPigstyKey, importPigstyKeys = origStat, origImport
 		newAddRepoManager, runAddRepoCommand, addRepoModule = origManager, origRun, origAdd
 	})
 	config.OSType, config.OSCode, config.OSArch, config.ConfigDir = osType, code, arch, t.TempDir()
 	pigstyRPMKeyPath = filepath.Join(t.TempDir(), "rpm-gpg", "RPM-GPG-KEY-pigsty")
 	pigstyAPTKeyPath = filepath.Join(t.TempDir(), "keyrings", "pigsty.asc")
+	importPigstyKeys = func([]string) error {
+		t.Fatal("unexpected RPM key import")
+		return nil
+	}
 	manager, err := NewManager()
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +106,14 @@ func TestConfigureReposAutomaticallyInstallsPigstyKey(t *testing.T) {
 						return nil
 					}
 					for attempt := 1; attempt <= 2; attempt++ {
+						if attempt > 1 {
+							fresh, err := NewManager()
+							if err != nil {
+								t.Fatal(err)
+							}
+							fresh.RepoDir, fresh.BackupDir, fresh.UpdateCmd = manager.RepoDir, manager.BackupDir, manager.UpdateCmd
+							*manager = *fresh
+						}
 						result := ConfigureRepos(selection.args, AddOptions{Region: "default", Update: true})
 						if !result.Success {
 							t.Fatalf("attempt %d: %+v", attempt, result)
@@ -266,7 +279,7 @@ func TestConfigureReposImplicitKeyFailureFallsBack(t *testing.T) {
 						t.Fatal(err)
 					}
 					if platform.osType == config.DistroDEB {
-						if !strings.Contains(string(content), "trusted=yes") || strings.Contains(string(content), "signed-by=") {
+						if !strings.Contains(string(content), "trusted=yes") || strings.Count(string(content), "signed-by="+pigstyAPTKeyPath) != 2 {
 							t.Fatalf("APT fallback = %s", content)
 						}
 					} else if !strings.Contains(string(content), "gpgcheck=0") || !strings.Contains(string(content), "repo_gpgcheck=0") {
@@ -301,9 +314,20 @@ func TestConfigureReposPreservesExplicitKey(t *testing.T) {
 		t.Run(platform.code, func(t *testing.T) {
 			for _, check := range []bool{false, true} {
 				manager, _ := setupAddKeyTest(t, platform.osType, platform.code, "x86_64")
-				const customKey = "/custom/pigsty-key.asc"
+				customKey := filepath.Join(t.TempDir(), "custom-key.asc")
+				writeRollbackFixture(t, customKey, string(embeddedPigstyKey))
 				manager.Map["pigsty-infra"].Meta[platform.field] = customKey
-				result := ConfigureRepos([]string{"pigsty"}, AddOptions{Region: "default", GPGCheck: check})
+				putPigstyKey = func(string, []byte, os.FileMode) error {
+					t.Fatal("custom key preparation tried to write an unrelated default key")
+					return nil
+				}
+				importPigstyKeys = func(args []string) error {
+					if strings.Join(args, " ") != "rpm --import -- "+customKey {
+						t.Fatalf("imported unrelated key: %v", args)
+					}
+					return nil
+				}
+				result := ConfigureRepos([]string{"infra"}, AddOptions{Region: "default", GPGCheck: check})
 				if !result.Success || manager.Map["pigsty-infra"].Meta[platform.field] != customKey {
 					t.Fatalf("explicit key was replaced (check=%v): %+v", check, result)
 				}
@@ -324,5 +348,90 @@ func TestConfigureReposRejectsReplacementBeforeKeyInstallation(t *testing.T) {
 	}
 	if _, err := os.Stat(keyPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unexpected key file: %v", err)
+	}
+}
+
+func TestConfigureReposMissingExplicitCustomKeyFailsBeforeMutation(t *testing.T) {
+	for _, platform := range []struct{ osType, code, field string }{
+		{config.DistroEL, "el9", "gpgkey"}, {config.DistroDEB, "d12", "signed-by"},
+	} {
+		for _, remove := range []bool{false, true} {
+			t.Run(platform.code+"/remove="+strconv.FormatBool(remove), func(t *testing.T) {
+				manager, defaultKey := setupAddKeyTest(t, platform.osType, platform.code, "aarch64")
+				customKey := filepath.Join(t.TempDir(), "missing.asc")
+				manager.Map["pigsty-infra"].Meta[platform.field] = customKey
+				legacy := filepath.Join(manager.RepoDir, "legacy.repo")
+				writeRollbackFixture(t, legacy, "preserve me\n")
+				importPigstyKeys = func([]string) error { return os.ErrNotExist }
+				runAddRepoCommand = func([]string) error {
+					t.Fatal("explicit key failure reached backup/cache update")
+					return nil
+				}
+				result := ConfigureRepos([]string{"infra"}, AddOptions{Remove: remove, Update: true})
+				if result.Success || !strings.Contains(result.Message, "explicitly configures a signing key") {
+					t.Fatalf("missing custom key was accepted: %+v", result)
+				}
+				assertRollbackFixture(t, legacy, "preserve me\n")
+				data := result.Data.(*RepoAddData)
+				if len(data.AddedRepos) != 0 || data.BackupInfo != nil || data.UpdateResult != nil || len(data.Warnings) != 0 {
+					t.Fatalf("explicit failure changed repositories or fell back: %+v", data)
+				}
+				if _, err := os.Stat(defaultKey); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("custom key installed an unrelated default: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestConfigureReposFallbackPreservesExistingAPTReference(t *testing.T) {
+	manager, keyPath := setupAddKeyTest(t, config.DistroDEB, "d12", "aarch64")
+	result := ConfigureRepos([]string{"infra"}, AddOptions{})
+	if !result.Success {
+		t.Fatal(result)
+	}
+	before, err := os.ReadFile(manager.getModulePath("infra"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := NewManager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh.RepoDir = manager.RepoDir
+	newAddRepoManager = func(...string) (*Manager, error) { return fresh, nil }
+	putPigstyKey = func(string, []byte, os.FileMode) error { return os.ErrPermission }
+	result = ConfigureRepos([]string{"pigsty"}, AddOptions{})
+	if !result.Success || len(result.Data.(*RepoAddData).Warnings) != 1 {
+		t.Fatalf("fallback failed: %+v", result)
+	}
+	assertRollbackFixture(t, manager.getModulePath("infra"), string(before))
+	after, err := os.ReadFile(fresh.getModulePath("pigsty"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	option := "[signed-by=" + keyPath + " trusted=yes]"
+	if !strings.Contains(string(before), option) || strings.Count(string(after), option) != 2 {
+		t.Fatalf("APT options differ between retained and new definitions:\n%s\n%s", before, after)
+	}
+}
+
+func TestConfigureReposFallbackDoesNotDowngradeExplicitCustomKey(t *testing.T) {
+	manager, _ := setupAddKeyTest(t, config.DistroDEB, "d12", "aarch64")
+	customKey := filepath.Join(t.TempDir(), "custom.asc")
+	writeRollbackFixture(t, customKey, string(embeddedPigstyKey))
+	manager.Map["pigsty-infra"].Meta["signed-by"] = customKey
+	manager.Map["pigsty-infra"].Meta["trusted"] = "no"
+	before := maps.Clone(manager.Map["pigsty-infra"].Meta)
+	putPigstyKey = func(string, []byte, os.FileMode) error { return os.ErrPermission }
+	result := ConfigureRepos([]string{"pigsty"}, AddOptions{})
+	if !result.Success || len(result.Data.(*RepoAddData).Warnings) != 1 {
+		t.Fatalf("unrelated default key failure blocked custom key: %+v", result)
+	}
+	if !maps.Equal(before, manager.Map["pigsty-infra"].Meta) || manager.Map["pigsty-pgsql"].Meta["trusted"] != "yes" {
+		t.Fatal("fallback crossed the explicit-key boundary")
 	}
 }
