@@ -13,7 +13,7 @@ import (
 )
 
 func TestBuildPgrxDefaultVersion(t *testing.T) {
-	const want = "0.19.2"
+	const want = "0.19.3"
 	if build.DefaultPgrxVersion != want {
 		t.Fatalf("default pgrx version = %q, want %q", build.DefaultPgrxVersion, want)
 	}
