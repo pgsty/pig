@@ -3,6 +3,7 @@ package build
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -220,6 +221,9 @@ func TestXrayServiceCapabilitiesAndSecretFreePlan(t *testing.T) {
 		if !strings.Contains(string(b), "AmbientCapabilities="+tt.capability+"\n") || strings.Contains(string(b), "CAP_NET_ADMIN") {
 			t.Fatal("incorrect service privilege")
 		}
+		if !strings.Contains(string(b), "CapabilityBoundingSet=\nAmbientCapabilities=\n") {
+			t.Fatal("package capabilities were not reset before assigning listener capabilities")
+		}
 	}
 	_, _, c := proxyTestPair(t)
 	b, _ := json.Marshal(proxyPlan("client", r, DefaultProxyListen))
@@ -244,5 +248,90 @@ func TestXrayServerSetupRefusesUnknownRoutingButAllowsReadOnlyExport(t *testing.
 	query := ProxyServerOptions{Host: opts.Host, Port: 443, ExportOnly: true, Export: "-"}
 	if _, _, _, _, err := prepareXrayServer(r, query, false); err != nil {
 		t.Fatalf("read-only export unnecessarily rejects routing: %v", err)
+	}
+}
+
+func TestXrayConfigOwnershipMustMatchEvenWhenContentMatches(t *testing.T) {
+	r := proxyRuntime{os: "linux"}
+	config, service := []byte("config"), []byte("service")
+	saved := []proxySnapshot{{data: config, mode: 0640, uid: 0, gid: 123}, {data: service, mode: 0644, uid: 0, gid: 0}}
+	if r.configFilesChanged(saved, config, service, 123) {
+		t.Fatal("matching files were treated as changed")
+	}
+	for _, tt := range []struct{ file, uid, gid int }{{0, 0, 0}, {0, 42, 123}, {1, 42, 0}} {
+		changed := append([]proxySnapshot(nil), saved...)
+		changed[tt.file].uid, changed[tt.file].gid = tt.uid, tt.gid
+		if !r.configFilesChanged(changed, config, service, 123) {
+			t.Fatal("incorrect file ownership was treated as an idempotent success")
+		}
+	}
+}
+
+func TestXrayMacEnabledStateAndRecovery(t *testing.T) {
+	const label = "com.pigsty.xray-review"
+	for _, tt := range []struct {
+		state   string
+		want    bool
+		failure bool
+	}{{"disabled services = {\n}", true, false}, {`"other.service" => true`, true, false}, {`"com.pigsty.xray-review" => false`, true, false}, {`"com.pigsty.xray-review" => true`, false, false}, {`"com.pigsty.xray-review" => enabled`, true, false}, {`"com.pigsty.xray-review" => disabled`, false, false}, {`"com.pigsty.xray-review" => unknown`, false, false}, {"", false, true}} {
+		r := proxyRuntime{os: "darwin", label: label, capture: func(name string, args ...string) (string, error) {
+			if name != "launchctl" || args[0] != "print-disabled" {
+				t.Fatal("unexpected enablement query")
+			}
+			if tt.failure {
+				return "", fmt.Errorf("query failed")
+			}
+			return tt.state, nil
+		}}
+		if got := r.enabled(); got != tt.want {
+			t.Fatalf("incorrect persistent LaunchAgent enablement: got %v", got)
+		}
+	}
+	var operations []string
+	r := proxyRuntime{os: "darwin", label: label, serviceFile: "/test/agent.plist", run: func(name string, args ...string) error {
+		if name != "launchctl" {
+			t.Fatal("unexpected service operation")
+		}
+		if args[0] == "print" {
+			return fmt.Errorf("not loaded")
+		}
+		operations = append(operations, args[0])
+		return nil
+	}}
+	if err := r.start(false); err != nil || strings.Join(operations, ",") != "enable,bootstrap" {
+		t.Fatal("disabled LaunchAgent was not enabled before loading")
+	}
+	operations = nil
+	if err := r.restoreService(true, false); err != nil || strings.Join(operations, ",") != "enable,bootstrap,disable" {
+		t.Fatal("rollback did not restore both running and disabled state")
+	}
+	operations = nil
+	if err := r.restoreService(false, true); err != nil || strings.Join(operations, ",") != "enable" {
+		t.Fatal("rollback changed a stopped, enabled LaunchAgent into a disabled one")
+	}
+}
+
+func TestXrayUnitMustUseTheValidatedIdentityAndConfig(t *testing.T) {
+	const command = "{ path=/usr/bin/xray ; argv[]=/usr/bin/xray run -config /etc/xray.json ; ignore_errors=no }"
+	for _, tt := range []struct {
+		group, command string
+		allowed        bool
+	}{{"xray", command, true}, {"", command, true}, {"root", command, false}, {"xray", strings.Replace(command, "xray.json ;", "xray.json -confdir /other ;", 1), false}, {"xray", strings.Replace(command, "/etc/xray.json", "/other/config.json", 1), false}, {"xray", command + command, false}} {
+		r := proxyRuntime{os: "linux", config: "/etc/xray.json", capture: func(_ string, args ...string) (string, error) {
+			switch args[2] {
+			case "--property=User":
+				return "xray", nil
+			case "--property=Group":
+				return tt.group, nil
+			case "--property=ExecStart":
+				return tt.command, nil
+			default:
+				t.Fatal("unexpected unit property")
+				return "", nil
+			}
+		}}
+		if err := r.checkServiceUnit(); (err == nil) != tt.allowed {
+			t.Fatal("unit with a different identity or extra configuration was not refused")
+		}
 	}
 }

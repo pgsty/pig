@@ -2,10 +2,13 @@ package build
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"pig/internal/utils"
@@ -50,8 +53,12 @@ func (r proxyRuntime) checkServiceUnit() error {
 	if err != nil || strings.TrimSpace(user) != "xray" {
 		return fmt.Errorf("the packaged Xray unit must run as the xray service account")
 	}
+	group, err := r.capture("systemctl", "show", "xray", "--property=Group", "--value")
+	if err != nil || strings.TrimSpace(group) != "" && strings.TrimSpace(group) != "xray" {
+		return fmt.Errorf("the packaged Xray unit must use the xray service group")
+	}
 	command, err := r.capture("systemctl", "show", "xray", "--property=ExecStart", "--value")
-	if err != nil || !strings.Contains(command, "/usr/bin/xray run -config "+r.config+" ") {
+	if err != nil || strings.Count(command, "argv[]=") != 1 || !strings.Contains(command, "argv[]=/usr/bin/xray run -config "+r.config+" ;") {
 		return fmt.Errorf("existing Xray unit uses a different configuration; refusing to take it over")
 	}
 	return nil
@@ -122,10 +129,18 @@ func (r proxyRuntime) restoreService(active, enabled bool) error {
 			return err
 		}
 	}
+	var stateErr error
 	if active {
-		return r.run("launchctl", "bootstrap", r.domain(), r.serviceFile)
+		if err := r.run("launchctl", "enable", r.domain()+"/"+r.label); err != nil {
+			return err
+		}
+		stateErr = r.run("launchctl", "bootstrap", r.domain(), r.serviceFile)
 	}
-	return nil
+	action := "disable"
+	if enabled {
+		action = "enable"
+	}
+	return errors.Join(stateErr, r.run("launchctl", action, r.domain()+"/"+r.label))
 }
 
 func (t *proxyTransaction) commit(candidate, service []byte, changed bool) error {
@@ -157,7 +172,7 @@ func (t *proxyTransaction) finishClient(listen string, result *ProxySetupResult)
 	if t.r.os == "linux" {
 		mode = 0644
 	}
-	if !bytes.Equal(t.saved[2].data, shell) || t.saved[2].mode != mode {
+	if !bytes.Equal(t.saved[2].data, shell) || t.saved[2].mode != mode || t.saved[2].uid != os.Geteuid() {
 		t.mutated = true
 		if err := utils.AtomicWriteFile(t.r.shell, shell, mode); err != nil {
 			return fmt.Errorf("cannot write proxy shell helpers")
@@ -168,12 +183,31 @@ func (t *proxyTransaction) finishClient(listen string, result *ProxySetupResult)
 	return nil
 }
 
-func (r proxyRuntime) configFilesChanged(saved []proxySnapshot, candidate, service []byte) bool {
+func (r proxyRuntime) configGroupID() (int, error) {
+	if r.os != "linux" {
+		return os.Getegid(), nil
+	}
+	group, err := user.LookupGroup("xray")
+	if err != nil {
+		return 0, fmt.Errorf("packaged xray group is unavailable")
+	}
+	gid, err := strconv.Atoi(group.Gid)
+	if err != nil {
+		return 0, fmt.Errorf("packaged xray group is invalid")
+	}
+	return gid, nil
+}
+
+func (r proxyRuntime) configFilesChanged(saved []proxySnapshot, candidate, service []byte, gid int) bool {
 	configMode := os.FileMode(0600)
+	uid := os.Geteuid()
+	groupChanged := false
 	if r.os == "linux" {
 		configMode = 0640
+		uid = 0
+		groupChanged = saved[0].gid != gid
 	}
-	return !bytes.Equal(saved[0].data, candidate) || saved[0].mode != configMode || !bytes.Equal(saved[1].data, service) || saved[1].mode != 0644
+	return !bytes.Equal(saved[0].data, candidate) || saved[0].mode != configMode || saved[0].uid != uid || groupChanged || !bytes.Equal(saved[1].data, service) || saved[1].mode != 0644 || saved[1].uid != uid
 }
 
 func (r proxyRuntime) binaryPath() (string, error) {
@@ -212,7 +246,11 @@ func (r proxyRuntime) apply(role, listen string, candidate []byte, replace bool,
 	if t.saved[1].exists && !bytes.Equal(t.saved[1].data, service) && !strings.HasPrefix(string(t.saved[1].data), "# Managed by pig build proxy\n") && !replace {
 		return nil, fmt.Errorf("existing service configuration differs and is not managed by PIG")
 	}
-	changed := r.configFilesChanged(t.saved, candidate, service)
+	gid, err := r.configGroupID()
+	if err != nil {
+		return nil, err
+	}
+	changed := r.configFilesChanged(t.saved, candidate, service, gid)
 	if err := os.MkdirAll(filepath.Dir(r.serviceFile), 0755); err != nil {
 		return nil, fmt.Errorf("cannot create service configuration directory")
 	}

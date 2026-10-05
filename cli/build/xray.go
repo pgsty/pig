@@ -171,7 +171,18 @@ func (r proxyRuntime) enabled() bool {
 	if r.os == "linux" {
 		return r.run("systemctl", "is-enabled", "--quiet", "xray") == nil
 	}
-	return r.active()
+	state, err := r.capture("launchctl", "print-disabled", r.domain())
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(state, "\n") {
+		name, disabled, found := strings.Cut(line, "=>")
+		if found && strings.TrimSpace(name) == strconv.Quote(r.label) {
+			value := strings.TrimSpace(disabled)
+			return value == "false" || value == "enabled"
+		}
+	}
+	return true // An absent override means the LaunchAgent is enabled by default.
 }
 
 func (r proxyRuntime) domain() string { return "gui/" + strconv.Itoa(os.Getuid()) }
@@ -191,6 +202,9 @@ func (r proxyRuntime) start(restart bool) error {
 			action = "restart"
 		}
 		return r.run("systemctl", action, "xray")
+	}
+	if err := r.run("launchctl", "enable", r.domain()+"/"+r.label); err != nil {
+		return err
 	}
 	if restart && r.active() {
 		if err := r.run("launchctl", "bootout", r.domain()+"/"+r.label); err != nil {
@@ -213,7 +227,13 @@ func (r proxyRuntime) serviceContent(listen, binary string) ([]byte, error) {
 		if port < 1024 {
 			capability = "CAP_NET_BIND_SERVICE"
 		}
-		return []byte("# Managed by pig build proxy\n[Service]\nEnvironment=XRAY_LOCATION_ASSET=" + r.asset + "\nCapabilityBoundingSet=" + capability + "\nAmbientCapabilities=" + capability + "\n"), nil
+		// Repeated positive assignments are additive in systemd. Reset the package's
+		// capability sets before granting only the capability needed by this listener.
+		service := "# Managed by pig build proxy\n[Service]\nEnvironment=XRAY_LOCATION_ASSET=" + r.asset + "\nCapabilityBoundingSet=\nAmbientCapabilities=\n"
+		if capability != "" {
+			service += "CapabilityBoundingSet=" + capability + "\nAmbientCapabilities=" + capability + "\n"
+		}
+		return []byte(service), nil
 	}
 	// All interpolated paths are XML-escaped; arguments are never shell source.
 	escape := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
