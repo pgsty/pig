@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"fmt"
 	"pig/cli/build"
 	"pig/cli/ext"
 	"pig/cli/repo"
+	"pig/internal/config"
+	"pig/internal/output"
+	"runtime"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -49,8 +53,10 @@ Environment Setup:
   pig build tool  [mini|full|...]  # init build toolset
   pig build rust  [-y] [-m]        # install Rust toolchain
   pig build pgrx  [-v <ver>] [-b]  # install & init pgrx (` + build.DefaultPgrxVersion + `)
-  pig build proxy                  # install or verify the vray package
-  pig build proxy id@host:port     # configure the optional build proxy
+  pig build proxy                  # install or verify Xray
+  pig build proxy client 'vless://...' # configure HTTP/SOCKS on 127.0.0.1:12345
+  pig build proxy server --host HOST --target HOST:443 # configure a REALITY server
+  pig build proxy id@host:port     # legacy VMess client
 
 Package Building:
   pig build pkg   [ext|pkg...]     # complete pipeline: get + dep + ext
@@ -136,6 +142,7 @@ func moduleArgsContain(args []string, target string) bool {
 var buildProxyCmd = &cobra.Command{
 	Use:         "proxy [id@remote] [local]",
 	Short:       "Initialize build proxy",
+	Long:        "Install or verify Xray with no arguments. Use client/server for VLESS/REALITY/Vision setup. The historical id@host:port [local] form retains its VMess/V2Ray behavior and default listener 127.0.0.1:12345.",
 	Annotations: ancsAnn("pig build proxy", "action", "volatile", "unsafe", true, "low", "none", "root", 60000),
 	Args:        cobra.MaximumNArgs(2),
 	Aliases:     []string{"x"},
@@ -158,6 +165,119 @@ var buildProxyCmd = &cobra.Command{
 			return build.SetupProxy(remote, local)
 		})
 	},
+}
+
+var buildProxyClientCmd = newBuildProxyClientCommand()
+var buildProxyServerCmd = newBuildProxyServerCommand()
+
+func newBuildProxyClientCommand() *cobra.Command {
+	var opts build.ProxyClientOptions
+	var plan bool
+	command := &cobra.Command{
+		Use:         "client [vless-uri]",
+		Short:       "Set up an Xray HTTP/SOCKS client",
+		Long:        "Install Xray, configure VLESS/REALITY/Vision, start its service, and verify HTTP and SOCKS HTTPS requests. Connection input is a URI, --from FILE/-, or connection flags. The default listener is 127.0.0.1:12345; reruns preserve an existing listener when --listen is omitted.",
+		Annotations: ancsAnn("pig build proxy client", "action", "volatile", "unsafe", true, "medium", "none", proxyClientOSUser(), 120000),
+		Args:        cobra.MaximumNArgs(1),
+		Example:     "pig build proxy client 'vless://...'\npig build proxy client --from -\npig build proxy client --server proxy.example.com:443 --id UUID --sni www.example.net --public-key KEY --short-id ID --pqv KEY",
+	}
+	command.RunE = func(cmd *cobra.Command, args []string) error {
+		opts.URI = ""
+		if len(args) == 1 {
+			opts.URI = args[0]
+		}
+		opts.ListenSet = cmd.Flags().Changed("listen")
+		if plan {
+			p, err := build.PlanXrayClient(opts, cmd.InOrStdin())
+			if err != nil {
+				return proxyCommandError("client", err)
+			}
+			return handlePlanOutput(p)
+		}
+		if opts.Replace && !opts.Yes {
+			return proxyCommandError("client", fmt.Errorf("replacement requires --replace --yes"))
+		}
+		result, err := build.SetupXrayClient(opts, cmd.InOrStdin())
+		if err != nil {
+			return proxyCommandError("client", err)
+		}
+		return handleAuxResult(output.OK("Xray client ready", result))
+	}
+	f := command.Flags()
+	f.StringVar(&opts.From, "from", "", "read one VLESS URI from a file or '-' for stdin")
+	f.StringVar(&opts.Server, "server", "", "public server endpoint (host:port)")
+	f.StringVar(&opts.ID, "id", "", "client UUID (credential)")
+	f.StringVar(&opts.SNI, "sni", "", "REALITY server name")
+	f.StringVar(&opts.PublicKey, "public-key", "", "REALITY client authentication key")
+	f.StringVar(&opts.ShortID, "short-id", "", "REALITY short ID")
+	f.StringVar(&opts.PQV, "pqv", "", "ML-DSA-65 verification key")
+	f.StringVar(&opts.Listen, "listen", build.DefaultProxyListen, "local listener; preserve existing listener if omitted")
+	f.BoolVar(&plan, "plan", false, "preview without installing, writing, or starting services")
+	f.BoolVar(&opts.Replace, "replace", false, "replace a different or unsupported client configuration")
+	f.BoolVarP(&opts.Yes, "yes", "y", false, "confirm client configuration replacement")
+	return command
+}
+
+func newBuildProxyServerCommand() *cobra.Command {
+	var opts build.ProxyServerOptions
+	var plan bool
+	command := &cobra.Command{
+		Use:         "server",
+		Short:       "Set up or export an Xray REALITY server",
+		Long:        "Set up a Linux VLESS/REALITY/Vision server. Repeated setup preserves existing credentials and clients. Direct listeners default to 0.0.0.0:443; --proxy-protocol defaults to 127.0.0.1:9443 behind an existing trusted frontend. --export-only reads existing configuration without changing the deployment.",
+		Annotations: ancsAnn("pig build proxy server", "action", "volatile", "unsafe", true, "medium", "none", "root", 120000),
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return fmt.Errorf("server does not accept positional arguments")
+			}
+			return nil
+		},
+		Example: "pig build proxy server --host proxy.example.com --target www.example.net:443 --export -\npig build proxy server --host proxy.example.com --target www.example.net:443 --proxy-protocol --export -\npig build proxy server --host proxy.example.com --export-only --export -",
+	}
+	command.RunE = func(cmd *cobra.Command, args []string) error {
+		opts.ListenSet, opts.ProxyProtocolSet = cmd.Flags().Changed("listen"), cmd.Flags().Changed("proxy-protocol")
+		if opts.Export != "" && config.IsStructuredOutput() {
+			return proxyCommandError("server", fmt.Errorf("credential export requires text output; omit --output json/yaml"))
+		}
+		if plan {
+			p, err := build.PlanXrayServer(opts)
+			if err != nil {
+				return proxyCommandError("server", err)
+			}
+			return handlePlanOutput(p)
+		}
+		result, err := build.SetupXrayServer(opts, cmd.OutOrStdout())
+		if err != nil {
+			return proxyCommandError("server", err)
+		}
+		// Explicit export must leave stdout as exactly one URI, with diagnostics on stderr.
+		if opts.Export != "" {
+			return nil
+		}
+		return handleAuxResult(output.OK("Xray server ready locally; public ingress not yet verified", result))
+	}
+	f := command.Flags()
+	f.StringVar(&opts.Host, "host", "", "advertised public server domain or IP")
+	f.IntVar(&opts.Port, "port", 443, "advertised public server port")
+	f.StringVar(&opts.Target, "target", "", "REALITY camouflage TLS endpoint (host:port)")
+	f.StringVar(&opts.SNI, "sni", "", "allowed server name; first setup defaults to target hostname")
+	f.StringVar(&opts.Listen, "listen", "", "bind endpoint; preserve existing or default to direct/public port or backend 127.0.0.1:9443")
+	f.BoolVar(&opts.ProxyProtocol, "proxy-protocol", false, "receive PROXY protocol on loopback behind an existing trusted frontend")
+	f.StringVar(&opts.Export, "export", "", "explicitly export connection URI to a 0600 file or '-' for stdout")
+	f.BoolVar(&opts.ExportOnly, "export-only", false, "read existing server and export its connection without changing configuration or service")
+	f.BoolVar(&plan, "plan", false, "preview without installing, generating credentials, writing, or restarting")
+	return command
+}
+
+func proxyClientOSUser() string {
+	if runtime.GOOS == "darwin" {
+		return "current"
+	}
+	return "root"
+}
+
+func proxyCommandError(role string, err error) error {
+	return handleAuxResult(output.Fail(output.GenericOpFailed(legacyModuleBuild), "Xray "+role+" setup failed").WithDetail(err.Error()))
 }
 
 // buildRustCmd represents the `build rust` command
@@ -285,6 +405,7 @@ var buildPkgCmd = &cobra.Command{
 }
 
 func init() {
+	buildProxyCmd.AddCommand(buildProxyClientCmd, buildProxyServerCmd)
 	// Parse build flags
 	buildRepoCmd.Flags().BoolVarP(&buildRepoMirror, "mirror", "m", false, "prefer China mirrors")
 	buildRepoCmd.Flags().BoolVarP(&buildRepoBeta, "beta", "b", false, "include PostgreSQL beta repository")

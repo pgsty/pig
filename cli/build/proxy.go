@@ -49,7 +49,7 @@ func SetupProxy(remote string, local string) error {
 	logrus.Infof("setting up proxy from local %s to remote %s", local, net.JoinHostPort(host, port))
 
 	// 2. Install or make sure proxy packages are installed
-	if err := InstallProxy(); err != nil {
+	if err := installLegacyProxy(); err != nil {
 		return fmt.Errorf("failed to install proxy: %v", err)
 	}
 
@@ -144,8 +144,12 @@ func validatePort(port string) error {
 	return nil
 }
 
-// InstallProxy will install build proxy via http
+// InstallProxy installs Xray for the new explicit client/server workflow.
 func InstallProxy() error {
+	return installXray()
+}
+
+func installLegacyProxy() error {
 	if _, err := exec.LookPath("v2ray"); err == nil {
 		logrus.Info("proxy binary is already installed")
 		return nil
