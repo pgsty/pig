@@ -149,7 +149,6 @@ func createRepoCmdEL(dir string) string {
 		trap 'rm -f -- "$marker_tmp"' EXIT
 		rm -rf proj-data*
 		rm -rf patroni*3.0.4*
-		rm -rf *docs*
 		createrepo_c .
 		if command -v repo2module >/dev/null 2>&1 && command -v modifyrepo_c >/dev/null 2>&1; then
 			if ! repo2module -s stable . modules.yaml || ! modifyrepo_c --mdtype=modules modules.yaml repodata/; then
@@ -175,7 +174,6 @@ func createRepoCmdEL7(dir string) string {
 		trap 'rm -f -- "$marker_tmp"' EXIT
 		rm -f *.i686.rpm
 		rm -rf patroni*3.0.4*
-		rm -rf *docs*
 		createrepo_c .
 		md5sum *.rpm > "$marker_tmp"
 		mv -f -- "$marker_tmp" "$marker"
