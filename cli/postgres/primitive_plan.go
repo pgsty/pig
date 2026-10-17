@@ -15,7 +15,7 @@ const pgLocalBoundary = "pg:local-instance"
 func BuildPromotePlan(cfg *Config, opts *PromoteOptions) *output.Plan {
 	dataDir := GetPgData(cfg)
 	dbsu := GetDbSU(cfg)
-	running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
+	running, pid, _, probeErr := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
 	role := detectRoleString(cfg)
 
 	return &output.Plan{
@@ -39,7 +39,7 @@ func BuildPromotePlan(cfg *Config, opts *PromoteOptions) *output.Plan {
 		},
 		Preconditions: []output.Check{
 			{Name: "data_dir", Status: "planned", Detail: dataDir},
-			{Name: "postgres running", Status: boolStatus(running), Detail: fmt.Sprintf("pid=%d", pid)},
+			postgresRunningCheck(running, pid, probeErr),
 			{Name: "current role", Status: roleStatus(role), Detail: role},
 			{Name: "boundary", Status: "local-only", Detail: "does not manage Patroni, DCS, VIP, or client routing"},
 		},
@@ -50,7 +50,7 @@ func BuildPromotePlan(cfg *Config, opts *PromoteOptions) *output.Plan {
 		NextActions: []output.NextAction{
 			{Command: "pig pt switchover --help", Reason: "review native Patroni switchover syntax", Required: false},
 			{Command: "pig pt failover --help", Reason: "review native Patroni failover syntax", Required: false},
-			{Command: BuildPromoteCommand(cfg, opts, false), Reason: "execute local-only promotion after explicit confirmation", Required: true},
+			{Command: BuildPromoteCommand(cfg, opts, false), Reason: "execute local-only promotion after resolving preconditions and explicit confirmation", Required: probeErr == nil},
 		},
 	}
 }

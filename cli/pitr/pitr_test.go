@@ -383,6 +383,16 @@ func TestPrintExecutionPlanSideRestoreShowsPatroniLeftRunning(t *testing.T) {
 	}
 }
 
+func TestPrintExecutionPlanUnknownRuntime(t *testing.T) {
+	state := &SystemState{DataDir: "/tmp/pitr-restore", DbSU: "postgres", PGRunning: true, PGPID: 0}
+	text := capturePITRStderr(t, func() {
+		printExecutionPlan(state, &Options{Default: true})
+	})
+	if !strings.Contains(text, "unknown") || strings.Contains(text, "PID: 0") {
+		t.Fatalf("unknown runtime reported as running: %s", text)
+	}
+}
+
 func TestBuildPlanIncludesRecoveryWaitForAutoPromoteTargets(t *testing.T) {
 	state := &SystemState{
 		DataDir: "/pg/data",

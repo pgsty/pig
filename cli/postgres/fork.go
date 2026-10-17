@@ -1195,7 +1195,11 @@ func precheckInstance(opts *Options) (*State, error) {
 	}
 
 	if destExists, _ := CheckDataDirAsDBSU(opts.DbSU, inst.DestData); destExists {
-		if running, pid := CheckPostgresRunningAsDBSU(opts.DbSU, inst.DestData); running {
+		running, pid, _, err := checkPostgresRunningAsDBSUWithError(opts.DbSU, inst.DestData)
+		if err != nil {
+			return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("cannot determine destination fork running state: %w", err)}
+		}
+		if running {
 			return nil, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("destination fork is running (PID: %d): %s\nHint: stop it with `%s`, or remove it with `%s` before replacing", pid, inst.DestData, forkStopCommand(inst), forkRemoveCommand(inst))}
 		}
 		if !opts.Replace {

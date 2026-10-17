@@ -50,8 +50,8 @@ func StatusResult(cfg *Config) *output.Result {
 	// Check if data directory exists and is initialized
 	exists, initialized, err := checkDataDirStateAsDBSU(dbsu, dataDir)
 	if err != nil {
-		return output.Fail(output.CodePgStatusPermissionDenied,
-			"Permission denied checking PostgreSQL data directory").
+		return output.Fail(statusProbeErrorCode(err),
+			"Unable to check PostgreSQL data directory").
 			WithData(statusData).
 			WithDetail(err.Error())
 	}
@@ -71,7 +71,7 @@ func StatusResult(cfg *Config) *output.Result {
 	// Check if PostgreSQL is running
 	running, pid, pidContent, err := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
 	if err != nil {
-		return output.Fail(output.CodePgStatusPermissionDenied,
+		return output.Fail(statusProbeErrorCode(err),
 			"Unable to determine PostgreSQL running state").
 			WithData(statusData).
 			WithDetail(err.Error())
@@ -102,6 +102,13 @@ func StatusResult(cfg *Config) *output.Result {
 	}
 
 	return output.OK("PostgreSQL is running", statusData)
+}
+
+func statusProbeErrorCode(err error) int {
+	if isPermissionErr(err) || isPermissionOutput(err.Error()) {
+		return output.CodePgStatusPermissionDenied
+	}
+	return output.CodePgStatusProbeFailed
 }
 
 // readPostmasterPidInfo reads port and start time from postmaster.pid file.

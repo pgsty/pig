@@ -117,13 +117,14 @@ const (
 	CodePgInitRunningConflict = MODULE_PG + CAT_STATE + 6 // PostgreSQL running, cannot init with --force
 
 	// Control operation errors (13_08_xx - Operation category)
-	CodePgStartFailed   = MODULE_PG + CAT_OPERATION + 1 // pg_ctl start failed
-	CodePgStopFailed    = MODULE_PG + CAT_OPERATION + 2 // pg_ctl stop failed
-	CodePgRestartFailed = MODULE_PG + CAT_OPERATION + 3 // pg_ctl restart failed
-	CodePgReloadFailed  = MODULE_PG + CAT_OPERATION + 4 // pg_ctl reload failed
-	CodePgTimeout       = MODULE_PG + CAT_OPERATION + 5 // Operation timed out
-	CodePgInitFailed    = MODULE_PG + CAT_OPERATION + 6 // initdb failed
-	CodePgPromoteFailed = MODULE_PG + CAT_OPERATION + 7 // pg_ctl promote failed
+	CodePgStartFailed       = MODULE_PG + CAT_OPERATION + 1 // pg_ctl start failed
+	CodePgStopFailed        = MODULE_PG + CAT_OPERATION + 2 // pg_ctl stop failed
+	CodePgRestartFailed     = MODULE_PG + CAT_OPERATION + 3 // pg_ctl restart failed
+	CodePgReloadFailed      = MODULE_PG + CAT_OPERATION + 4 // pg_ctl reload failed
+	CodePgTimeout           = MODULE_PG + CAT_OPERATION + 5 // Operation timed out
+	CodePgInitFailed        = MODULE_PG + CAT_OPERATION + 6 // initdb failed
+	CodePgPromoteFailed     = MODULE_PG + CAT_OPERATION + 7 // pg_ctl promote failed
+	CodePgStatusProbeFailed = MODULE_PG + CAT_OPERATION + 8 // Status metadata or process probe failed
 
 	// Permission errors (13_02_xx - Permission category)
 	CodePgPermissionDenied = MODULE_PG + CAT_PERM + 2 // Permission denied executing pg_ctl

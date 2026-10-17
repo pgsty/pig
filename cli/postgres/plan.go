@@ -27,7 +27,7 @@ func BuildRestartPlan(cfg *Config, opts *RestartOptions) *output.Plan {
 	dbsu := GetDbSU(cfg)
 
 	// Check current state
-	running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
+	running, pid, _, probeErr := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
 
 	// Get shutdown mode
 	mode := DefaultStopMode
@@ -39,18 +39,18 @@ func BuildRestartPlan(cfg *Config, opts *RestartOptions) *output.Plan {
 	plan.Command = buildRestartCommandFor(cfg, opts, true)
 	plan.Boundary = pgLocalBoundary
 	plan.Confirmation = "recommended"
-	runningDetail := fmt.Sprintf("pid=%d", pid)
-	if !running {
-		runningDetail = "not running; restart requires a running PostgreSQL server"
-	}
 	plan.Preconditions = append(plan.Preconditions,
 		output.Check{Name: "data_dir", Status: "planned", Detail: dataDir},
-		output.Check{Name: "postgres running", Status: boolStatus(running), Detail: runningDetail},
+		postgresRunningCheck(running, pid, probeErr),
 		output.Check{Name: "boundary", Status: "local-only", Detail: "does not manage Patroni, DCS, VIP, or client routing"},
 	)
 	restartNext := output.NextAction{Command: buildRestartCommandFor(cfg, opts, false), Reason: "execute restart after reviewing the plan", Required: running}
 	if !running {
 		restartNext.Reason = "not running; restart execution will be refused until PostgreSQL is started"
+	}
+	if probeErr != nil {
+		plan.Expected = "PostgreSQL running state is unknown; restart will be refused until it can be determined"
+		restartNext.Reason = plan.Expected
 	}
 	plan.NextActions = append(plan.NextActions,
 		restartNext,
@@ -186,7 +186,7 @@ func BuildStopPlan(cfg *Config, opts *StopOptions) *output.Plan {
 	dbsu := GetDbSU(cfg)
 
 	// Check current state
-	running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
+	running, pid, _, probeErr := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
 
 	// Get shutdown mode
 	mode := DefaultStopMode
@@ -200,14 +200,29 @@ func BuildStopPlan(cfg *Config, opts *StopOptions) *output.Plan {
 	plan.Confirmation = "recommended"
 	plan.Preconditions = append(plan.Preconditions,
 		output.Check{Name: "data_dir", Status: "planned", Detail: dataDir},
-		output.Check{Name: "postgres running", Status: boolStatus(running), Detail: fmt.Sprintf("pid=%d", pid)},
+		postgresRunningCheck(running, pid, probeErr),
 		output.Check{Name: "boundary", Status: "local-only", Detail: "does not manage Patroni, DCS, VIP, or client routing"},
 	)
+	stopNext := output.NextAction{Command: buildStopCommandFor(cfg, opts, false), Reason: "execute stop after reviewing the plan", Required: running}
+	if probeErr != nil {
+		plan.Expected = "PostgreSQL running state is unknown; stop will be refused until it can be determined"
+		stopNext.Reason = plan.Expected
+	}
 	plan.NextActions = append(plan.NextActions,
-		output.NextAction{Command: buildStopCommandFor(cfg, opts, false), Reason: "execute stop after reviewing the plan", Required: running},
+		stopNext,
 		output.NextAction{Command: "pig pt pause --help", Reason: "review native Patroni pause syntax when Patroni owns this instance", Required: false},
 	)
 	return plan
+}
+
+func postgresRunningCheck(running bool, pid int, err error) output.Check {
+	check := output.Check{Name: "postgres running", Status: boolStatus(running), Detail: "not running"}
+	if err != nil {
+		check.Status, check.Detail = "unknown", "running state is unknown: "+err.Error()
+	} else if running {
+		check.Detail = fmt.Sprintf("pid=%d", pid)
+	}
+	return check
 }
 
 // buildStopPlanFromState constructs a stop plan from given state.

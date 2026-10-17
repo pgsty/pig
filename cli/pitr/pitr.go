@@ -690,7 +690,9 @@ func printExecutionPlan(state *SystemState, opts *Options) {
 		fmt.Fprintf(os.Stderr, "  Patroni Service: %sinactive%s\n", utils.ColorYellow, utils.ColorReset)
 	}
 
-	if state.PGRunning {
+	if state.PGRunning && state.PGPID <= 0 {
+		fmt.Fprintf(os.Stderr, "  PostgreSQL:      %sunknown%s (running state could not be determined)\n", utils.ColorYellow, utils.ColorReset)
+	} else if state.PGRunning {
 		fmt.Fprintf(os.Stderr, "  PostgreSQL:      %srunning%s (PID: %d)\n", utils.ColorGreen, utils.ColorReset, state.PGPID)
 	} else {
 		fmt.Fprintf(os.Stderr, "  PostgreSQL:      %sstopped%s\n", utils.ColorYellow, utils.ColorReset)

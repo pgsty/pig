@@ -143,7 +143,7 @@ func TestReviewForkReplacementOwnershipAndEmptyTarget(t *testing.T) {
 	t.Cleanup(func() { forkProbeSourceDataDir, forkPortFree = oldProbe, oldPort })
 	forkProbeSourceDataDir = func(string, int) (string, error) { return "", fmt.Errorf("offline") }
 	forkPortFree = func(int) bool { return true }
-	for _, kind := range []string{"empty", "unmanaged", "managed"} {
+	for _, kind := range []string{"empty", "unmanaged", "managed", "unknown"} {
 		t.Run(kind, func(t *testing.T) {
 			src, dst := t.TempDir(), t.TempDir()
 			if err := os.WriteFile(filepath.Join(src, "PG_VERSION"), []byte("18"), 0600); err != nil {
@@ -157,10 +157,18 @@ func TestReviewForkReplacementOwnershipAndEmptyTarget(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(dst, "fork.json"), []byte(metadata), 0600); err != nil {
 					t.Fatal(err)
 				}
+				if kind == "unknown" {
+					if err := os.WriteFile(filepath.Join(dst, "postmaster.pid"), []byte("invalid\n"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
 			_, err := precheckInstance(&Options{Kind: KindInstance, DbSU: dbsu, Replace: true, Instance: InstanceOptions{SourceData: src, DestData: dst, SourcePort: 5432, DestPort: 15432}})
-			if (err != nil) != (kind == "managed") {
+			if (err != nil) != (kind == "managed" || kind == "unknown") {
 				t.Fatalf("replacement %s: %v", kind, err)
+			}
+			if kind == "unknown" && (strings.Contains(err.Error(), "PID: 0") || !strings.Contains(err.Error(), "cannot determine")) {
+				t.Fatalf("unknown target reported as running: %v", err)
 			}
 		})
 	}
