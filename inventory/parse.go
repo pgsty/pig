@@ -690,6 +690,8 @@ func (d *Document) semanticScalar(node *yaml.Node, span byteSpan) Scalar {
 	switch node.Tag {
 	case "!!str":
 		scalar.Kind = StringScalar
+	case "!!timestamp":
+		// Keep unsupported date/time values opaque, rather than claiming string semantics.
 	case "!!bool", "!!int", "!!float":
 		switch node.Tag {
 		case "!!bool":
@@ -724,6 +726,11 @@ var (
 	ansiblePlainFloat = regexp.MustCompile(
 		`^[-+]?(?:(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?|[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*|\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$`,
 	)
+	// Match PyYAML SafeLoader's timestamp resolver, including forms that yaml.v3
+	// leaves as strings. Resolution is syntactic: even invalid dates need quoting.
+	ansiblePlainTimestamp = regexp.MustCompile(`^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?)$`)
+	// yaml.v3 additionally recognizes dates with one-digit months or days.
+	yamlPlainDate = regexp.MustCompile(`^[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}$`)
 )
 
 func implicitPlainScalar(node *yaml.Node) bool {
@@ -763,11 +770,14 @@ func resolveAnsiblePlainScalar(text string) (ScalarKind, any) {
 		}
 		return FloatScalar, value
 	}
+	if ansiblePlainTimestamp.MatchString(text) {
+		return UnknownScalar, text
+	}
 	return StringScalar, text
 }
 
 // IsAmbiguousPlainString reports whether text would resolve as a non-string
-// scalar under YAML 1.1 / PyYAML SafeLoader plain-scalar rules.
+// scalar under PyYAML SafeLoader or yaml.v3 plain-scalar rules.
 func IsAmbiguousPlainString(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	switch strings.ToLower(trimmed) {
@@ -775,7 +785,7 @@ func IsAmbiguousPlainString(text string) bool {
 		return true
 	}
 	kind, _ := resolveAnsiblePlainScalar(trimmed)
-	return kind != StringScalar
+	return kind != StringScalar || yamlPlainDate.MatchString(trimmed)
 }
 
 func parseAnsibleInteger(text string) (any, bool) {

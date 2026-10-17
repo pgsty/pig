@@ -1,8 +1,13 @@
 package inventory
 
 import (
+	"bytes"
 	"fmt"
+	"os"
+	"os/exec"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestUserRolesStringAndObjectCompatibility(t *testing.T) {
@@ -31,7 +36,7 @@ func TestUserRolesStringAndObjectCompatibility(t *testing.T) {
 
 func TestAmbiguousStringsSurviveEditAndSerialization(t *testing.T) {
 	// 010 is a retained control case, not evidence that it was previously broken.
-	for _, value := range []string{"1:30", "010", "yes", "2001-12-15", "1:30.5", "plain"} {
+	for _, value := range []string{"1:30", "010", "yes", "2001-12-15", "2001-12-15T02:59:43.1Z", "2001-1-5 2:59:43 -5", "2001-13-99", "2001-1-5", "1:30.5", "plain"} {
 		for _, flow := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/flow=%v", value, flow), func(t *testing.T) {
 				source := "all:\n  vars:\n    value: old # preserve\n"
@@ -58,7 +63,43 @@ func TestAmbiguousStringsSurviveEditAndSerialization(t *testing.T) {
 				if !ok || got.Scalar == nil || got.Scalar.Kind != StringScalar || got.Scalar.Value != value {
 					t.Fatalf("semantic roundtrip changed %q: %+v", value, got)
 				}
+				var decoded struct {
+					All struct {
+						Vars map[string]any
+					}
+				}
+				if err := yaml.Unmarshal(committed.Bytes(), &decoded); err != nil {
+					t.Fatal(err)
+				}
+				if got := decoded.All.Vars["value"]; got != value {
+					t.Fatalf("independent YAML decoding changed %q to %T: %v", value, got, got)
+				}
+				if got.Scalar.Tag != "!!str" {
+					t.Fatalf("string was written with tag %s", got.Scalar.Tag)
+				}
+				if python := os.Getenv("PIG_TEST_PYYAML"); python != "" {
+					// CI uses pinned PyYAML as the independent downstream consumer.
+					check := exec.Command(python, "-c", "import sys,yaml; v=yaml.safe_load(sys.stdin)['all']['vars']['value']; assert type(v) is str and v == sys.argv[1], type(v).__name__", value)
+					check.Stdin = bytes.NewReader(committed.Bytes())
+					if out, err := check.CombinedOutput(); err != nil {
+						t.Fatalf("PyYAML string semantics: %v: %s", err, out)
+					}
+				}
 			})
+		}
+	}
+}
+
+func TestTimestampScalarsRemainOpaque(t *testing.T) {
+	for _, text := range []string{"2001-12-15", "2001-12-15T02:59:43.1Z", "2001-1-5 2:59:43 -5", "!!timestamp 2001-12-15"} {
+		source := []byte("all:\n  vars:\n    value: " + text + " # preserved\n")
+		doc, err := Parse("timestamp.yml", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, _ := doc.Lookup(AllVars("value"))
+		if value.Scalar.Kind != UnknownScalar || !bytes.Equal(doc.Bytes(), source) {
+			t.Fatalf("timestamp was treated as a string or normalized: %+v", value.Scalar)
 		}
 	}
 }

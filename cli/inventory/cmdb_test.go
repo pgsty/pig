@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"pig/internal/cmdb"
 	"pig/internal/output"
 	"pig/inventory"
@@ -323,7 +325,7 @@ func jsonFieldsObject(fields []cmdb.JSONField) map[string]any {
 }
 
 func TestCMDBExportAmbiguousStringsSemanticRoundtrip(t *testing.T) {
-	values := map[string]any{"duration": "1:30", "octal": "010", "boolean": "yes", "date": "2001-12-15", "nested": []any{"1:30", map[string]any{"010": "1:30"}}}
+	values := map[string]any{"duration": "1:30", "octal": "010", "boolean": "yes", "date": "2001-12-15", "timestamp": "2001-1-5 2:59:43 -5", "nested": []any{"1:30", map[string]any{"010": "1:30"}}}
 	raw, err := json.Marshal(map[string]any{"all": map[string]any{"vars": values, "children": map[string]any{}}})
 	if err != nil {
 		t.Fatal(err)
@@ -335,6 +337,13 @@ func TestCMDBExportAmbiguousStringsSemanticRoundtrip(t *testing.T) {
 	body, err := canonicalCMDBYAML(canonical)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := yaml.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if got := decoded["all"].(map[string]any)["vars"]; !reflect.DeepEqual(got, values) {
+		t.Fatalf("CMDB YAML changed string types: %#v", got)
 	}
 	doc, err := inventory.Parse("cmdb-export.yml", body)
 	if err != nil {
