@@ -7,6 +7,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"pig/cli/postgres"
 	"pig/internal/output"
 	"pig/internal/utils"
@@ -178,5 +179,10 @@ func getExporterBody(url string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	// Error bodies and reason phrases may contain credentials or database
+	// diagnostics. Report only the status code and standard HTTP description.
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, fmt.Errorf("HTTP %d (%s)", resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
 	return io.ReadAll(resp.Body)
 }
