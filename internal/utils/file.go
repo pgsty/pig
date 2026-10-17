@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -118,6 +119,9 @@ func existingFileMode(path string, fallback os.FileMode) (os.FileMode, error) {
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		return 0, fmt.Errorf("refusing to replace symlink destination %q", path)
+	}
+	if !info.Mode().IsRegular() {
+		return 0, fmt.Errorf("refusing to replace non-regular destination %q", path)
 	}
 	return info.Mode().Perm(), nil
 }
@@ -255,13 +259,13 @@ func ReadFileAsDBSU(path, dbsu string) (string, error) {
 
 	// Use DBSUCommandStdout for privilege escalation
 	logrus.Debugf("reading file via privilege escalation")
-	return DBSUCommandStdout(dbsu, []string{"cat", path})
+	return DBSUCommandStdout(dbsu, []string{"cat", "--", path})
 }
 
 // WriteFileAsDBSU writes content to a file using DBSU privilege escalation.
 // Execution strategy:
-//   - If current user is DBSU: write directly with os.WriteFile
-//   - Otherwise: pipe content through tee via buildDBSUCmd
+//   - If current user is DBSU: write directly with AtomicWriteFile
+//   - Otherwise: atomically stage and rename with mode 0600 via buildDBSUCmd
 func WriteFileAsDBSU(path, content, dbsu string) error {
 	if dbsu == "" {
 		dbsu = GetDBSU("")
@@ -271,12 +275,47 @@ func WriteFileAsDBSU(path, content, dbsu string) error {
 
 	if IsDBSU(dbsu) {
 		logrus.Debugf("writing file directly as DBSU")
-		return os.WriteFile(path, []byte(content), 0600)
+		return AtomicWriteFile(path, []byte(content), 0600)
 	}
 
 	logrus.Debugf("writing file via privilege escalation")
-	cmd := buildDBSUCmd(dbsu, []string{"tee", path})
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("file path is empty")
+	}
+	// Resolve before su changes cwd. Like AtomicWrite, stage a private sibling
+	// and replace only the exact destination, never a child of a directory.
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	rename := []string{"mv", "-fT", "--"}
+	if runtime.GOOS == "darwin" {
+		// BSD mv lacks -T. macOS's system Perl exposes rename(2) without the
+		// directory-target behavior of mv (and without a copy fallback).
+		rename = []string{"/usr/bin/perl", "-e", `rename($ARGV[0], $ARGV[1]) or die "rename: $!\n"`}
+	}
+	args := []string{"sh", "-c", `set -eu
+umask 077
+dst=$1
+shift
+[ ! -L "$dst" ] && { [ ! -e "$dst" ] || [ -f "$dst" ]; } || exit 1
+tmp=$(mktemp "${dst%/*}/.${dst##*/}.tmp-XXXXXXXXXX")
+trap 'rm -f -- "$tmp"' EXIT
+trap 'exit 1' HUP INT TERM
+cat > "$tmp"
+chmod 0600 "$tmp"
+[ ! -L "$dst" ] && { [ ! -e "$dst" ] || [ -f "$dst" ]; } || exit 1
+"$@" "$tmp" "$dst"`, "pig-write-dbsu", path}
+	cmd := buildDBSUCmd(dbsu, append(args, rename...))
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = io.Discard
-	return cmd.Run()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if errText := strings.TrimSpace(stderr.String()); errText != "" {
+			return fmt.Errorf("command failed: %w: %s", err, errText)
+		}
+		return fmt.Errorf("command failed: %w", err)
+	}
+	return nil
 }
