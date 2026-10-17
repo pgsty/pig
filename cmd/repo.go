@@ -166,7 +166,7 @@ var repoRmCmd = &cobra.Command{
 	},
 	Example: `
   pig repo rm                      # remove (backup) all existing repo to backup dir
-  pig repo rm all --update         # remove module 'all' and update repo cache
+  pig repo rm all --update         # remove node, pgsql, and infra modules; update cache
   pig repo rm node pigsty -u       # remove module 'node' & 'pigsty' and update repo cache
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {

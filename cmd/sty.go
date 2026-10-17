@@ -106,7 +106,7 @@ const styConfigureExample = `
   pig sty conf -x                    # write proxy env from environment to config
   pig sty conf ha/trio --ip 10.0.0.10,10.0.0.11,10.0.0.12
   pig sty conf --domain infra.example.com
-  pig sty conf ha/full -g -o ha.yml  # full HA template with random passwords to ha.yml
+  pig sty conf ha/full -g -O ha.yml  # full HA template with random passwords to ha.yml
 `
 
 var pigstyInitCmd = &cobra.Command{

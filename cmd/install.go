@@ -38,7 +38,7 @@ Examples:
   pig install postgresql17             # install directly without translation  
   pig install pg17                     # translate pg17 alias to postgresql packages
   pig ins nginx htop                   # install multiple packages
-  pig i pg_vector -y                   # auto confirm installation
+  pig i vector -y                      # auto confirm installation
   pig install somepackage -n           # disable translation, use package name as-is
   pig install pg17 --plan              # preview install plan without executing
 `,
@@ -48,7 +48,7 @@ Examples:
   pig install nginx htop vim           # install multiple system packages
   pig install postgresql17-server -y   # auto confirm installation
   pig install unknown-package -n       # disable translation for unknown packages
-  pig install pg_vector=1.0.0          # install specific version
+  pig install vector=VERSION          # use a version available in the configured repository
   pig install pg17 --plan              # preview translated install command
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {

@@ -61,13 +61,16 @@ var extCmd = &cobra.Command{
 
 var extListCmd = &cobra.Command{
 	Use:     "list [query]",
-	Short:   "list & search available extensions",
+	Short:   "List and search extension catalog entries",
 	Aliases: []string{"l", "ls", "find"},
+	Long: `List or search all catalog entries, including unavailable entries.
+--version selects the PostgreSQL version used to evaluate availability; it does
+not filter records out. --pkg lists leading package records.`,
 	Example: `
   pig ext list                # list all extensions
   pig ext list postgis        # search extensions by name/description
   pig ext ls olap             # list extension of olap category
-  pig ext ls gis -v 16        # list gis category for pg 16
+  pig ext ls gis -v 16        # list GIS entries with PG 16 availability
 `,
 	Annotations: ancsAnn("pig ext list", "query", "stable", "safe", true, "safe", "none", "current", 100),
 	Args:        cobra.MaximumNArgs(1),
@@ -202,7 +205,7 @@ Description:
   pig ext update                     # no-op (safety), requires explicit targets
   pig ext update postgis             # update specific extension
   pig ext update postgis timescaledb # update multiple extensions
-  pig ext up pg_vector -y            # update with auto-confirm
+  pig ext up vector -y               # update with auto-confirm
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Safety: no arguments means no-op (avoid "update everything" surprises).

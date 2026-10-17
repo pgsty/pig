@@ -26,7 +26,7 @@ var updateCmd = &cobra.Command{
   
   pig update 				    # update pig to the latest version
   pig update [-v version]       # update pig to given version
-  pig update -v 1.8.1 		    # update pig to version 1.8.1
+  pig update -v X.Y.Z                # use a version available in the configured repository
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		effectiveRegion := updateRegion
