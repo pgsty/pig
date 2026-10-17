@@ -22,14 +22,6 @@ var filesystemDFOutput = func(args ...string) (string, error) {
 	return string(out), err
 }
 
-func detectFilesystem(path string) (filesystemProbe, error) {
-	out, err := filesystemDFOutput("-T", path)
-	if err != nil {
-		return filesystemProbe{}, err
-	}
-	return parseFilesystemProbe(out)
-}
-
 func detectFilesystemAs(dbsu, path string) (filesystemProbe, error) {
 	out, err := forkDBSUCommandOutput(dbsu, []string{"df", "-T", path})
 	if err != nil {
@@ -63,14 +55,6 @@ func detectDiskFilesystem(path string) (filesystemProbe, error) {
 		return filesystemProbe{}, err
 	}
 	return parseFilesystemProbe(out)
-}
-
-func dfMountAndFS(path string) (string, string) {
-	info, err := detectFilesystem(path)
-	if err != nil {
-		return "", ""
-	}
-	return info.Mount, info.Type
 }
 
 func dfMountAndFSAs(dbsu, path string) (string, string) {

@@ -136,3 +136,55 @@ func TestReviewForkUnknownStartDoesNotWriteSuccess(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewForkReplacementOwnershipAndEmptyTarget(t *testing.T) {
+	dbsu := withCurrentUserAsDBSU(t)
+	oldProbe, oldPort := forkProbeSourceDataDir, forkPortFree
+	t.Cleanup(func() { forkProbeSourceDataDir, forkPortFree = oldProbe, oldPort })
+	forkProbeSourceDataDir = func(string, int) (string, error) { return "", fmt.Errorf("offline") }
+	forkPortFree = func(int) bool { return true }
+	for _, kind := range []string{"empty", "unmanaged", "managed"} {
+		t.Run(kind, func(t *testing.T) {
+			src, dst := t.TempDir(), t.TempDir()
+			if err := os.WriteFile(filepath.Join(src, "PG_VERSION"), []byte("18"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if kind != "empty" {
+				if err := os.WriteFile(filepath.Join(dst, "PG_VERSION"), []byte("18"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				metadata := fmt.Sprintf(`{"kind":"pg_fork","managed":%t,"name":"review","target":{"data":%q}}`, kind == "managed", dst)
+				if err := os.WriteFile(filepath.Join(dst, "fork.json"), []byte(metadata), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := precheckInstance(&Options{Kind: KindInstance, DbSU: dbsu, Replace: true, Instance: InstanceOptions{SourceData: src, DestData: dst, SourcePort: 5432, DestPort: 15432}})
+			if (err != nil) != (kind == "managed") {
+				t.Fatalf("replacement %s: %v", kind, err)
+			}
+		})
+	}
+}
+
+func TestReviewForkForcePreservesOrdinaryDirectory(t *testing.T) {
+	dbsu := withCurrentUserAsDBSU(t)
+	src, dst := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "PG_VERSION"), []byte("18"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dst, "keep.log")
+	if err := os.WriteFile(marker, []byte("unrelated logs"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	oldProbe, oldPort := forkProbeSourceDataDir, forkPortFree
+	t.Cleanup(func() { forkProbeSourceDataDir, forkPortFree = oldProbe, oldPort })
+	forkProbeSourceDataDir = func(string, int) (string, error) { return "", fmt.Errorf("offline") }
+	forkPortFree = func(int) bool { return true }
+	result := ExecuteResult(&Options{Kind: KindInstance, DbSU: dbsu, Replace: true, Yes: true, Instance: InstanceOptions{Name: "review", SourceData: src, DestData: dst, SourcePort: 5432, DestPort: 15432}})
+	if result.Success {
+		t.Error("ordinary destination was accepted")
+	}
+	if data, err := os.ReadFile(marker); err != nil || !strings.Contains(string(data), "unrelated") {
+		t.Fatalf("forced fork removed an unrelated directory: result=%+v err=%v", result, err)
+	}
+}

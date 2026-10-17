@@ -3,6 +3,7 @@ package postgres
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -261,8 +262,8 @@ func TestValidateForkDataPathsRejectsUnsafeDestinations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, _, err := validateForkDataPaths(src, tt.dst); err == nil {
-				t.Fatalf("validateForkDataPaths(%q, %q) returned nil error", src, tt.dst)
+			if _, _, err := validateForkDataPathsAs("", src, tt.dst); err == nil {
+				t.Fatalf("validateForkDataPathsAs(%q, %q) returned nil error", src, tt.dst)
 			}
 		})
 	}
@@ -276,7 +277,7 @@ func TestValidateForkDataPathsAllowsSiblingForkDirectory(t *testing.T) {
 	}
 	dst := filepath.Join(root, "data-dev")
 
-	normalizedSrc, normalizedDst, err := validateForkDataPaths(src, dst)
+	normalizedSrc, normalizedDst, err := validateForkDataPathsAs("", src, dst)
 	if err != nil {
 		t.Fatalf("validateForkDataPaths returned error: %v", err)
 	}
@@ -1450,6 +1451,67 @@ func TestRemoveForkRejectsUnmanagedSymlink(t *testing.T) {
 	}
 	if _, statErr := os.Stat(realDir); statErr != nil {
 		t.Fatalf("real fork dir should remain after rejected symlink removal: %v", statErr)
+	}
+}
+
+func TestRemoveForkPermissionFallback(t *testing.T) {
+	for _, state := range []string{"directory", "symlink", "probe-denied", "missing", "same-user"} {
+		t.Run(state, func(t *testing.T) {
+			oldCheck, oldRead, oldLstat := forkCheckDataDir, forkReadFileAsDBSU, forkLstat
+			oldRun, oldRunning, oldUser := forkDBSUCommand, forkCheckPostgresRunning, config.CurrentUser
+			t.Cleanup(func() {
+				forkCheckDataDir, forkReadFileAsDBSU, forkLstat = oldCheck, oldRead, oldLstat
+				forkDBSUCommand, forkCheckPostgresRunning, config.CurrentUser = oldRun, oldRunning, oldUser
+			})
+			config.CurrentUser = "fixture-caller"
+			if state == "same-user" {
+				config.CurrentUser = "fixture-dbsu"
+			}
+			realDir := filepath.Join(t.TempDir(), "fork 'with spaces;$")
+			if err := os.Mkdir(realDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			dir := realDir
+			if state == "symlink" {
+				dir = filepath.Join(t.TempDir(), "alias")
+				if err := os.Symlink(realDir, dir); err != nil {
+					t.Fatal(err)
+				}
+			}
+			forkCheckDataDir = func(string, string) (bool, bool) { return true, true }
+			forkReadFileAsDBSU = func(string, string) (string, error) {
+				return fmt.Sprintf(`{"kind":"pg_fork","target":{"data":%q}}`, dir), nil
+			}
+			forkLstat = func(string) (os.FileInfo, error) {
+				if state == "missing" {
+					return nil, os.ErrNotExist
+				}
+				return nil, os.ErrPermission
+			}
+			forkCheckPostgresRunning = func(string, string) (bool, int) { return false, 0 }
+			calls := 0
+			forkDBSUCommand = func(dbsu string, args []string) error {
+				calls++
+				if dbsu != "fixture-dbsu" {
+					t.Fatalf("wrong removal identity: %s", dbsu)
+				}
+				if state == "probe-denied" {
+					return os.ErrPermission
+				}
+				return exec.Command(args[0], args[1:]...).Run()
+			}
+			_, err := RemoveFork(ForkTargetOptions{DbSU: "fixture-dbsu", DestData: dir, Yes: true})
+			if (err == nil) != (state == "directory") {
+				t.Fatalf("unexpected removal outcome: %v", err)
+			}
+			_, statErr := os.Stat(realDir)
+			if (state == "directory" && !os.IsNotExist(statErr)) || (state != "directory" && statErr != nil) {
+				t.Fatalf("unexpected removal effects: %v", statErr)
+			}
+			if (state == "missing" || state == "same-user") && calls != 0 {
+				t.Fatalf("ineligible error triggered DBSU fallback: %d calls", calls)
+			}
+		})
 	}
 }
 

@@ -354,8 +354,16 @@ func NextDatabaseCloneName(source string, existing map[string]bool) string {
 }
 
 func validatePostgresIdentifier(kind, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%s cannot be empty", kind)
+	}
 	if len(value) > maxPostgresIdentifierBytes {
 		return fmt.Errorf("%s %q is %d bytes; PostgreSQL identifiers are limited to %d bytes", kind, value, len(value), maxPostgresIdentifierBytes)
+	}
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("%s %q contains unsupported control character", kind, value)
+		}
 	}
 	return nil
 }
@@ -478,7 +486,7 @@ func prepareClone(opts *CloneOptions) error {
 			preflight.FileCopyMethodError = err.Error()
 		}
 		if preflight.DataDirectory != "" {
-			cloneMode, fs, fsErr := detectDatabaseCloneMode(preflight.DataDirectory)
+			cloneMode, fs, fsErr := detectDatabaseCloneModeAs(opts.DbSU, preflight.DataDirectory)
 			preflight.CloneMode = cloneMode
 			preflight.FileSystem = fs
 			if fsErr != nil {
@@ -600,8 +608,8 @@ func cloneConfirmationWarning(warnings []string) string {
 	return strings.Join(lines, "\n")
 }
 
-func detectDatabaseCloneMode(path string) (DatabaseCloneMode, string, error) {
-	mount, fs := dfMountAndFS(path)
+func detectDatabaseCloneModeAs(dbsu, path string) (DatabaseCloneMode, string, error) {
+	mount, fs := dfMountAndFSAs(dbsu, path)
 	if mount == "" || fs == "" {
 		return DatabaseCloneModeCopy, "", fmt.Errorf("unable to detect filesystem for %s", path)
 	}

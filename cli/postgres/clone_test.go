@@ -316,6 +316,19 @@ func TestQuoteIdentifierEscapesDoubleQuotes(t *testing.T) {
 	}
 }
 
+func TestNormalizeCloneIdentifierCompatibility(t *testing.T) {
+	for _, name := range []string{`app"quoted`, "应用 数据库", "a;b", strings.Repeat("库", 21)} {
+		if _, err := NormalizeCloneOptions(&CloneOptions{SourceDB: name, DestDB: "copy"}); err != nil {
+			t.Fatalf("valid quoted identifier %q rejected: %v", name, err)
+		}
+	}
+	for _, name := range []string{"bad\x00name", "bad\nname", "bad\x7fname", strings.Repeat("库", 22)} {
+		if _, err := NormalizeCloneOptions(&CloneOptions{SourceDB: "source", DestDB: name}); err == nil {
+			t.Fatalf("unsupported identifier %q accepted", name)
+		}
+	}
+}
+
 func TestBuildClonePlan(t *testing.T) {
 	opts, err := NormalizeCloneOptions(&CloneOptions{
 		SourceDB: "app",

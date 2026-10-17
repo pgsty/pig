@@ -1012,6 +1012,14 @@ type forkCLIOptions struct {
 	stopBefore bool
 }
 
+func (o *forkCLIOptions) syncCommon(parent *forkCLIOptions) {
+	if parent == nil {
+		return
+	}
+	o.plan = parent.plan
+	o.yes = parent.yes
+}
+
 func newPgForkCommand() *cobra.Command {
 	opts := &forkCLIOptions{}
 	cmd := &cobra.Command{
@@ -1067,7 +1075,8 @@ func addPgForkFlags(cmd *cobra.Command, opts *forkCLIOptions) {
 	cmd.Flags().IntVarP(&opts.timeout, "timeout", "t", 0, "startup timeout in seconds")
 }
 
-func newPgForkInitCommand(opts *forkCLIOptions) *cobra.Command {
+func newPgForkInitCommand(parentOpts *forkCLIOptions) *cobra.Command {
+	opts := &forkCLIOptions{}
 	cmd := &cobra.Command{
 		Use:          "init <name>",
 		Aliases:      []string{"create"},
@@ -1080,6 +1089,7 @@ func newPgForkInitCommand(opts *forkCLIOptions) *cobra.Command {
   pig pg fork init dev -D /pg/data2 --src-port 15431
   pig pg fork init dev --dst-data /tmp/dev-fork --dst-port 15440`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.syncCommon(parentOpts)
 			return runFork(cmd, buildInstanceOptions(opts, args[0]))
 		},
 	}
@@ -1112,7 +1122,8 @@ func newPgForkListCommand() *cobra.Command {
 	return cmd
 }
 
-func newPgForkStartCommand(opts *forkCLIOptions) *cobra.Command {
+func newPgForkStartCommand(parentOpts *forkCLIOptions) *cobra.Command {
+	opts := &forkCLIOptions{}
 	cmd := &cobra.Command{
 		Use:          "start <name>",
 		Short:        "Start a PostgreSQL fork",
@@ -1120,6 +1131,7 @@ func newPgForkStartCommand(opts *forkCLIOptions) *cobra.Command {
 		SilenceUsage: true,
 		Annotations:  ancsAnn("pig postgres fork start", "action", "volatile", "unsafe", true, "medium", "none", "dbsu", 10000),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.syncCommon(parentOpts)
 			if len(args) > 0 {
 				opts.destData = ""
 			}
@@ -1138,7 +1150,8 @@ func newPgForkStartCommand(opts *forkCLIOptions) *cobra.Command {
 	return cmd
 }
 
-func newPgForkStopCommand(opts *forkCLIOptions) *cobra.Command {
+func newPgForkStopCommand(parentOpts *forkCLIOptions) *cobra.Command {
+	opts := &forkCLIOptions{}
 	cmd := &cobra.Command{
 		Use:          "stop <name>",
 		Short:        "Stop a PostgreSQL fork",
@@ -1146,6 +1159,7 @@ func newPgForkStopCommand(opts *forkCLIOptions) *cobra.Command {
 		SilenceUsage: true,
 		Annotations:  ancsAnn("pig postgres fork stop", "action", "volatile", "unsafe", true, "high", "recommended", "dbsu", 10000),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.syncCommon(parentOpts)
 			if len(args) > 0 {
 				opts.destData = ""
 			}
@@ -1164,7 +1178,8 @@ func newPgForkStopCommand(opts *forkCLIOptions) *cobra.Command {
 	return cmd
 }
 
-func newPgForkRemoveCommand(opts *forkCLIOptions) *cobra.Command {
+func newPgForkRemoveCommand(parentOpts *forkCLIOptions) *cobra.Command {
+	opts := &forkCLIOptions{}
 	cmd := &cobra.Command{
 		Use:          "rm <name>",
 		Aliases:      []string{"remove", "delete"},
@@ -1173,6 +1188,7 @@ func newPgForkRemoveCommand(opts *forkCLIOptions) *cobra.Command {
 		SilenceUsage: true,
 		Annotations:  ancsAnn("pig postgres fork rm", "action", "volatile", "unsafe", false, "critical", "required", "dbsu", 30000),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.syncCommon(parentOpts)
 			if len(args) > 0 {
 				opts.destData = ""
 			}

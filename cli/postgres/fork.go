@@ -197,7 +197,14 @@ func (e *ForkError) Unwrap() error {
 var forkNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
 var forkDBSUCommand = utils.DBSUCommand
-var forkDBSUCommandOutput = utils.DBSUCommandStdout
+var forkDBSUCommandOutput = func(dbsu string, args []string) (string, error) {
+	if len(args) > 0 && args[0] == "find" {
+		// GNU find must be able to return to its initial working directory.
+		// The caller's private home may be inaccessible to DBSU.
+		args = append([]string{"sh", "-c", `cd / && exec "$@"`, "fork-find"}, args...)
+	}
+	return utils.DBSUCommandStdout(dbsu, args)
+}
 var forkCheckDataDir = CheckDataDirAsDBSU
 var forkCheckPostgresRunning = CheckPostgresRunningAsDBSU
 var forkReadFileAsDBSU = utils.ReadFileAsDBSU
@@ -789,14 +796,14 @@ func ReadForkInfoAs(dbsu, dataDir string) (ForkInfo, error) {
 	if err := json.Unmarshal([]byte(payload), &info); err != nil {
 		return ForkInfo{}, err
 	}
+	if strings.TrimSpace(info.Target.Data) == "" {
+		return ForkInfo{}, fmt.Errorf("fork metadata has no recorded target data directory")
+	}
 	completeForkInfoDefaults(&info, dataDir)
 	return info, nil
 }
 
 func completeForkInfoDefaults(info *ForkInfo, dataDir string) {
-	if info.Target.Data == "" {
-		info.Target.Data = dataDir
-	}
 	if info.Name == "" {
 		info.Name = strings.TrimPrefix(filepath.Base(dataDir), "data-")
 	}
@@ -925,7 +932,7 @@ func RemoveFork(opts ForkTargetOptions) (ResultData, error) {
 		}
 		info = orphan
 	}
-	if err := validateForkRemovalRoute(opts, dataDir, info); err != nil {
+	if err := validateForkRemovalRoute(dbsu, opts, dataDir, info); err != nil {
 		return ResultData{}, &ForkError{Code: output.CodeForkInvalidArgs, Err: err}
 	}
 	running, pid := forkCheckPostgresRunning(dbsu, dataDir)
@@ -967,7 +974,7 @@ func requireForkInfo(dbsu, dataDir string) (ForkInfo, error) {
 	}
 	info, err := ReadForkInfoAs(dbsu, dataDir)
 	if err != nil {
-		return ForkInfo{}, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("fork metadata not found: %s/fork.json", dataDir)}
+		return ForkInfo{}, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("cannot read valid fork metadata: %s/fork.json: %w", dataDir, err)}
 	}
 	if info.Kind != "pg_fork" {
 		return ForkInfo{}, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("invalid fork kind %q in %s/fork.json", info.Kind, dataDir)}
@@ -978,7 +985,7 @@ func requireForkInfo(dbsu, dataDir string) (ForkInfo, error) {
 	return info, nil
 }
 
-func validateForkRemovalRoute(opts ForkTargetOptions, dataDir string, info ForkInfo) error {
+func validateForkRemovalRoute(dbsu string, opts ForkTargetOptions, dataDir string, info ForkInfo) error {
 	if opts.DestData != "" {
 		if info.Managed {
 			name := info.Name
@@ -987,7 +994,7 @@ func validateForkRemovalRoute(opts ForkTargetOptions, dataDir string, info ForkI
 			}
 			return fmt.Errorf("managed fork %q must be removed by name, not --dst-data", name)
 		}
-		return validateUnmanagedForkRemovalPath(dataDir)
+		return validateUnmanagedForkRemovalPath(dbsu, dataDir)
 	}
 	if opts.Name == "" {
 		return nil
@@ -1008,9 +1015,15 @@ func validateForkRemovalRoute(opts ForkTargetOptions, dataDir string, info ForkI
 	return nil
 }
 
-func validateUnmanagedForkRemovalPath(dataDir string) error {
+func validateUnmanagedForkRemovalPath(dbsu, dataDir string) error {
 	info, err := forkLstat(dataDir)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) && dbsu != "" && !utils.IsDBSU(dbsu) {
+			if checkErr := forkDBSUCommand(dbsu, []string{"sh", "-c", `test -d "$1" && ! test -L "$1"`, "fork-rm-check", dataDir}); checkErr != nil {
+				return fmt.Errorf("cannot verify fork data directory is a real directory as %s: %w", dbsu, checkErr)
+			}
+			return nil
+		}
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
@@ -1160,7 +1173,7 @@ func forkProgress(opts *Options, message string) {
 
 func precheckInstance(opts *Options) (*State, error) {
 	inst := opts.Instance
-	sourceData, destData, err := validateForkDataPaths(inst.SourceData, inst.DestData)
+	sourceData, destData, err := validateForkDataPathsAs(opts.DbSU, inst.SourceData, inst.DestData)
 	if err != nil {
 		return nil, &ForkError{Code: output.CodeForkInvalidArgs, Err: err}
 	}
@@ -1187,6 +1200,11 @@ func precheckInstance(opts *Options) (*State, error) {
 		}
 		if !opts.Replace {
 			return nil, &ForkError{Code: output.CodeForkDestExists, Err: fmt.Errorf("destination data directory exists: %s\nHint: use -f/--force to replace a stopped fork, or remove it with `%s`", inst.DestData, forkRemoveCommand(inst))}
+		}
+		if !inst.Managed {
+			if err := validateUnmanagedForkReplacement(opts.DbSU, inst.DestData); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -1215,6 +1233,24 @@ func precheckInstance(opts *Options) (*State, error) {
 	}
 	cloneMode, fs := detectCloneModeAs(opts.DbSU, inst.SourceData, inst.DestData)
 	return &State{BackupMode: mode, CloneMode: cloneMode, FS: fs}, nil
+}
+
+func validateUnmanagedForkReplacement(dbsu, dataDir string) error {
+	entry, err := forkDBSUCommandOutput(dbsu, []string{"find", dataDir, "-mindepth", "1", "-maxdepth", "1", "-print", "-quit"})
+	if err != nil {
+		return &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("cannot inspect fork destination: %w", err)}
+	}
+	if strings.TrimSpace(entry) == "" {
+		return nil
+	}
+	info, err := requireForkInfo(dbsu, dataDir)
+	if err != nil {
+		return err
+	}
+	if info.Managed {
+		return &ForkError{Code: output.CodeForkInvalidArgs, Err: fmt.Errorf("managed fork %q must be replaced by name, not --dst-data", info.Name)}
+	}
+	return nil
 }
 
 func executeInstance(opts *Options, state *State) error {
@@ -1833,12 +1869,12 @@ func sourceHasTablespacesAsDBSU(dbsu, dataDir string) (bool, string, error) {
 	return entry != "", entry, nil
 }
 
-func validateForkDataPaths(src, dst string) (string, string, error) {
-	srcPath, err := normalizeDataPath(src)
+func validateForkDataPathsAs(dbsu, src, dst string) (string, string, error) {
+	srcPath, err := normalizeDataPath(dbsu, src)
 	if err != nil {
 		return "", "", err
 	}
-	dstPath, err := normalizeDataPath(dst)
+	dstPath, err := normalizeDataPath(dbsu, dst)
 	if err != nil {
 		return "", "", err
 	}
@@ -1861,23 +1897,34 @@ func validateForkDataPaths(src, dst string) (string, string, error) {
 	return srcPath, dstPath, nil
 }
 
-func normalizeDataPath(path string) (string, error) {
+func normalizeDataPath(dbsu, path string) (string, error) {
 	cleaned, err := cleanAbsPath(path)
 	if err != nil {
 		return "", err
 	}
-	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
-		return filepath.Clean(resolved), nil
-	}
-
 	parent := cleaned
 	suffix := []string{}
 	for {
-		if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+		resolved, err := filepath.EvalSymlinks(parent)
+		if err == nil {
 			for i := len(suffix) - 1; i >= 0; i-- {
 				resolved = filepath.Join(resolved, suffix[i])
 			}
 			return filepath.Clean(resolved), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			if errors.Is(err, os.ErrPermission) && dbsu != "" && !utils.IsDBSU(dbsu) {
+				// Resolve through the same identity that will read/copy the data.
+				// Never fall back to the unresolved lexical path on failure.
+				resolved, resolveErr := utils.DBSUCommandStdout(dbsu, []string{"sh", "-c", `if [ -L "$1" ] && [ ! -e "$1" ]; then exit 1; fi; readlink -f -- "$1"`, "fork-path", cleaned})
+				if resolveErr == nil && filepath.IsAbs(strings.TrimSpace(resolved)) {
+					return filepath.Clean(strings.TrimSpace(resolved)), nil
+				}
+			}
+			return "", fmt.Errorf("cannot resolve data path %s: %w", parent, err)
+		}
+		if info, err := os.Lstat(parent); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("cannot resolve symlink data path: %s", parent)
 		}
 		next := filepath.Dir(parent)
 		if next == parent {

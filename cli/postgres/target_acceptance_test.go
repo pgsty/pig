@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"pig/cli/ext"
@@ -99,6 +100,112 @@ case "$*" in *'SELECT datname'*) printf 'app\nreport\n';; esac
 				})
 			}
 		})
+	}
+}
+
+func TestUnmanagedInitializedForkReplacementRequiresMetadata(t *testing.T) {
+	dbsu := withCurrentUserAsDBSU(t)
+	for _, kind := range []string{"missing", "corrupt", "wrong-kind", "wrong-target"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			src, dst := filepath.Join(root, "source"), filepath.Join(root, "target")
+			for _, dir := range []string{src, dst} {
+				if err := os.Mkdir(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "PG_VERSION"), []byte("18"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			metadata := map[string]string{"corrupt": "{", "wrong-kind": `{"kind":"other"}`, "wrong-target": `{"kind":"pg_fork","target":{"data":"/elsewhere"}}`}[kind]
+			if metadata != "" {
+				if err := os.WriteFile(filepath.Join(dst, "fork.json"), []byte(metadata), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := precheckInstance(&Options{Kind: KindInstance, DbSU: dbsu, Replace: true, Instance: InstanceOptions{SourceData: src, DestData: dst, SourcePort: 5432, DestPort: 15432}})
+			if err == nil || !strings.Contains(err.Error(), "fork") {
+				t.Fatalf("metadata %s accepted: %v", kind, err)
+			}
+			if got, _ := os.ReadFile(filepath.Join(dst, "PG_VERSION")); string(got) != "18" {
+				t.Fatal("target changed")
+			}
+		})
+	}
+}
+
+func TestForkDefaultDataPathIsNotReserved(t *testing.T) {
+	if err := validateForkRemovalPath("/pg/data"); err != nil {
+		t.Errorf("conventional data path rejected before ownership checks: %v", err)
+	}
+	t.Run("destination", func(t *testing.T) {
+		// Only resolve the existing path; never create or remove /pg/data.
+		if _, err := normalizeDataPath("", "/pg/data"); err != nil {
+			t.Skipf("host data path cannot be resolved: %v", err)
+		}
+		if _, _, err := validateForkDataPathsAs("", t.TempDir(), "/pg/data"); err != nil {
+			t.Fatalf("conventional data path rejected as an unrelated destination: %v", err)
+		}
+	})
+}
+
+func TestForkRejectsDanglingDestinationAlias(t *testing.T) {
+	root := t.TempDir()
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(filepath.Join(root, "missing"), alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := validateForkDataPathsAs("", t.TempDir(), alias); err == nil {
+		t.Fatal("accepted unresolved destination alias")
+	}
+}
+
+func TestForkMetadataRequiresRecordedTarget(t *testing.T) {
+	dbsu := withCurrentUserAsDBSU(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "PG_VERSION"), []byte("18"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, metadata := range []string{`{"kind":"pg_fork"}`, `{"kind":"pg_fork","target":null}`, `{"kind":"pg_fork","target":{"data":""}}`} {
+		if err := os.WriteFile(filepath.Join(dir, "fork.json"), []byte(metadata), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := requireForkInfo(dbsu, dir); err == nil {
+			t.Errorf("incomplete metadata authorized target: %s", metadata)
+		}
+	}
+	// An actual recorded matching target remains valid.
+	metadata := fmt.Sprintf(`{"kind":"pg_fork","target":{"data":%q}}`, dir)
+	if err := os.WriteFile(filepath.Join(dir, "fork.json"), []byte(metadata), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := requireForkInfo(dbsu, dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestForkCannotIgnoreInaccessiblePathAlias(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission fixture requires an ordinary uid")
+	}
+	root := t.TempDir()
+	src := filepath.Join(root, "source")
+	protected := filepath.Join(root, "protected")
+	for _, dir := range []string{src, protected} {
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alias := filepath.Join(protected, "source-alias")
+	if err := os.Symlink(src, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(protected, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(protected, 0700) })
+	if _, _, err := validateForkDataPathsAs("", src, alias); err == nil {
+		t.Fatal("unresolved alias of source accepted as unrelated destination")
 	}
 }
 
