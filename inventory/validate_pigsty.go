@@ -16,8 +16,12 @@ var (
 		"name": "string", "password": "string", "login": "bool", "superuser": "bool",
 		"createdb": "bool", "createrole": "bool", "inherit": "bool", "replication": "bool",
 		"bypassrls": "bool", "pgbouncer": "bool", "connlimit": "integer", "expire_in": "integer",
-		"expire_at": "date", "comment": "string", "roles": "string[]", "parameters": "mapping",
+		"expire_at": "date", "comment": "string", "roles": "user_role[]", "parameters": "mapping",
 		"pool_mode": "enum:transaction,session,statement", "pool_connlimit": "integer",
+	}
+	userRoleFields = map[string]string{
+		"name": "string", "state": "enum:grant,revoke,absent",
+		"admin": "nullable_bool", "set": "nullable_bool", "inherit": "nullable_bool",
 	}
 	databaseFields = map[string]string{
 		"name": "string", "baseline": "string", "pgbouncer": "bool", "schemas": "string[]",
@@ -940,17 +944,23 @@ func (v *pigstyValidator) validateFields(prefix string, item *Value, known map[s
 	}
 }
 
+func isScalarKind(value *Value, kind ScalarKind) bool {
+	return value != nil && value.Kind == ScalarValue && value.Scalar != nil && value.Scalar.Kind == kind
+}
+
 func (v *pigstyValidator) valueMatchesType(value *Value, expected string) bool {
 	switch expected {
 	case "string":
 		_, ok := stringValue(value)
 		return ok
 	case "integer":
-		return value != nil && value.Kind == ScalarValue && value.Scalar != nil && value.Scalar.Kind == IntegerScalar
+		return isScalarKind(value, IntegerScalar)
 	case "float":
-		return value != nil && value.Kind == ScalarValue && value.Scalar != nil && value.Scalar.Kind == FloatScalar
+		return isScalarKind(value, FloatScalar)
 	case "bool":
-		return value != nil && value.Kind == ScalarValue && value.Scalar != nil && value.Scalar.Kind == BoolScalar
+		return isScalarKind(value, BoolScalar)
+	case "nullable_bool":
+		return (value != nil && value.Kind == NullValue) || isScalarKind(value, BoolScalar)
 	case "sequence":
 		return value != nil && value.Kind == SequenceValue
 	case "mapping":
@@ -962,11 +972,65 @@ func (v *pigstyValidator) valueMatchesType(value *Value, expected string) bool {
 		return v.sequenceMatchesType(value, "string")
 	case "mapping[]":
 		return v.sequenceMatchesType(value, "mapping")
+	case "user_role[]":
+		return v.userRolesMatchesType(value)
 	}
 	if strings.HasPrefix(expected, "enum:") {
 		return valueMatchesEnum(value, strings.TrimPrefix(expected, "enum:"))
 	}
 	return false
+}
+
+func (v *pigstyValidator) userRolesMatchesType(value *Value) bool {
+	if value == nil || value.Kind != SequenceValue {
+		return false
+	}
+	for index := range value.Sequence {
+		item := &value.Sequence[index]
+		if v.unverifiable(item, "sequence item") {
+			continue
+		}
+		if text, ok := stringValue(item); ok {
+			if strings.TrimSpace(text) == "" {
+				return false
+			}
+			continue
+		}
+		if !v.userRoleMappingMatchesType(item) {
+			return false
+		}
+	}
+	return true
+}
+
+func (v *pigstyValidator) userRoleMappingMatchesType(item *Value) bool {
+	if item == nil || item.Kind != MappingValue {
+		return false
+	}
+	hasName := false
+	for index := range item.Mapping {
+		entry := &item.Mapping[index]
+		field := fmt.Sprint(entry.Key.Value)
+		expected, recognized := userRoleFields[field]
+		if !recognized {
+			return false
+		}
+		if field == "name" {
+			hasName = true
+		}
+		if v.unverifiable(&entry.Value, field) {
+			continue
+		}
+		if !v.valueMatchesType(&entry.Value, expected) {
+			return false
+		}
+		if field == "name" {
+			if text, ok := stringValue(&entry.Value); !ok || strings.TrimSpace(text) == "" {
+				return false
+			}
+		}
+	}
+	return hasName
 }
 
 func (v *pigstyValidator) sequenceMatchesType(value *Value, expected string) bool {

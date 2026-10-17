@@ -862,10 +862,5 @@ func clearGeneratedYAMLStyle(node *yaml.Node) {
 }
 
 func yaml11AmbiguousString(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "y", "yes", "n", "no", "true", "false", "on", "off", "null", "~", ".nan", ".inf", "+.inf", "-.inf":
-		return true
-	default:
-		return false
-	}
+	return inventory.IsAmbiguousPlainString(value)
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"pig/cli/do"
+	"pig/internal/config"
 
 	"github.com/spf13/cobra"
 )
@@ -32,7 +33,7 @@ func doPlaybooksRunE(operation string, params doParams, build do.PlaybookBuilder
 		if err != nil {
 			return err
 		}
-		return do.RunPlaybooks(inventory, commands)
+		return do.RunPlaybooks(config.PigstyConfig, commands)
 	})
 }
 
@@ -54,7 +55,7 @@ var doCmd = &cobra.Command{
 	  pig do pgsql-add  <cls> [ip...]       # add cluster or replicas
 	  pig do pgsql-rm   <cls> [ip...]       # remove cluster or replicas
   pig do pgsql-db   <cls> <dbname>      # create/update pgsql database
-  pig do pgsql-user <cls> <username>    # create/udpate pgsql user
+  pig do pgsql-user <cls> <username>    # create/update pgsql user
   pig do pgsql-ext  <cls> [ext...]      # install pgsql extensions
   pig do pgsql-svc  <sel>               # reload pgsql service
   pig do pgsql-hba  <sel>               # refresh pgsql hba
@@ -203,7 +204,7 @@ var doPgmonRmCmd = &cobra.Command{
   `,
 	Args: cobra.ExactArgs(1),
 	RunE: doRunE("pig do pgmon-rm", nil, func(args []string) error {
-		return do.RemovePgmon(inventory, args)
+		return do.RemovePgmon(config.PigstyConfig, args)
 	}),
 }
 

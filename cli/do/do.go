@@ -61,6 +61,13 @@ func runAnsibleTool(binary, inventory string, args []string) error {
 		if config.PigstyConfig == "" {
 			return errors.New("pigsty config inventory not found, use -i to specify the inventory")
 		}
+		if _, err := os.Stat(config.PigstyConfig); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("pigsty config inventory not found: %w", err)
+			}
+			return fmt.Errorf("failed to inspect inventory %s: %w", config.PigstyConfig, err)
+		}
+		inventory = config.PigstyConfig
 	}
 
 	command := []string{binary}

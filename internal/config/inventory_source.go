@@ -419,14 +419,15 @@ func resolveInventorySource(explicit, pigstyHome string) InventorySourceDescript
 		return inspectInventoryCandidate(descriptor, value, InventorySourceEnvironment, cwd, "")
 	}
 	if value := strings.TrimSpace(viperString("inventory")); value != "" {
-		if !filepath.IsAbs(value) && pigstyHome == "" {
+		expanded := expandHomePath(value)
+		if !filepath.IsAbs(expanded) && pigstyHome == "" {
 			descriptor.Tier = InventorySourceConfig
 			descriptor.Type = InventorySourceUnsupported
 			descriptor.OriginPath = ConfigFile
 			descriptor.Findings = []string{"SOURCE_CONFIG_HOME_REQUIRED"}
 			return descriptor
 		}
-		return inspectInventoryCandidate(descriptor, value, InventorySourceConfig, pigstyHome, ConfigFile)
+		return inspectInventoryCandidate(descriptor, expanded, InventorySourceConfig, pigstyHome, ConfigFile)
 	}
 	if pigstyHome == "" {
 		descriptor.Findings = []string{"SOURCE_NOT_CONFIGURED"}

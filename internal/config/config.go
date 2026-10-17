@@ -148,6 +148,9 @@ func resolveUserHome() (string, error) {
 	}
 	logrus.Debugf("failed to get user home directory, trying user.Current()")
 	if usr, userErr := user.Current(); userErr == nil {
+		if usr.HomeDir != "" {
+			return usr.HomeDir, nil
+		}
 		return "/home/" + usr.Username, nil
 	}
 	if os.Getuid() == 0 {
@@ -250,15 +253,21 @@ func validatePigstyHome(pigstyHomePath string) bool {
 	return false
 }
 
-func resolveInventoryCandidate(value, base string) string {
+func expandHomePath(value string) string {
 	value = strings.TrimSpace(value)
+	if value == "~" {
+		return HomeDir
+	}
+	if strings.HasPrefix(value, "~/") {
+		return filepath.Join(HomeDir, strings.TrimPrefix(value, "~/"))
+	}
+	return value
+}
+
+func resolveInventoryCandidate(value, base string) string {
+	value = expandHomePath(value)
 	if value == "" {
 		return ""
-	}
-	if value == "~" {
-		value = HomeDir
-	} else if strings.HasPrefix(value, "~/") {
-		value = filepath.Join(HomeDir, strings.TrimPrefix(value, "~/"))
 	}
 	if !filepath.IsAbs(value) {
 		value = filepath.Join(base, value)
@@ -475,6 +484,13 @@ func detectLinuxOSCode() {
 
 // DetectEnvironment detects the OS and sets the global variables
 func DetectEnvironment() {
+	OSCode = ""
+	OSType = ""
+	OSVendor = ""
+	OSVersion = ""
+	OSVersionFull = ""
+	OSVersionCode = ""
+	OSMajor = 0
 	OSArch = runtime.GOARCH
 	NodeHostname, _ = os.Hostname()
 	NodeCPUCount = runtime.NumCPU()

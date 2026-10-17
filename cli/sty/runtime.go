@@ -226,7 +226,9 @@ func Deploy(opts DeployOptions) error {
 
 	logrus.Infof("run playbook %s", playbookName)
 	logrus.Warnf("IT'S DANGEROUS TO RUN THIS ON INSTALLED SYSTEM!!! Use Ctrl+C to abort")
-	return commandFailed(output.CodeStyDeployFailed, utils.CommandInDir([]string{"ansible-playbook", playbookName}, opts.PigstyHome))
+	cmdArgs := []string{"ansible-playbook", "-i", opts.PigstyConfig}
+	cmdArgs = append(cmdArgs, playbookName)
+	return commandFailed(output.CodeStyDeployFailed, utils.CommandInDir(cmdArgs, opts.PigstyHome))
 }
 
 func resolveDeployPlaybook(home string) (string, error) {

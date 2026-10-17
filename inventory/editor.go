@@ -960,9 +960,7 @@ func plainStringSafe(value string, flow bool) bool {
 	if strings.ContainsRune("-?:,[]{}#&*!|>'\"%@`", first) {
 		return false
 	}
-	lower := strings.ToLower(value)
-	switch lower {
-	case "null", "~", "true", "false", "yes", "no", "y", "n", "on", "off", ".nan", ".inf", "-.inf", "+.inf":
+	if IsAmbiguousPlainString(value) {
 		return false
 	}
 	if _, err := strconv.ParseInt(value, 0, 64); err == nil {

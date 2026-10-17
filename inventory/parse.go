@@ -766,6 +766,18 @@ func resolveAnsiblePlainScalar(text string) (ScalarKind, any) {
 	return StringScalar, text
 }
 
+// IsAmbiguousPlainString reports whether text would resolve as a non-string
+// scalar under YAML 1.1 / PyYAML SafeLoader plain-scalar rules.
+func IsAmbiguousPlainString(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	switch strings.ToLower(trimmed) {
+	case "y", "n":
+		return true
+	}
+	kind, _ := resolveAnsiblePlainScalar(trimmed)
+	return kind != StringScalar
+}
+
 func parseAnsibleInteger(text string) (any, bool) {
 	cleaned := strings.ReplaceAll(text, "_", "")
 	if strings.Contains(cleaned, ":") {

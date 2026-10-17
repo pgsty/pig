@@ -78,6 +78,32 @@ func TestResolveInventorySourceFallsBackWithinResolvedHome(t *testing.T) {
 	}
 }
 
+func TestRelativeConfiguredInventoryRequiresHome(t *testing.T) {
+	originalViperString, originalConfigFile := viperString, ConfigFile
+	t.Cleanup(func() { viperString, ConfigFile = originalViperString, originalConfigFile })
+	t.Setenv("PIGSTY_INVENTORY", "")
+	root := t.TempDir()
+	t.Chdir(root)
+	ConfigFile = filepath.Join(root, "config.yml")
+	// An unrelated file in cwd must not turn a home-relative source into a
+	// usable inventory when no Pigsty home was selected.
+	if err := os.WriteFile("pigsty.yml", []byte("all: {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	viperString = func(string) string { return "pigsty.yml" }
+	got := resolveInventorySource("", "")
+	if got.Tier != InventorySourceConfig || got.Type != InventorySourceUnsupported || got.Path != "" || got.OriginPath != ConfigFile || !slices.Contains(got.Findings, "SOURCE_CONFIG_HOME_REQUIRED") {
+		t.Fatalf("relative configured inventory silently used cwd: %+v", got)
+	}
+	// Absolute config paths and explicit relative flags remain usable.
+	viperString = func(string) string { return filepath.Join(root, "pigsty.yml") }
+	for _, explicit := range []string{"", "pigsty.yml"} {
+		if got := resolveInventorySource(explicit, ""); got.Type != InventorySourceStaticYAML || got.Path != filepath.Join(root, "pigsty.yml") {
+			t.Fatalf("unambiguous source rejected: %+v", got)
+		}
+	}
+}
+
 func TestReadAnsibleInventoryDirectiveIsDefaultsScoped(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ansible.cfg")
 	source := `[inventory]

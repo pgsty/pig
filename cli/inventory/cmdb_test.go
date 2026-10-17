@@ -321,3 +321,30 @@ func jsonFieldsObject(fields []cmdb.JSONField) map[string]any {
 	}
 	return result
 }
+
+func TestCMDBExportAmbiguousStringsSemanticRoundtrip(t *testing.T) {
+	values := map[string]any{"duration": "1:30", "octal": "010", "boolean": "yes", "date": "2001-12-15", "nested": []any{"1:30", map[string]any{"010": "1:30"}}}
+	raw, err := json.Marshal(map[string]any{"all": map[string]any{"vars": values, "children": map[string]any{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := cmdb.CanonicalRawConfigJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := canonicalCMDBYAML(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := inventory.Parse("cmdb-export.yml", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations, failure := pigstyDeclarationsFromDocument(doc, "cmdb-export.yml")
+	if failure != nil {
+		t.Fatal(failure)
+	}
+	if got := jsonFieldsObject(declarations.Globals); !reflect.DeepEqual(got, values) {
+		t.Fatalf("CMDB semantic roundtrip: got=%#v want=%#v YAML=%s", got, values, body)
+	}
+}
