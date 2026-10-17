@@ -39,6 +39,9 @@ type MaintOptions struct {
 
 // RunPsqlMaintenance runs a maintenance SQL command
 func RunPsqlMaintenance(cfg *Config, dbname, sql string) error {
+	if err := ValidateMaintenanceDatabase(dbname); err != nil {
+		return err
+	}
 	dbsu := GetDbSU(cfg)
 	pg, err := GetPgInstall(cfg)
 	if err != nil {
@@ -149,6 +152,12 @@ func runMaintAllDatabases(cfg *Config, task *maintTask) error {
 	if err != nil {
 		return fmt.Errorf("failed to get databases: %w", err)
 	}
+	// Validate the entire list before logging names or changing any database.
+	for _, db := range dbs {
+		if err := ValidateMaintenanceDatabase(db); err != nil {
+			return err
+		}
+	}
 	var failures []string
 	for _, db := range dbs {
 		fmt.Printf("\n%s=== %s database: %s ===%s\n", utils.ColorCyan, task.taskName, db, utils.ColorReset)
@@ -165,8 +174,20 @@ func runMaintAllDatabases(cfg *Config, task *maintTask) error {
 	return nil
 }
 
-// validateMaintOptions validates common maintenance options
-func validateMaintOptions(schema, table string) error {
+// ValidateMaintenanceDatabase accepts literal database names, not libpq
+// connection strings, which can override -h/-p and contain credentials.
+func ValidateMaintenanceDatabase(dbname string) error {
+	if strings.Contains(dbname, "=") || strings.HasPrefix(dbname, "postgresql://") || strings.HasPrefix(dbname, "postgres://") {
+		return fmt.Errorf("database must be a literal name, not a connection string; use the native client for connection strings")
+	}
+	return nil
+}
+
+// validateMaintOptions validates common maintenance options.
+func validateMaintOptions(dbname, schema, table string) error {
+	if err := ValidateMaintenanceDatabase(dbname); err != nil {
+		return err
+	}
 	if !ValidateIdentifier(schema) {
 		return fmt.Errorf("invalid schema name: %s", schema)
 	}
@@ -197,7 +218,7 @@ func Vacuum(cfg *Config, dbname string, opts *VacuumOptions) error {
 	}
 
 	// Validate identifiers
-	if err := validateMaintOptions(schema, table); err != nil {
+	if err := validateMaintOptions(dbname, schema, table); err != nil {
 		return err
 	}
 
@@ -247,7 +268,7 @@ func Analyze(cfg *Config, dbname string, opts *MaintOptions) error {
 	}
 
 	// Validate identifiers
-	if err := validateMaintOptions(schema, table); err != nil {
+	if err := validateMaintOptions(dbname, schema, table); err != nil {
 		return err
 	}
 
@@ -297,7 +318,7 @@ func Freeze(cfg *Config, dbname string, opts *FreezeOptions) error {
 	}
 
 	// Validate identifiers
-	if err := validateMaintOptions(schema, table); err != nil {
+	if err := validateMaintOptions(dbname, schema, table); err != nil {
 		return err
 	}
 
@@ -352,7 +373,7 @@ func Repack(cfg *Config, dbname string, opts *RepackOptions) error {
 	}
 
 	// Validate identifiers
-	if err := validateMaintOptions(schema, table); err != nil {
+	if err := validateMaintOptions(dbname, schema, table); err != nil {
 		return err
 	}
 

@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"pig/internal/output"
+
+	"github.com/spf13/cobra"
 )
 
 // Run each Cobra invocation in its own process so flags and configuration cannot
@@ -55,6 +57,22 @@ func TestPgPlanAndConfirmationPreserveTarget(t *testing.T) {
 				commands = append(commands, action.Command)
 			}
 		}
+		var maintenanceCmd *cobra.Command
+		if args[1] == "vacuum" {
+			maintenanceCmd = pgVacuumCmd
+		} else if args[1] == "repack" {
+			maintenanceCmd = pgRepackCmd
+		}
+		var wantArgs []string
+		wantFlags := map[string]string{}
+		if maintenanceCmd != nil {
+			wantArgs = append([]string(nil), maintenanceCmd.Flags().Args()...)
+			for _, name := range []string{"data", "dbsu", "version", "all", "full", "schema", "table", "verbose", "jobs"} {
+				if flag := maintenanceCmd.Flags().Lookup(name); flag != nil {
+					wantFlags[name] = flag.Value.String()
+				}
+			}
+		}
 		for _, command := range commands {
 			if !strings.HasPrefix(command, "pig pg ") {
 				continue
@@ -76,6 +94,9 @@ func TestPgPlanAndConfirmationPreserveTarget(t *testing.T) {
 				}
 			}
 			if len(got) > 2 && got[2] == args[1] {
+				if maintenanceCmd != nil {
+					assertMaintenanceCommandParsing(t, maintenanceCmd, got[3:], wantArgs, wantFlags)
+				}
 				for _, flag := range []string{"--timeout", "--no-wait", "--full", "--all", "--jobs"} {
 					if at := slices.Index(args, flag); at >= 0 {
 						idx := slices.Index(got, flag)
@@ -93,22 +114,30 @@ func TestPgPlanAndConfirmationPreserveTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, target := range []string{"", "/pg/data", filepath.Join(t.TempDir(), "pg data 'quoted' $(printf marker)")} {
-		for _, operation := range [][]string{
-			{"promote", "--timeout", "17", "--no-wait"},
-			{"vacuum", "app", "--full", "--all"},
-			{"repack", "app", "--jobs", "3", "--all"},
+		for _, operation := range []struct {
+			args     []string
+			database string
+		}{
+			{[]string{"promote", "--timeout", "17", "--no-wait"}, ""},
+			{[]string{"vacuum", "--full", "--all"}, "app"},
+			{[]string{"repack", "--jobs", "3", "--all"}, "app"},
+			{[]string{"vacuum", "--full"}, "--all"},
+			{[]string{"repack", "--jobs", "3"}, "-a"},
 		} {
 			for _, plan := range []bool{true, false} {
-				if !plan && operation[0] == "repack" {
+				if !plan && operation.args[0] == "repack" {
 					continue
 				}
-				args := append([]string{"pg"}, operation...)
+				args := append([]string{"pg"}, operation.args...)
 				args = append(args, "--dbsu", account.Username, "--version", "18", "-o", "json")
 				if target != "" {
 					args = append(args, "-D", target)
 				}
 				if plan {
 					args = append(args, "--plan")
+				}
+				if operation.database != "" {
+					args = append(args, "--", operation.database)
 				}
 				t.Run(strings.Join(args, " "), func(t *testing.T) {
 					raw, _ := json.Marshal(args)
@@ -119,6 +148,29 @@ func TestPgPlanAndConfirmationPreserveTarget(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+}
+
+func assertMaintenanceCommandParsing(t *testing.T, cmd *cobra.Command, args, wantArgs []string, wantFlags map[string]string) {
+	t.Helper()
+	// Use the real Cobra flags, resetting their values so the original invocation
+	// cannot hide a missing selector or an operand reinterpreted as an option.
+	for name := range wantFlags {
+		flag := cmd.Flags().Lookup(name)
+		if err := flag.Value.Set(flag.DefValue); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cmd.ParseFlags(args); err != nil {
+		t.Fatalf("generated command cannot be parsed: %v", err)
+	}
+	if !slices.Equal(cmd.Flags().Args(), wantArgs) {
+		t.Errorf("database changed: got %q, want %q", cmd.Flags().Args(), wantArgs)
+	}
+	for name, want := range wantFlags {
+		if got := cmd.Flags().Lookup(name).Value.String(); got != want {
+			t.Errorf("%s changed: got %q, want %q", name, got, want)
 		}
 	}
 }

@@ -539,8 +539,8 @@ func registerPostgresCommand() *cobra.Command {
 
 	// Global flags for all pg subcommands
 	pgCmd.PersistentFlags().IntVarP(&pgConfig.PgVersion, "version", "v", 0, "PostgreSQL major version")
-	pgCmd.PersistentFlags().StringVarP(&pgConfig.PgData, "data", "D", "", "data directory (default: /pg/data)")
-	pgCmd.PersistentFlags().StringVarP(&pgConfig.DbSU, "dbsu", "U", "", "database superuser (default: $PIG_DBSU or postgres)")
+	pgCmd.PersistentFlags().StringVarP(&pgConfig.PgData, "data", "D", "", "data directory (instance default: /pg/data; SQL commands use this target only with explicit -D)")
+	pgCmd.PersistentFlags().StringVarP(&pgConfig.DbSU, "dbsu", "U", "", "PostgreSQL operating-system user (default: $PIG_DBSU or postgres)")
 
 	registerPgControlCommands()
 	registerPgLogCommands()
@@ -648,7 +648,7 @@ func registerPgConnectionCommands() {
 	pgKillCmd.Flags().StringVarP(&pgKillDb, "database", "d", "", "filter by database")
 	pgKillCmd.Flags().StringVarP(&pgKillState, "state", "s", "", "filter by state (idle/active/idle in transaction)")
 	pgKillCmd.Flags().StringVarP(&pgKillQuery, "query", "q", "", "filter by query pattern")
-	pgKillCmd.Flags().BoolVarP(&pgKillAll, "all", "a", false, "include replication connections")
+	pgKillCmd.Flags().BoolVarP(&pgKillAll, "all", "a", false, "include non-client background processes")
 	pgKillCmd.Flags().BoolVarP(&pgKillCancel, "cancel", "c", false, "cancel query instead of terminate")
 	pgKillCmd.Flags().IntVar(&pgKillWatch, "watch", 0, "repeat every N seconds")
 	pgKillCmd.Flags().BoolVar(&pgKillPlan, "plan", false, "preview kill plan without executing")
@@ -710,15 +710,17 @@ func newPgCloneCommand() *cobra.Command {
 	opts := &cloneCLIOptions{}
 	cmd := &cobra.Command{
 		Use:               "clone <source-db> [dest-db]",
-		Short:             "Clone a PostgreSQL database with FILE_COPY",
+		Short:             "Clone a PostgreSQL database with CREATE DATABASE TEMPLATE",
 		Args:              cobra.RangeArgs(1, 2),
 		Annotations:       ancsAnn("pig postgres clone", "action", "volatile", "unsafe", false, "high", "recommended", "dbsu", 60000),
 		PersistentPreRunE: pgPreRun,
 		Long: `Clone a database inside the current PostgreSQL instance.
 
-This wraps CREATE DATABASE ... TEMPLATE ... STRATEGY FILE_COPY. It terminates
+This wraps CREATE DATABASE ... TEMPLATE, using STRATEGY FILE_COPY on PostgreSQL
+15 and later. PostgreSQL 14 uses the native template-copy behavior. It terminates
 existing source-database sessions immediately before cloning, matching Pigsty's
-pgsql-db clone workflow.`,
+pgsql-db clone workflow. Select the instance with --port (default: $PG_PORT or
+5432); this command does not use -D to select its SQL connection.`,
 		Example: `  pig pg clone meta                       # clone meta to meta_1/meta_2/...
   pig pg clone meta meta_fork             # clone meta to meta_fork
   pig pg clone meta meta_dev --owner dba  # set owner on cloned database
@@ -1653,17 +1655,47 @@ var pgLogGrepCmd = &cobra.Command{
 // Maintenance Commands
 // ============================================================================
 
+const pgMaintenanceDatabaseHelp = `
+
+The optional database name defaults to postgres. It is a literal name, not a
+libpq connection string: names containing '=' or beginning with postgres:// or
+postgresql:// are rejected. Use the native client for connection strings.
+For a name beginning with '-', put all options before '--', then the name.
+--all processes all databases. Vacuum, analyze, and freeze enumerate non-template
+databases and validate the full list before maintenance starts.`
+
+func pgMaintenanceArgs(cmd *cobra.Command, args []string) error {
+	if err := cobra.MaximumNArgs(1)(cmd, args); err != nil {
+		return err
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	if err := postgres.ValidateMaintenanceDatabase(args[0]); err != nil {
+		// Args run before module setup. Initialize structured errors here and
+		// omit the raw operand, which may contain a password.
+		if formatErr := initOutputFormat(); formatErr != nil {
+			return formatErr
+		}
+		applyStructuredOutputSilence(cmd)
+		return structuredParamError(output.MODULE_PG, cmd.CommandPath(),
+			"invalid maintenance database", err.Error(), nil, nil)
+	}
+	return nil
+}
+
 var pgVacuumCmd = &cobra.Command{
 	Use:         "vacuum [dbname]",
 	Short:       "Vacuum database tables",
+	Long:        "Vacuum database tables. Combine --schema with --table; for a whole schema, use native vacuumdb --schema." + pgMaintenanceDatabaseHelp,
 	Aliases:     []string{"vac", "vc"},
 	Annotations: ancsAnn("pig postgres vacuum", "action", "volatile", "restricted", true, "low", "none", "dbsu", 60000),
-	Args:        cobra.MaximumNArgs(1),
-	Example: `  pig pg vacuum                  # vacuum current database
+	Args:        pgMaintenanceArgs,
+	Example: `  pig pg vacuum                  # vacuum the postgres database
   pig pg vacuum mydb             # vacuum specific database
   pig pg vacuum -a               # vacuum all databases
   pig pg vacuum mydb -t mytable  # vacuum specific table
-  pig pg vacuum mydb --schema myschema # vacuum tables in schema
+  pig pg vacuum mydb --schema myschema -t mytable # vacuum a table in a schema
   pig pg vacuum mydb --full      # VACUUM FULL (exclusive lock)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dbname := ""
@@ -1737,10 +1769,11 @@ var pgVacuumCmd = &cobra.Command{
 var pgAnalyzeCmd = &cobra.Command{
 	Use:         "analyze [dbname]",
 	Short:       "Analyze database tables",
+	Long:        "Analyze database tables." + pgMaintenanceDatabaseHelp,
 	Aliases:     []string{"ana", "az"},
 	Annotations: ancsAnn("pig postgres analyze", "action", "volatile", "restricted", true, "safe", "none", "dbsu", 60000),
-	Args:        cobra.MaximumNArgs(1),
-	Example: `  pig pg analyze                 # analyze current database
+	Args:        pgMaintenanceArgs,
+	Example: `  pig pg analyze                 # analyze the postgres database
   pig pg analyze mydb            # analyze specific database
   pig pg analyze -a              # analyze all databases
   pig pg analyze mydb -t mytable # analyze specific table`,
@@ -1770,9 +1803,10 @@ var pgAnalyzeCmd = &cobra.Command{
 var pgFreezeCmd = &cobra.Command{
 	Use:         "freeze [dbname]",
 	Short:       "Vacuum freeze database",
+	Long:        "Vacuum freeze database tables. Combine --schema with --table; for a whole schema, use native vacuumdb --schema." + pgMaintenanceDatabaseHelp,
 	Annotations: ancsAnn("pig postgres freeze", "action", "volatile", "restricted", true, "low", "none", "dbsu", 60000),
-	Args:        cobra.MaximumNArgs(1),
-	Example: `  pig pg freeze                  # vacuum freeze current database
+	Args:        pgMaintenanceArgs,
+	Example: `  pig pg freeze                  # vacuum freeze the postgres database
   pig pg freeze mydb             # vacuum freeze specific database
   pig pg freeze -a               # vacuum freeze all databases`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -1801,9 +1835,10 @@ var pgFreezeCmd = &cobra.Command{
 var pgRepackCmd = &cobra.Command{
 	Use:         "repack [dbname]",
 	Short:       "Repack database tables (requires pg_repack)",
+	Long:        "Repack database tables with pg_repack." + pgMaintenanceDatabaseHelp,
 	Aliases:     []string{"rp"},
 	Annotations: ancsAnn("pig postgres repack", "action", "volatile", "unsafe", true, "medium", "recommended", "dbsu", 300000),
-	Args:        cobra.MaximumNArgs(1),
+	Args:        pgMaintenanceArgs,
 	Example: `  pig pg repack mydb             # repack all tables in database
   pig pg repack -a               # repack all databases
   pig pg repack mydb -t mytable  # repack specific table

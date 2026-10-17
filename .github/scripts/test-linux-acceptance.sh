@@ -44,8 +44,8 @@ grep -q '^--- PASS: TestWriteFileAsDBSULinuxIdentity ' "$work/utils.log"
 sudo -u "$reviewer" env PIG_TEST_CLONE_PGDATA="$pg_data" PIG_TEST_PG_BIN="$pg_bin" \
     PIG_TEST_POSTGRES_PID="$(head -1 "$pg_data/postmaster.pid")" \
     "$test_bins/postgres.test" -test.v \
-    -test.run '^(TestCloneLinuxProtectedPGDATA|TestReviewLinuxPrivateForkAndStaleSQLTarget|TestLinuxLivePostgresPermissionDenied)$' \
+    -test.run '^(TestCloneLinuxProtectedPGDATA|TestReviewLinuxPrivateForkAndStaleSQLTarget|TestLinuxLivePostgresPermissionDenied|TestMaintenanceLibpqTargetBoundary)$' \
     | tee "$work/postgres.log"
-for test_name in TestCloneLinuxProtectedPGDATA TestReviewLinuxPrivateForkAndStaleSQLTarget TestLinuxLivePostgresPermissionDenied; do
+for test_name in TestCloneLinuxProtectedPGDATA TestReviewLinuxPrivateForkAndStaleSQLTarget TestLinuxLivePostgresPermissionDenied TestMaintenanceLibpqTargetBoundary; do
     grep -q "^--- PASS: $test_name " "$work/postgres.log"
 done

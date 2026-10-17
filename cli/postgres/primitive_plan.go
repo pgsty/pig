@@ -139,7 +139,7 @@ func BuildVacuumPlan(cfg *Config, dbname string, opts *VacuumOptions) *output.Pl
 
 // ValidateMaintenanceOptions exposes the same maintenance validation used by execution paths.
 func ValidateMaintenanceOptions(schema, table string) error {
-	return validateMaintOptions(schema, table)
+	return validateMaintOptions("", schema, table)
 }
 
 // BuildPromoteCommand preserves the target and options in a preview or confirmed retry.
@@ -161,9 +161,6 @@ func BuildPromoteCommand(cfg *Config, opts *PromoteOptions, includePlan bool) st
 
 func buildRepackCommand(cfg *Config, dbname string, opts *RepackOptions, includePlan bool) string {
 	parts := appendPgTargetCommandFlags([]string{"pig", "pg", "repack"}, cfg)
-	if dbname != "" {
-		parts = append(parts, dbname)
-	}
 	if opts != nil {
 		appendMaintOptions(&parts, opts.All, opts.Schema, opts.Table, opts.Verbose)
 		if opts.Jobs > 1 {
@@ -173,15 +170,15 @@ func buildRepackCommand(cfg *Config, dbname string, opts *RepackOptions, include
 	if includePlan {
 		parts = append(parts, "--plan")
 	}
+	if dbname != "" {
+		parts = append(parts, "--", dbname)
+	}
 	return utils.ShellQuoteArgs(parts)
 }
 
 // BuildVacuumCommand preserves the target and options, including FULL confirmation.
 func BuildVacuumCommand(cfg *Config, dbname string, opts *VacuumOptions, includePlan bool) string {
 	parts := appendPgTargetCommandFlags([]string{"pig", "pg", "vacuum"}, cfg)
-	if dbname != "" {
-		parts = append(parts, dbname)
-	}
 	if opts != nil {
 		appendMaintOptions(&parts, opts.All, opts.Schema, opts.Table, opts.Verbose)
 		if opts.Full {
@@ -192,6 +189,9 @@ func BuildVacuumCommand(cfg *Config, dbname string, opts *VacuumOptions, include
 		parts = append(parts, "--plan")
 	} else if opts != nil && opts.Full {
 		parts = append(parts, "--yes")
+	}
+	if dbname != "" {
+		parts = append(parts, "--", dbname)
 	}
 	return utils.ShellQuoteArgs(parts)
 }
