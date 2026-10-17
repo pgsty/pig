@@ -49,7 +49,11 @@ func RunPsqlMaintenance(cfg *Config, dbname, sql string) error {
 		dbname = "postgres"
 	}
 
-	cmdArgs := []string{pg.Psql(), "-d", dbname, "-c", sql}
+	cmdArgs, err := appendDataDirConnArgs([]string{pg.Psql()}, cfg)
+	if err != nil {
+		return err
+	}
+	cmdArgs = append(cmdArgs, "-d", dbname, "-c", sql)
 	PrintHint(cmdArgs)
 	return utils.DBSUCommand(dbsu, cmdArgs)
 }
@@ -63,8 +67,12 @@ func GetAllDatabases(cfg *Config) ([]string, error) {
 	}
 
 	// Build command args
-	cmdArgs := []string{pg.Psql(), "-d", "postgres", "-t", "-A", "-c",
-		"SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname"}
+	cmdArgs, err := appendDataDirConnArgs([]string{pg.Psql()}, cfg)
+	if err != nil {
+		return nil, err
+	}
+	cmdArgs = append(cmdArgs, "-d", "postgres", "-t", "-A", "-c",
+		"SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname")
 
 	// Capture stdout only so diagnostics cannot become database names.
 	output, err := utils.DBSUCommandStdout(dbsu, cmdArgs)
@@ -358,7 +366,10 @@ func Repack(cfg *Config, dbname string, opts *RepackOptions) error {
 	}
 
 	// Build pg_repack command
-	cmdArgs := []string{repackPath}
+	cmdArgs, err := appendDataDirConnArgs([]string{repackPath}, cfg)
+	if err != nil {
+		return err
+	}
 
 	if plan {
 		cmdArgs = append(cmdArgs, "-N") // pg_repack dry-run flag

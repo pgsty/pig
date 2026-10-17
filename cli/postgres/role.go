@@ -53,9 +53,15 @@ func DetectRole(cfg *Config, opts *RoleOptions) (*RoleResult, error) {
 	if verbose {
 		fmt.Printf("%s[1] Checking PostgreSQL processes...%s\n", utils.ColorCyan, utils.ColorReset)
 	}
-	running, targetPID := CheckPostgresRunningAsDBSU(dbsu, dataDir)
-	psResult := roleFromProcesses(dbsu, targetPID, verbose)
-	psResult.Alive = running
+	running, targetPID, _, err := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot determine PostgreSQL running state: %w", err)
+	}
+	psResult := &RoleResult{Role: RoleUnknown, Source: "ps"}
+	if running {
+		psResult = roleFromProcesses(dbsu, targetPID, verbose)
+		psResult.Alive = true
+	}
 	if verbose {
 		fmt.Printf("    Process check: alive=%v, role=%s\n", psResult.Alive, psResult.Role)
 	}
@@ -88,16 +94,13 @@ func DetectRole(cfg *Config, opts *RoleOptions) (*RoleResult, error) {
 		fmt.Printf("%s[3] Checking data directory files...%s\n", utils.ColorCyan, utils.ColorReset)
 	}
 	fileResult := roleFromDataDir(dbsu, dataDir, verbose)
+	fileResult.Alive = running
 	if verbose {
 		fmt.Printf("    File check: alive=%v, role=%s\n", fileResult.Alive, fileResult.Role)
 	}
 
 	// Return file result if we got something
 	if fileResult.Role != RoleUnknown {
-		// Preserve alive status from process check
-		if psResult.Alive {
-			fileResult.Alive = true
-		}
 		return fileResult, nil
 	}
 
@@ -339,7 +342,7 @@ func roleFromDataDir(dbsu, dataDir string, verbose bool) *RoleResult {
 		return result
 	}
 
-	result.Role, result.Alive = roleFromDataFiles(dbsu, dataDir, files, verbose)
+	result.Role = roleFromDataFiles(dbsu, dataDir, files, verbose)
 	if result.Role == RoleReplica {
 		return result
 	}
@@ -359,25 +362,22 @@ func roleFromDataDir(dbsu, dataDir string, verbose bool) *RoleResult {
 	return result
 }
 
-func roleFromDataFiles(dbsu, dataDir string, files []string, verbose bool) (Role, bool) {
-	alive := false
+func roleFromDataFiles(dbsu, dataDir string, files []string, verbose bool) Role {
 	for _, raw := range files {
 		name := strings.TrimSpace(raw)
 		switch name {
-		case "postmaster.pid":
-			alive = true
 		case "standby.signal", "recovery.signal":
 			if verbose {
 				fmt.Printf("    found %s -> replica\n", name)
 			}
-			return RoleReplica, alive
+			return RoleReplica
 		case "recovery.conf":
 			if checkRecoveryConfAsDBSU(dbsu, filepath.Join(dataDir, name), verbose) {
-				return RoleReplica, alive
+				return RoleReplica
 			}
 		}
 	}
-	return RolePrimary, alive
+	return RolePrimary
 }
 
 // fileExistsAsDBSU checks if a file exists as the database superuser

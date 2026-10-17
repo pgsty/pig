@@ -72,7 +72,7 @@ func StatusResult(cfg *Config) *output.Result {
 	running, pid, pidContent, err := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
 	if err != nil {
 		return output.Fail(output.CodePgStatusPermissionDenied,
-			"Permission denied checking PostgreSQL status").
+			"Unable to determine PostgreSQL running state").
 			WithData(statusData).
 			WithDetail(err.Error())
 	}
@@ -147,10 +147,15 @@ type PostmasterPidInfo struct {
 // ReadPostmasterPidInfoAsDBSU reads postmaster.pid from a data directory using
 // DBSU privileges.
 func ReadPostmasterPidInfoAsDBSU(dbsu, dataDir string) (PostmasterPidInfo, error) {
-	pidFile := filepath.Join(dataDir, "postmaster.pid")
-	content, err := utils.ReadFileAsDBSU(pidFile, dbsu)
+	running, pid, content, err := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
 	if err != nil {
-		return PostmasterPidInfo{}, fmt.Errorf("read postmaster.pid: %w", err)
+		return PostmasterPidInfo{}, err
+	}
+	if !running || pid <= 0 {
+		return PostmasterPidInfo{}, fmt.Errorf("target PostgreSQL is not running")
+	}
+	if postmasterPIDDataDir(content) == "" || !postmasterPIDMatchesDataDirAsDBSU(dbsu, content, dataDir) {
+		return PostmasterPidInfo{}, fmt.Errorf("postmaster.pid data directory does not match requested directory")
 	}
 	return ParsePostmasterPidInfo(content)
 }
@@ -169,7 +174,7 @@ func ParsePostmasterPidInfo(content string) (PostmasterPidInfo, error) {
 
 	portStr := strings.TrimSpace(lines[3])
 	port, err := strconv.Atoi(portStr)
-	if err != nil || port <= 0 {
+	if err != nil || !validPort(port) {
 		if err == nil {
 			err = fmt.Errorf("invalid port %d", port)
 		}
@@ -229,61 +234,75 @@ func checkPostgresRunningAsDBSUWithError(dbsu, dataDir string) (running bool, pi
 		if isPermissionOutput(content) || isPermissionErr(readErr) {
 			return false, 0, "", fmt.Errorf("permission denied reading %s: %s", pidFile, strings.TrimSpace(content))
 		}
-		if isNotFoundOutput(content) {
+		if errors.Is(readErr, os.ErrNotExist) || isNotFoundOutput(content) || isNotFoundOutput(readErr.Error()) {
 			return false, 0, "", nil
 		}
-		// Treat other read errors as non-running but log for debugging
-		logrus.Debugf("cannot read postmaster.pid: %v", readErr)
-		return false, 0, "", nil
+		return false, 0, "", fmt.Errorf("cannot read postmaster.pid: %w", readErr)
 	}
 
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
-		logrus.Debugf("postmaster.pid is empty")
-		return false, 0, content, nil
+		return false, 0, content, fmt.Errorf("postmaster.pid is empty")
 	}
 
 	parsedPID, parseErr := strconv.Atoi(strings.TrimSpace(lines[0]))
-	if parseErr != nil {
-		logrus.Debugf("cannot parse PID from postmaster.pid: %v", parseErr)
-		return false, 0, content, nil
+	if parseErr != nil || parsedPID <= 0 {
+		return false, 0, content, fmt.Errorf("postmaster.pid has no valid positive PID")
+	}
+	if postmasterPIDDataDir(content) == "" {
+		return false, parsedPID, content, fmt.Errorf("postmaster.pid has no data directory; running state is unknown")
+	}
+	if !postmasterPIDMatchesDataDirAsDBSU(dbsu, content, dataDir) {
+		logrus.Debugf("postmaster.pid belongs to another data directory")
+		return false, parsedPID, content, nil
 	}
 
-	running, err = checkProcessRunningAsDBSUWithError(dbsu, parsedPID)
-	if err != nil {
-		return false, parsedPID, content, err
-	}
-	if !running {
+	running, probeErr := checkProcessRunningAsDBSUWithError(dbsu, parsedPID)
+	if !running && probeErr == nil {
 		logrus.Debugf("process %d not running (stale pid file)", parsedPID)
 		return false, parsedPID, content, nil
+	}
+	// EPERM alone cannot prove absence. Independent process identity can prove
+	// that a PID was reused, even when the new owner cannot be signalled.
+	command, err := postgresDBSUCommandOutput(dbsu, []string{"ps", "-p", strconv.Itoa(parsedPID), "-o", "comm="})
+	if err != nil {
+		return false, parsedPID, content, fmt.Errorf("cannot identify postmaster process %d: %w", parsedPID, err)
+	}
+	if strings.TrimSpace(command) == "" {
+		return false, parsedPID, content, fmt.Errorf("cannot identify postmaster process %d", parsedPID)
+	}
+	name := filepath.Base(strings.TrimSpace(command))
+	if name != "postgres" && name != "postmaster" {
+		return false, parsedPID, content, nil
+	}
+	if probeErr != nil {
+		return false, parsedPID, content, probeErr
 	}
 	return true, parsedPID, content, nil
 }
 
 func checkProcessRunningAsDBSUWithError(dbsu string, pid int) (bool, error) {
-	// If current user is DBSU, use direct signal check
+	if pid <= 0 {
+		return false, fmt.Errorf("invalid postmaster PID")
+	}
 	if utils.IsDBSU(dbsu) {
-		process, err := os.FindProcess(pid)
-		if err != nil {
+		err := syscall.Kill(pid, 0)
+		if errors.Is(err, syscall.ESRCH) {
 			return false, nil
 		}
-		if err := process.Signal(syscall.Signal(0)); err != nil {
-			return false, nil
+		if err != nil {
+			return false, fmt.Errorf("cannot probe postmaster PID %d: %w", pid, err)
 		}
 		return true, nil
 	}
-
-	// Use kill -0 via DBSU privilege escalation
-	output, err := utils.DBSUCommandStdout(dbsu, []string{"kill", "-0", strconv.Itoa(pid)})
+	// Keep stderr in the error so EPERM and privilege failures cannot become
+	// evidence that the process has exited. Only ESRCH proves absence.
+	out, err := postgresDBSUCommandOutput(dbsu, []string{"kill", "-0", strconv.Itoa(pid)})
 	if err != nil {
-		if isPermissionOutput(output) || isPermissionErr(err) {
-			detail := strings.TrimSpace(output)
-			if detail == "" {
-				return false, fmt.Errorf("permission denied running kill -0: %w", err)
-			}
-			return false, fmt.Errorf("permission denied running kill -0: %s: %w", detail, err)
+		if strings.Contains(strings.ToLower(out+err.Error()), "no such process") {
+			return false, nil
 		}
-		return false, nil
+		return false, fmt.Errorf("cannot probe postmaster PID %d: %w", pid, err)
 	}
 	return true, nil
 }

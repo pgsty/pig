@@ -460,7 +460,13 @@ func InitResult(cfg *Config, opts *InitOptions) *output.Result {
 		}
 
 		// Force mode: check if PostgreSQL is running (NEVER allow overwrite if running)
-		running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
+		running, pid, _, err := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
+		if err != nil {
+			return output.Fail(classifyCtlError(err, output.CodePgInitFailed),
+				"Cannot determine PostgreSQL running state; initialization not attempted").
+				WithData(&PgInitResultData{DataDir: dataDir}).
+				WithDetail(err.Error())
+		}
 		if running {
 			return output.Fail(output.CodePgInitRunningConflict,
 				"PostgreSQL is running, cannot overwrite").
@@ -724,22 +730,24 @@ func getTimeline(cfg *Config, dbsu string) int {
 		return 0
 	}
 
-	// Try pg_control_checkpoint() SQL function
-	cmdArgs := []string{pg.Psql(), "-AXtqw", "-d", "postgres", "-c",
-		"SELECT timeline_id FROM pg_control_checkpoint()"}
-	output, err := utils.DBSUCommandStdout(dbsu, cmdArgs)
-	if err == nil {
-		output = strings.TrimSpace(output)
-		if timeline, parseErr := strconv.Atoi(output); parseErr == nil {
-			return timeline
+	// Query only an explicitly resolved target, including when using the default
+	// PGDATA. Missing/corrupt metadata must never connect to the default instance.
+	target := &Config{PgData: GetPgData(cfg), DbSU: dbsu}
+	cmdArgs, connErr := appendDataDirConnArgs([]string{pg.Psql(), "-AXtqw"}, target)
+	if connErr == nil {
+		cmdArgs = append(cmdArgs, "-d", "postgres", "-c", "SELECT timeline_id FROM pg_control_checkpoint()")
+		out, queryErr := utils.DBSUCommandStdout(dbsu, cmdArgs)
+		if queryErr == nil {
+			if timeline, parseErr := strconv.Atoi(strings.TrimSpace(out)); parseErr == nil {
+				return timeline
+			}
 		}
 	}
-	logrus.Debugf("SQL timeline query failed: %v", err)
 
 	// Fall back to pg_controldata
 	dataDir := GetPgData(cfg)
 	cmdArgs = []string{pg.PgControldata(), "-D", dataDir}
-	output, err = utils.DBSUCommandStdout(dbsu, cmdArgs)
+	output, err := utils.DBSUCommandStdout(dbsu, cmdArgs)
 	if err != nil {
 		logrus.Debugf("pg_controldata failed: %v", err)
 		return 0

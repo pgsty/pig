@@ -1214,6 +1214,7 @@ func TestResolveForkTargetAllowsUnmanagedDestination(t *testing.T) {
 
 func TestRemoveForkRefusesRunningForkWithoutStop(t *testing.T) {
 	dbsu := withCurrentUserAsDBSU(t)
+	mockPostmasterIdentity(t)
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "data-dev")
 	if err := os.Mkdir(dataDir, 0755); err != nil {
@@ -1225,9 +1226,7 @@ func TestRemoveForkRefusesRunningForkWithoutStop(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dataDir, "fork.json"), []byte(`{"kind":"pg_fork","version":1,"name":"dev","target":{"data":"`+dataDir+`","port":15432}}`), 0644); err != nil {
 		t.Fatalf("write fork.json: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dataDir, "postmaster.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0644); err != nil {
-		t.Fatalf("write postmaster.pid: %v", err)
-	}
+	writeTestPostmasterPid(t, dataDir, "1738656000", "15432", "/tmp")
 
 	_, err := RemoveFork(ForkTargetOptions{DbSU: dbsu, DestData: dataDir, Force: true, Yes: true})
 	if err == nil {
@@ -1493,6 +1492,7 @@ func TestRemoveForkAllowsForcedManagedOrphan(t *testing.T) {
 
 func TestPrecheckInstanceRefusesReplacingRunningDestination(t *testing.T) {
 	dbsu := withCurrentUserAsDBSU(t)
+	mockPostmasterIdentity(t)
 	root := t.TempDir()
 	source := filepath.Join(root, "data")
 	dest := filepath.Join(root, "data-dev")
@@ -1504,9 +1504,7 @@ func TestPrecheckInstanceRefusesReplacingRunningDestination(t *testing.T) {
 			t.Fatalf("write PG_VERSION: %v", err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dest, "postmaster.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0644); err != nil {
-		t.Fatalf("write destination postmaster.pid: %v", err)
-	}
+	writeTestPostmasterPid(t, dest, "1738656000", "15432", "/tmp")
 
 	_, err := precheckInstance(&Options{
 		Kind:    KindInstance,

@@ -520,6 +520,14 @@ var pgRoleCmd = &cobra.Command{
 
 func registerPostgresCommand() *cobra.Command {
 	pgCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if cmd.Flags().Changed("data") && strings.TrimSpace(pgConfig.PgData) == "" {
+			if err := initOutputFormat(); err != nil {
+				return err
+			}
+			applyStructuredOutputSilence(cmd)
+			return structuredParamError(output.MODULE_PG, cmd.CommandPath(),
+				"invalid PostgreSQL data directory", "--data/-D must not be empty or whitespace", nil, nil)
+		}
 		if err := commandModulePreRun(cmd, args); err != nil {
 			return err
 		}
@@ -1801,7 +1809,7 @@ var pgRepackCmd = &cobra.Command{
 			Jobs: pgMaintJobs,
 			Plan: pgMaintPlan,
 		}
-		if config.IsStructuredOutput() && pgMaintPlan {
+		if pgMaintPlan {
 			if err := postgres.ValidateMaintenanceOptions(pgMaintSchema, pgMaintTable); err != nil {
 				return structuredParamError(
 					output.MODULE_PG,

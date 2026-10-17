@@ -104,18 +104,19 @@ type ResultData struct {
 }
 
 type ForkInfo struct {
-	Kind      string         `json:"kind" yaml:"kind"`
-	Version   int            `json:"version" yaml:"version"`
-	Name      string         `json:"name" yaml:"name"`
-	Managed   bool           `json:"managed" yaml:"managed"`
-	CreatedAt string         `json:"created_at,omitempty" yaml:"created_at,omitempty"`
-	Source    ForkEndpoint   `json:"source" yaml:"source"`
-	Target    ForkEndpoint   `json:"target" yaml:"target"`
-	Copy      ForkCopyInfo   `json:"copy" yaml:"copy"`
-	Backup    ForkBackupInfo `json:"backup" yaml:"backup"`
-	Commands  ForkCommands   `json:"commands" yaml:"commands"`
-	Pig       PigBuildInfo   `json:"pig,omitempty" yaml:"pig,omitempty"`
-	Orphan    bool           `json:"orphan,omitempty" yaml:"orphan,omitempty"`
+	Kind           string         `json:"kind" yaml:"kind"`
+	Version        int            `json:"version" yaml:"version"`
+	Name           string         `json:"name" yaml:"name"`
+	Managed        bool           `json:"managed" yaml:"managed"`
+	CreatedAt      string         `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	Source         ForkEndpoint   `json:"source" yaml:"source"`
+	Target         ForkEndpoint   `json:"target" yaml:"target"`
+	Copy           ForkCopyInfo   `json:"copy" yaml:"copy"`
+	Backup         ForkBackupInfo `json:"backup" yaml:"backup"`
+	Commands       ForkCommands   `json:"commands" yaml:"commands"`
+	Pig            PigBuildInfo   `json:"pig,omitempty" yaml:"pig,omitempty"`
+	Orphan         bool           `json:"orphan,omitempty" yaml:"orphan,omitempty"`
+	RuntimeUnknown bool           `json:"runtime_unknown,omitempty" yaml:"runtime_unknown,omitempty"`
 }
 
 type PigBuildInfo struct {
@@ -831,7 +832,10 @@ func StartFork(opts ForkTargetOptions) (ResultData, error) {
 	if !validPort(port) {
 		return ResultData{}, &ForkError{Code: output.CodeForkInvalidArgs, Err: fmt.Errorf("invalid destination port %d (must be 1-65535)", port)}
 	}
-	if running, _ := forkCheckPostgresRunning(dbsu, dataDir); running {
+	if running, pid := forkCheckPostgresRunning(dbsu, dataDir); running {
+		if pid <= 0 {
+			return ResultData{}, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("cannot determine PostgreSQL running state: %s", dataDir)}
+		}
 		if opts.DestPort != 0 && info.Target.Port != 0 && opts.DestPort != info.Target.Port {
 			return ResultData{}, &ForkError{Code: output.CodeForkPortInUse, Err: fmt.Errorf("fork is already running on port %d; stop it before changing destination port to %d", info.Target.Port, opts.DestPort)}
 		}
@@ -882,7 +886,11 @@ func StopFork(opts ForkTargetOptions) (ResultData, error) {
 	if err != nil {
 		return ResultData{}, err
 	}
-	if running, _ := forkCheckPostgresRunning(dbsu, dataDir); !running {
+	running, pid := forkCheckPostgresRunning(dbsu, dataDir)
+	if running && pid <= 0 {
+		return ResultData{}, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("cannot determine PostgreSQL running state: %s", dataDir)}
+	}
+	if !running {
 		info.Target.Started = false
 		if err := WriteForkInfoAs(dbsu, dataDir, info); err != nil {
 			return ResultData{}, &ForkError{Code: output.CodeForkConfigFailed, Err: err}
@@ -921,6 +929,9 @@ func RemoveFork(opts ForkTargetOptions) (ResultData, error) {
 		return ResultData{}, &ForkError{Code: output.CodeForkInvalidArgs, Err: err}
 	}
 	running, pid := forkCheckPostgresRunning(dbsu, dataDir)
+	if running && pid <= 0 {
+		return ResultData{}, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("cannot determine PostgreSQL running state: %s", dataDir)}
+	}
 	if running {
 		if !opts.StopBefore {
 			return ResultData{}, &ForkError{Code: output.CodeForkPrecheckFailed, Err: fmt.Errorf("fork is running (PID: %d): %s\nHint: use --stop to stop and remove it; add -f or -y only to skip the confirmation wait", pid, dataDir)}
@@ -1665,8 +1676,9 @@ func RefreshForkRuntimeStates(forks []ForkInfo, dbsu string) {
 			continue
 		}
 		running, pid := forkCheckPostgresRunning(dbsu, forks[i].Target.Data)
-		forks[i].Target.Started = running
-		if running {
+		forks[i].RuntimeUnknown = running && pid <= 0
+		forks[i].Target.Started = running && pid > 0
+		if forks[i].Target.Started {
 			forks[i].Target.PID = pid
 		} else {
 			forks[i].Target.PID = 0
@@ -1691,6 +1703,9 @@ func RenderForkList(forks []ForkInfo, now time.Time) string {
 func forkListStatus(fork ForkInfo) string {
 	if fork.Orphan {
 		return "orphan"
+	}
+	if fork.RuntimeUnknown {
+		return "unknown"
 	}
 	if fork.Target.Started {
 		return "running"

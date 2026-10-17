@@ -8,6 +8,7 @@ package postgres
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -60,7 +61,11 @@ func Ps(cfg *Config, opts *PsOptions) error {
 	}
 	sql += " ORDER BY state, pid"
 
-	cmdArgs := []string{pg.Psql(), "-d", "postgres", "-c", sql}
+	cmdArgs, err := appendDataDirConnArgs([]string{pg.Psql()}, cfg)
+	if err != nil {
+		return err
+	}
+	cmdArgs = append(cmdArgs, "-d", "postgres", "-c", sql)
 	PrintHint(cmdArgs)
 	return utils.DBSUCommand(dbsu, cmdArgs)
 }
@@ -178,7 +183,11 @@ func Kill(cfg *Config, opts *KillOptions) error {
 			fmt.Printf("%s[DRY-RUN] Connections that would be killed:%s\n", utils.ColorYellow, utils.ColorReset)
 		}
 
-		cmdArgs := []string{pg.Psql(), "-d", "postgres", "-c", sql}
+		cmdArgs, err := appendDataDirConnArgs([]string{pg.Psql()}, cfg)
+		if err != nil {
+			return err
+		}
+		cmdArgs = append(cmdArgs, "-d", "postgres", "-c", sql)
 		PrintHint(cmdArgs)
 		if err := utils.DBSUCommand(dbsu, cmdArgs); err != nil {
 			return err
@@ -229,6 +238,21 @@ func Psql(cfg *Config, dbname string, opts *PsqlOptions) error {
 	return utils.DBSUCommand(dbsu, cmdArgs)
 }
 
+func appendDataDirConnArgs(cmdArgs []string, cfg *Config) ([]string, error) {
+	if cfg == nil || cfg.PgData == "" {
+		return cmdArgs, nil
+	}
+	info, err := ReadPostmasterPidInfoAsDBSU(GetDbSU(cfg), cfg.PgData)
+	if err != nil {
+		return nil, fmt.Errorf("read postmaster info for %s: %w", cfg.PgData, err)
+	}
+	if !filepath.IsAbs(info.SocketDir) && !strings.HasPrefix(info.SocketDir, "@") {
+		return nil, fmt.Errorf("cannot determine socket for explicit data directory %s", cfg.PgData)
+	}
+	cmdArgs = append(cmdArgs, "-p", fmt.Sprintf("%d", info.Port), "-h", info.SocketDir)
+	return cmdArgs, nil
+}
+
 func buildPsqlArgs(psqlPath string, cfg *Config, dbname string, opts *PsqlOptions) ([]string, error) {
 	if dbname == "" {
 		dbname = "postgres"
@@ -237,16 +261,9 @@ func buildPsqlArgs(psqlPath string, cfg *Config, dbname string, opts *PsqlOption
 		return nil, fmt.Errorf("invalid database name: %s", dbname)
 	}
 
-	cmdArgs := []string{psqlPath}
-	if cfg != nil && cfg.PgData != "" {
-		info, err := ReadPostmasterPidInfoAsDBSU(GetDbSU(cfg), cfg.PgData)
-		if err != nil {
-			return nil, fmt.Errorf("read postmaster info for %s: %w", cfg.PgData, err)
-		}
-		cmdArgs = append(cmdArgs, "-p", fmt.Sprintf("%d", info.Port))
-		if info.SocketDir != "" {
-			cmdArgs = append(cmdArgs, "-h", info.SocketDir)
-		}
+	cmdArgs, err := appendDataDirConnArgs([]string{psqlPath}, cfg)
+	if err != nil {
+		return nil, err
 	}
 	cmdArgs = append(cmdArgs, "-d", dbname)
 

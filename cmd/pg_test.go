@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/pflag"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	postgrescli "pig/cli/postgres"
 	"pig/internal/config"
@@ -15,7 +16,76 @@ import (
 	"pig/internal/utils"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+func TestPgRejectsExplicitBlankDataBeforeExecution(t *testing.T) {
+	if raw := os.Getenv("PIG_TEST_PG_DATA_ARGS"); raw != "" {
+		var args []string
+		if err := json.Unmarshal([]byte(raw), &args); err != nil {
+			t.Fatal(err)
+		}
+		rootCmd.AddCommand(pgCmd)
+		command, _, err := rootCmd.Find(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		command.RunE = func(*cobra.Command, []string) error {
+			t.Fatal("blank data directory reached command execution")
+			return nil
+		}
+		config.HomeDir = "not-initialized"
+		rootCmd.SetArgs(args)
+		rootCmd.SetOut(io.Discard)
+		rootCmd.SetErr(io.Discard)
+		var runErr error
+		stdout := captureStdout(t, func() { runErr = rootCmd.Execute() })
+		if runErr == nil || config.HomeDir != "not-initialized" {
+			t.Fatalf("blank directory was accepted or initialized config: %v", runErr)
+		}
+		if config.IsStructuredOutput() {
+			var result output.Result
+			if config.OutputFormat == config.OUTPUT_YAML {
+				decoder := yaml.NewDecoder(strings.NewReader(stdout))
+				err = decoder.Decode(&result)
+				if err == nil && decoder.Decode(new(any)) != io.EOF {
+					t.Fatal("expected one YAML result")
+				}
+			} else {
+				err = json.Unmarshal([]byte(stdout), &result)
+			}
+			if err != nil || result.Success || result.Code != output.GenericParamError(output.MODULE_PG) || !strings.Contains(result.Detail, "--data/-D") {
+				t.Fatalf("invalid parameter result: %s, %v", stdout, err)
+			}
+		} else if stdout != "" || !strings.Contains(runErr.Error(), "--data/-D") {
+			t.Fatalf("unexpected text error: stdout=%q err=%v", stdout, runErr)
+		}
+		return
+	}
+	for _, command := range [][]string{
+		{"pg", "stop"}, {"pg", "init", "--force", "--yes"},
+		{"postgres", "psql", "-c", "SELECT 1"}, {"pg", "role"},
+		{"pg", "clone", "source", "--plan"}, {"pg", "fork", "init", "review", "--plan"},
+	} {
+		for _, mode := range []string{"text", "json", "yaml"} {
+			for _, value := range []string{"", " \t "} {
+				t.Run(fmt.Sprintf("%s/%s/%q", strings.Join(command, " "), mode, value), func(t *testing.T) {
+					args := append(append([]string(nil), command...), "--data", value, "-o", mode)
+					raw, err := json.Marshal(args)
+					if err != nil {
+						t.Fatal(err)
+					}
+					child := exec.Command(os.Args[0], "-test.run=^TestPgRejectsExplicitBlankDataBeforeExecution$")
+					child.Env = append(os.Environ(), "PIG_TEST_PG_DATA_ARGS="+string(raw))
+					if out, err := child.CombinedOutput(); err != nil {
+						t.Fatalf("Cobra rejected blank directory incorrectly: %v\n%s", err, out)
+					}
+				})
+			}
+		}
+	}
+}
 
 func TestPgCloneCommandIsRegistered(t *testing.T) {
 	pgClone, _, err := pgTestRootCmd.Find([]string{"pg", "clone"})

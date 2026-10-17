@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -565,6 +566,8 @@ func TestParsePostmasterPidInfo(t *testing.T) {
 }
 
 func TestReadPostmasterPidInfoAsDBSU(t *testing.T) {
+	withCurrentUserAsDBSU(t)
+	mockPostmasterIdentity(t)
 	dataDir := t.TempDir()
 	writeTestPostmasterPid(t, dataDir, "1738656000", "6543", "/tmp/pgsocket")
 
@@ -586,7 +589,7 @@ func writeTestPostmasterPid(t *testing.T, dataDir, startTime, port, socketDir st
 }
 
 func testPostmasterPid(dataDir, startTime, port, socketDir string) string {
-	return "12345\n" + dataDir + "\n" + startTime + "\n" + port + "\n" + socketDir + "\n127.0.0.1\n12345\n"
+	return strconv.Itoa(os.Getpid()) + "\n" + dataDir + "\n" + startTime + "\n" + port + "\n" + socketDir + "\n127.0.0.1\n12345\n"
 }
 
 // TestPgStatusResultData_RoundTrip tests JSON round-trip

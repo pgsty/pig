@@ -4,6 +4,7 @@ import "testing"
 
 func TestBuildPsqlArgsBindsExplicitDataDirToPostmasterInfo(t *testing.T) {
 	dbsu := withCurrentUserAsDBSU(t)
+	mockPostmasterIdentity(t)
 	dataDir := t.TempDir()
 	writeTestPostmasterPid(t, dataDir, "1738656000", "6543", "/tmp/pgsocket")
 
@@ -17,19 +18,13 @@ func TestBuildPsqlArgsBindsExplicitDataDirToPostmasterInfo(t *testing.T) {
 	assertArgPair(t, args, "-c", "select 1")
 }
 
-func TestBuildPsqlArgsBindsPortWithoutSocketDir(t *testing.T) {
+func TestBuildPsqlArgsRejectsMissingSocket(t *testing.T) {
 	dbsu := withCurrentUserAsDBSU(t)
+	mockPostmasterIdentity(t)
 	dataDir := t.TempDir()
 	writeTestPostmasterPid(t, dataDir, "1738656000", "6543", "")
-
-	args, err := buildPsqlArgs("/usr/bin/psql", &Config{PgData: dataDir, DbSU: dbsu}, "", nil)
-	if err != nil {
-		t.Fatalf("buildPsqlArgs returned error: %v", err)
-	}
-	assertArgPair(t, args, "-p", "6543")
-	assertArgPair(t, args, "-d", "postgres")
-	if containsArgValue(args, "-h") {
-		t.Fatalf("psql args should omit -h when socket dir is absent, got %v", args)
+	if _, err := buildPsqlArgs("/usr/bin/psql", &Config{PgData: dataDir, DbSU: dbsu}, "", nil); err == nil {
+		t.Fatal("explicit target without socket must not fall back to libpq defaults")
 	}
 }
 
@@ -41,13 +36,4 @@ func assertArgPair(t *testing.T, args []string, flag string, value string) {
 		}
 	}
 	t.Fatalf("args missing %s %s pair: %v", flag, value, args)
-}
-
-func containsArgValue(args []string, flag string) bool {
-	for _, arg := range args {
-		if arg == flag {
-			return true
-		}
-	}
-	return false
 }

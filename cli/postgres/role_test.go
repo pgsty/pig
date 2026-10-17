@@ -63,12 +63,12 @@ func TestParseRoleSQLResult(t *testing.T) {
 }
 
 func TestRoleFromDataFiles(t *testing.T) {
-	role, alive := roleFromDataFiles("postgres", "/pg/data", []string{"postmaster.pid", "standby.signal"}, false)
-	if role != RoleReplica || !alive {
-		t.Fatalf("standby files yielded role=%s alive=%v, want replica/true", role, alive)
+	role := roleFromDataFiles("postgres", "/pg/data", []string{"postmaster.pid", "standby.signal"}, false)
+	if role != RoleReplica {
+		t.Fatalf("standby files yielded role=%s, want replica", role)
 	}
-	role, alive = roleFromDataFiles("postgres", "/pg/data", []string{"PG_VERSION", "postgresql.conf"}, false)
-	if role != RolePrimary || alive {
-		t.Fatalf("primary files yielded role=%s alive=%v, want primary/false", role, alive)
+	role = roleFromDataFiles("postgres", "/pg/data", []string{"PG_VERSION", "postgresql.conf"}, false)
+	if role != RolePrimary {
+		t.Fatalf("primary files yielded role=%s, want primary", role)
 	}
 }

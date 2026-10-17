@@ -60,7 +60,10 @@ func InitDB(cfg *Config, opts *InitOptions) error {
 		}
 
 		// Force mode: check if PostgreSQL is running (NEVER allow overwrite if running)
-		running, pid := CheckPostgresRunningAsDBSU(dbsu, dataDir)
+		running, pid, _, err := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
+		if err != nil {
+			return fmt.Errorf("cannot safely overwrite %s: %w", dataDir, err)
+		}
 		if running {
 			return fmt.Errorf("postgresql is running (PID %d) in %s, cannot overwrite running database", pid, dataDir)
 		}
@@ -271,6 +274,9 @@ func Start(cfg *Config, opts *StartOptions) error {
 
 	// Idempotent success (B06/B22): already running is not an error
 	running, pid := ctlCheckRunning(dbsu, dataDir)
+	if running && pid <= 0 {
+		return fmt.Errorf("cannot determine PostgreSQL running state in %s", dataDir)
+	}
 	if running {
 		if config.IsStructuredOutput() {
 			utils.PrintInfo("PostgreSQL is already running (pid %d)", pid)
@@ -336,7 +342,10 @@ func Stop(cfg *Config, opts *StopOptions) error {
 	}
 
 	// Idempotent success (B22): already stopped is not an error
-	running, _ := ctlCheckRunning(dbsu, dataDir)
+	running, pid := ctlCheckRunning(dbsu, dataDir)
+	if running && pid <= 0 {
+		return fmt.Errorf("cannot determine PostgreSQL running state in %s", dataDir)
+	}
 	if !running {
 		if config.IsStructuredOutput() {
 			utils.PrintInfo("PostgreSQL is already stopped")

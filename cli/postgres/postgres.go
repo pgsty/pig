@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"pig/cli/ext"
 	"pig/internal/utils"
@@ -167,49 +166,15 @@ func CheckDataDirAsDBSU(dbsu, dataDir string) (exists, initialized bool) {
 }
 
 // CheckPostgresRunningAsDBSU checks if PostgreSQL is running as the database superuser.
-// Returns (running bool, pid int) where:
-//   - running: true if postmaster.pid exists and process is alive
-//   - pid: the PID from postmaster.pid (0 if not running or can't determine)
-//
-// Uses utils.ReadFileAsDBSU for privilege escalation (dbsu direct / root su / sudo).
+// A failed probe conservatively returns (true, 0): callers must not infer that
+// destructive work is safe, or use an unverified PID for signalling.
 func CheckPostgresRunningAsDBSU(dbsu, dataDir string) (bool, int) {
-	pidFile := filepath.Join(dataDir, "postmaster.pid")
-
-	// Read PID from postmaster.pid using DBSU privilege escalation
-	pidContent, err := utils.ReadFileAsDBSU(pidFile, dbsu)
+	running, pid, _, err := checkPostgresRunningAsDBSUWithError(dbsu, dataDir)
 	if err != nil {
-		// File doesn't exist or can't be read - not running
-		logrus.Debugf("cannot read postmaster.pid: %v", err)
-		return false, 0
+		logrus.Debugf("cannot determine PostgreSQL running state: %v", err)
+		return true, 0
 	}
-
-	// Parse PID (first line of postmaster.pid)
-	lines := strings.Split(pidContent, "\n")
-	if len(lines) == 0 || lines[0] == "" {
-		logrus.Debugf("postmaster.pid is empty")
-		return false, 0
-	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(lines[0]))
-	if err != nil {
-		logrus.Debugf("cannot parse PID from postmaster.pid: %v", err)
-		return false, 0
-	}
-	if !postmasterPIDMatchesDataDirAsDBSU(dbsu, pidContent, dataDir) {
-		logrus.Debugf("postmaster.pid belongs to another data directory")
-		return false, pid
-	}
-
-	// Check if process exists using kill -0 via DBSU privilege escalation
-	// This is necessary because current user may not have permission to signal the postgres process
-	running := checkProcessRunningAsDBSU(dbsu, pid)
-	if !running {
-		logrus.Debugf("process %d not running (stale pid file)", pid)
-		return false, pid
-	}
-
-	logrus.Debugf("PostgreSQL is running with PID %d", pid)
-	return true, pid
+	return running, pid
 }
 
 func postmasterPIDMatchesDataDirAsDBSU(dbsu, pidContent, dataDir string) bool {
@@ -239,24 +204,6 @@ func postmasterPIDDataDir(pidContent string) string {
 func resolvePathAsDBSU(dbsu, path string) (string, error) {
 	out, err := postgresDBSUCommandOutput(dbsu, []string{"readlink", "-f", path})
 	return strings.TrimSpace(out), err
-}
-
-// checkProcessRunningAsDBSU checks if a process is running using kill -0 as DBSU.
-// This handles the case where current user doesn't have permission to signal the process.
-func checkProcessRunningAsDBSU(dbsu string, pid int) bool {
-	// If current user is DBSU, use direct signal check (faster)
-	if utils.IsDBSU(dbsu) {
-		process, err := os.FindProcess(pid)
-		if err != nil {
-			return false
-		}
-		return process.Signal(syscall.Signal(0)) == nil
-	}
-
-	// Use kill -0 via DBSU privilege escalation
-	// kill -0 returns 0 if process exists and we can signal it, non-zero otherwise
-	_, err := postgresDBSUCommandOutput(dbsu, []string{"kill", "-0", strconv.Itoa(pid)})
-	return err == nil
 }
 
 // ============================================================================
