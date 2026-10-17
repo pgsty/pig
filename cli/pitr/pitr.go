@@ -157,7 +157,7 @@ func Execute(opts *Options) error {
 	// Confirm before destructive restore (unless --yes)
 	if !opts.Yes {
 		if err := utils.Confirm("This will overwrite the current database!", "PITR"); err != nil {
-			return &utils.ExitCodeError{Code: output.ExitCode(output.CodePITRInvalidArgs), Err: &PITRError{Code: output.CodePITRInvalidArgs, Err: err}}
+			return &utils.ExitCodeError{Code: output.ExitCode(output.CodePITRConfirmationRequired), Err: &PITRError{Code: output.CodePITRConfirmationRequired, Err: err}}
 		}
 	}
 
@@ -223,7 +223,7 @@ func executeResult(opts *Options) *output.Result {
 	// Confirm before destructive restore (unless --yes)
 	if !opts.Yes {
 		if err := utils.Confirm("This will overwrite the current database!", "PITR"); err != nil {
-			return output.Fail(output.CodePITRInvalidArgs, "pitr confirmation cancelled").WithDetail(err.Error())
+			return output.Fail(output.CodePITRConfirmationRequired, "pitr confirmation cancelled").WithDetail(err.Error())
 		}
 	}
 
@@ -1155,6 +1155,10 @@ func ensurePostgresStopped(state *SystemState, opts *Options, patroniWasStopped 
 		return nil
 	}
 
+	if pid <= 0 {
+		return &PITRError{Code: output.CodePITRStopFailed, Err: fmt.Errorf("cannot determine PID or PostgreSQL running state; manual intervention required")}
+	}
+
 	// Try pg_ctl stop with exponential backoff
 	fmt.Fprintf(os.Stderr, "Stopping PostgreSQL (PID: %d)...\n", pid)
 
@@ -1337,7 +1341,7 @@ func startPostgres(state *SystemState, opts *Options) *PITRError {
 
 	// Verify running
 	running, pid := postgres.CheckPostgresRunningAsDBSU(state.DbSU, state.DataDir)
-	if !running {
+	if !running || pid <= 0 {
 		return &PITRError{Code: output.CodePITRStartFailed, Err: fmt.Errorf("postgresql failed to start after restore")}
 	}
 
@@ -1417,7 +1421,12 @@ func collectPostRestoreState(state *SystemState, postgresStarted bool) *PostRest
 		return post
 	}
 
-	running, _ := pitrCheckPostgresRunningAsDBSU(state.DbSU, state.DataDir)
+	running, pid := pitrCheckPostgresRunningAsDBSU(state.DbSU, state.DataDir)
+	if running && pid <= 0 {
+		post.Error = "cannot determine PostgreSQL running state"
+		post.QuerySkippedReason = post.Error
+		return post
+	}
 	post.Running = running
 	if !running {
 		post.QuerySkippedReason = "postgresql is not running"

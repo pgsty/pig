@@ -1028,20 +1028,6 @@ func TestPITRError_ExitCodeMapping(t *testing.T) {
 	}
 }
 
-// TestPITRError_ConfirmCancel verifies confirmation cancel returns 160101 (not 160801)
-func TestPITRError_ConfirmCancel(t *testing.T) {
-	// Simulate what ExecuteResult does when confirmation is cancelled
-	cancelErr := fmt.Errorf("user cancelled")
-	result := output.Fail(output.CodePITRInvalidArgs, "pitr confirmation cancelled").WithDetail(cancelErr.Error())
-
-	if result.Code != output.CodePITRInvalidArgs {
-		t.Errorf("confirmation cancel should use CodePITRInvalidArgs (160101), got %d", result.Code)
-	}
-	if result.Code == output.CodePITRStopFailed {
-		t.Error("confirmation cancel must NOT use CodePITRStopFailed (was the old buggy behavior)")
-	}
-}
-
 // TestPITRError_ErrorCodeValues verifies all error code numeric values
 func TestPITRError_ErrorCodeValues(t *testing.T) {
 	tests := []struct {
@@ -1624,8 +1610,13 @@ func TestQueryRecoveryStateBindsPsqlToPostmasterPid(t *testing.T) {
 		config.CurrentUser = oldCurrentUser
 	}()
 
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ps"), []byte("#!/bin/sh\nprintf 'postgres\\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	dataDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dataDir, "postmaster.pid"), []byte("12345\n"+dataDir+"\n1738656000\n6543\n/tmp/pgsocket\n127.0.0.1\n12345\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dataDir, "postmaster.pid"), []byte(fmt.Sprint(os.Getpid())+"\n"+dataDir+"\n1738656000\n6543\n/tmp/pgsocket\n127.0.0.1\n12345\n"), 0o644); err != nil {
 		t.Fatalf("write postmaster.pid: %v", err)
 	}
 	pitrGetPgInstall = func(*postgres.Config) (*ext.PostgresInstall, error) {
@@ -1826,6 +1817,9 @@ func TestWithQuietStderrSuppressesHumanOutput(t *testing.T) {
 }
 
 func TestCollectPostRestoreStateSkipsQueryWhenPostgresNotStarted(t *testing.T) {
+	oldCheck := pitrCheckPostgresRunningAsDBSU
+	pitrCheckPostgresRunningAsDBSU = func(string, string) (bool, int) { return false, 0 }
+	t.Cleanup(func() { pitrCheckPostgresRunningAsDBSU = oldCheck })
 	oldQuery := pitrQueryPostRestoreState
 	defer func() {
 		pitrQueryPostRestoreState = oldQuery
