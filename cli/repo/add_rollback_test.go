@@ -126,6 +126,45 @@ func TestConfigureReposPreservesDefaultAndCommaOperands(t *testing.T) {
 	}
 }
 
+func TestConfigureReposRejectsUnsafeNamesBeforeEffects(t *testing.T) {
+	for _, args := range [][]string{
+		{"pgsql", "../escape"}, {"/tmp/escape", "pgsql"}, {"pgsql,../escape"},
+		{"pgsql", `node\escape`}, {"pgsql", "node;infra"}, {"pgsql", "node infra"},
+	} {
+		for _, replace := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%q/replace=%v", args, replace), func(t *testing.T) {
+				_, dir := setupAddRollbackTest(t)
+				writeRollbackFixture(t, filepath.Join(dir, "custom.repo"), "original")
+				newAddRepoManager = func(...string) (*Manager, error) {
+					t.Fatal("unsafe operands reached repository manager")
+					return nil, nil
+				}
+				result := ConfigureRepos(args, AddOptions{Remove: replace, Update: true})
+				if result.Success || result.Code != output.CodeRepoInvalidArgs {
+					t.Fatalf("unsafe input result: %+v", result)
+				}
+				assertRollbackFixture(t, filepath.Join(dir, "custom.repo"), "original")
+			})
+		}
+	}
+}
+
+func TestConfigureReposPreservesPartialAddForUnknownModule(t *testing.T) {
+	_, dir := setupAddRollbackTest(t)
+	result := ConfigureRepos([]string{"node", "unknown-module"}, AddOptions{Region: "europe"})
+	if result.Success {
+		t.Fatal("unknown module reported success")
+	}
+	data := result.Data.(*RepoAddData)
+	if len(data.AddedRepos) != 1 || data.AddedRepos[0].Module != "node" ||
+		len(data.Failed) != 1 || data.Failed[0].Module != "unknown-module" {
+		t.Fatalf("partial add result = %+v", data)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "node.repo")); err != nil {
+		t.Fatalf("valid module was not added: %v", err)
+	}
+}
+
 func runRepoTestCommand(args []string) error {
 	if len(args) == 0 {
 		return errors.New("empty command")

@@ -158,6 +158,11 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 	if err != nil {
 		return output.Fail(output.CodeRepoInvalidArgs, err.Error())
 	}
+	for _, module := range modules {
+		if !isSafeModuleName(module) {
+			return output.Fail(output.CodeRepoInvalidArgs, fmt.Sprintf("unsafe repository module name: %q", module))
+		}
+	}
 
 	// Check OS support
 	if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
