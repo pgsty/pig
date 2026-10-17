@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,39 @@ func loadEmbeddedCatalogForTest(t *testing.T) *ExtensionCatalog {
 		t.Fatalf("failed to load embedded catalog: %v", err)
 	}
 	return ec
+}
+
+func TestEmbeddedCatalogCountsEveryRecord(t *testing.T) {
+	ec := loadEmbeddedCatalogForTest(t)
+	origCatalog, origShowPkg := Catalog, ShowPkg
+	Catalog, ShowPkg = ec, false
+	t.Cleanup(func() { Catalog, ShowPkg = origCatalog, origShowPkg })
+
+	want := len(ec.Extensions)
+	if ec.ExtensionCount() != want {
+		t.Fatalf("ExtensionCount() = %d, want all %d catalog records", ec.ExtensionCount(), want)
+	}
+	result := ListExtensions("", 0)
+	data, ok := result.Data.(*ExtensionListData)
+	if !ok || data.Count != want || len(data.Extensions) != want {
+		t.Fatalf("default list = %#v, want %d records", result.Data, want)
+	}
+	utilityFound := false
+	for _, item := range data.Extensions {
+		if item.Name == "pg_relation_sql" {
+			utilityFound = true
+		}
+	}
+	if !utilityFound {
+		t.Fatal("default list must include pg_relation_sql")
+	}
+	if !strings.Contains(data.Text(), fmt.Sprintf("(%d Rows)", want)) {
+		t.Fatal("text list must report the full catalog count")
+	}
+	availability := GetExtensionAvailability(nil).Data.(*ExtensionAvailData).Text()
+	if !strings.Contains(availability, fmt.Sprintf("with %d extensions", want)) {
+		t.Fatal("availability summary must report the full catalog count")
+	}
 }
 
 func countAvailableEntriesByOS(ec *ExtensionCatalog) map[string]int {

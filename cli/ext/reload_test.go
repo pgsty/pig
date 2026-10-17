@@ -1,7 +1,13 @@
 package ext
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -40,5 +46,48 @@ func TestMirrorAttemptDetailHandlesSingleMirrorURL(t *testing.T) {
 	}
 	if !strings.Contains(detail, "boom") {
 		t.Fatalf("detail missing error: %q", detail)
+	}
+}
+
+type catalogRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f catalogRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestReloadCatalogCountsEveryDownloadedRecord(t *testing.T) {
+	ec := loadEmbeddedCatalogForTest(t)
+	want := len(ec.Extensions)
+	client := utils.DefaultClient()
+	origTransport, origConfigDir := client.Transport, config.ConfigDir
+	config.ConfigDir = t.TempDir()
+	client.Transport = catalogRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body io.ReadCloser = http.NoBody
+		if req.Method == http.MethodGet {
+			body = io.NopCloser(bytes.NewReader(embedExtensionData))
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       body,
+			Request:    req,
+		}, nil
+	})
+	t.Cleanup(func() { client.Transport, config.ConfigDir = origTransport, origConfigDir })
+
+	result := ReloadCatalogResult(true)
+	data, ok := result.Data.(*ReloadResultData)
+	if !result.Success || !ok || data.ExtensionCount != want {
+		t.Fatalf("reload result = %#v, want %d catalog records", result, want)
+	}
+	if !strings.Contains(result.Message, fmt.Sprintf("%d extensions", want)) {
+		t.Fatalf("reload message = %q, want %d catalog records", result.Message, want)
+	}
+	saved, err := os.ReadFile(filepath.Join(config.ConfigDir, "extension.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(saved, embedExtensionData) {
+		t.Fatal("reload must preserve the downloaded catalog")
 	}
 }

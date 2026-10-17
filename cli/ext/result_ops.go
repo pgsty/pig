@@ -19,10 +19,7 @@ func ListExtensions(query string, pgVer int) *output.Result {
 		return output.Fail(output.CodeExtensionCatalogError, "extension catalog not initialized")
 	}
 
-	results := Catalog.PostgreSQLExtensions()
-	if ShowPkg {
-		results = Catalog.Extensions
-	}
+	results := Catalog.Extensions
 	if query != "" {
 		results = SearchExtensions(query, Catalog.Extensions)
 	}
@@ -203,9 +200,10 @@ func getGlobalAvailability(osCode, arch string) *output.Result {
 		versions := make(map[string]string)
 
 		// Use the centralized PostgreSQL version list
+		normArch := normalizeMatrixArch(arch)
 		for _, pg := range PostgresActiveMajorVersions {
 			if matrix != nil {
-				entry := matrix.Get(osCode, arch, pg)
+				entry := matrix.Get(osCode, normArch, pg)
 				if entry != nil && entry.State == PkgAvail {
 					versions[fmt.Sprintf("%d", pg)] = entry.Version
 				}

@@ -143,11 +143,11 @@ func defaultBuilderPGVersions(extension *ext.Extension) []int {
 		return nil
 	}
 
-	// Prefer distro-specific availability list to avoid false negatives on Debian/RPM
-	// (e.g. pg_ver includes versions that are not packaged for this distro).
+	// Retain distro version metadata and platform exceptions for build targets.
+	// Package-matrix gaps must not exclude versions whose packages need building.
 	var available []int
 	for _, v := range declared {
-		if extension.Available(v) {
+		if extension.AvailableByMetadata(v) {
 			available = append(available, v)
 		}
 	}

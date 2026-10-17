@@ -389,6 +389,12 @@ func (d *ExtensionAvailData) textGlobalAvailability() string {
 		if arch == "" {
 			arch = config.OSArch
 		}
+		switch arch {
+		case "x86_64":
+			arch = "amd64"
+		case "aarch64":
+			arch = "arm64"
+		}
 
 		if !validOSCodes[osCode] {
 			sb.WriteString(fmt.Sprintf("\nNote: Current OS '%s' is not a supported Linux distribution.\n", osCode))

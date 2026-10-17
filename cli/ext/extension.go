@@ -56,21 +56,6 @@ type Extension struct {
 	Mtime       string                 `csv:"mtime"`       // Last modify time
 }
 
-// IsPostgreSQLExtension reports whether this catalog record represents an
-// extension installed into PostgreSQL, rather than a package-only utility.
-// Package-only records stay resolvable by name and package, but do not count
-// toward the public PostgreSQL extension total.
-func (e *Extension) IsPostgreSQLExtension() bool {
-	if e == nil {
-		return false
-	}
-	if e.Contrib || e.HasBin || e.HasLib || e.NeedDDL || e.NeedLoad {
-		return true
-	}
-	kind, _ := e.Extra["type"].(string)
-	return !strings.EqualFold(kind, "puresql")
-}
-
 // SummaryURL returns the URL to the Pigsty extension catalog summary page
 func (e *Extension) SummaryURL() string {
 	return fmt.Sprintf("https://pigsty.io/ext/e/%s", e.Name)
@@ -476,8 +461,32 @@ var DistroBadCase = map[string]map[string][]int{
 	"d13.arm64": {"babelfishpg_common": {}, "babelfishpg_tsql": {}, "babelfishpg_tds": {}, "babelfishpg_money": {}}, // TBD
 }
 
-// Available check if the extension is available for the given pg version
+// Available reports package availability in the catalog snapshot, falling back
+// to version metadata for entries without a matrix.
 func (e *Extension) Available(pgVer int) bool {
+	if e == nil {
+		return false
+	}
+	lead := getLeadExtension(e)
+	// A platform matrix is authoritative, including missing cells. Older
+	// catalogs without a matrix retain the RPM/DEB metadata fallback below.
+	if validOSCodes[config.OSCode] && config.OSType != config.DistroMAC {
+		if matrix := lead.GetPkgMatrix(); matrix != nil {
+			return matrix.IsAvailable(config.OSCode, normalizeMatrixArch(config.OSArch), pgVer)
+		}
+	}
+	if config.OSType == config.DistroMAC {
+		return slices.Contains(lead.PgVer, strconv.Itoa(pgVer))
+	}
+	return e.AvailableByMetadata(pgVer)
+}
+
+// AvailableByMetadata retains the version and platform rules used for default
+// build targets. A missing package in the catalog matrix does not rule out a build.
+func (e *Extension) AvailableByMetadata(pgVer int) bool {
+	if e == nil {
+		return false
+	}
 	verStr := strconv.Itoa(pgVer)
 
 	// test1: check rpm/deb version compatibility
@@ -495,7 +504,7 @@ func (e *Extension) Available(pgVer int) bool {
 	}
 
 	// test2 will check bad base according to DistroCode and OSArch
-	distroCodeArch := fmt.Sprintf("%s.%s", config.OSCode, config.OSArch)
+	distroCodeArch := fmt.Sprintf("%s.%s", config.OSCode, normalizeMatrixArch(config.OSArch))
 	badCases := DistroBadCase[distroCodeArch]
 	if badCases == nil {
 		return true

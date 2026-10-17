@@ -5,27 +5,6 @@ import (
 	"testing"
 )
 
-func TestIsPostgreSQLExtension(t *testing.T) {
-	tests := []struct {
-		name string
-		ext  *Extension
-		want bool
-	}{
-		{name: "nil", ext: nil, want: false},
-		{name: "regular extension", ext: &Extension{Name: "example"}, want: true},
-		{name: "pure SQL extension", ext: &Extension{Name: "example", NeedDDL: true, Extra: map[string]interface{}{"type": "puresql"}}, want: true},
-		{name: "package-only SQL utility", ext: &Extension{Name: "pg_relation_sql", Extra: map[string]interface{}{"type": "puresql"}}, want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.ext.IsPostgreSQLExtension(); got != tt.want {
-				t.Fatalf("IsPostgreSQLExtension() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestParseExtension(t *testing.T) {
 	tests := []struct {
 		name    string

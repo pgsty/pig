@@ -204,6 +204,71 @@ func TestDefaultBuilderPGVersions_DebianFiltersByDebPgAndInstalled(t *testing.T)
 	}
 }
 
+func TestNewExtensionBuilderPreservesTargetsAcrossPackageMatrices(t *testing.T) {
+	oldOS, oldCode, oldArch := config.OSType, config.OSCode, config.OSArch
+	oldCatalog, oldDebLib := ext.Catalog, debianPgLibDir
+	t.Cleanup(func() {
+		config.OSType, config.OSCode, config.OSArch = oldOS, oldCode, oldArch
+		ext.Catalog, debianPgLibDir = oldCatalog, oldDebLib
+	})
+	debianPgLibDir = t.TempDir()
+	for _, version := range []string{"17", "18"} {
+		if err := os.Mkdir(filepath.Join(debianPgLibDir, version), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, platform := range []struct{ os, code, arch, matrixPrefix string }{
+		{config.DistroEL, "el9", "amd64", "el9i"},
+		{config.DistroEL, "el9", "arm64", "el9a"},
+		{config.DistroDEB, "d12", "amd64", "d12i"},
+		{config.DistroDEB, "d12", "arm64", "d12a"},
+	} {
+		t.Run(platform.matrixPrefix, func(t *testing.T) {
+			config.OSType, config.OSCode, config.OSArch = platform.os, platform.code, platform.arch
+			for _, tc := range []struct {
+				name      string
+				matrix    []string
+				supported []string
+				want      []int
+			}{
+				{"no-matrix", nil, []string{"17", "18"}, []int{17, 18}},
+				{"both-available", []string{":17:A:f:1:P:1.0", ":18:A:f:1:P:1.0"}, []string{"17", "18"}, []int{17, 18}},
+				{"missing-package", []string{":17:A:f:1:P:1.0", ":18:M:f:0::"}, []string{"17", "18"}, []int{17, 18}},
+				{"missing-cell", []string{":17:A:f:1:P:1.0"}, []string{"17", "18"}, []int{17, 18}},
+				{"empty-matrix", []string{}, []string{"17", "18"}, []int{17, 18}},
+				{"all-missing", []string{":17:M:f:0::", ":18:M:f:0::"}, []string{"17", "18"}, []int{17, 18}},
+				{"metadata-limit", []string{":17:A:f:1:P:1.0", ":18:A:f:1:P:1.0"}, []string{"17"}, []int{17}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					e := &ext.Extension{Name: "build_probe", Pkg: "build_probe", Lead: true,
+						PgVer: []string{"17", "18"}, RpmPg: tc.supported, DebPg: tc.supported}
+					if tc.matrix != nil {
+						matrix := make([]interface{}, 0, len(tc.matrix))
+						for _, cell := range tc.matrix {
+							matrix = append(matrix, platform.matrixPrefix+cell)
+						}
+						e.Extra = map[string]interface{}{"matrix": matrix}
+					}
+					ext.Catalog = &ext.ExtensionCatalog{ExtNameMap: map[string]*ext.Extension{e.Name: e}}
+					builder, err := NewExtensionBuilder(e.Name)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(builder.PGVersions, tc.want) {
+						t.Errorf("default build targets = %v, want %v", builder.PGVersions, tc.want)
+					}
+					if err := builder.UpdateVersion("17,18"); err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(builder.PGVersions, []int{17, 18}) {
+						t.Errorf("explicit build targets = %v, want [17 18]", builder.PGVersions)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestBuildVersionForLog(t *testing.T) {
 	tests := []struct {
 		name   string

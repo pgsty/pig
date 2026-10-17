@@ -499,9 +499,7 @@ func tabulateGlobalMatrix(packages []*Extension, osCode, arch string, pgVersions
 	}
 
 	for _, pkg := range packages {
-		if len(pkg.Pkg) > nameWidth {
-			nameWidth = len(pkg.Pkg)
-		}
+		nameWidth = max(nameWidth, len(pkg.Pkg))
 
 		matrix := pkg.GetPkgMatrix()
 		entries := make([]*PkgMatrixEntry, len(pgVersions))

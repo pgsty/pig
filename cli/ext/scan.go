@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -233,7 +234,13 @@ func addControlLessExtensions(p *PostgresInstall, catalog *ExtensionCatalog, sha
 		return extensions
 	}
 
+	names := make([]string, 0, len(catalog.ControlLess))
 	for name := range catalog.ControlLess {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
 		if _, exists := shareLibs[name]; !exists {
 			continue
 		}
@@ -245,6 +252,7 @@ func addControlLessExtensions(p *PostgresInstall, catalog *ExtensionCatalog, sha
 		extInstall := &ExtensionInstall{Postgres: p}
 		extInstall.Extension = catalog.ExtNameMap[name]
 		extInstall.Libraries = map[string]bool{name: true}
+		extMap[name] = extInstall
 		extensions = append(extensions, extInstall)
 	}
 	return extensions

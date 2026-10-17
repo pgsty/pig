@@ -686,7 +686,7 @@ func TestListExtensionsWithExtensions(t *testing.T) {
 	}
 }
 
-func TestListExtensionsClassifiesPackageOnlySQLUtility(t *testing.T) {
+func TestListExtensionsIncludesEveryCatalogRecord(t *testing.T) {
 	origCatalog := Catalog
 	origShowPkg := ShowPkg
 	defer func() {
@@ -701,9 +701,10 @@ func TestListExtensionsClassifiesPackageOnlySQLUtility(t *testing.T) {
 		Lead:  true,
 		Extra: map[string]interface{}{"type": "puresql"},
 	}
+	removed := &Extension{Name: "removed_example", Pkg: "example", State: "removed", NeedDDL: true}
 	Catalog = &ExtensionCatalog{
-		Extensions: []*Extension{extension, utility},
-		ExtNameMap: map[string]*Extension{extension.Name: extension, utility.Name: utility},
+		Extensions: []*Extension{extension, utility, removed},
+		ExtNameMap: map[string]*Extension{extension.Name: extension, utility.Name: utility, removed.Name: removed},
 		ExtPkgMap:  map[string]*Extension{extension.Pkg: extension, utility.Pkg: utility},
 	}
 
@@ -713,11 +714,11 @@ func TestListExtensionsClassifiesPackageOnlySQLUtility(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *ExtensionListData, got %T", result.Data)
 	}
-	if data.Count != 1 || data.Extensions[0].Name != "example" {
-		t.Fatalf("default extension list = %#v, want only example", data.Extensions)
+	if data.Count != 3 || len(data.Extensions) != 3 || data.Extensions[1].Name != utility.Name || data.Extensions[2].Name != removed.Name {
+		t.Fatalf("default extension list = %#v, want all three catalog records", data.Extensions)
 	}
-	if Catalog.ExtensionCount() != 1 {
-		t.Fatalf("ExtensionCount() = %d, want 1", Catalog.ExtensionCount())
+	if Catalog.ExtensionCount() != 3 {
+		t.Fatalf("ExtensionCount() = %d, want 3", Catalog.ExtensionCount())
 	}
 
 	result = ListExtensions("pg_relation_sql", 0)
@@ -1714,6 +1715,7 @@ func TestAddExtensionsMixedResults(t *testing.T) {
 	}
 
 	// One valid, one invalid extension
+	installFakePackageManager(t, "dnf")
 	result := AddExtensions(17, []string{"test_ext", "nonexistent"}, true)
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -1860,6 +1862,7 @@ func TestAddExtensionsWithVersion(t *testing.T) {
 	}
 
 	// Test with version specification
+	installFakePackageManager(t, "dnf")
 	result := AddExtensions(17, []string{"test_ext=1.2.3"}, true)
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -1902,6 +1905,7 @@ func TestAddExtensionsDebPackageFormat(t *testing.T) {
 		AliasMap:   make(map[string]string),
 	}
 
+	installFakePackageManager(t, "apt-get")
 	result := AddExtensions(17, []string{"test_ext"}, true)
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -3438,11 +3442,11 @@ func TestRmExtensionsWithCatalog(t *testing.T) {
 
 	// Test with DEB OS
 	config.OSType = config.DistroDEB
+	installFakePackageManager(t, "apt-get")
 	result := RmExtensions(17, []string{"postgis"}, true)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	// Will fail due to no sudo, but should have correct data structure
 	data, ok := result.Data.(*ExtensionRmData)
 	if !ok {
 		t.Fatal("expected ExtensionRmData type")
@@ -3584,6 +3588,7 @@ func TestUpgradeExtensionsAliasLookup(t *testing.T) {
 
 	config.OSType = config.DistroEL
 	config.OSVersion = "8"
+	installFakePackageManager(t, "dnf")
 	result := UpgradeExtensions(17, []string{"pg-core"}, false)
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -3976,10 +3981,6 @@ func TestPackageManagerCmd(t *testing.T) {
 		}
 	}
 }
-
-// Test note: ReloadCatalogResult has 0% test coverage because it makes actual network calls
-// to download the extension catalog. A proper unit test would require HTTP mocking.
-// The DTO serialization is tested in TestReloadCatalogResultDataSerialization above.
 
 /********************
  * Text() Method Tests
