@@ -25,7 +25,8 @@ func RunSystemctl(action, service string) error {
 	if os.Geteuid() == 0 || action == "status" {
 		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
 	} else {
-		cmd = exec.Command("sudo", cmdArgs...)
+		sudoArgs := prependSudoArgs(cmdArgs)
+		cmd = exec.Command(sudoArgs[0], sudoArgs[1:]...)
 	}
 
 	configureCmdIO(cmd)

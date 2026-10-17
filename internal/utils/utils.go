@@ -19,7 +19,9 @@ var sudoCommandSummaryOut io.Writer = os.Stderr
 // configureCmdIO sets stdin/stdout/stderr for external commands.
 // In structured output mode, redirect stdout to stderr to keep stdout clean.
 func configureCmdIO(cmd *exec.Cmd) {
-	cmd.Stdin = os.Stdin
+	if os.Getenv("PIG_NON_INTERACTIVE") == "" && !config.IsStructuredOutput() {
+		cmd.Stdin = os.Stdin
+	}
 	if config.IsStructuredOutput() {
 		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
@@ -27,6 +29,13 @@ func configureCmdIO(cmd *exec.Cmd) {
 	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+}
+
+func prependSudoArgs(args []string) []string {
+	if os.Getenv("PIG_NON_INTERACTIVE") != "" || config.IsStructuredOutput() {
+		return append([]string{"sudo", "-n"}, args...)
+	}
+	return append([]string{"sudo"}, args...)
 }
 
 // Command runs a command with current user
@@ -96,7 +105,7 @@ func SudoCommand(args []string) error {
 			logrus.Warnf("sudo command not available, trying to execute directly")
 		} else {
 			// sudo exists, prepend it to the command
-			args = append([]string{"sudo"}, args...)
+			args = prependSudoArgs(args)
 			logrus.Debugf("executing sudo command: %v", args)
 		}
 	} else {
@@ -132,7 +141,7 @@ func QuietSudoCommand(args []string) error {
 			logrus.Debugf("sudo not found, attempting quiet direct execution: %v", args)
 		} else {
 			// sudo exists, prepend it to the command
-			args = append([]string{"sudo"}, args...)
+			args = prependSudoArgs(args)
 			logrus.Debugf("executing quiet sudo command: %v", args)
 		}
 	} else {
@@ -158,7 +167,7 @@ func SudoCommandSummary(args []string, tailLines int) error {
 	if nosudo := os.Getenv("PIG_NO_SUDO"); nosudo != "1" && nosudo != "true" {
 		if isRoot := os.Geteuid() == 0 || config.CurrentUser == "root"; !isRoot {
 			if _, err := exec.LookPath("sudo"); err == nil {
-				args = append([]string{"sudo"}, args...)
+				args = prependSudoArgs(args)
 			}
 		}
 	}
@@ -173,7 +182,9 @@ func SudoCommandSummary(args []string, tailLines int) error {
 		progress.render([]byte(strings.Join(args, " ")))
 	}
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = os.Stdin
+	if os.Getenv("PIG_NON_INTERACTIVE") == "" && !config.IsStructuredOutput() {
+		cmd.Stdin = os.Stdin
+	}
 	cmd.Stdout = commandOutput
 	cmd.Stderr = commandOutput
 	err := cmd.Run()
@@ -268,7 +279,7 @@ func PadKV(key string, value string) {
 	fmt.Printf("%-16s : %s\n", key, value)
 }
 
-// PadRight pads a string with spaces to the right to a given length
+// PadHeader formats a section header padded with '=' to the given length
 func PadHeader(str string, length int) string {
 	var buf strings.Builder
 	buf.WriteByte('#')

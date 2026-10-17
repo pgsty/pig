@@ -445,6 +445,12 @@ func captureLegacyOutputUnlocked(fn func() error, limit int) (captured string, t
 	oldStderr := os.Stderr
 	oldFormat := config.OutputFormat
 	oldLogrusOut := logrus.StandardLogger().Out
+	// Rendering legacy text inside a structured envelope must not re-enable
+	// sudo prompts or terminal stdin in the wrapped operation.
+	oldNonInteractive, hadNonInteractive := os.LookupEnv("PIG_NON_INTERACTIVE")
+	if config.IsStructuredOutput() && oldNonInteractive == "" {
+		_ = os.Setenv("PIG_NON_INTERACTIVE", "1")
+	}
 
 	os.Stdout = writer
 	os.Stderr = writer
@@ -462,6 +468,11 @@ func captureLegacyOutputUnlocked(fn func() error, limit int) (captured string, t
 		os.Stderr = oldStderr
 		logrus.SetOutput(oldLogrusOut)
 		config.OutputFormat = oldFormat
+		if hadNonInteractive {
+			_ = os.Setenv("PIG_NON_INTERACTIVE", oldNonInteractive)
+		} else {
+			_ = os.Unsetenv("PIG_NON_INTERACTIVE")
+		}
 		result := <-done
 		_ = reader.Close()
 		captured = result.output

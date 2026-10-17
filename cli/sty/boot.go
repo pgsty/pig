@@ -145,17 +145,14 @@ func BootstrapNative(ctx context.Context, opts NativeBootstrapOptions) *output.R
 		}
 		data.Ansible = "bootstrapped"
 		data.Changed = true
-		writeBootStatus("ansible", "ready")
-	} else {
-		if pkg != "" || hasLocalRepo {
-			if failure := prepareOfflineBootstrap(opts, data, pkg, hasLocalRepo, false); failure != nil {
-				return failure
-			}
-		} else {
-			data.Mode = "ready"
+	} else if pkg != "" || hasLocalRepo {
+		if failure := prepareOfflineBootstrap(opts, data, pkg, hasLocalRepo, false); failure != nil {
+			return failure
 		}
-		writeBootStatus("ansible", "ready")
+	} else {
+		data.Mode = "ready"
 	}
+	writeBootStatus("ansible", "ready")
 
 	// Advisory only: deploy needs these helpers, but an otherwise usable
 	// controller is not failed solely because one of them is absent.
@@ -299,46 +296,45 @@ func bootstrapAnsible(opts NativeBootstrapOptions, data *BootData, pkg string, h
 
 	if pkg != "" || hasLocalRepo {
 		return prepareOfflineBootstrap(opts, data, pkg, hasLocalRepo, true)
+	}
+	region := strings.TrimSpace(opts.Region)
+	result := bootRepos([]string{"node", "pigsty"}, repo.AddOptions{
+		Region:   region,
+		Mirror:   region == "china",
+		Remove:   overwrite,
+		Update:   true,
+		GPGCheck: true,
+		Quiet:    true,
+	})
+	recordBootRepositoryRollback(data, result)
+	if result == nil {
+		return output.Fail(output.CodeStyBootstrapFailed, "failed to configure Pigsty bootstrap repositories").WithData(data)
+	}
+	if repoData := bootRepoAddData(result); repoData != nil {
+		for _, warning := range repoData.Warnings {
+			appendBootWarningText(data, warning)
+		}
+	}
+	if !result.Success && (overwrite || result.Code != output.CodeRepoCacheUpdateFailed) {
+		message := "failed to configure Pigsty bootstrap repositories"
+		if result.Message != "" {
+			message += ": " + result.Message
+		}
+		return output.Fail(output.CodeStyBootstrapFailed, message).WithDetail(result.Detail).WithData(data)
+	}
+	if missing := missingBootstrapRepoModules(result, "node", "pigsty"); len(missing) > 0 {
+		return output.Fail(output.CodeStyBootstrapFailed,
+			fmt.Sprintf("failed to configure required bootstrap repository modules: %s", strings.Join(missing, ", "))).WithData(data)
+	}
+	if !result.Success {
+		data.Mode = "existing"
+		appendBootWarningText(data, "Pigsty repository cache refresh failed; package installation will retry with all configured repositories")
 	} else {
-		region := strings.TrimSpace(opts.Region)
-		result := bootRepos([]string{"node", "pigsty"}, repo.AddOptions{
-			Region:   region,
-			Mirror:   region == "china",
-			Remove:   overwrite,
-			Update:   true,
-			GPGCheck: true,
-			Quiet:    true,
-		})
-		recordBootRepositoryRollback(data, result)
-		if result == nil {
-			return output.Fail(output.CodeStyBootstrapFailed, "failed to configure Pigsty bootstrap repositories").WithData(data)
-		}
-		if repoData := bootRepoAddData(result); repoData != nil {
-			for _, warning := range repoData.Warnings {
-				appendBootWarningText(data, warning)
-			}
-		}
-		if !result.Success && (overwrite || result.Code != output.CodeRepoCacheUpdateFailed) {
-			message := "failed to configure Pigsty bootstrap repositories"
-			if result.Message != "" {
-				message += ": " + result.Message
-			}
-			return output.Fail(output.CodeStyBootstrapFailed, message).WithDetail(result.Detail).WithData(data)
-		}
-		if missing := missingBootstrapRepoModules(result, "node", "pigsty"); len(missing) > 0 {
-			return output.Fail(output.CodeStyBootstrapFailed,
-				fmt.Sprintf("failed to configure required bootstrap repository modules: %s", strings.Join(missing, ", "))).WithData(data)
-		}
-		if !result.Success {
-			data.Mode = "existing"
-			appendBootWarningText(data, "Pigsty repository cache refresh failed; package installation will retry with all configured repositories")
-		} else {
-			data.Mode = "online"
-		}
-		if err := bootInstall(0, controllerBootstrapPackages(), install.PackageOptions{Yes: true, NoTranslation: true, Quiet: true}); err != nil {
-			return failOnlineRepositoryReplacement(data, result, overwrite,
-				fmt.Sprintf("failed to install controller packages: %v", err))
-		}
+		data.Mode = "online"
+	}
+	if err := bootInstall(0, controllerBootstrapPackages(), install.PackageOptions{Yes: true, NoTranslation: true, Quiet: true}); err != nil {
+		return failOnlineRepositoryReplacement(data, result, overwrite,
+			fmt.Sprintf("failed to install controller packages: %v", err))
 	}
 	return nil
 }
@@ -699,7 +695,7 @@ func ReexecBootstrapAsRoot(args []string, stderr io.Writer) ReexecOutcome {
 		return ReexecOutcome{ExitCode: 3, Err: err, ResourceMissing: true}
 	}
 	sudoArgs := []string{"--", executable}
-	if os.Getenv("PIG_NON_INTERACTIVE") != "" {
+	if os.Getenv("PIG_NON_INTERACTIVE") != "" || config.IsStructuredOutput() {
 		sudoArgs = append([]string{"-n"}, sudoArgs...)
 	}
 	childArgs := append(sudoArgs, args...)

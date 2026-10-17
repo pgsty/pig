@@ -166,7 +166,7 @@ func TestPutFileModeRetriesDeniedInspectionWithSudo(t *testing.T) {
 			// Emulate privilege escalation by restoring directory access only
 			// after the writer invokes sudo, then run its actual commands.
 			t.Setenv("PIG_TEST_PROTECTED_DIR", protected)
-			fakeSudo := "#!/bin/sh\nchmod 0700 \"$PIG_TEST_PROTECTED_DIR\" || exit 1\nexec \"$@\"\n"
+			fakeSudo := "#!/bin/sh\nchmod 0700 \"$PIG_TEST_PROTECTED_DIR\" || exit 1\nif [ \"$1\" = \"-n\" ]; then shift; fi\nexec \"$@\"\n"
 			if err := os.WriteFile(filepath.Join(dir, "sudo"), []byte(fakeSudo), 0700); err != nil {
 				t.Fatal(err)
 			}

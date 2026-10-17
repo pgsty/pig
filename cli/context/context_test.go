@@ -1595,6 +1595,7 @@ func TestContextResultWithModules_InvalidModule(t *testing.T) {
 
 // TestContextResultWithModules_EmptyFilter tests that nil filter collects all modules
 func TestContextResultWithModules_EmptyFilter(t *testing.T) {
+	t.Setenv("PIG_NON_INTERACTIVE", "1")
 	result := ContextResultWithModules(nil)
 	if result == nil {
 		t.Fatal("Result should not be nil")
@@ -1635,6 +1636,7 @@ func TestContextResultWithModules_SingleModule(t *testing.T) {
 
 // TestContextResult_NilModules tests that nil module filter keeps default behavior.
 func TestContextResult_NilModules(t *testing.T) {
+	t.Setenv("PIG_NON_INTERACTIVE", "1")
 	result := ContextResultWithModules(nil)
 	if result == nil {
 		t.Fatal("Result should not be nil")

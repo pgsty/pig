@@ -7,6 +7,7 @@ package postgres
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -222,6 +223,9 @@ func Psql(cfg *Config, dbname string, opts *PsqlOptions) error {
 	}
 
 	PrintHint(cmdArgs)
+	if opts != nil && opts.File == "-" {
+		return utils.DBSUCommandWithStdin(dbsu, cmdArgs, os.Stdin)
+	}
 	return utils.DBSUCommand(dbsu, cmdArgs)
 }
 

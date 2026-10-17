@@ -178,18 +178,38 @@ func TestSudoCommand(t *testing.T) {
 		config.CurrentUser = originalUser
 	}()
 
+	binDir := t.TempDir()
+	argsLog := filepath.Join(t.TempDir(), "sudo-args")
+	fakeSudo := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PIG_TEST_SUDO_LOG\"\nif [ \"$1\" = \"-n\" ]; then shift; fi\nexec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "sudo"), []byte(fakeSudo), 0755); err != nil {
+		t.Fatalf("write fake sudo: %v", err)
+	}
+	t.Setenv("PIG_TEST_SUDO_LOG", argsLog)
+	t.Setenv("PIG_NO_SUDO", "")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
 	// Scenario 1: Current user is not root, should prepend sudo
 	config.CurrentUser = "testuser"
-	err := SudoCommand([]string{"echo", "sudo test"})
-	if err != nil {
-		// In some environments, if sudo is not available or user fails to input password, it will report an error
-		// We are just demonstrating here, so we can make a lenient judgment
-		t.Logf("SudoCommand returned error (could be expected in non-privileged environment): %v", err)
+	t.Setenv("PIG_NON_INTERACTIVE", "")
+	if err := SudoCommand([]string{"echo", "sudo test"}); err != nil {
+		t.Fatalf("SudoCommand failed with fake sudo: %v", err)
+	}
+	if got, err := os.ReadFile(argsLog); err != nil || string(got) != "echo\nsudo test\n" {
+		t.Fatalf("sudo args = %q, err = %v", string(got), err)
+	}
+
+	// Scenario 1b: Non-interactive mode should prepend sudo -n
+	t.Setenv("PIG_NON_INTERACTIVE", "1")
+	if err := SudoCommand([]string{"echo", "sudo test"}); err != nil {
+		t.Fatalf("SudoCommand failed in non-interactive mode: %v", err)
+	}
+	if got, err := os.ReadFile(argsLog); err != nil || string(got) != "-n\necho\nsudo test\n" {
+		t.Fatalf("non-interactive sudo args = %q, err = %v", string(got), err)
 	}
 
 	// Scenario 2: Current user is root, should not prepend sudo
 	config.CurrentUser = "root"
-	err = SudoCommand([]string{"echo", "root test"})
+	err := SudoCommand([]string{"echo", "root test"})
 	if err != nil {
 		t.Fatalf("SudoCommand failed under root user: %v", err)
 	}

@@ -783,14 +783,12 @@ func checkFileExistsAsDBSU(dbsu, path string) (bool, error) {
 		return false, nil
 	}
 
-	// If not root and dbsu is specified, try with sudo
-	if dbsu != "" && os.Geteuid() != 0 {
-		args := []string{}
-		if os.Getenv("PIG_NON_INTERACTIVE") != "" {
-			args = append(args, "-n")
+	// If not root/DBSU and dbsu is specified, try with sudo
+	if dbsu != "" && !utils.IsDBSU(dbsu) && os.Geteuid() != 0 {
+		cmd, err := utils.BuildDBSUCommand(dbsu, []string{"test", "-f", path})
+		if err != nil {
+			return false, err
 		}
-		args = append(args, "-u", dbsu, "test", "-f", path)
-		cmd := exec.Command("sudo", args...)
 		output, err := cmd.CombinedOutput()
 		if err == nil {
 			return true, nil

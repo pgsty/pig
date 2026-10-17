@@ -125,7 +125,19 @@ func BuildDBSUCommand(dbsu string, args []string) (*exec.Cmd, error) {
 
 func runDBSUCommand(dbsu string, args []string, preserveStdout bool) error {
 	stdout, stderr := commandWriters(config.IsStructuredOutput(), preserveStdout)
-	result, err := executeDBSUCommand(dbsu, args, os.Stdin, stdout, stderr)
+	var stdin io.Reader
+	if preserveStdout || (os.Getenv("PIG_NON_INTERACTIVE") == "" && !config.IsStructuredOutput()) {
+		stdin = os.Stdin
+	}
+	result, err := executeDBSUCommand(dbsu, args, stdin, stdout, stderr)
+	return dbsuCommandError(result, err)
+}
+
+// DBSUCommandWithStdin supplies an explicit data input channel, including in
+// non-interactive mode. It does not enable terminal prompts.
+func DBSUCommandWithStdin(dbsu string, args []string, stdin io.Reader) error {
+	stdout, stderr := commandWriters(config.IsStructuredOutput(), false)
+	result, err := executeDBSUCommand(dbsu, args, stdin, stdout, stderr)
 	return dbsuCommandError(result, err)
 }
 
@@ -263,7 +275,7 @@ func buildDBSUCmd(dbsu string, args []string) *exec.Cmd {
 	}
 
 	sudoArgs := []string{"-H", "-u", dbsu, "--"}
-	if os.Getenv("PIG_NON_INTERACTIVE") != "" {
+	if os.Getenv("PIG_NON_INTERACTIVE") != "" || config.IsStructuredOutput() {
 		sudoArgs = []string{"-n", "-H", "-u", dbsu, "--"}
 	}
 	sudoArgs = append(sudoArgs, args...)
