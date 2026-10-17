@@ -51,6 +51,10 @@ func resolveModulePathForRm(m *Manager, module string) (string, error) {
 // If modules is empty, it backs up all repositories
 func RmRepos(modules []string, doUpdate bool) *output.Result {
 	startTime := time.Now()
+	modules, err := ParseRmModules(modules)
+	if err != nil {
+		return output.Fail(output.CodeRepoInvalidArgs, err.Error())
+	}
 
 	// Check OS support
 	if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
@@ -81,30 +85,7 @@ func RmRepos(modules []string, doUpdate bool) *output.Result {
 
 	// If no modules specified, backup all repos
 	if len(modules) == 0 {
-		backupInfo, err := backupReposStructured(manager)
-		data.BackupInfo = backupInfo
-		if err != nil {
-			data.DurationMs = time.Since(startTime).Milliseconds()
-			result := output.Fail(output.CodeRepoBackupFailed,
-				fmt.Sprintf("failed to backup repos: %v", err)).WithData(data)
-			if backupInfo != nil {
-				rollback, rollbackErr := restoreReposStructured(manager, backupInfo, nil)
-				data.RollbackInfo = rollback
-				if rollbackErr != nil {
-					result.Detail = fmt.Sprintf("repository rollback failed: %v", rollbackErr)
-				} else {
-					result.Detail = "previous repository definitions restored"
-				}
-			}
-			return result
-		}
-		data.DurationMs = time.Since(startTime).Milliseconds()
-
-		message := "Backed up all repositories"
-		if backupInfo != nil && len(backupInfo.BackedUpFiles) > 0 {
-			message = fmt.Sprintf("Backed up %d repository files to %s", len(backupInfo.BackedUpFiles), backupInfo.BackupDir)
-		}
-		return output.OK(message, data)
+		return backupAllReposResult(manager, data, doUpdate, startTime)
 	}
 
 	// Remove specified modules
@@ -167,6 +148,72 @@ func RmRepos(modules []string, doUpdate bool) *output.Result {
 	return buildRmReposResult(data, len(modules))
 }
 
+// ParseRmModules preserves the distinction between no operands (backup all)
+// and explicit empty operands. Validate the entire request before any changes.
+func ParseRmModules(modules []string) ([]string, error) {
+	var expanded []string
+	for _, arg := range modules {
+		for _, part := range strings.Split(arg, ",") {
+			mod := strings.TrimSpace(part)
+			if mod == "" || strings.Contains(mod, "..") || !rmModuleNamePattern.MatchString(mod) {
+				return nil, fmt.Errorf("invalid repository module %q", part)
+			}
+			if mod == "all" {
+				expanded = append(expanded, "node", "pgsql", "infra")
+			} else {
+				expanded = append(expanded, mod)
+			}
+		}
+	}
+	return expanded, nil
+}
+
+func backupAllReposResult(manager *Manager, data *RepoRmData, doUpdate bool, startTime time.Time) *output.Result {
+	backupInfo, err := backupReposStructured(manager)
+	data.BackupInfo = backupInfo
+	if err != nil {
+		data.DurationMs = time.Since(startTime).Milliseconds()
+		result := output.Fail(output.CodeRepoBackupFailed,
+			fmt.Sprintf("failed to backup repos: %v", err)).WithData(data)
+		if backupInfo != nil {
+			rollback, rollbackErr := restoreReposStructured(manager, backupInfo, nil)
+			data.RollbackInfo = rollback
+			if rollbackErr != nil {
+				result.Detail = fmt.Sprintf("repository rollback failed: %v", rollbackErr)
+			} else {
+				result.Detail = "previous repository definitions restored"
+			}
+		}
+		return result
+	}
+	if doUpdate {
+		updateCmd := strings.Join(manager.UpdateCmd, " ")
+		if err := utils.SudoCommand(manager.UpdateCmd); err != nil {
+			data.UpdateResult = &UpdateCacheResult{
+				Command: updateCmd,
+				Success: false,
+				Error:   err.Error(),
+			}
+			data.DurationMs = time.Since(startTime).Milliseconds()
+			return output.Fail(output.CodeRepoCacheUpdateFailed,
+				fmt.Sprintf("backed up all repositories, but cache update failed: %v", err)).
+				WithData(data).
+				WithDetail(fmt.Sprintf("command: %s", updateCmd))
+		}
+		data.UpdateResult = &UpdateCacheResult{
+			Command: updateCmd,
+			Success: true,
+		}
+	}
+	data.DurationMs = time.Since(startTime).Milliseconds()
+
+	message := "Backed up all repositories"
+	if backupInfo != nil && len(backupInfo.BackedUpFiles) > 0 {
+		message = fmt.Sprintf("Backed up %d repository files to %s", len(backupInfo.BackedUpFiles), backupInfo.BackupDir)
+	}
+	return output.OK(message, data)
+}
+
 // buildRmReposResult computes the final RmRepos result from collected operation data.
 func buildRmReposResult(data *RepoRmData, _ int) *output.Result {
 	successCount := 0
@@ -181,7 +228,7 @@ func buildRmReposResult(data *RepoRmData, _ int) *output.Result {
 
 	if failCount > 0 {
 		return output.Fail(output.CodeRepoRemoveFailed,
-			fmt.Sprintf("removed %d module(s), but %d requested module(s) failed", successCount, failCount)).
+			fmt.Sprintf("ensured %d module(s) absent, but %d requested module(s) failed", successCount, failCount)).
 			WithData(data).
 			WithDetail("partial repository changes were applied; inspect failed entries before retrying")
 	}
@@ -199,7 +246,7 @@ func buildRmReposResult(data *RepoRmData, _ int) *output.Result {
 		return result
 	}
 
-	message := fmt.Sprintf("Removed %d module(s)", successCount)
+	message := fmt.Sprintf("Ensured %d module(s) absent", successCount)
 	return output.OK(message, data)
 }
 

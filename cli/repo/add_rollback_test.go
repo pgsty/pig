@@ -2,6 +2,7 @@ package repo
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,6 +79,50 @@ func TestNormalizeModulesDeduplicatesNonAdjacentInputs(t *testing.T) {
 	want := []string{"node", "pigsty"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("normalizeModules() = %v, want %v", got, want)
+	}
+}
+
+func TestConfigureReposRejectsEmptyNamesBeforeEffects(t *testing.T) {
+	for _, args := range [][]string{{""}, {" "}, {","}, {"node,"}, {",node"}, {"node,,infra"}, {"node", ""}, {"node", " "}} {
+		for _, replace := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%q/replace=%v", args, replace), func(t *testing.T) {
+				_, dir := setupAddRollbackTest(t)
+				writeRollbackFixture(t, filepath.Join(dir, "custom.repo"), "original")
+				newAddRepoManager = func(...string) (*Manager, error) {
+					t.Fatal("invalid operands reached repository manager")
+					return nil, nil
+				}
+				result := ConfigureRepos(args, AddOptions{Remove: replace, Update: true})
+				if result.Success || result.Code != output.CodeRepoInvalidArgs {
+					t.Fatalf("invalid input result: %+v", result)
+				}
+				assertRollbackFixture(t, filepath.Join(dir, "custom.repo"), "original")
+				if result := GetRepoInfo(args); result.Success || result.Code != output.CodeRepoInvalidArgs {
+					t.Fatalf("repo info ignored empty name: %+v", result)
+				}
+			})
+		}
+	}
+}
+
+func TestConfigureReposPreservesDefaultAndCommaOperands(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{nil, []string{"infra", "node", "pgsql"}},
+		{[]string{" node,infra ", "node"}, []string{"infra", "node"}},
+	} {
+		t.Run(fmt.Sprintf("%q", tc.args), func(t *testing.T) {
+			setupAddRollbackTest(t)
+			result := ConfigureRepos(tc.args, AddOptions{Region: "europe"})
+			if !result.Success {
+				t.Fatalf("valid operands failed: %+v", result)
+			}
+			if got := result.Data.(*RepoAddData).ExpandedModules; !slices.Equal(got, tc.want) {
+				t.Fatalf("expanded modules = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

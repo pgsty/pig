@@ -137,3 +137,16 @@ func TestSiblingFlagStateIsIsolated(t *testing.T) {
 		})
 	}
 }
+
+func TestRepoRmRejectsEmptyAndUnsafeOperands(t *testing.T) {
+	for _, args := range [][]string{{""}, {" "}, {","}, {"node,"}, {",node"}, {"node,,infra"}, {"node", "../evil"}} {
+		if err := repoRmCmd.ValidateArgs(args); err == nil {
+			t.Errorf("accepted invalid operands %q", args)
+		}
+	}
+	for _, args := range [][]string{nil, {"all"}, {"node, infra"}, {"custom.repo"}} {
+		if err := repoRmCmd.ValidateArgs(args); err != nil {
+			t.Errorf("rejected valid operands %q: %v", args, err)
+		}
+	}
+}

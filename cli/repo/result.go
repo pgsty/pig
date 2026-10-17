@@ -379,6 +379,10 @@ func GetRepoInfo(args []string) *output.Result {
 	if len(args) == 0 {
 		return output.Fail(output.CodeRepoInvalidArgs, "repo or module name is required")
 	}
+	args, err := ExpandModuleArgs(args)
+	if err != nil {
+		return output.Fail(output.CodeRepoInvalidArgs, err.Error())
+	}
 
 	rm, err := NewManager()
 	if err != nil {
@@ -412,6 +416,10 @@ func GetRepoInfo(args []string) *output.Result {
 	var notFound []string
 
 	for _, name := range repoList {
+		if r, ok := rm.Map[name]; ok && r != nil {
+			repos = append(repos, r.ToDetail())
+			continue
+		}
 		found := false
 		for _, r := range rm.Data {
 			if r.Name == name {
@@ -661,7 +669,7 @@ type RepoRmData struct {
 	DurationMs       int64              `json:"duration_ms" yaml:"duration_ms"`
 }
 
-// RemovedRepoItem represents a successfully removed repository file
+// RemovedRepoItem records a removal attempt. Success includes an already absent file.
 type RemovedRepoItem struct {
 	Module   string `json:"module" yaml:"module"`
 	FilePath string `json:"file_path" yaml:"file_path"`
@@ -704,16 +712,29 @@ func (r *RepoRmData) Text() string {
 		}
 		return fmt.Sprintf("Repository rollback failed: %s", r.RollbackInfo.Error)
 	}
-	if r.BackupInfo != nil && len(r.BackupInfo.BackedUpFiles) > 0 {
-		return fmt.Sprintf("Backed up %d files to %s", len(r.BackupInfo.BackedUpFiles), r.BackupInfo.BackupDir)
+	var msg string
+	if r.BackupInfo != nil {
+		msg = "No repository files to back up"
+		if len(r.BackupInfo.BackedUpFiles) > 0 {
+			msg = fmt.Sprintf("Backed up %d files to %s", len(r.BackupInfo.BackedUpFiles), r.BackupInfo.BackupDir)
+		}
+	} else {
+		successCount := 0
+		for _, item := range r.RemovedRepos {
+			if item != nil && item.Success {
+				successCount++
+			}
+		}
+		msg = fmt.Sprintf("Ensured %d module(s) absent", successCount)
 	}
-	successCount := 0
-	for _, item := range r.RemovedRepos {
-		if item != nil && item.Success {
-			successCount++
+	if r.UpdateResult != nil {
+		if r.UpdateResult.Success {
+			msg += fmt.Sprintf("\nCache updated successfully (command: %s)", r.UpdateResult.Command)
+		} else {
+			msg += fmt.Sprintf("\nCache update failed: %s (command: %s)", r.UpdateResult.Error, r.UpdateResult.Command)
 		}
 	}
-	return fmt.Sprintf("Removed %d module(s)", successCount)
+	return msg
 }
 
 // Text returns a human-readable representation of RepoUpdateData

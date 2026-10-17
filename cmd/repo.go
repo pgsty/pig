@@ -138,7 +138,7 @@ var repoSetCmd = &cobra.Command{
   pig repo set                      # set repo to node,pgsql,infra (= pig repo add all -ru)
   pig repo set node,pgsql           # use pgdg + pigsty repo
   pig repo set node,pgdg            # use pgdg and node repo only
-  pig repo set node,pigsty          # use pgdg and node repo only
+  pig repo set node,pigsty          # use pigsty and node repo only
   pig repo set node,infra,docker    # enable docker-ce repo alongside base repos
 
   (Beware that system repo management require sudo/root privilege)
@@ -160,15 +160,17 @@ var repoRmCmd = &cobra.Command{
 	Aliases:      []string{"remove"},
 	SilenceUsage: true,
 	Annotations:  ancsAnn("pig repo rm", "action", "stable", "restricted", true, "medium", "recommended", "root", 2000),
-	Args:         cobra.ArbitraryArgs,
+	Args: func(cmd *cobra.Command, args []string) error {
+		_, err := repo.ParseRmModules(args)
+		return err
+	},
 	Example: `
   pig repo rm                      # remove (backup) all existing repo to backup dir
   pig repo rm all --update         # remove module 'all' and update repo cache
   pig repo rm node pigsty -u       # remove module 'node' & 'pigsty' and update repo cache
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		modules := repo.ExpandModuleArgs(args)
-		result := repo.RmRepos(modules, repoRmUpdate)
+		result := repo.RmRepos(args, repoRmUpdate)
 		return handleAuxResult(result)
 	},
 }

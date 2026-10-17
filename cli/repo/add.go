@@ -118,17 +118,19 @@ func (m *Manager) normalizeModules(modules ...string) []string {
 	return modules
 }
 
-// ExpandModuleArgs will split the input arguments by comma if necessary
-func ExpandModuleArgs(args []string) []string {
+// ExpandModuleArgs splits comma-separated operands and rejects empty entries.
+func ExpandModuleArgs(args []string) ([]string, error) {
 	var newArgs []string
 	for _, arg := range args {
-		if strings.Contains(arg, ",") {
-			newArgs = append(newArgs, strings.Split(arg, ",")...)
-		} else {
-			newArgs = append(newArgs, arg)
+		for _, part := range strings.Split(arg, ",") {
+			trimmed := strings.TrimSpace(part)
+			if trimmed == "" {
+				return nil, fmt.Errorf("repository module list contains an empty name")
+			}
+			newArgs = append(newArgs, trimmed)
 		}
 	}
-	return newArgs
+	return newArgs, nil
 }
 
 type AddOptions struct {
@@ -147,11 +149,15 @@ func ConfigureRepos(args []string, opts AddOptions) *output.Result {
 	if len(args) == 0 {
 		args = []string{"all"}
 	}
-	return AddReposWithOptions(ExpandModuleArgs(args), opts)
+	return AddReposWithOptions(args, opts)
 }
 
 func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 	startTime := time.Now()
+	modules, err := ExpandModuleArgs(modules)
+	if err != nil {
+		return output.Fail(output.CodeRepoInvalidArgs, err.Error())
+	}
 
 	// Check OS support
 	if config.OSType != config.DistroEL && config.OSType != config.DistroDEB {
