@@ -199,6 +199,10 @@ func runLegacyStructuredContractWithPolicy(module int, command, kind string, arg
 		result := output.Fail(code, command+" failed").
 			WithDetail(err.Error()).
 			WithData(data)
+		if policy.RedactCapturedOutput {
+			result.Detail = "sensitive command failed; output and error details withheld"
+			data.OutputRedacted = true
+		}
 		return handleAuxResult(result)
 	}
 	result := output.OK(command+" completed", data)

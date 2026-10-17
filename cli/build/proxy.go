@@ -102,7 +102,7 @@ func parseRemoteTarget(remote string) (userID string, host string, port string, 
 	}
 	host, port, err = net.SplitHostPort(parts[1])
 	if err != nil {
-		return "", "", "", fmt.Errorf("invalid host:port format, expected host:port, got %s", parts[1])
+		return "", "", "", fmt.Errorf("invalid host:port format, expected host:port")
 	}
 	if host == "" {
 		return "", "", "", fmt.Errorf("invalid host:port format, host is empty")
@@ -120,7 +120,7 @@ func parseLocalListen(local string) (host string, port string, normalized string
 
 	host, port, err = net.SplitHostPort(local)
 	if err != nil {
-		return "", "", "", fmt.Errorf("invalid local listen address, expected host:port, got %s", local)
+		return "", "", "", fmt.Errorf("invalid local listen address, expected host:port")
 	}
 	if err := validatePort(port); err != nil {
 		return "", "", "", err
@@ -139,7 +139,7 @@ func parseLocalListen(local string) (host string, port string, normalized string
 func validatePort(port string) error {
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 1 || n > 65535 {
-		return fmt.Errorf("invalid port: %s (must be in range 1-65535)", port)
+		return fmt.Errorf("invalid port (must be in range 1-65535)")
 	}
 	return nil
 }

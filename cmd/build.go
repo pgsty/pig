@@ -151,7 +151,7 @@ var buildProxyCmd = &cobra.Command{
 		if len(structuredArgs) > 0 {
 			structuredArgs[0] = "<redacted>"
 		}
-		return runLegacyStructured(legacyModuleBuild, "pig build proxy", structuredArgs, nil, func() error {
+		return runLegacyStructuredSensitiveWithNextActions(legacyModuleBuild, "pig build proxy", structuredArgs, nil, nil, func() error {
 			var remote, local string
 			if len(args) == 0 {
 				return build.InstallProxy()

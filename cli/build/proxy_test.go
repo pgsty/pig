@@ -1,9 +1,15 @@
 package build
 
 import (
+	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/sirupsen/logrus"
 )
 
 func TestParseRemoteTarget(t *testing.T) {
@@ -104,5 +110,63 @@ func TestProxyInstallCommand(t *testing.T) {
 	}
 	if command, err := proxyInstallCommand("brew"); err == nil || command != nil {
 		t.Fatalf("unsupported package manager result = %#v, %v; want nil and error", command, err)
+	}
+}
+
+func TestLegacyProxyMalformedInputsWithholdCredentials(t *testing.T) {
+	const secret = "SENTINEL-proxy-credential"
+	for _, remote := range []string{secret, "id@" + secret, "id@host:" + secret} {
+		if _, _, _, err := parseRemoteTarget(remote); err == nil || strings.Contains(err.Error(), secret) {
+			t.Fatalf("unsafe remote diagnostic: %v", err)
+		}
+	}
+	for _, local := range []string{secret, "host:" + secret} {
+		if _, _, _, err := parseLocalListen(local); err == nil || strings.Contains(err.Error(), secret) {
+			t.Fatalf("unsafe local diagnostic: %v", err)
+		}
+	}
+}
+
+func TestProxySubprocessCredentialsStayPrivate(t *testing.T) {
+	const secret = "SENTINEL-xray-validator-private-key"
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "xray-fixture")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf '%s' \"$PIG_TEST_XRAY_SECRET\"\nprintf '%s' \"$PIG_TEST_XRAY_SECRET\" >&2\nexit \"$PIG_TEST_XRAY_EXIT\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PIG_TEST_XRAY_SECRET", secret)
+	external, err := os.CreateTemp(dir, "output")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldOut, oldErr, oldLog := os.Stdout, os.Stderr, logrus.StandardLogger().Out
+	var logs bytes.Buffer
+	os.Stdout, os.Stderr = external, external
+	logrus.SetOutput(&logs)
+	t.Cleanup(func() {
+		os.Stdout, os.Stderr = oldOut, oldErr
+		logrus.SetOutput(oldLog)
+		_ = external.Close()
+	})
+	for _, status := range []string{"0", "17"} {
+		t.Run(status, func(t *testing.T) {
+			t.Setenv("PIG_TEST_XRAY_EXIT", status)
+			private, err := proxyCapture(binary)
+			if status == "0" && (err != nil || private != secret) {
+				t.Fatalf("private capture did not preserve child stdout: %v", err)
+			}
+			if status != "0" && (err == nil || private != "" || strings.Contains(err.Error(), secret)) {
+				t.Fatalf("failed capture leaked credentials: %v", err)
+			}
+			r := proxyRuntime{os: "darwin", run: proxyRun}
+			err = r.validateConfig(binary, filepath.Join(dir, "candidate.json"))
+			if (err == nil) != (status == "0") || strings.Contains(fmt.Sprint(err), secret) {
+				t.Fatalf("unsafe validator result: %v", err)
+			}
+			data, _ := os.ReadFile(external.Name())
+			if strings.Contains(string(data)+logs.String(), secret) {
+				t.Fatal("private subprocess output escaped to stdout/stderr/logs")
+			}
+		})
 	}
 }

@@ -5,6 +5,7 @@ Copyright 2018-2026 Ruohang Feng <rh@vonng.com>
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,7 +43,6 @@ var licenseCmd = &cobra.Command{
     $ pig license status
     $ pig license verify <jwt|path>
     $ pig license issue [-mnbst] <aud>
-	$ pig license history
 `,
 }
 
@@ -81,7 +81,6 @@ var licenseIssueCmd = &cobra.Command{
 	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLegacyStructured(legacyModuleSty, "pig license issue", args, map[string]interface{}{
-			"key":   issueKey,
 			"by":    issueBy,
 			"start": issueStart,
 			"type":  issueType,
@@ -121,7 +120,7 @@ var licenseIssueCmd = &cobra.Command{
 			}
 			if issueMonth < 0 {
 				logrus.Error("Invalid month limit: must be non-negative")
-				return fmt.Errorf("month limit should be positive, 0 represents unlimited")
+				return fmt.Errorf("month limit should be non-negative, 0 represents unlimited")
 			}
 			if issueMonth == 0 {
 				issueMonth = 1200 // 100-year (permanent) license
@@ -132,8 +131,11 @@ var licenseIssueCmd = &cobra.Command{
 				issueName, issueBy, issueType, startDate.Format(dateFormat), issueMonth, issueNode)
 
 			if err = license.Manager.SetPrivateKey(issueKey); err != nil {
-				logrus.Errorf("Failed to load private key: %v", err)
-				return err
+				if errors.Is(err, license.ErrPrivateKeyMismatch) {
+					return fmt.Errorf("signing key does not match a configured public key")
+				}
+				// The argument may be inline key material rather than a path.
+				return fmt.Errorf("failed to load signing key: invalid or unreadable private key")
 			}
 
 			lic, err := license.Manager.IssueLicense(issueBy, issueName, startDate, issueMonth, issueType, issueNode)
