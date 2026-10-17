@@ -83,3 +83,41 @@ jobs:
           distribution: goreleaser
           version: v2.18.3
           args: release --snapshot --clean --skip=publish
+
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: postgres:18.6@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - name: Install acceptance tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git sudo procps python3-venv
+
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify downstream YAML string types
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pig-yaml"
+          "$RUNNER_TEMP/pig-yaml/bin/pip" install PyYAML==6.0.3
+          PIG_TEST_PYYAML="$RUNNER_TEMP/pig-yaml/bin/python" go test ./inventory -run '^TestAmbiguousStringsSurviveEditAndSerialization$' -count=1 -v
+
+      - name: Verify Linux permissions and instance boundaries
+        shell: bash
+        run: |
+          test_bins=$(mktemp -d /tmp/pig-acceptance-bins.XXXXXX)
+          trap 'rm -rf "$test_bins"' EXIT
+          chmod 755 "$test_bins"
+          go test -c ./cli/postgres -o "$test_bins/postgres.test"
+          go test -c ./internal/utils -o "$test_bins/utils.test"
+          bash .github/scripts/test-linux-acceptance.sh "$test_bins"

@@ -3,17 +3,54 @@
 package postgres
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"pig/cli/ext"
 	"pig/internal/config"
+	"pig/internal/output"
 	"pig/internal/utils"
 )
+
+func linuxTestPostgresBin() string {
+	if path := os.Getenv("PIG_TEST_PG_BIN"); path != "" {
+		return path
+	}
+	return "/usr/lib/postgresql/18/bin"
+}
+
+func TestLinuxLivePostgresPermissionDenied(t *testing.T) {
+	rawPID := os.Getenv("PIG_TEST_POSTGRES_PID")
+	if rawPID == "" {
+		t.Skip("requires a live PostgreSQL process owned by another user")
+	}
+	pid, err := strconv.Atoi(rawPID)
+	if err != nil || pid <= 0 {
+		t.Fatalf("invalid fixture PID: %q", rawPID)
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("fixture must produce real EPERM: %v", err)
+	}
+	// Both kill(0) and ps are real here. Only the pid file belongs to the caller.
+	cfg := runtimeFixture(t, withCurrentUserAsDBSU(t), pid, "")
+	if result := StatusResult(cfg); result.Success || result.Code != output.CodePgStatusPermissionDenied {
+		t.Fatalf("live PostgreSQL with EPERM reported as stopped or known: %+v", result)
+	}
+	if err := InitDB(cfg, &InitOptions{Force: true}); err == nil {
+		t.Fatal("unknown live process allowed forced initialization")
+	}
+	if contents, err := os.ReadFile(filepath.Join(cfg.PgData, "PG_VERSION")); err != nil || string(contents) != "18\n" {
+		t.Fatalf("refused initialization changed the directory: %q, %v", contents, err)
+	}
+	t.Log("real EPERM and PostgreSQL process identity preserved unknown state and blocked forced initialization")
+}
 
 // Run as an ordinary user with passwordless sudo to postgres in a disposable
 // Linux container. The PG18 fixture is running on 6543 with a 0700 PGDATA.
@@ -30,7 +67,7 @@ func TestCloneLinuxProtectedPGDATA(t *testing.T) {
 		t.Fatal("ordinary caller unexpectedly traversed 0700 PGDATA")
 	}
 	oldInited, oldActive, oldPostgres := ext.Inited, ext.Active, ext.Postgres
-	ext.Inited, ext.Active = true, &ext.PostgresInstall{BinPath: "/usr/lib/postgresql/18/bin", MajorVersion: 18}
+	ext.Inited, ext.Active = true, &ext.PostgresInstall{BinPath: linuxTestPostgresBin(), MajorVersion: 18}
 	t.Cleanup(func() { ext.Inited, ext.Active, ext.Postgres = oldInited, oldActive, oldPostgres })
 	opts := &CloneOptions{DbSU: "postgres", SourceDB: "postgres", DestDB: "clone_acceptance", ConnDB: "template1", Port: 6543}
 	if err := prepareClone(opts); err != nil {
@@ -54,7 +91,7 @@ func TestReviewLinuxPrivateForkAndStaleSQLTarget(t *testing.T) {
 	withCurrentUserAsDBSU(t)
 	oldInit, oldActive, oldPG, oldInstalls := ext.Inited, ext.Active, ext.Postgres, ext.Installs
 	t.Cleanup(func() { ext.Inited, ext.Active, ext.Postgres, ext.Installs = oldInit, oldActive, oldPG, oldInstalls })
-	ext.Inited, ext.Active = true, &ext.PostgresInstall{BinPath: "/usr/lib/postgresql/18/bin", MajorVersion: 18}
+	ext.Inited, ext.Active = true, &ext.PostgresInstall{BinPath: linuxTestPostgresBin(), MajorVersion: 18}
 	ext.Postgres, ext.Installs = ext.Active, map[int]*ext.PostgresInstall{18: ext.Active}
 	role, err := DetectRole(&Config{PgData: dir, DbSU: "postgres"}, nil)
 	if err != nil || role.Role != RolePrimary || !role.Alive || role.Source != "psql" {
