@@ -303,7 +303,7 @@ func appendPgTargetCommandFlags(args []string, cfg *Config) []string {
 	if cfg.PgVersion > 0 {
 		args = append(args, "--version", strconv.Itoa(cfg.PgVersion))
 	}
-	if cfg.PgData != "" && cfg.PgData != DefaultPgData {
+	if cfg.PgData != "" {
 		args = append(args, "-D", cfg.PgData)
 	}
 	if cfg.DbSU != "" {

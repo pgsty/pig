@@ -469,8 +469,8 @@ var pgPromoteCmd = &cobra.Command{
 						DryRun:       false,
 					},
 					[]output.NextAction{
-						{Command: "pig pg promote --yes", Reason: "execute local-only promotion after explicit confirmation", Required: true},
-						{Command: "pig pg promote --plan", Reason: "preview local-only promotion", Required: false},
+						{Command: postgres.BuildPromoteCommand(pgConfig, opts, false), Reason: "execute local-only promotion after explicit confirmation", Required: true},
+						{Command: postgres.BuildPromoteCommand(pgConfig, opts, true), Reason: "preview local-only promotion", Required: false},
 						{Command: "pig pt switchover --help", Reason: "review native Patroni-managed switchover syntax", Required: false},
 					},
 				)
@@ -1707,8 +1707,8 @@ var pgVacuumCmd = &cobra.Command{
 					DryRun:       false,
 				},
 				[]output.NextAction{
-					{Command: buildVacuumNextAction(dbname, true), Reason: "execute VACUUM FULL after explicit confirmation", Required: true},
-					{Command: buildVacuumNextAction(dbname, false) + " --plan", Reason: "preview VACUUM FULL impact", Required: false},
+					{Command: postgres.BuildVacuumCommand(pgConfig, dbname, opts, false), Reason: "execute VACUUM FULL after explicit confirmation", Required: true},
+					{Command: postgres.BuildVacuumCommand(pgConfig, dbname, opts, true), Reason: "preview VACUUM FULL impact", Required: false},
 				},
 			)
 		}
@@ -1850,32 +1850,6 @@ var pgRepackCmd = &cobra.Command{
 			return postgres.Repack(pgConfig, dbname, opts)
 		})
 	},
-}
-
-func buildVacuumNextAction(dbname string, includeYes bool) string {
-	parts := []string{"pig", "pg", "vacuum"}
-	if dbname != "" {
-		parts = append(parts, dbname)
-	}
-	if pgMaintAll {
-		parts = append(parts, "--all")
-	}
-	if pgMaintSchema != "" {
-		parts = append(parts, "--schema", pgMaintSchema)
-	}
-	if pgMaintTable != "" {
-		parts = append(parts, "--table", pgMaintTable)
-	}
-	if pgMaintVerbose {
-		parts = append(parts, "--verbose")
-	}
-	if pgMaintFull {
-		parts = append(parts, "--full")
-	}
-	if includeYes {
-		parts = append(parts, "--yes")
-	}
-	return strings.Join(parts, " ")
 }
 
 func maintenanceParams(dbname string, includeFull bool) map[string]interface{} {

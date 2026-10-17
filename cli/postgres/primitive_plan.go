@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"pig/internal/output"
+	"pig/internal/utils"
 )
 
 const pgLocalBoundary = "pg:local-instance"
@@ -18,7 +19,7 @@ func BuildPromotePlan(cfg *Config, opts *PromoteOptions) *output.Plan {
 	role := detectRoleString(cfg)
 
 	return &output.Plan{
-		Command:      buildPromoteCommand(opts, true),
+		Command:      BuildPromoteCommand(cfg, opts, true),
 		Boundary:     pgLocalBoundary,
 		Confirmation: "required",
 		Actions: []output.Action{
@@ -43,13 +44,13 @@ func BuildPromotePlan(cfg *Config, opts *PromoteOptions) *output.Plan {
 			{Name: "boundary", Status: "local-only", Detail: "does not manage Patroni, DCS, VIP, or client routing"},
 		},
 		Verifications: []output.Check{
-			{Name: "role", Status: "manual", Detail: "pig pg role"},
-			{Name: "status", Status: "manual", Detail: "pig pg status"},
+			{Name: "role", Status: "manual", Detail: utils.ShellQuoteArgs(appendPgTargetCommandFlags([]string{"pig", "pg", "role"}, cfg))},
+			{Name: "status", Status: "manual", Detail: utils.ShellQuoteArgs(appendPgTargetCommandFlags([]string{"pig", "pg", "status"}, cfg))},
 		},
 		NextActions: []output.NextAction{
 			{Command: "pig pt switchover --help", Reason: "review native Patroni switchover syntax", Required: false},
 			{Command: "pig pt failover --help", Reason: "review native Patroni failover syntax", Required: false},
-			{Command: "pig pg promote --yes", Reason: "execute local-only promotion after explicit confirmation", Required: true},
+			{Command: BuildPromoteCommand(cfg, opts, false), Reason: "execute local-only promotion after explicit confirmation", Required: true},
 		},
 	}
 }
@@ -62,7 +63,7 @@ func BuildRepackPlan(cfg *Config, dbname string, opts *RepackOptions) *output.Pl
 		jobs = opts.Jobs
 	}
 	return &output.Plan{
-		Command:      buildRepackCommand(dbname, opts, true),
+		Command:      buildRepackCommand(cfg, dbname, opts, true),
 		Boundary:     pgLocalBoundary,
 		Confirmation: "recommended",
 		Actions: []output.Action{
@@ -85,11 +86,11 @@ func BuildRepackPlan(cfg *Config, dbname string, opts *RepackOptions) *output.Pl
 			{Name: "boundary", Status: "local-only", Detail: "does not manage Patroni or application traffic"},
 		},
 		Verifications: []output.Check{
-			{Name: "sessions", Status: "manual", Detail: "pig pg ps"},
+			{Name: "sessions", Status: "manual", Detail: utils.ShellQuoteArgs(appendPgTargetCommandFlags([]string{"pig", "pg", "ps"}, cfg))},
 			{Name: "repack result", Status: "manual", Detail: "inspect pg_repack native output"},
 		},
 		NextActions: []output.NextAction{
-			{Command: strings.TrimSuffix(buildRepackCommand(dbname, opts, false), " "), Reason: "execute repack after reviewing the plan", Required: true},
+			{Command: buildRepackCommand(cfg, dbname, opts, false), Reason: "execute repack after reviewing the plan", Required: true},
 			{Command: "pig ext add pg_repack", Reason: "install pg_repack if missing", Required: false},
 		},
 	}
@@ -103,14 +104,14 @@ func BuildVacuumPlan(cfg *Config, dbname string, opts *VacuumOptions) *output.Pl
 	risks := []string{"This primitive does not coordinate Patroni, traffic draining, or maintenance windows."}
 	if opts != nil && opts.Full {
 		mode = "VACUUM FULL"
-		confirmation = "recommended"
+		confirmation = "required"
 		risks = append(risks,
 			"VACUUM FULL rewrites relations and requires exclusive locks.",
 			"Large relations can create heavy IO and block application queries.",
 		)
 	}
 	return &output.Plan{
-		Command:      buildVacuumCommand(dbname, opts, true),
+		Command:      BuildVacuumCommand(cfg, dbname, opts, true),
 		Boundary:     pgLocalBoundary,
 		Confirmation: confirmation,
 		Actions: []output.Action{
@@ -128,10 +129,10 @@ func BuildVacuumPlan(cfg *Config, dbname string, opts *VacuumOptions) *output.Pl
 			{Name: "boundary", Status: "local-only", Detail: "does not manage Patroni or application traffic"},
 		},
 		Verifications: []output.Check{
-			{Name: "sessions", Status: "manual", Detail: "pig pg ps"},
+			{Name: "sessions", Status: "manual", Detail: utils.ShellQuoteArgs(appendPgTargetCommandFlags([]string{"pig", "pg", "ps"}, cfg))},
 		},
 		NextActions: []output.NextAction{
-			{Command: buildVacuumCommand(dbname, opts, false), Reason: "execute vacuum after reviewing the plan", Required: opts != nil && opts.Full},
+			{Command: BuildVacuumCommand(cfg, dbname, opts, false), Reason: "execute vacuum after reviewing the plan", Required: opts != nil && opts.Full},
 		},
 	}
 }
@@ -141,8 +142,9 @@ func ValidateMaintenanceOptions(schema, table string) error {
 	return validateMaintOptions(schema, table)
 }
 
-func buildPromoteCommand(opts *PromoteOptions, includePlan bool) string {
-	parts := []string{"pig", "pg", "promote"}
+// BuildPromoteCommand preserves the target and options in a preview or confirmed retry.
+func BuildPromoteCommand(cfg *Config, opts *PromoteOptions, includePlan bool) string {
+	parts := appendPgTargetCommandFlags([]string{"pig", "pg", "promote"}, cfg)
 	if opts != nil && opts.Timeout > 0 {
 		parts = append(parts, "--timeout", strconv.Itoa(opts.Timeout))
 	}
@@ -151,14 +153,16 @@ func buildPromoteCommand(opts *PromoteOptions, includePlan bool) string {
 	}
 	if includePlan {
 		parts = append(parts, "--plan")
+	} else {
+		parts = append(parts, "--yes")
 	}
-	return strings.Join(parts, " ")
+	return utils.ShellQuoteArgs(parts)
 }
 
-func buildRepackCommand(dbname string, opts *RepackOptions, includePlan bool) string {
-	parts := []string{"pig", "pg", "repack"}
+func buildRepackCommand(cfg *Config, dbname string, opts *RepackOptions, includePlan bool) string {
+	parts := appendPgTargetCommandFlags([]string{"pig", "pg", "repack"}, cfg)
 	if dbname != "" {
-		parts = append(parts, quotePgArg(dbname))
+		parts = append(parts, dbname)
 	}
 	if opts != nil {
 		appendMaintOptions(&parts, opts.All, opts.Schema, opts.Table, opts.Verbose)
@@ -169,13 +173,14 @@ func buildRepackCommand(dbname string, opts *RepackOptions, includePlan bool) st
 	if includePlan {
 		parts = append(parts, "--plan")
 	}
-	return strings.Join(parts, " ")
+	return utils.ShellQuoteArgs(parts)
 }
 
-func buildVacuumCommand(dbname string, opts *VacuumOptions, includePlan bool) string {
-	parts := []string{"pig", "pg", "vacuum"}
+// BuildVacuumCommand preserves the target and options, including FULL confirmation.
+func BuildVacuumCommand(cfg *Config, dbname string, opts *VacuumOptions, includePlan bool) string {
+	parts := appendPgTargetCommandFlags([]string{"pig", "pg", "vacuum"}, cfg)
 	if dbname != "" {
-		parts = append(parts, quotePgArg(dbname))
+		parts = append(parts, dbname)
 	}
 	if opts != nil {
 		appendMaintOptions(&parts, opts.All, opts.Schema, opts.Table, opts.Verbose)
@@ -185,8 +190,10 @@ func buildVacuumCommand(dbname string, opts *VacuumOptions, includePlan bool) st
 	}
 	if includePlan {
 		parts = append(parts, "--plan")
+	} else if opts != nil && opts.Full {
+		parts = append(parts, "--yes")
 	}
-	return strings.Join(parts, " ")
+	return utils.ShellQuoteArgs(parts)
 }
 
 func appendMaintOptions(parts *[]string, all bool, schema, table string, verbose bool) {
@@ -194,10 +201,10 @@ func appendMaintOptions(parts *[]string, all bool, schema, table string, verbose
 		*parts = append(*parts, "--all")
 	}
 	if schema != "" {
-		*parts = append(*parts, "--schema", quotePgArg(schema))
+		*parts = append(*parts, "--schema", schema)
 	}
 	if table != "" {
-		*parts = append(*parts, "--table", quotePgArg(table))
+		*parts = append(*parts, "--table", table)
 	}
 	if verbose {
 		*parts = append(*parts, "--verbose")
