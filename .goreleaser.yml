@@ -69,7 +69,7 @@ nfpms:
           mode: 0644
     release: "1"
     rpm:
-      summary: "PostgreSQL Package Manger CLI"
+      summary: "PostgreSQL Package Manager CLI"
       group: "Applications/Databases"
 
 

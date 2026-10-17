@@ -38,10 +38,10 @@ jobs:
       - name: Install analysis tools
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
-          go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
-          go install golang.org/x/tools/cmd/deadcode@v0.49.0
-          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+          go install honnef.co/go/tools/cmd/staticcheck@2026.2.2
+          go install golang.org/x/tools/cmd/deadcode@v0.52.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
       - name: Check GitHub Actions workflows
         run: actionlint
@@ -78,8 +78,8 @@ jobs:
         run: govulncheck ./...
 
       - name: Build release snapshot
-        uses: goreleaser/goreleaser-action@v7.2.3
+        uses: goreleaser/goreleaser-action@v7.3.0
         with:
           distribution: goreleaser
-          version: v2.18.0
+          version: v2.18.3
           args: release --snapshot --clean --skip=publish
