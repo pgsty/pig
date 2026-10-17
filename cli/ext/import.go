@@ -160,6 +160,13 @@ func ImportExtensionsResult(pgVer int, names []string, importPath string) *outpu
 		DurationMs: durationMs,
 	}
 
+	if len(failed) > 0 {
+		message := fmt.Sprintf("imported %d package(s), %d failed", len(pkgNames), len(failed))
+		return output.Fail(output.CodeExtensionImportFailed, message).
+			WithData(data).
+			WithDetail(fmt.Sprintf("failed: %s", strings.Join(failed, ", ")))
+	}
+
 	message := fmt.Sprintf("Imported %d packages to %s", len(pkgNames), importPath)
 	return output.OK(message, data)
 }
@@ -283,7 +290,7 @@ func parseAptDependsOutput(out string) []string {
 			value := strings.TrimSpace(line[idx+1:])
 			switch key {
 			case "Depends", "PreDepends", "Recommends", "Suggests", "Conflicts", "Breaks", "Replaces", "Enhances":
-				if value != "" {
+				if value != "" && !strings.HasPrefix(value, "<") {
 					deps = append(deps, value)
 				}
 			}
@@ -300,7 +307,9 @@ func runCommandInDir(args []string, workDir string) error {
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
-	cmd.Stdin = os.Stdin
+	if os.Getenv("PIG_NON_INTERACTIVE") == "" && !config.IsStructuredOutput() {
+		cmd.Stdin = os.Stdin
+	}
 	if config.IsStructuredOutput() {
 		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
@@ -327,7 +336,11 @@ func sudoCommandInDir(args []string, workDir string) error {
 	finalArgs := args
 	if isRoot := os.Geteuid() == 0 || config.CurrentUser == "root"; !isRoot {
 		if _, err := exec.LookPath("sudo"); err == nil {
-			finalArgs = append([]string{"sudo"}, args...)
+			if os.Getenv("PIG_NON_INTERACTIVE") != "" || config.IsStructuredOutput() {
+				finalArgs = append([]string{"sudo", "-n"}, args...)
+			} else {
+				finalArgs = append([]string{"sudo"}, args...)
+			}
 		} else {
 			logrus.Warnf("sudo command not available, trying to execute directly")
 		}
