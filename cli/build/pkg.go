@@ -33,7 +33,7 @@ func BuildPackage(pkg string, pgVersions string, noDebug bool, mirror bool) erro
 	}
 
 	// Step 2: Install dependencies
-	if err := InstallDeps(pkg, pgVersions); err != nil {
+	if err := InstallDepsList([]string{pkg}, pgVersions); err != nil {
 		// Deps may already be installed; keep going, but surface the error clearly.
 		logrus.Warnf("Dependency install error for %s: %v", pkg, err)
 	}

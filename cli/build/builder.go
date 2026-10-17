@@ -422,7 +422,7 @@ func (b *ExtensionBuilder) printBuildInfo() {
 	if src := b.buildSourceForLog(); src != "" {
 		logrus.Infof("src  : %s", src)
 	}
-	logrus.Infof("log  : %s/%s.log", b.LogDir, b.Extension.Pkg)
+	logrus.Infof("log  : %s/%s.log", b.LogDir, b.PackageName)
 	logrus.Infof("pg   : %s", b.formatPGVersions())
 	logrus.Info(strings.Repeat("-", b.HeaderWidth))
 }
@@ -691,6 +691,16 @@ func (b *ExtensionBuilder) buildForAll() {
 
 	// Set environment
 	envPATH := os.Getenv("PATH")
+	// Make Cargo available without changing the caller's toolchain priority.
+	if currentUser, err := user.Current(); err == nil {
+		cargoPath := filepath.Join(currentUser.HomeDir, ".cargo", "bin")
+		if info, err := os.Stat(cargoPath); err == nil && info.IsDir() {
+			if envPATH != "" {
+				envPATH += string(os.PathListSeparator)
+			}
+			envPATH += cargoPath
+		}
+	}
 	cmd.Env = buildCommandEnvironment(os.Environ(), b.OSType, b.NoDebug, envPATH)
 
 	// Prepare metadata
