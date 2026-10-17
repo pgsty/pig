@@ -73,6 +73,8 @@ func UpdatePig(pigVer, region string) error {
 	case config.DistroMAC:
 		PrintInstallMethod()
 		return fmt.Errorf("macos is not supported yet")
+	default:
+		return fmt.Errorf("unsupported platform: %s (%s)", config.OSVendor, config.OSType)
 	}
 	downloadTo = fmt.Sprintf("/tmp/%s", filename)
 

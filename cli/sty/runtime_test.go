@@ -2,6 +2,8 @@ package sty
 
 import (
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,6 +48,58 @@ func TestUsePigstyMirrorSourceRewritesDownloadURLs(t *testing.T) {
 	}
 	if got := get.AllVersions[0].Checksum; got != "abc" {
 		t.Fatalf("Checksum = %q, want abc", got)
+	}
+}
+
+type versionListTransport struct{}
+
+func (versionListTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	const checksums = "fixture pigsty-v1.10.3.tgz\nfixture pigsty-v1.1.8.tgz\nfixture pigsty-v1.1.99-rc1.tgz\nfixture pigsty-v1.1.2.tgz\n"
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(checksums)), Header: make(http.Header), Request: req}, nil
+}
+
+func TestListVersionsPreservesHighestMatchingCompletion(t *testing.T) {
+	oldTransport, oldStdout := http.DefaultTransport, os.Stdout
+	oldVersions, oldLatest := get.AllVersions, get.LatestVersion
+	oldSource, oldRegion, oldAccess, oldDetails := get.Source, get.Region, get.InternetAccess, get.Details
+	t.Cleanup(func() {
+		http.DefaultTransport, os.Stdout = oldTransport, oldStdout
+		get.AllVersions, get.LatestVersion = oldVersions, oldLatest
+		get.Source, get.Region, get.InternetAccess, get.Details = oldSource, oldRegion, oldAccess, oldDetails
+	})
+	http.DefaultTransport = versionListTransport{}
+	get.Details = false
+	for input, want := range map[string]string{
+		"1.1": "v1.10.3,v1.1.99-rc1,v1.1.8", "1.10": "v1.10.3", "1": "v1.10.3",
+		"1.1.2": "v1.10.3,v1.1.99-rc1,v1.1.8,v1.1.2", "1.1.99-rc1": "v1.10.3,v1.1.99-rc1",
+		"latest": "v1.10.3", "all": "v1.10.3,v1.1.99-rc1,v1.1.8,v1.1.2",
+	} {
+		t.Run(input, func(t *testing.T) {
+			file, err := os.CreateTemp(t.TempDir(), "versions")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer file.Close()
+			os.Stdout = file
+			err = ListVersionsWithOptions(ListOptions{Args: []string{input}})
+			os.Stdout = oldStdout
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(file.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var versions []string
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.HasPrefix(line, "v") {
+					versions = append(versions, strings.Fields(line)[0])
+				}
+			}
+			if got := strings.Join(versions, ","); got != want {
+				t.Errorf("sty list %s returned %s, want %s", input, got, want)
+			}
+		})
 	}
 }
 

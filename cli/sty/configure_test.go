@@ -1799,8 +1799,11 @@ func TestBuildProxyEnv(t *testing.T) {
 	t.Setenv("HTTP_PROXY", "")
 	t.Setenv("http_proxy", "http://lowercase-http")
 	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("https_proxy", "")
 	t.Setenv("ALL_PROXY", "socks5://all")
+	t.Setenv("all_proxy", "")
 	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
 	proxy := buildProxyEnv(true)
 	if proxy["http_proxy"] != "http://lowercase-http" {
 		t.Fatalf("expected lowercase http_proxy fallback, got: %#v", proxy)

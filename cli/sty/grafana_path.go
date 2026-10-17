@@ -104,6 +104,17 @@ func resolveGrafanaScope(options GrafanaOptions, action grafanaAction) (*grafana
 		}
 	}
 
+	scope, err := classifyGrafanaScope(root, selected)
+	if err != nil {
+		return nil, err
+	}
+	if err := inspectGrafanaScopePath(scope, action); err != nil {
+		return nil, err
+	}
+	return scope, nil
+}
+
+func classifyGrafanaScope(root, selected string) (*grafanaScope, error) {
 	relative, err := filepath.Rel(root, selected)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) || filepath.IsAbs(relative) {
 		return nil, errors.New("grafana path escapes its root")
@@ -144,9 +155,6 @@ func resolveGrafanaScope(options GrafanaOptions, action grafanaAction) (*grafana
 		return nil, errors.New("grafana paths may contain only one folder layer")
 	}
 
-	if err := inspectGrafanaScopePath(scope, action); err != nil {
-		return nil, err
-	}
 	return scope, nil
 }
 

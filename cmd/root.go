@@ -49,7 +49,7 @@ var rootCmd = &cobra.Command{
   pig repo add -ru            # overwrite existing repo & update cache
   pig install pg17            # install postgresql 17 PGDG package
   pig install pg_duckdb       # install certain postgresql extension
-  pig install pgactive -v 18  # install extension for specifc pg major
+  pig install pgactive -v 18  # install extension for specific pg major
 
   check https://pigsty.io/ext/ for details
 `,
@@ -426,6 +426,7 @@ func patroniNativeBoundary(args []string) (int, bool) {
 		"--log-level": true, "--log-path": true,
 	}
 	localCommands := map[string]bool{
+		"help":  true,
 		"set":   true,
 		"start": true, "up": true,
 		"stop": true, "dn": true,

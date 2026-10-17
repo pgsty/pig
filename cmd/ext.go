@@ -47,7 +47,7 @@ var extCmd = &cobra.Command{
   pig ext rm      [ext...]     # remove extension for current pg version
   pig ext update  [ext...]     # update extension to the latest version
   pig ext import  [ext...]     # download extension to local repo
-  pig ext link    [ext...]     # link postgres installation to path
+  pig ext link    [ver|path]   # link postgres installation to path
   pig ext reload               # reload the latest extension catalog data
 `,
 	Annotations: ancsAnn("pig ext", "query", "stable", "safe", true, "safe", "none", "current", 100),

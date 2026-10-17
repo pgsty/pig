@@ -881,8 +881,17 @@ func buildProxyEnv(useProxy bool) map[string]string {
 		httpProxy = strings.TrimSpace(os.Getenv("http_proxy"))
 	}
 	httpsProxy := strings.TrimSpace(os.Getenv("HTTPS_PROXY"))
+	if httpsProxy == "" {
+		httpsProxy = strings.TrimSpace(os.Getenv("https_proxy"))
+	}
 	allProxy := strings.TrimSpace(os.Getenv("ALL_PROXY"))
+	if allProxy == "" {
+		allProxy = strings.TrimSpace(os.Getenv("all_proxy"))
+	}
 	noProxy := strings.TrimSpace(os.Getenv("NO_PROXY"))
+	if noProxy == "" {
+		noProxy = strings.TrimSpace(os.Getenv("no_proxy"))
+	}
 	if noProxy == "" {
 		noProxy = defaultNoProxy
 	}

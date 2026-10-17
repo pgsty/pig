@@ -122,8 +122,8 @@ func CompleteVersion(version string) string {
 		if strings.Contains(v.Version, "-") {
 			continue // Skip pre-release versions
 		}
-		// Check if version matches our prefix
-		if strings.HasPrefix(v.Version, prefix) {
+		// Check if version matches our prefix at a dot boundary
+		if v.Version == prefix || strings.HasPrefix(v.Version, prefix+".") {
 			if highest == "" || CompareVersions(v.Version, highest) > 0 {
 				highest = v.Version
 			}
@@ -154,6 +154,9 @@ func comparePreRelease(v1Parts, v2Parts []string) int {
 	}
 
 	parse := func(s string) preRelease {
+		if s == "" {
+			return preRelease{}
+		}
 		var typ string
 		var num int
 		switch {
