@@ -51,6 +51,7 @@ func resolveModulePathForRm(m *Manager, module string) (string, error) {
 // If modules is empty, it backs up all repositories
 func RmRepos(modules []string, doUpdate bool) *output.Result {
 	startTime := time.Now()
+	requestedModules := modules
 	modules, err := ParseRmModules(modules)
 	if err != nil {
 		return output.Fail(output.CodeRepoInvalidArgs, err.Error())
@@ -79,7 +80,7 @@ func RmRepos(modules []string, doUpdate bool) *output.Result {
 	// Prepare data structure
 	data := &RepoRmData{
 		OSEnv:            osEnv,
-		RequestedModules: modules,
+		RequestedModules: requestedModules,
 		RemovedRepos:     []*RemovedRepoItem{},
 	}
 

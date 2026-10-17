@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"pig/internal/output"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -54,6 +55,9 @@ func TestRmReposScopeAndCache(t *testing.T) {
 					t.Fatalf("cache update=%v err=%v", update, err)
 				}
 				data := result.Data.(*RepoRmData)
+				if !slices.Equal(data.RequestedModules, args) {
+					t.Fatalf("requested_modules=%v, want original operands %v", data.RequestedModules, args)
+				}
 				if len(args) == 0 {
 					if data.BackupInfo == nil || len(data.BackupInfo.BackedUpFiles) != 4 {
 						t.Fatalf("backup=%+v", data.BackupInfo)
