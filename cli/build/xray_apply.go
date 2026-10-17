@@ -243,7 +243,7 @@ func (r proxyRuntime) apply(role, listen string, candidate []byte, replace bool,
 	if err != nil {
 		return nil, err
 	}
-	if t.saved[1].exists && !bytes.Equal(t.saved[1].data, service) && !strings.HasPrefix(string(t.saved[1].data), "# Managed by pig build proxy\n") && !replace {
+	if t.saved[1].exists && !r.serviceFileReplaceable(t.saved[1].data, service) && !replace {
 		return nil, fmt.Errorf("existing service configuration differs and is not managed by PIG")
 	}
 	gid, err := r.configGroupID()
@@ -287,4 +287,25 @@ func (r proxyRuntime) apply(role, listen string, candidate []byte, replace bool,
 		}
 	}
 	return result, nil
+}
+
+// Match complete generated service files. A marker by itself cannot establish
+// ownership: operator edits and foreign files still require --replace --yes.
+func (r proxyRuntime) serviceFileReplaceable(data, desired []byte) bool {
+	if bytes.Equal(data, desired) {
+		return true
+	}
+	if r.os == "darwin" {
+		// c885c696's renderer emitted this exact plist without the later comment.
+		legacy := bytes.Replace(desired, []byte("<!-- Managed by pig build proxy -->\n"), nil, 1)
+		return bytes.Equal(data, legacy)
+	}
+	// The only generated Linux variant is the privileged-port capability set.
+	for _, listen := range []string{"0.0.0.0:443", "127.0.0.1:9443"} {
+		generated, err := r.serviceContent(listen, "/usr/bin/xray")
+		if err == nil && bytes.Equal(data, generated) {
+			return true
+		}
+	}
+	return false
 }

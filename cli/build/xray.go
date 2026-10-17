@@ -238,6 +238,7 @@ func (r proxyRuntime) serviceContent(listen, binary string) ([]byte, error) {
 	// All interpolated paths are XML-escaped; arguments are never shell source.
 	escape := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
 	return []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!-- Managed by pig build proxy -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>%s</string>
