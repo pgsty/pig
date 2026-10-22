@@ -1,6 +1,6 @@
 module pig
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/goccy/go-yaml v1.19.2
@@ -31,4 +31,12 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
+)
+
+// Upgrade inherited tooling dependencies; tidy removes unused require entries.
+replace (
+	github.com/cpuguy83/go-md2man/v2 v2.0.6 => github.com/cpuguy83/go-md2man/v2 v2.0.7
+	github.com/stretchr/objx v0.1.0 => github.com/stretchr/objx v0.8.0
+	golang.org/x/mod v0.41.0 => golang.org/x/mod v0.42.0
+	golang.org/x/tools v0.51.0 => golang.org/x/tools v0.52.0
 )
