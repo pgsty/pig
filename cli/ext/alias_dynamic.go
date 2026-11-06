@@ -35,7 +35,6 @@ var (
 type categoryAliasSpec struct {
 	category string
 	targetPG int
-	isPgsql  bool
 }
 
 // resolveAliasPattern resolves both static aliases and dynamic category aliases.
@@ -72,7 +71,7 @@ func resolveCategoryAliasPackages(alias string, targetPgVer int) ([]string, bool
 	}
 
 	matrixOS, arch, allowMetadataFallback := resolveCategoryAliasMatrixTarget()
-	cacheKey := fmt.Sprintf("%p|%s|%s|%s|%s|%d|%s|%t|%t", Catalog, config.OSType, config.OSCode, matrixOS, arch, spec.targetPG, spec.category, allowMetadataFallback, spec.isPgsql)
+	cacheKey := fmt.Sprintf("%p|%s|%s|%s|%s|%d|%s|%t", Catalog, config.OSType, config.OSCode, matrixOS, arch, spec.targetPG, spec.category, allowMetadataFallback)
 	if v, ok := categoryAliasCache.Load(cacheKey); ok {
 		if cached, ok := v.([]string); ok {
 			return cached, true
@@ -96,7 +95,6 @@ func parseCategoryAlias(alias string, targetPgVer int) (spec categoryAliasSpec, 
 		return categoryAliasSpec{
 			category: category,
 			targetPG: targetPgVer,
-			isPgsql:  true,
 		}, true
 	}
 
@@ -125,7 +123,6 @@ func parseCategoryAlias(alias string, targetPgVer int) (spec categoryAliasSpec, 
 	return categoryAliasSpec{
 		category: category,
 		targetPG: ver,
-		isPgsql:  false,
 	}, true
 }
 
@@ -174,11 +171,11 @@ func buildCategoryPackageList(spec categoryAliasSpec, matrixOS, matrixArch strin
 	// betaTarget: the requested major is the current beta placeholder and has
 	// no catalog matrix data of its own yet.
 	betaTarget := IsBetaPGMajor(spec.targetPG)
-	// Visibility is evaluated against the stable window: pgsql-* aliases follow
-	// the latest stable template, and beta targets borrow it, restricted to
-	// PGDG-origin entries (PGDG rebuilds its repo for beta majors, Pigsty does not).
+	// Beta targets have no catalog matrix row of their own yet, so borrow the
+	// latest stable template and keep only PGDG-origin entries. Stable targets,
+	// including pgsql-* aliases with an explicit -v, use their exact PG row.
 	selectPG := spec.targetPG
-	if spec.isPgsql || betaTarget {
+	if betaTarget {
 		selectPG = PostgresLatestMajorVersion()
 	}
 
@@ -199,10 +196,6 @@ func buildCategoryPackageList(spec categoryAliasSpec, matrixOS, matrixArch strin
 		pkgName := ext.PackageName(spec.targetPG)
 		if pkgName == "" {
 			continue
-		}
-
-		if !spec.isPgsql {
-			pkgName = applyCategoryPackageSpecialCase(ext, pkgName, spec.targetPG)
 		}
 
 		for _, pkg := range ProcessPkgName(pkgName, spec.targetPG) {
@@ -266,16 +259,4 @@ func isCategoryExtensionVisible(ext *Extension, pgVer int, matrixOS, matrixArch 
 
 func repoIsPGDG(repo string) bool {
 	return strings.EqualFold(strings.TrimSpace(repo), "PGDG")
-}
-
-func applyCategoryPackageSpecialCase(ext *Extension, pkgName string, pgVer int) string {
-	if config.OSType == config.DistroEL && (ext.Pkg == "pgaudit" || ext.Name == "pgaudit") {
-		switch pgVer {
-		case 15:
-			return "pgaudit17_15"
-		case 14:
-			return "pgaudit16_14"
-		}
-	}
-	return pkgName
 }

@@ -29,7 +29,7 @@ func TestExtensionSummaryJSONSerialization(t *testing.T) {
 		License:     "GPL-2.0",
 		Repo:        "PGDG",
 		Status:      "available",
-		PackageName: "postgis36_17",
+		PackageName: "postgis37_17",
 		Description: "PostGIS geometry extension",
 		PgVer:       []string{"17", "16", "15"},
 	}
@@ -1326,9 +1326,9 @@ func TestExtensionAddDataJSONSerialization(t *testing.T) {
 		OSCode:    "el9",
 		Arch:      "amd64",
 		Requested: []string{"postgis", "pg_stat_statements"},
-		Packages:  []string{"postgis36_17", "pg_stat_statements_17"},
+		Packages:  []string{"postgis37_17", "pg_stat_statements_17"},
 		Installed: []*InstalledExtItem{
-			{Name: "postgis", Package: "postgis36_17", Version: "3.5.0"},
+			{Name: "postgis", Package: "postgis37_17", Version: "3.5.0"},
 			{Name: "pg_stat_statements", Package: "pg_stat_statements_17"},
 		},
 		Failed:      nil,
@@ -1417,9 +1417,9 @@ func TestExtensionAddDataWithFailed(t *testing.T) {
 		OSCode:    "el9",
 		Arch:      "amd64",
 		Requested: []string{"postgis", "nonexistent_ext"},
-		Packages:  []string{"postgis36_17"},
+		Packages:  []string{"postgis37_17"},
 		Installed: []*InstalledExtItem{
-			{Name: "postgis", Package: "postgis36_17"},
+			{Name: "postgis", Package: "postgis37_17"},
 		},
 		Failed: []*FailedExtItem{
 			{Name: "nonexistent_ext", Error: "extension not found in catalog", Code: 100501},
@@ -1518,9 +1518,9 @@ func TestExtensionAddDataOmitEmpty(t *testing.T) {
 		OSCode:    "el9",
 		Arch:      "amd64",
 		Requested: []string{"postgis"},
-		Packages:  []string{"postgis36_17"},
+		Packages:  []string{"postgis37_17"},
 		Installed: []*InstalledExtItem{
-			{Name: "postgis", Package: "postgis36_17"},
+			{Name: "postgis", Package: "postgis37_17"},
 		},
 		Failed:      nil, // should be omitted
 		DurationMs:  100,
@@ -1932,7 +1932,7 @@ func TestExtensionRmDataJSONSerialization(t *testing.T) {
 		OSCode:      "el9",
 		Arch:        "amd64",
 		Requested:   []string{"postgis", "pg_stat_statements"},
-		Packages:    []string{"postgis36_17", "pg_stat_statements_17"},
+		Packages:    []string{"postgis37_17", "pg_stat_statements_17"},
 		Removed:     []string{"postgis", "pg_stat_statements"},
 		Failed:      nil,
 		DurationMs:  1200,
@@ -2018,7 +2018,7 @@ func TestExtensionRmDataWithFailed(t *testing.T) {
 		OSCode:    "el9",
 		Arch:      "amd64",
 		Requested: []string{"postgis", "nonexistent_ext"},
-		Packages:  []string{"postgis36_17"},
+		Packages:  []string{"postgis37_17"},
 		Removed:   []string{"postgis"},
 		Failed: []*FailedExtItem{
 			{Name: "nonexistent_ext", Error: "extension not found in catalog", Code: 100501},
@@ -2055,7 +2055,7 @@ func TestExtensionRmDataOmitEmpty(t *testing.T) {
 		OSCode:      "el9",
 		Arch:        "amd64",
 		Requested:   []string{"postgis"},
-		Packages:    []string{"postgis36_17"},
+		Packages:    []string{"postgis37_17"},
 		Removed:     []string{"postgis"},
 		Failed:      nil, // should be omitted
 		DurationMs:  100,
@@ -2084,7 +2084,7 @@ func TestExtensionUpdateDataJSONSerialization(t *testing.T) {
 		OSCode:      "el9",
 		Arch:        "amd64",
 		Requested:   []string{"postgis", "pg_stat_statements"},
-		Packages:    []string{"postgis36_17", "pg_stat_statements_17"},
+		Packages:    []string{"postgis37_17", "pg_stat_statements_17"},
 		Updated:     []string{"postgis", "pg_stat_statements"},
 		Failed:      nil,
 		DurationMs:  2500,
@@ -2170,7 +2170,7 @@ func TestExtensionUpdateDataWithFailed(t *testing.T) {
 		OSCode:    "el9",
 		Arch:      "amd64",
 		Requested: []string{"postgis", "nonexistent_ext"},
-		Packages:  []string{"postgis36_17"},
+		Packages:  []string{"postgis37_17"},
 		Updated:   []string{"postgis"},
 		Failed: []*FailedExtItem{
 			{Name: "nonexistent_ext", Error: "extension not found in catalog", Code: 100501},
@@ -2207,7 +2207,7 @@ func TestExtensionUpdateDataOmitEmpty(t *testing.T) {
 		OSCode:      "el9",
 		Arch:        "amd64",
 		Requested:   []string{"postgis"},
-		Packages:    []string{"postgis36_17"},
+		Packages:    []string{"postgis37_17"},
 		Updated:     []string{"postgis"},
 		Failed:      nil, // should be omitted
 		DurationMs:  100,
@@ -2632,9 +2632,9 @@ func TestImportResultDataJSONSerialization(t *testing.T) {
 		Arch:       "amd64",
 		RepoDir:    "/www/pigsty",
 		Requested:  []string{"postgis", "pgvector"},
-		Packages:   []string{"postgis36_17", "pgvector_17"},
+		Packages:   []string{"postgis37_17", "pgvector_17"},
 		PkgCount:   2,
-		Downloaded: []string{"postgis36_17", "pgvector_17"},
+		Downloaded: []string{"postgis37_17", "pgvector_17"},
 		Failed:     nil,
 		DurationMs: 5000,
 	}
@@ -2708,9 +2708,9 @@ func TestImportResultDataWithFailed(t *testing.T) {
 		Arch:       "amd64",
 		RepoDir:    "/www/pigsty",
 		Requested:  []string{"postgis", "nonexistent"},
-		Packages:   []string{"postgis36_17"},
+		Packages:   []string{"postgis37_17"},
 		PkgCount:   1,
-		Downloaded: []string{"postgis36_17"},
+		Downloaded: []string{"postgis37_17"},
 		Failed:     []string{"nonexistent"},
 		DurationMs: 2000,
 	}
@@ -2741,7 +2741,7 @@ func TestImportResultDataOmitEmpty(t *testing.T) {
 		Arch:       "amd64",
 		RepoDir:    "/www/pigsty",
 		Requested:  []string{"postgis"},
-		Packages:   []string{"postgis36_17"},
+		Packages:   []string{"postgis37_17"},
 		PkgCount:   1,
 		Downloaded: nil, // should be omitted
 		Failed:     nil, // should be omitted
@@ -3431,7 +3431,7 @@ func TestRmExtensionsWithCatalog(t *testing.T) {
 	// Setup mock catalog
 	Catalog = &ExtensionCatalog{
 		Extensions: []*Extension{
-			{Name: "postgis", Pkg: "postgis", RpmPkg: "postgis36_$v", DebPkg: "postgresql-$v-postgis-3", RpmPg: []string{"17", "16"}, DebPg: []string{"17", "16"}},
+			{Name: "postgis", Pkg: "postgis", RpmPkg: "postgis37_$v", DebPkg: "postgresql-$v-postgis-3", RpmPg: []string{"17", "16"}, DebPg: []string{"17", "16"}},
 		},
 		ExtNameMap: map[string]*Extension{},
 		ExtPkgMap:  map[string]*Extension{},

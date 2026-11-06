@@ -178,7 +178,7 @@ func TestResolveBetaPgsqlCategoryAliasUsesLatestStableDEBTemplate(t *testing.T) 
 	}
 }
 
-func TestResolvePgsqlCategoryAliasUsesTemplateFromLatestVersion(t *testing.T) {
+func TestResolvePgsqlCategoryAliasUsesTargetVersion(t *testing.T) {
 	extAll := newTestCategoryExt(100, "pg_cron", "pg_cron", "TIME", []string{
 		"el9i:18:A:f:1:G:1.0",
 		"el9i:17:A:f:1:G:1.0",
@@ -188,46 +188,30 @@ func TestResolvePgsqlCategoryAliasUsesTemplateFromLatestVersion(t *testing.T) {
 	extOnly18 := newTestCategoryExt(110, "pg_topn", "pg_topn", "TIME", []string{"el9i:18:A:f:1:G:1.0"})
 	extOnly18.RpmPkg, extOnly18.RpmRepo, extOnly18.RpmPg = "pg_topn_$v", "PGDG", []string{"18"}
 
-	cleanup := withCategoryAliasTestEnv(t, config.DistroEL, "el9", "amd64", []*Extension{extAll, extOnly18})
+	extOnly17 := newTestCategoryExt(120, "pg17_only", "pg17_only", "TIME", []string{"el9i:17:A:f:1:G:1.0"})
+	extOnly17.RpmPkg, extOnly17.RpmRepo, extOnly17.RpmPg = "pg17_only_$v", "PGDG", []string{"17"}
+
+	cleanup := withCategoryAliasTestEnv(t, config.DistroEL, "el9", "amd64", []*Extension{extAll, extOnly18, extOnly17})
 	defer cleanup()
 
-	res := ResolveExtensionPackages(17, []string{"pgsql-time"}, false)
-	if len(res.NotFound) > 0 || len(res.NoPackage) > 0 {
-		t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
-	}
-	want := []string{"pg_cron_17", "pg_topn_17"}
-	if !reflect.DeepEqual(res.Packages, want) {
-		t.Fatalf("resolved packages mismatch\nwant: %v\ngot:  %v", want, res.Packages)
-	}
-}
-
-func TestResolveCategoryAliasPGAuditELRename(t *testing.T) {
-	ext := newTestCategoryExt(100, "pgaudit", "pgaudit", "SEC", []string{
-		"el9i:15:A:f:1:G:1.0",
-		"el9i:14:A:f:1:G:1.0",
-	})
-	ext.RpmPkg, ext.RpmRepo, ext.RpmPg = "pgaudit_$v", "PGDG", []string{"15", "14"}
-
-	cleanup := withCategoryAliasTestEnv(t, config.DistroEL, "el9", "amd64", []*Extension{ext})
-	defer cleanup()
-
-	cases := []struct {
-		pgVer    int
-		alias    string
-		expected string
+	for _, tc := range []struct {
+		name  string
+		pgVer int
+		alias string
+		want  []string
 	}{
-		{15, "pg15-sec", "pgaudit17_15"},
-		{14, "pg14-sec", "pgaudit16_14"},
-	}
-
-	for _, tc := range cases {
-		t.Run(fmt.Sprintf("pg%d", tc.pgVer), func(t *testing.T) {
+		{name: "pgsql explicit target", pgVer: 17, alias: "pgsql-time", want: []string{"pg_cron_17", "pg17_only_17"}},
+		{name: "numbered alias", pgVer: 17, alias: "pg17-time", want: []string{"pg_cron_17", "pg17_only_17"}},
+		{name: "pgsql default target", pgVer: 0, alias: "pgsql-time", want: []string{"pg_cron_18", "pg_topn_18"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearCategoryAliasCache()
 			res := ResolveExtensionPackages(tc.pgVer, []string{tc.alias}, false)
 			if len(res.NotFound) > 0 || len(res.NoPackage) > 0 {
 				t.Fatalf("unexpected resolution errors: not_found=%v no_package=%v", res.NotFound, res.NoPackage)
 			}
-			if !reflect.DeepEqual(res.Packages, []string{tc.expected}) {
-				t.Fatalf("expected %q, got %v", tc.expected, res.Packages)
+			if !reflect.DeepEqual(res.Packages, tc.want) {
+				t.Fatalf("resolved packages mismatch\nwant: %v\ngot:  %v", tc.want, res.Packages)
 			}
 		})
 	}

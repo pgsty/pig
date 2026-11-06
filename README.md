@@ -17,9 +17,9 @@ Also explore the full [**PGEXT.CLOUD directory**](https://pgext.cloud/) of 2,703
 
 ## Current catalog snapshot
 
-The **2026-10-29** source catalog snapshot contains **620 packaged catalog records**: **617** are marked available and **3** are retained as removed records. They map to **512** distinct package names when PostgreSQL contrib modules are included; the package view used for availability reports covers **451** non-contrib package families. The full PGEXT.CLOUD directory contains **2,703** ecosystem entries, including packaged, source-only, and provider-specific extensions.
+The current source catalog contains **620 packaged catalog records**: **617** are marked available and **3** are retained as removed records. They map to **514** distinct package names when PostgreSQL contrib modules are included; the package view used for availability reports covers **453** non-contrib package families. The full PGEXT.CLOUD directory contains **2,703** ecosystem entries, including packaged, source-only, and provider-specific extensions.
 
-The count follows the catalog directory-entry contract: it measures coverage, while package names, platform availability, PostgreSQL-major support, and database enablement remain separate properties. The `v1.10.3` release artifact ships with this **620-record** catalog snapshot; later catalog data can be loaded with `pig ext reload`.
+The count follows the catalog directory-entry contract: it measures coverage, while package names, platform availability, PostgreSQL-major support, and database enablement remain separate properties. The `v1.10.3` release artifact shipped with the earlier **2026-10-29 620-record** catalog snapshot; later catalog data can be loaded with `pig ext reload`.
 
 [![PostgreSQL Extension Ecosystem](https://pigsty.io/img/pigsty/ecosystem.jpg)](https://medium.com/@fengruohang/postgres-is-eating-the-database-world-157c204dcfc4)
 
@@ -400,7 +400,7 @@ vagrant@meta:~$ pig ext avail
 ✓ Found 444 packages available on u24.arm64
 
 Extension Availability on u24.aarch64 : https://pigsty.io/ext/os/u24.aarch64
-Showing 451 packages with 620 extensions  (green = PIGSTY, blue = PGDG)
+Showing 453 packages with 620 extensions  (green = PIGSTY, blue = PGDG)
 
 Pkg                     18          17          16          15          14
 timescaledb             2.31.0      2.31.0      2.31.0      2.28.3      2.19.3
@@ -419,7 +419,7 @@ pg_when                 0.1.10      0.1.10      0.1.10      0.1.10      0.1.10
 edtf_postgres           1.3.2       1.3.2       1.3.2       1.3.2       1.3.2
 pg_stl                  1.0.0       1.0.0       1.0.0       -           -
 cron_utils              0.1.0       0.1.0       0.1.0       0.1.0       0.1.0
-postgis                 3.6.4       3.6.4       3.6.4       3.6.4       3.6.4
+postgis                 3.7.0       3.7.0       3.7.0       3.7.0       3.7.0
 pgrouting               4.0.1       4.0.1       4.0.1       4.0.1       4.0.1
 pointcloud              1.2.5       1.2.5       1.2.5       1.2.5       1.2.5
 ...
