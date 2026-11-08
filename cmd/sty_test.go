@@ -591,12 +591,12 @@ func TestStyConfMirrorFlagSetsRegionChina(t *testing.T) {
 	}
 }
 
-func TestStyConfPositionalModeUsesNativeRoute(t *testing.T) {
+func TestStyConfTemplateShorthandUsesNativeRoute(t *testing.T) {
 	restore := saveStyConfState(t)
 	defer restore()
 
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, "conf"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, "conf", "ha"), 0o755); err != nil {
 		t.Fatalf("mkdir conf: %v", err)
 	}
 	template := `all:
@@ -608,7 +608,7 @@ func TestStyConfPositionalModeUsesNativeRoute(t *testing.T) {
     pg_version: 18
     pg_conf: oltp.yml
 `
-	if err := os.WriteFile(filepath.Join(home, "conf", "rich.yml"), []byte(template), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "conf", "ha", "full.yml"), []byte(template), 0o644); err != nil {
 		t.Fatalf("write template: %v", err)
 	}
 	if err := writeExecutable(filepath.Join(home, "configure"), "#!/bin/sh\nprintf raw > route_raw.txt\n"); err != nil {
@@ -621,21 +621,31 @@ func TestStyConfPositionalModeUsesNativeRoute(t *testing.T) {
 	pigstyConfRegion = "default"
 	pigstyConfSkip = true
 	pigstyConfNonInteractive = true
-	pigstyConfOutput = "native.yml"
-
-	if err := pigstyConfCmd.RunE(pigstyConfCmd, []string{"rich"}); err != nil {
-		t.Fatalf("pig sty conf failed: %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(home, "route_raw.txt")); err == nil {
-		t.Fatal("legacy configure script should not be called")
-	}
-	rendered, err := os.ReadFile(filepath.Join(home, "native.yml"))
-	if err != nil {
-		t.Fatalf("expected native output file: %v", err)
-	}
-	if !strings.Contains(string(rendered), "home_domain: infra.example.com") {
-		t.Fatalf("native --domain replacement missing:\n%s", rendered)
+	for _, test := range []struct {
+		name, flagMode string
+		args           []string
+	}{
+		{"positional", "", []string{"full"}},
+		{"flag", "full", nil},
+		{"path", "", []string{"./conf/ha/full.yml"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pigstyConfName = test.flagMode
+			pigstyConfOutput = test.name + ".yml"
+			if err := pigstyConfCmd.RunE(pigstyConfCmd, test.args); err != nil {
+				t.Fatalf("pig sty conf failed: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(home, "route_raw.txt")); err == nil {
+				t.Fatal("legacy configure script should not be called")
+			}
+			rendered, err := os.ReadFile(filepath.Join(home, pigstyConfOutput))
+			if err != nil {
+				t.Fatalf("expected native output file: %v", err)
+			}
+			if !strings.Contains(string(rendered), "home_domain: infra.example.com") {
+				t.Fatalf("native --domain replacement missing:\n%s", rendered)
+			}
+		})
 	}
 }
 

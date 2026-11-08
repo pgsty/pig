@@ -279,17 +279,12 @@ func ConfigureNative(opts ConfigureOptions) *output.Result {
 		return output.Fail(output.CodeStyConfigureInvalidArgs, "pigsty home is required")
 	}
 
-	mode, err := normalizeConfigureMode(opts.Mode)
+	mode, templatePath, err := resolveTemplatePath(home, opts.Mode)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return output.Fail(output.CodeStyConfigureTemplateNotFound, err.Error())
+		}
 		return output.Fail(output.CodeStyConfigureInvalidArgs, err.Error())
-	}
-
-	templatePath, err := resolveTemplatePath(home, mode)
-	if err != nil {
-		return output.Fail(output.CodeStyConfigureInvalidArgs, err.Error())
-	}
-	if _, err := os.Stat(templatePath); err != nil {
-		return output.Fail(output.CodeStyConfigureTemplateNotFound, fmt.Sprintf("template not found: conf/%s.yml", mode))
 	}
 
 	pgVer, err := validatePGVersion(opts.PGVersion)
@@ -503,11 +498,16 @@ func normalizeConfigureMode(mode string) (string, error) {
 	if mode == "" {
 		return defaultTemplateMode, nil
 	}
+	// Reject traversal before cleaning or stripping the optional conf/ prefix.
+	if filepath.IsAbs(mode) || slices.Contains(strings.Split(mode, "/"), "..") {
+		return "", fmt.Errorf("invalid conf mode: %s", mode)
+	}
 	clean := filepath.ToSlash(filepath.Clean(mode))
 	if clean == "." || clean == "" {
 		return defaultTemplateMode, nil
 	}
-	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+	clean = strings.TrimSuffix(strings.TrimPrefix(clean, "conf/"), ".yml")
+	if clean == "" {
 		return "", fmt.Errorf("invalid conf mode: %s", mode)
 	}
 	for _, r := range clean {
@@ -519,26 +519,37 @@ func normalizeConfigureMode(mode string) (string, error) {
 	return clean, nil
 }
 
-func resolveTemplatePath(home, mode string) (string, error) {
-	confDir := filepath.Join(home, "conf")
-	target := filepath.Join(confDir, filepath.FromSlash(mode)+".yml")
-
-	baseAbs, err := filepath.Abs(confDir)
+// resolveTemplatePath returns the canonical mode as well as its path, so build
+// preflight and version-pinning rules do not depend on how the mode was spelled.
+func resolveTemplatePath(home, requestedMode string) (string, string, error) {
+	mode, err := normalizeConfigureMode(requestedMode)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	targetAbs, err := filepath.Abs(target)
+	confDir, err := filepath.Abs(filepath.Join(home, "conf"))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	rel, err := filepath.Rel(baseAbs, targetAbs)
-	if err != nil {
-		return "", err
+	candidates := []string{mode}
+	if !strings.Contains(mode, "/") {
+		for _, group := range []string{"ha", "fork", "app", "demo", "build"} {
+			candidates = append(candidates, group+"/"+mode)
+		}
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("invalid conf mode path: %s", mode)
+	for _, candidate := range candidates {
+		target := filepath.Join(confDir, filepath.FromSlash(candidate)+".yml")
+		info, err := os.Stat(target)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", "", fmt.Errorf("failed to inspect template conf/%s.yml: %w", candidate, err)
+		}
+		if info.Mode().IsRegular() {
+			return candidate, target, nil
+		}
 	}
-	return targetAbs, nil
+	return "", "", fmt.Errorf("template not found for conf mode %q: %w", mode, os.ErrNotExist)
 }
 
 func validatePGVersion(ver string) (int, error) {
@@ -1438,7 +1449,7 @@ func applyTemplatePGVersion(mutation *inventory.Mutation, globals *inventory.Map
 	templateVersion := configureTemplatePGVersion(globals, opts.Mode)
 	effectiveVersion := chooseEffectivePGVersion(opts.Mode, opts.PGVersion, templateVersion)
 	var warnings []string
-	canOverride := opts.Mode != "mssql" && opts.Mode != "polar" && !pgMajorTemplateMode.MatchString(opts.Mode)
+	canOverride := !isPinnedPGVersionMode(opts.Mode)
 	if opts.PGVersion > 0 && canOverride {
 		if err := globals.Set("pg_version", opts.PGVersion, insertAfterExisting(globals, "node_repo_modules")...); err != nil {
 			return 0, nil, err
@@ -1486,10 +1497,18 @@ func configureTemplatePGVersion(globals *inventory.MappingEditor, mode string) i
 }
 
 func chooseEffectivePGVersion(mode string, requested, templateVersion int) int {
-	if requested > 0 && mode != "mssql" && mode != "polar" && !pgMajorTemplateMode.MatchString(mode) {
+	if requested > 0 && !isPinnedPGVersionMode(mode) {
 		return requested
 	}
 	return templateVersion
+}
+
+func isPinnedPGVersionMode(mode string) bool {
+	switch mode {
+	case "mssql", "polar", "fork/mssql", "fork/polar":
+		return true
+	}
+	return pgMajorTemplateMode.MatchString(mode)
 }
 
 func enableChinaTemplateKey(mutation *inventory.Mutation, key string) error {

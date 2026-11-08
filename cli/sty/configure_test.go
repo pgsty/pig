@@ -49,9 +49,16 @@ func TestNormalizeConfigureMode(t *testing.T) {
 	}{
 		{name: "default", input: "", want: "meta"},
 		{name: "normal", input: "ha/full", want: "ha/full"},
+		{name: "suffix", input: "full.yml", want: "full"},
+		{name: "prefix", input: "conf/ha/full", want: "ha/full"},
+		{name: "relative file", input: "./conf/ha/full.yml", want: "ha/full"},
+		{name: "root file", input: "conf/meta.yml", want: "meta"},
 		{name: "backslash", input: `ha\full`, want: "ha/full"},
 		{name: "traversal", input: "../meta", wantErr: true},
+		{name: "internal traversal", input: "ha/../meta", wantErr: true},
+		{name: "prefixed traversal", input: "conf/../meta.yml", wantErr: true},
 		{name: "absolute", input: "/tmp/meta", wantErr: true},
+		{name: "empty stem", input: "conf/.yml", wantErr: true},
 		{name: "invalid char", input: "meta$1", wantErr: true},
 	}
 	for _, tt := range tests {
@@ -453,7 +460,7 @@ func TestMutateTemplateBetaPGSkipsPinnedKernelModes(t *testing.T) {
     node_repo_modules: node,infra,pgsql
     pg_version: 17
 `
-	for _, mode := range []string{"mssql", "polar"} {
+	for _, mode := range []string{"mssql", "polar", "fork/mssql", "fork/polar"} {
 		got, _, warnings, err := mutateTemplate(content, mutationOptions{
 			Mode:      mode,
 			PGVersion: ext.PostgresBetaMajorVersion,
@@ -1779,14 +1786,17 @@ func TestResolveTemplatePathGuardsTraversal(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(tmp, "conf"), 0755); err != nil {
 		t.Fatalf("mkdir conf: %v", err)
 	}
-	path, err := resolveTemplatePath(tmp, "meta")
+	if err := os.WriteFile(filepath.Join(tmp, "conf", "meta.yml"), []byte("all: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, path, err := resolveTemplatePath(tmp, "meta")
 	if err != nil {
 		t.Fatalf("resolve safe path failed: %v", err)
 	}
 	if !strings.HasSuffix(path, filepath.Join("conf", "meta.yml")) {
 		t.Fatalf("unexpected path: %q", path)
 	}
-	if _, err := resolveTemplatePath(tmp, "../meta"); err == nil {
+	if _, _, err := resolveTemplatePath(tmp, "../meta"); err == nil {
 		t.Fatal("expected traversal path to fail")
 	}
 }

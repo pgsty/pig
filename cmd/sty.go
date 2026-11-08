@@ -80,8 +80,10 @@ and controller-side Grafana dashboards.
 
 var styConfigureLong = fmt.Sprintf(`Configure Pigsty through the native Inventory workflow.
 
-MODE selects conf/MODE.yml and is equivalent to --conf MODE. Specify the mode
-either positionally or with --conf, not both.
+MODE is equivalent to --conf MODE. Specify the mode either positionally or with
+--conf, not both. Bare names search conf/ first, then ha/, fork/, app/, demo/,
+and build/ in that order. Relative paths such as ha/full select that template
+directly. The conf/ prefix and .yml suffix are optional.
 
 PostgreSQL major versions: %s (beta: %d). --skip uses the placeholder primary
 IP and skips the admin SSH/sudo preflight; it cannot be combined with --ip.
@@ -97,7 +99,7 @@ const styConfigureExample = `
   pig sty configure                  # same as 'pig sty conf' (alias)
   pig sty conf -g                    # generate with random passwords (RECOMMENDED!)
   pig sty conf rich                  # use conf/rich.yml template (with more extensions)
-  pig sty conf ha/full               # use conf/ha/full.yml 4-node ha template
+  pig sty conf full                  # find conf/ha/full.yml (same as ha/full)
   pig sty conf slim                  # use conf/slim.yml template (minimal install)
   pig sty conf supabase              # use conf/supabase.yml template (self-hosting)
   pig sty conf rich -v 17            # use conf/rich.yml template with PostgreSQL 17
@@ -106,7 +108,7 @@ const styConfigureExample = `
   pig sty conf -x                    # write proxy env from environment to config
   pig sty conf ha/trio --ip 10.0.0.10,10.0.0.11,10.0.0.12
   pig sty conf --domain infra.example.com
-  pig sty conf ha/full -g -O ha.yml  # full HA template with random passwords to ha.yml
+  pig sty conf full -g -O ha.yml     # full HA template with random passwords to ha.yml
 `
 
 var pigstyInitCmd = &cobra.Command{
