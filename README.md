@@ -2,24 +2,24 @@
 
 [![Website: pig.pgsty.com](https://img.shields.io/badge/Website-pig.pgsty.com-slategray?style=flat&logo=cilium&logoColor=white)](https://pig.pgsty.com/)
 [![Doc: pig](https://img.shields.io/badge/Docs-pig-slategray?style=flat)](https://pig.pgsty.com/docs/)
-[![Version: v1.10.4](https://img.shields.io/badge/version-v1.10.4-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.10.4)
-[![Pigsty: v4.5.0](https://img.shields.io/badge/Pigsty-v4.5.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
+[![Version: v1.11.0](https://img.shields.io/badge/version-v1.11.0-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.11.0)
+[![Pigsty: v4.6.0](https://img.shields.io/badge/Pigsty-v4.6.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
-[![Extensions: 626](https://img.shields.io/badge/extensions-626-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
+[![Extensions: 625](https://img.shields.io/badge/extensions-625-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pgsty/pig)
 
 [**pig**](https://pig.pgsty.com/intro/) is an open-source PostgreSQL and extension package manager for [mainstream](https://pigsty.io/ext/os/) (EL/Debian/Ubuntu) Linux.
 
-Install PostgreSQL 14–18 and explore a catalog of [626 packaged entries](https://pigsty.io/ext/list) on `amd64` or `arm64` hosts through the native OS package manager.
+Install PostgreSQL 14–18 and explore a catalog of [625 packaged entries](https://pigsty.io/ext/list) on `amd64` or `arm64` hosts through the native OS package manager.
 
 PIG-owned commands can emit self-describing structured results with `-o json` or `-o yaml`, making it an **Agent-Friendly** PostgreSQL CLI tool. Native passthrough commands retain their own interaction and output contract.
-Also explore the full [**PGEXT.CLOUD directory**](https://pgext.cloud/) of 2,703 catalogued PostgreSQL extensions.
+Also explore the full [**PGEXT.CLOUD directory**](https://pgext.cloud/) of 2,733 catalogued PostgreSQL extensions.
 
 ## Current catalog snapshot
 
-The current source catalog contains **626 packaged catalog records**: **624** are marked available and **2** are retained as removed records. They map to **518** distinct package names when PostgreSQL contrib modules are included; the package view used for availability reports covers **457** non-contrib package families. The full PGEXT.CLOUD directory contains **2,703** ecosystem entries, including packaged, source-only, and provider-specific extensions.
+The current public catalog metric is **625 packaged entries**. The source snapshot retains lifecycle records for removed entries; the entries map to **518** distinct package names when PostgreSQL contrib modules are included, and the package view used for availability reports covers **457** non-contrib package families. The full PGEXT.CLOUD directory contains **2,733** ecosystem entries, including packaged, source-only, and provider-specific extensions.
 
-The count follows the catalog directory-entry contract: it measures coverage, while package names, platform availability, PostgreSQL-major support, and database enablement remain separate properties. The `v1.10.4` release includes the **2026-11-06 626-record** catalog snapshot; later catalog data can be loaded with `pig ext reload`.
+The count follows the catalog directory-entry contract: it measures coverage, while package names, platform availability, PostgreSQL-major support, and database enablement remain separate properties. The `v1.11.0` release uses the **2026-11-09 625-entry** public metric; later catalog data can be loaded with `pig ext reload`.
 
 [![PostgreSQL Extension Ecosystem](https://pigsty.io/img/pigsty/ecosystem.jpg)](https://medium.com/@fengruohang/postgres-is-eating-the-database-world-157c204dcfc4)
 
@@ -48,7 +48,7 @@ $ pig install pg18              # install PostgreSQL 18 kernel packages
 $ pig ext add pg_duckdb -v 18   # install the pg_duckdb extension (for current pg18)
 ```
 
-These commands install host packages. Creating or configuring an extension inside a database is a separate PostgreSQL operation. Check the [advanced usage](#advanced-usage) for details and the [full list of 626 catalog entries](https://pigsty.io/ext/list/).
+These commands install host packages. Creating or configuring an extension inside a database is a separate PostgreSQL operation. Check the [advanced usage](#advanced-usage) for details and the [full list of 625 catalog entries](https://pigsty.io/ext/list/).
 
 [![asciicast](https://asciinema.org/a/695902.svg)](https://asciinema.org/a/695902)
 
@@ -400,7 +400,7 @@ vagrant@meta:~$ pig ext avail
 ✓ Found 444 packages available on u24.arm64
 
 Extension Availability on u24.aarch64 : https://pigsty.io/ext/os/u24.aarch64
-Showing 457 packages with 626 extensions  (green = PIGSTY, blue = PGDG)
+Showing 457 packages with 625 extensions  (green = PIGSTY, blue = PGDG)
 
 Pkg                     18          17          16          15          14
 timescaledb             2.31.0      2.31.0      2.31.0      2.28.3      2.19.3

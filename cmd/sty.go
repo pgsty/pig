@@ -127,7 +127,7 @@ requires interactive EULA acceptance or --accept-eula.`,
   pig sty init -f                # install and OVERWRITE existing pigsty dir
   pig sty init -m                # install from mirror source
   pig sty init -p /tmp/pigsty    # install to another location /tmp/pigsty
-  pig sty init -v 4.5            # get & install specific version v4.5.0
+  pig sty init -v 4.6            # get & install specific version v4.6.0
   pig sty init 4                 # get & install specific version v4 latest
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
