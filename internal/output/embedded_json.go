@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // EmbeddedJSON wraps a JSON value (object/array/etc.) so it can be embedded as a

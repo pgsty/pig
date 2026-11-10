@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"

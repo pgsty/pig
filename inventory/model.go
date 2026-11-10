@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Position is a one-based source position plus its zero-based byte offset.

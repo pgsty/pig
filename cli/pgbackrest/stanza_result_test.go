@@ -13,7 +13,7 @@ import (
 
 	"pig/internal/output"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 func TestPbStanzaResultDataJSONSerialization(t *testing.T) {

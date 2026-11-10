@@ -16,7 +16,7 @@ import (
 	"testing"
 
 	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 	"pig/cli/license"
 	"pig/internal/config"
 	"pig/internal/utils"

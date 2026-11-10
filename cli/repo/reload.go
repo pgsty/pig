@@ -9,7 +9,7 @@ import (
 	"pig/internal/utils"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // ReloadRepoCatalogWithResult downloads the latest repo catalog and returns a structured Result

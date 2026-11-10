@@ -6,7 +6,7 @@
 VERSION=v1.11.0
 PIG_VERSION:=$(patsubst v%,%,$(VERSION))
 PIGSTY_VERSION:=4.6.0
-GORELEASER_VERSION:=v2.18.3
+GORELEASER_VERSION:=v2.20.0
 GORELEASER:=go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
 DOCS_DIR?=../pig.pgsty.com
 

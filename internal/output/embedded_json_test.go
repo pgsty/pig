@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 func TestEmbeddedJSON_MarshalJSON_EmbedsObjectNotString(t *testing.T) {
