@@ -220,3 +220,46 @@ func TestClientRefusesRedirectsAndUnsafeEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestClientSingleEncodesPathSegmentsAndRejectsTraversalOrMalformedSecret(t *testing.T) {
+	var seenEscapedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		seenEscapedPath = request.URL.EscapedPath()
+		_, _ = writer.Write([]byte(`{"dashboard":{},"meta":{}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{Endpoint: server.URL, Username: "admin", Password: "secret", HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.GetDashboard(context.Background(), "uid%25check"); err != nil {
+		t.Fatal(err)
+	}
+	if seenEscapedPath != "/api/dashboards/uid/uid%2525check" {
+		t.Fatalf("escaped path = %q, want single-encoded /api/dashboards/uid/uid%%2525check", seenEscapedPath)
+	}
+
+	for _, bad := range []string{"", ".", "..", "a/b", `a\b`, "bad\nuid"} {
+		if _, err := client.GetDashboard(context.Background(), bad); err == nil {
+			t.Errorf("GetDashboard(%q) succeeded, want rejection", bad)
+		}
+		if err := client.DeleteFolder(context.Background(), bad); err == nil {
+			t.Errorf("DeleteFolder(%q) succeeded, want rejection", bad)
+		}
+		if _, err := client.GetDashboardResource(context.Background(), bad, "name"); err == nil {
+			t.Errorf("GetDashboardResource(ns=%q) succeeded, want rejection", bad)
+		}
+		if _, err := client.GetDashboardResource(context.Background(), "default", bad); err == nil {
+			t.Errorf("GetDashboardResource(name=%q) succeeded, want rejection", bad)
+		}
+	}
+
+	_, err = NewClient(Config{Endpoint: "http://admin:super-secret@%zz"})
+	if err == nil {
+		t.Fatal("malformed endpoint accepted")
+	}
+	if strings.Contains(err.Error(), "super-secret") {
+		t.Fatalf("malformed endpoint error leaked embedded credential: %q", err.Error())
+	}
+}

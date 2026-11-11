@@ -135,7 +135,7 @@ func NewClient(config Config) (*Client, error) {
 	endpoint := strings.TrimSpace(config.Endpoint)
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("parse Grafana endpoint: %w", err)
+		return nil, errors.New("invalid Grafana endpoint URL")
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return nil, errors.New("grafana endpoint must use http or https")
@@ -202,9 +202,22 @@ func (c *Client) Search(ctx context.Context) ([]SearchItem, error) {
 	return nil, errors.New("grafana search pagination exceeded the safety limit")
 }
 
+func validatePathSegment(seg, kind string) error {
+	if seg == "" || seg == "." || seg == ".." {
+		return fmt.Errorf("invalid Grafana %s: %q", kind, seg)
+	}
+	if strings.ContainsAny(seg, "/\\\x00\r\n") {
+		return fmt.Errorf("invalid Grafana %s: path separators or control characters are not allowed", kind)
+	}
+	return nil
+}
+
 func (c *Client) GetDashboard(ctx context.Context, uid string) (DashboardEnvelope, error) {
+	if err := validatePathSegment(uid, "dashboard UID"); err != nil {
+		return DashboardEnvelope{}, err
+	}
 	var result DashboardEnvelope
-	err := c.do(ctx, http.MethodGet, "dashboards/uid/"+url.PathEscape(uid), nil, nil, &result)
+	err := c.do(ctx, http.MethodGet, "dashboards/uid/"+uid, nil, nil, &result)
 	return result, err
 }
 
@@ -213,8 +226,12 @@ func (c *Client) GetDashboard(ctx context.Context, uid string) (DashboardEnvelop
 // surface because schema v2 layouts (for example tabs and section variables)
 // cannot round-trip through /api/dashboards/db.
 func (c *Client) GetDashboardResource(ctx context.Context, namespace, name string) (map[string]interface{}, error) {
+	route, err := dashboardResourceRoute(namespace, name, true)
+	if err != nil {
+		return nil, err
+	}
 	var result map[string]interface{}
-	err := c.doResource(ctx, http.MethodGet, dashboardResourceRoute(namespace, name), nil, nil, &result)
+	err = c.doResource(ctx, http.MethodGet, route, nil, nil, &result)
 	return result, err
 }
 
@@ -230,10 +247,16 @@ func (c *Client) UpsertDashboard(ctx context.Context, dashboard map[string]inter
 // resource. Grafana uses POST on the collection for creation and PUT on the
 // named item for replacement, so a bounded existence check selects the method.
 func (c *Client) UpsertDashboardResource(ctx context.Context, resource map[string]interface{}, namespace, name string) error {
-	collection := dashboardResourceRoute(namespace, "")
-	item := dashboardResourceRoute(namespace, name)
+	collection, err := dashboardResourceRoute(namespace, "", false)
+	if err != nil {
+		return err
+	}
+	item, err := dashboardResourceRoute(namespace, name, true)
+	if err != nil {
+		return err
+	}
 	var current map[string]interface{}
-	err := c.doResource(ctx, http.MethodGet, item, nil, nil, &current)
+	err = c.doResource(ctx, http.MethodGet, item, nil, nil, &current)
 	if err == nil {
 		return c.doResource(ctx, http.MethodPut, item, nil, resource, nil)
 	}
@@ -247,16 +270,25 @@ func (c *Client) UpsertDashboardResource(ctx context.Context, resource map[strin
 	return err
 }
 
-func dashboardResourceRoute(namespace, name string) string {
-	route := "apis/dashboard.grafana.app/v2/namespaces/" + url.PathEscape(namespace) + "/dashboards"
-	if name != "" {
-		route += "/" + url.PathEscape(name)
+func dashboardResourceRoute(namespace, name string, requireName bool) (string, error) {
+	if err := validatePathSegment(namespace, "namespace"); err != nil {
+		return "", err
 	}
-	return route
+	route := "apis/dashboard.grafana.app/v2/namespaces/" + namespace + "/dashboards"
+	if requireName || name != "" {
+		if err := validatePathSegment(name, "resource name"); err != nil {
+			return "", err
+		}
+		route += "/" + name
+	}
+	return route, nil
 }
 
 func (c *Client) DeleteDashboard(ctx context.Context, uid string) error {
-	return c.do(ctx, http.MethodDelete, "dashboards/uid/"+url.PathEscape(uid), nil, nil, nil)
+	if err := validatePathSegment(uid, "dashboard UID"); err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodDelete, "dashboards/uid/"+uid, nil, nil, nil)
 }
 
 func (c *Client) CreateFolder(ctx context.Context, uid, title string) error {
@@ -264,11 +296,17 @@ func (c *Client) CreateFolder(ctx context.Context, uid, title string) error {
 }
 
 func (c *Client) UpdateFolder(ctx context.Context, uid, title string) error {
-	return c.do(ctx, http.MethodPut, "folders/"+url.PathEscape(uid), nil, map[string]interface{}{"title": title, "overwrite": true}, nil)
+	if err := validatePathSegment(uid, "folder UID"); err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodPut, "folders/"+uid, nil, map[string]interface{}{"title": title, "overwrite": true}, nil)
 }
 
 func (c *Client) DeleteFolder(ctx context.Context, uid string) error {
-	return c.do(ctx, http.MethodDelete, "folders/"+url.PathEscape(uid), nil, nil, nil)
+	if err := validatePathSegment(uid, "folder UID"); err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodDelete, "folders/"+uid, nil, nil, nil)
 }
 
 func (c *Client) UpdateCurrentOrganization(ctx context.Context, name string) error {
@@ -276,7 +314,10 @@ func (c *Client) UpdateCurrentOrganization(ctx context.Context, name string) err
 }
 
 func (c *Client) StarDashboard(ctx context.Context, uid string) error {
-	err := c.do(ctx, http.MethodPost, "user/stars/dashboard/uid/"+url.PathEscape(uid), nil, nil, nil)
+	if err := validatePathSegment(uid, "dashboard UID"); err != nil {
+		return err
+	}
+	err := c.do(ctx, http.MethodPost, "user/stars/dashboard/uid/"+uid, nil, nil, nil)
 	if StatusCode(err) == http.StatusPreconditionFailed {
 		return nil
 	}
