@@ -14,6 +14,7 @@ import (
 
 	"pig/cli/ext"
 	"pig/internal/config"
+	"pig/internal/output"
 	"pig/internal/utils"
 
 	"github.com/sirupsen/logrus"
@@ -475,6 +476,10 @@ func Reload(cfg *Config) error {
 func Status(cfg *Config) error {
 	dataDir := GetPgData(cfg)
 	dbsu := GetDbSU(cfg)
+	result := StatusResult(cfg)
+	// StatusResult supplies this DTO on every path, including probe failures.
+	statusData := result.Data.(*PgStatusResultData)
+	knownState := result.Success || result.Code == output.CodePgStatusNotRunning
 
 	fmt.Printf("%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
 	fmt.Printf("%s PostgreSQL Status Summary%s\n", utils.ColorBold, utils.ColorReset)
@@ -493,7 +498,11 @@ func Status(cfg *Config) error {
 
 	// 2. Compact pg_controldata status summary
 	fmt.Println()
-	statusData := printCompactStatusSummary(cfg, dbsu, dataDir)
+	if knownState {
+		printCompactStatusData(cfg, dataDir, statusData, PgControlData{Fields: statusData.ControlData})
+	} else {
+		fmt.Printf("  %sPostgreSQL state unknown: %s%s\n", utils.ColorYellow, result.Message, utils.ColorReset)
+	}
 
 	// 3. PostgreSQL processes (ps)
 	fmt.Printf("\n%s[PostgreSQL Processes]%s\n", utils.ColorBold, utils.ColorReset)
@@ -502,12 +511,19 @@ func Status(cfg *Config) error {
 
 	// 4. Related services (systemctl)
 	fmt.Printf("\n%s[Related Services]%s\n", utils.ColorBold, utils.ColorReset)
-	showPostgresRuntimeStatus(statusData.Running)
+	if knownState {
+		showPostgresRuntimeStatus(statusData.Running)
+	} else {
+		printRelatedServiceStatus("postgres", serviceStatusView{Text: "unknown", Color: utils.ColorYellow, Show: true})
+	}
 	for _, serviceName := range pgStatusRelatedServices() {
 		showServiceStatus(serviceName)
 	}
 
 	fmt.Printf("\n%s══════════════════════════════════════════════════════════════════%s\n", utils.ColorCyan, utils.ColorReset)
+	if !result.Success {
+		return &utils.ExitCodeError{Code: result.ExitCode(), Err: fmt.Errorf("%s", result.Message)}
+	}
 	return nil
 }
 
@@ -516,10 +532,6 @@ func Status(cfg *Config) error {
 func PrintCompactStatusSummary(cfg *Config) {
 	dataDir := GetPgData(cfg)
 	dbsu := GetDbSU(cfg)
-	printCompactStatusSummary(cfg, dbsu, dataDir)
-}
-
-func printCompactStatusSummary(cfg *Config, dbsu, dataDir string) *PgStatusResultData {
 	statusData := &PgStatusResultData{
 		DataDir: dataDir,
 	}
@@ -538,11 +550,15 @@ func printCompactStatusSummary(cfg *Config, dbsu, dataDir string) *PgStatusResul
 		logrus.Debugf("cannot read compact PostgreSQL status: %v", err)
 	}
 
-	role := detectRoleString(cfg)
 	controlData, err := collectPgControlData(cfg, dbsu, dataDir)
 	if err != nil {
 		logrus.Debugf("pg_controldata failed: %v", err)
 	}
+	printCompactStatusData(cfg, dataDir, statusData, controlData)
+}
+
+func printCompactStatusData(cfg *Config, dataDir string, statusData *PgStatusResultData, controlData PgControlData) {
+	role := detectRoleString(cfg)
 	fmt.Println(renderPgStatusCompactHeader(true))
 	if pg, err := GetPgInstall(cfg); err == nil && pg != nil {
 		PrintHint([]string{pg.PgControldata(), "-D", dataDir})
@@ -550,7 +566,6 @@ func printCompactStatusSummary(cfg *Config, dbsu, dataDir string) *PgStatusResul
 		logrus.Debugf("cannot resolve pg_controldata command: %v", err)
 	}
 	fmt.Print(renderPgStatusCompactBody(statusData, role, controlData, true))
-	return statusData
 }
 
 // showPostgresProcesses shows postgres processes for DBSU user

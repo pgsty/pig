@@ -1429,7 +1429,10 @@ func applyTinyTemplateDefaults(globals *inventory.MappingEditor, cpuCount int) e
 }
 
 func applyTemplateRegion(mutation *inventory.Mutation, globals *inventory.MappingEditor, region string) error {
-	if region != "" && region != "default" {
+	// An omitted region already inherits default; override an existing template
+	// value in either direction without adding a redundant default declaration.
+	_, hasRegion := globals.Lookup("region")
+	if region != "" && (region != "default" || hasRegion) {
 		if err := globals.Set("region", region, insertAfterExisting(globals, "admin_ip")...); err != nil {
 			return err
 		}

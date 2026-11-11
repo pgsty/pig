@@ -453,7 +453,7 @@ IMPORTANT: PostgreSQL must be stopped before restore.`,
 		}
 
 		// Text mode: use original Restore function
-		return silentRuntimeError(cmd, pgbackrest.Restore(pbConfig, opts))
+		return runtimeCommandError(cmd, pgbackrest.Restore(pbConfig, opts))
 	},
 }
 

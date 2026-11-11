@@ -91,7 +91,7 @@ var (
 	bootStdinIsTerminal           = utils.StdinIsTerminal
 	bootEnsureSSH                 = ensureLocalSSH
 	bootEnsurePigsty              = ensureDefaultPigsty
-	bootAutoPkg                   = "/tmp/pkg.tgz"
+	bootResolvePackage            = config.ResolveOfflinePackagePath
 	bootRepoDir                   = "/www/pigsty"
 	bootProgressOut     io.Writer = os.Stderr
 )
@@ -210,7 +210,7 @@ func resolveBootstrapOfflineSource(requested string, data *BootData) (string, bo
 	pkg, err := resolveBootPackage(requested)
 	if err != nil {
 		if errors.Is(err, errUntrustedAutomaticPackage) {
-			appendBootWarningText(data, "ignored unsafe automatic package: "+bootAutoPkg)
+			appendBootWarningText(data, "ignored unsafe automatic package: "+pkg)
 			pkg = ""
 		} else {
 			return "", false, output.Fail(output.CodeStyBootstrapResourceMissing, err.Error()).WithData(data)
@@ -610,7 +610,11 @@ func missingBootstrapRepoModules(result *output.Result, required ...string) []st
 func resolveBootPackage(requested string) (string, error) {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
-		info, err := os.Lstat(bootAutoPkg)
+		path, err := bootResolvePackage("")
+		var info os.FileInfo
+		if err == nil {
+			info, err = os.Lstat(path)
+		}
 		if os.IsNotExist(err) {
 			return "", nil
 		}
@@ -618,9 +622,9 @@ func resolveBootPackage(requested string) (string, error) {
 			return "", fmt.Errorf("inspect automatic offline package: %w", err)
 		}
 		if !info.Mode().IsRegular() || !trustedAutomaticPackage(info) {
-			return "", fmt.Errorf("%w: %s", errUntrustedAutomaticPackage, bootAutoPkg)
+			return path, fmt.Errorf("%w: %s", errUntrustedAutomaticPackage, path)
 		}
-		return bootAutoPkg, nil
+		return path, nil
 	}
 	u, err := url.Parse(requested)
 	if err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {

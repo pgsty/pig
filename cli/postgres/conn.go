@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"pig/internal/config"
 	"pig/internal/utils"
 )
 
@@ -232,6 +233,9 @@ func Psql(cfg *Config, dbname string, opts *PsqlOptions) error {
 	}
 
 	PrintHint(cmdArgs)
+	if !config.IsStructuredOutput() && os.Getenv("PIG_NON_INTERACTIVE") == "" {
+		return utils.DBSUCommandPassthrough(dbsu, cmdArgs)
+	}
 	if opts != nil && opts.File == "-" {
 		return utils.DBSUCommandWithStdin(dbsu, cmdArgs, os.Stdin)
 	}
@@ -271,7 +275,16 @@ func buildPsqlArgs(psqlPath string, cfg *Config, dbname string, opts *PsqlOption
 		cmdArgs = append(cmdArgs, "-c", opts.Command)
 	}
 	if opts != nil && opts.File != "" {
-		cmdArgs = append(cmdArgs, "-f", opts.File)
+		file := opts.File
+		if file != "-" {
+			// su - changes directory to the DBSU's home. Resolve the caller's
+			// file before switching users, without changing the login environment.
+			file, err = filepath.Abs(file)
+			if err != nil {
+				return nil, fmt.Errorf("resolve SQL file: %w", err)
+			}
+		}
+		cmdArgs = append(cmdArgs, "-v", "ON_ERROR_STOP=1", "-f", file)
 	}
 	return cmdArgs, nil
 }

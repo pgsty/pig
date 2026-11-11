@@ -40,14 +40,43 @@ var (
 )
 
 const (
-	PigstyIO     = "https://pigsty.io"
-	PigstyCC     = "https://pigsty.cc"
-	RepoPigstyIO = "https://repo.pigsty.io"
-	RepoPigstyCC = "https://repo.pigsty.cc"
-	DistroEL     = "rpm"
-	DistroDEB    = "deb"
-	DistroMAC    = "brew"
+	PigstyIO                  = "https://pigsty.io"
+	PigstyCC                  = "https://pigsty.cc"
+	RepoPigstyIO              = "https://repo.pigsty.io"
+	RepoPigstyCC              = "https://repo.pigsty.cc"
+	DistroEL                  = "rpm"
+	DistroDEB                 = "deb"
+	DistroMAC                 = "brew"
+	DefaultOfflinePackagePath = "/var/tmp/pkg.tgz"
 )
+
+// ResolveOfflinePackagePath selects an offline input package. Only an empty path
+// enables automatic discovery: /var/tmp/pkg.tgz, then the legacy /tmp/pkg.tgz if
+// the first path does not exist. Explicit paths never fall back. Lstat preserves
+// unsafe candidates (including dangling symlinks) for the caller's safety checks;
+// an inspection error other than nonexistence must not select another package.
+// This helper does not validate ownership, permissions, type, or archive contents.
+func ResolveOfflinePackagePath(path string) (string, error) {
+	return resolveOfflinePackagePath(path, os.Lstat)
+}
+
+func resolveOfflinePackagePath(path string, lstat func(string) (os.FileInfo, error)) (string, error) {
+	if path != "" {
+		_, err := lstat(path)
+		return path, err
+	}
+
+	_, err := lstat(DefaultOfflinePackagePath)
+	if !os.IsNotExist(err) {
+		return DefaultOfflinePackagePath, err
+	}
+	const legacyPath = "/tmp/pkg.tgz"
+	_, legacyErr := lstat(legacyPath)
+	if os.IsNotExist(legacyErr) {
+		return DefaultOfflinePackagePath, err
+	}
+	return legacyPath, legacyErr
+}
 
 // Output format constants
 const (

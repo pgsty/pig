@@ -14,6 +14,7 @@ import (
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
+	"slices"
 	"strings"
 	"testing"
 
@@ -910,21 +911,27 @@ func TestPgInitForceUninitializedDirNeedsNoConfirmation(t *testing.T) {
 
 func TestPgInitForceStructuredRequiresExplicitYes(t *testing.T) {
 	origFormat := config.OutputFormat
+	origConfig := *pgConfig
 	origForce := pgInitForce
 	origYes := pgInitYes
+	origChecksum, origNoChecks := pgInitChecksum, pgInitNoChecks
 	origExec := pgInitCommandExec
 	origInitialized := pgInitTargetInitialized
 	defer func() {
 		config.OutputFormat = origFormat
+		*pgConfig = origConfig
 		pgInitForce = origForce
 		pgInitYes = origYes
+		pgInitChecksum, pgInitNoChecks = origChecksum, origNoChecks
 		pgInitCommandExec = origExec
 		pgInitTargetInitialized = origInitialized
 	}()
 
 	config.OutputFormat = config.OUTPUT_JSON
+	*pgConfig = postgrescli.Config{PgVersion: 18, PgData: "/data/pg init's", DbSU: "postgres-test"}
 	pgInitForce = true
 	pgInitYes = false
+	pgInitChecksum, pgInitNoChecks = false, true
 	pgInitTargetInitialized = func(*postgrescli.Config) bool { return true }
 	executed := false
 	pgInitCommandExec = func(*postgrescli.Config, *postgrescli.InitOptions) error {
@@ -933,8 +940,9 @@ func TestPgInitForceStructuredRequiresExplicitYes(t *testing.T) {
 	}
 
 	var runErr error
+	extraArgs := []string{"--waldir=/wal data's", "--auth-local=peer"}
 	raw := capturePgStdout(t, func() {
-		runErr = pgInitCmd.RunE(pgInitCmd, nil)
+		runErr = pgInitCmd.RunE(pgInitCmd, extraArgs)
 	})
 	if runErr == nil {
 		t.Fatal("structured pg init -f should require explicit --yes")
@@ -943,6 +951,34 @@ func TestPgInitForceStructuredRequiresExplicitYes(t *testing.T) {
 		t.Fatal("structured pg init -f should not execute without --yes")
 	}
 	assertPgStructuredConfirmationRequired(t, raw, "pg init --force requires explicit confirmation")
+	var result output.Result
+	if err := json.Unmarshal([]byte(raw), &result); err != nil || len(result.NextActions) != 1 {
+		t.Fatalf("confirmation next actions: %+v, err=%v", result.NextActions, err)
+	}
+	// Expand shell arguments only; never execute the suggested destructive command.
+	argv, err := exec.Command("sh", "-c", "set -- "+result.NextActions[0].Command+`; printf '%s\000' "$@"`).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Split(strings.TrimSuffix(string(argv), "\x00"), "\x00")
+	if len(args) < 3 || !slices.Equal(args[:3], []string{"pig", "pg", "init"}) {
+		t.Fatalf("wrong retry command: %q", args)
+	}
+	for flag, want := range map[string]string{"-D": pgConfig.PgData, "--version": "18", "--dbsu": pgConfig.DbSU} {
+		at := slices.Index(args, flag)
+		if at < 0 || at+1 == len(args) || args[at+1] != want {
+			t.Errorf("retry lost %s %q: %q", flag, want, args)
+		}
+	}
+	boundary := slices.Index(args, "--")
+	if boundary < 0 || !slices.Equal(args[boundary+1:], extraArgs) {
+		t.Fatalf("retry lost native initdb arguments: %q", args)
+	}
+	for _, flag := range []string{"--force", "--yes", "--no-data-checksums"} {
+		if at := slices.Index(args, flag); at < 0 || at >= boundary {
+			t.Errorf("retry lost PIG option %q: %q", flag, args)
+		}
+	}
 }
 
 func TestPgInitNoDataChecksumsMapsToInitOptions(t *testing.T) {

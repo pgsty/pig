@@ -159,6 +159,12 @@ func (m *Manager) applyRepositoryDefaults(repo *Repository) {
 			delete(repo.Meta, "module_hotfixes")
 		}
 	case config.DistroDEB:
+		repo.explicitAPTTrust = make(map[string]bool)
+		for _, option := range aptTrustOptions {
+			if _, exists := repo.Meta[option]; exists {
+				repo.explicitAPTTrust[option] = true
+			}
+		}
 		// Keep the historical permissive default for offline and mirror repos.
 		repo.Meta = mergeRepoMeta(map[string]string{"trusted": "yes"}, repo.Meta)
 	default:

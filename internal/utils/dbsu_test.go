@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"os"
@@ -312,5 +313,70 @@ func TestBuildDBSUCommandSuPayloadPreservesArguments(t *testing.T) {
 	got := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("su payload round trip = %#v, want %#v; payload=%s", got, want, cmd.Args[4])
+	}
+}
+
+func TestDBSUStreamingRetainsBoundedDiagnosticTails(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := config.CurrentUser
+	t.Cleanup(func() { config.CurrentUser = previous })
+	config.CurrentUser = current.Username
+	payload := strings.Repeat("x", dbsuDiagnosticLimit+4096)
+	var stdout, stderr bytes.Buffer
+	result, runErr := executeDBSUCommand(current.Username, []string{
+		"sh", "-c", `printf '%sout-tail' "$1"; printf '%serr-tail' "$1" >&2; exit 7`, "fixture", payload,
+	}, nil, &stdout, &stderr)
+	if result.ExitCode != 7 || runErr == nil {
+		t.Fatalf("exit result = %+v, err=%v", result, runErr)
+	}
+	for _, stream := range []struct {
+		full string
+		tail string
+		want string
+	}{{stdout.String(), result.Stdout, payload + "out-tail"}, {stderr.String(), result.Stderr, payload + "err-tail"}} {
+		if stream.full != stream.want {
+			t.Fatalf("streamed output was truncated: got %d bytes, want %d", len(stream.full), len(stream.want))
+		}
+		if len(stream.tail) != dbsuDiagnosticLimit || stream.tail != stream.want[len(stream.want)-dbsuDiagnosticLimit:] {
+			t.Fatalf("diagnostic tail = %d bytes, want latest %d bytes", len(stream.tail), dbsuDiagnosticLimit)
+		}
+	}
+	err = dbsuCommandError(result, runErr)
+	if ExitCode(err) != 7 || !IsSilentExit(err) || !strings.Contains(err.Error(), "err-tail") {
+		t.Fatalf("bounded diagnostics lost exit or silent semantics: %v", err)
+	}
+}
+
+func TestDBSUCaptureAPIsPreserveCompleteData(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := config.CurrentUser
+	t.Cleanup(func() { config.CurrentUser = previous })
+	config.CurrentUser = current.Username
+	payload := strings.Repeat("data", dbsuDiagnosticLimit/4+1024)
+	args := []string{"sh", "-c", `printf '%s' "$1"; printf diagnostic >&2`, "fixture", payload}
+	result, err := CaptureDBSUCommand(current.Username, args)
+	if err != nil || result.Stdout != payload || result.Stderr != "diagnostic" {
+		t.Fatalf("separate data capture changed: stdout=%d bytes stderr=%q err=%v", len(result.Stdout), result.Stderr, err)
+	}
+	for name, call := range map[string]func(string, []string) (string, error){
+		"stdout": DBSUCommandStdout,
+		"output": DBSUCommandOutput,
+	} {
+		t.Run(name, func(t *testing.T) {
+			want := payload
+			if name == "output" {
+				want += "diagnostic"
+			}
+			out, err := call(current.Username, args)
+			if err != nil || out != want {
+				t.Fatalf("data API truncated: got %d bytes, want %d; err=%v", len(out), len(want), err)
+			}
+		})
 	}
 }

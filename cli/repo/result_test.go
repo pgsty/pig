@@ -2087,7 +2087,7 @@ func TestCacheWithResultPermissionDenied(t *testing.T) {
 
 func TestBootDefaultsAndMissingPackageResult(t *testing.T) {
 	defaultPkg, defaultTarget := bootDefaults("", "")
-	if defaultPkg != "/tmp/pkg.tgz" || defaultTarget != "/www" {
+	if defaultPkg != config.DefaultOfflinePackagePath || defaultTarget != "/www" {
 		t.Fatalf("boot defaults = %q, %q", defaultPkg, defaultTarget)
 	}
 
@@ -2112,7 +2112,7 @@ func TestBootDefaultsAndMissingPackageResult(t *testing.T) {
 
 func TestCacheDefaultsAndFailedResult(t *testing.T) {
 	dirPath, pkgPath, repos := cacheDefaults("", "", nil)
-	if dirPath != "/www" || pkgPath != "/tmp/pkg.tgz" || !reflect.DeepEqual(repos, []string{"pigsty"}) {
+	if dirPath != "/www" || pkgPath != config.DefaultOfflinePackagePath || !reflect.DeepEqual(repos, []string{"pigsty"}) {
 		t.Fatalf("cache defaults = %q, %q, %v", dirPath, pkgPath, repos)
 	}
 

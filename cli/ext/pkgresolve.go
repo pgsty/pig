@@ -15,6 +15,25 @@ type resolvedExt struct {
 	packages []string
 }
 
+type packageSource uint8
+
+const (
+	packageRaw packageSource = iota
+	packageExtension
+	packageExtensionAlias
+	packageExplicitAlias
+	packageCategoryAlias
+)
+
+// packageRequest preserves provenance before deduplication. In particular, an
+// explicit kernel alias must not authorize another operand for the same package.
+type packageRequest struct {
+	input    string
+	alias    string
+	source   packageSource
+	packages []string
+}
+
 // PackageResolveResult contains resolved package names and resolution metadata.
 type PackageResolveResult struct {
 	Packages     []string
@@ -23,6 +42,7 @@ type PackageResolveResult struct {
 	NoPackage    []string
 	resolved     []resolvedExt
 	unresolved   []string
+	requests     []packageRequest
 }
 
 type packageResolveOptions struct {
@@ -102,7 +122,15 @@ func resolvePackageRequests(pgVer int, names []string, opts packageResolveOption
 
 	for _, raw := range names {
 		name, version := splitNameVersion(raw, opts.ParseVersion)
-		pkgPattern, owner, ext, reason := resolvePackagePattern(pgVer, raw, name, opts)
+		pkgPattern, owner, ext, source, reason := resolvePackagePattern(pgVer, raw, name, opts)
+		request := packageRequest{input: raw, source: source}
+		if source == packageExplicitAlias || source == packageCategoryAlias {
+			request.alias = name
+		}
+		for _, pkg := range ProcessPkgName(pkgPattern, pgVer) {
+			request.packages = append(request.packages, applyPackageVersion(pkg, version))
+		}
+		res.requests = append(res.requests, request)
 
 		switch reason {
 		case "not_found":
@@ -116,8 +144,7 @@ func resolvePackageRequests(pgVer int, names []string, opts packageResolveOption
 		}
 
 		requestPackages := make([]string, 0)
-		for _, pkg := range ProcessPkgName(pkgPattern, pgVer) {
-			resolvedPkg := applyPackageVersion(pkg, version)
+		for _, resolvedPkg := range request.packages {
 			if _, exists := seenPackages[resolvedPkg]; exists {
 				continue
 			}
@@ -152,39 +179,43 @@ func splitNameVersion(raw string, parse bool) (name string, version string) {
 	return raw, ""
 }
 
-func resolvePackagePattern(pgVer int, rawName, baseName string, opts packageResolveOptions) (pkgPattern string, owner string, ext *Extension, reason string) {
+func resolvePackagePattern(pgVer int, rawName, baseName string, opts packageResolveOptions) (pkgPattern string, owner string, ext *Extension, source packageSource, reason string) {
 	if opts.EnableTranslation && Catalog != nil {
 		if ext, ok := Catalog.ExtNameMap[baseName]; ok {
 			pkgName := ext.PackageName(pgVer)
 			if pkgName == "" {
-				return "", "", ext, "no_package"
+				return "", "", ext, packageExtension, "no_package"
 			}
-			return pkgName, ext.Name, ext, ""
+			return pkgName, ext.Name, ext, packageExtension, ""
 		}
 		// Explicit aliases may define package groups that intentionally override
 		// the catalog's normalized package alias (for example, IvorySQL + contrib).
 		if pgPkg, matched, noPackage := resolveAliasPattern(pgVer, baseName); matched {
-			if noPackage {
-				return "", "", nil, "no_package"
+			source = packageCategoryAlias
+			if _, ok := Catalog.AliasMap[baseName]; ok {
+				source = packageExplicitAlias
 			}
-			return pgPkg, rawName, nil, ""
+			if noPackage {
+				return "", "", nil, source, "no_package"
+			}
+			return pgPkg, rawName, nil, source, ""
 		}
 		if ext, ok := Catalog.ExtPkgMap[baseName]; ok {
 			pkgName := ext.PackageName(pgVer)
 			if pkgName == "" {
-				return "", "", ext, "no_package"
+				return "", "", ext, packageExtensionAlias, "no_package"
 			}
-			return pkgName, ext.Name, ext, ""
+			return pkgName, ext.Name, ext, packageExtensionAlias, ""
 		}
 		if !opts.FallbackToRaw {
-			return "", "", nil, "not_found"
+			return "", "", nil, packageRaw, "not_found"
 		}
 	}
 
 	if opts.FallbackToRaw {
-		return baseName, baseName, nil, ""
+		return baseName, baseName, nil, packageRaw, ""
 	}
-	return "", "", nil, "not_found"
+	return "", "", nil, packageRaw, "not_found"
 }
 
 func applyPackageVersion(pkg, version string) string {

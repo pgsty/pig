@@ -17,20 +17,20 @@ import (
 	"pig/internal/output"
 )
 
-func setupBootTest(t *testing.T) {
+func setupBootTest(t *testing.T) string {
 	t.Helper()
 	origInstall, origRepos, origReset, origRepo := bootInstall, bootRepos, bootResetRepos, bootRepo
 	origAddLocal, origRestore, origLocalRepo, origLookPath := bootAddLocal, bootRestoreRepos, bootLocalRepo, bootLookPath
 	origEUID, origRepairLocale, origVerify, origVerifyHelpers := bootEUID, bootRepairLocale, bootVerifyAnsible, bootVerifyHelpers
 	origEnsureSSH, origEnsurePigsty, origDownload := bootEnsureSSH, bootEnsurePigsty, bootDownload
-	origAuto, origRepoDir, origProgress := bootAutoPkg, bootRepoDir, bootProgressOut
+	origResolvePackage, origRepoDir, origProgress := bootResolvePackage, bootRepoDir, bootProgressOut
 	origType, origCode, origVendor, origVersion := config.OSType, config.OSCode, config.OSVendor, config.OSVersion
 	t.Cleanup(func() {
 		bootInstall, bootRepos, bootResetRepos, bootRepo = origInstall, origRepos, origReset, origRepo
 		bootAddLocal, bootRestoreRepos, bootLocalRepo, bootLookPath = origAddLocal, origRestore, origLocalRepo, origLookPath
 		bootEUID, bootRepairLocale, bootVerifyAnsible, bootVerifyHelpers = origEUID, origRepairLocale, origVerify, origVerifyHelpers
 		bootEnsureSSH, bootEnsurePigsty, bootDownload = origEnsureSSH, origEnsurePigsty, origDownload
-		bootAutoPkg, bootRepoDir, bootProgressOut = origAuto, origRepoDir, origProgress
+		bootResolvePackage, bootRepoDir, bootProgressOut = origResolvePackage, origRepoDir, origProgress
 		config.OSType, config.OSCode, config.OSVendor, config.OSVersion = origType, origCode, origVendor, origVersion
 	})
 	config.OSType, config.OSCode, config.OSVendor, config.OSVersion = config.DistroEL, "el10", "rocky", "10"
@@ -50,7 +50,13 @@ func setupBootTest(t *testing.T) {
 	bootEnsurePigsty = func(context.Context, string) (pigstyInitOutcome, error) {
 		return pigstyInitOutcome{Path: "/home/admin/pigsty", Status: pigstyInitExisting}, nil
 	}
-	bootAutoPkg = filepath.Join(t.TempDir(), "missing.tgz")
+	autoPkg := filepath.Join(t.TempDir(), "missing.tgz")
+	bootResolvePackage = func(path string) (string, error) {
+		if path != "" {
+			t.Fatalf("automatic package resolver received explicit path %q", path)
+		}
+		return config.ResolveOfflinePackagePath(autoPkg)
+	}
 	bootRepoDir = filepath.Join(t.TempDir(), "pigsty")
 	bootProgressOut = io.Discard
 	bootResetRepos = func([]string, bool) *output.Result {
@@ -58,6 +64,7 @@ func setupBootTest(t *testing.T) {
 	}
 	bootAddLocal = func(string) error { return nil }
 	bootLocalRepo = func() string { return "/fixture/local.repo" }
+	return autoPkg
 }
 
 func TestBootOKUsesLegacyStyleAndSuppressesStructuredOutput(t *testing.T) {
@@ -412,8 +419,8 @@ func TestBootstrapNativeReportsSelectedPackageWhenCommittedRepoIsReused(t *testi
 	}
 }
 
-func TestResolveBootPackageProtectsAutomaticTmpPackage(t *testing.T) {
-	setupBootTest(t)
+func TestResolveBootPackageProtectsAutomaticPackage(t *testing.T) {
+	bootAutoPkg := setupBootTest(t)
 	if err := writeTinyFile(bootAutoPkg); err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +438,7 @@ func TestResolveBootPackageProtectsAutomaticTmpPackage(t *testing.T) {
 }
 
 func TestBootstrapNativeIgnoresUnsafeAutomaticPackageAndUsesCommittedRepo(t *testing.T) {
-	setupBootTest(t)
+	bootAutoPkg := setupBootTest(t)
 	if err := writeTinyFile(bootAutoPkg); err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"pig/cli/ext"
 	"pig/cli/postgres"
 	"pig/internal/config"
@@ -225,7 +226,7 @@ var pgInitCmd = &cobra.Command{
 					output.CodePgConfirmationRequired,
 					"pg init --force requires explicit confirmation",
 					"init", "pg:local-instance", "high",
-					"pig pg init --force --yes",
+					postgres.BuildInitCommand(pgConfig, opts, true),
 					"", // pg init has no --plan
 				)
 			}
@@ -528,6 +529,14 @@ func registerPostgresCommand() *cobra.Command {
 			return structuredParamError(output.MODULE_PG, cmd.CommandPath(),
 				"invalid PostgreSQL data directory", "--data/-D must not be empty or whitespace", nil, nil)
 		}
+		if err := normalizePgPathOptions(cmd); err != nil {
+			if formatErr := initOutputFormat(); formatErr != nil {
+				return formatErr
+			}
+			applyStructuredOutputSilence(cmd)
+			return structuredParamError(output.MODULE_PG, cmd.CommandPath(),
+				"invalid PostgreSQL path", err.Error(), nil, nil)
+		}
 		if err := commandModulePreRun(cmd, args); err != nil {
 			return err
 		}
@@ -550,6 +559,33 @@ func registerPostgresCommand() *cobra.Command {
 	registerPgTuneCommands()
 	registerPgForkCommands()
 	return pgCmd
+}
+
+// Resolve PIG-owned path flags before a login-shell DBSU switch changes cwd.
+// Keep omitted values empty so SQL commands retain native connection defaults.
+func normalizePgPathOptions(cmd *cobra.Command) error {
+	type pathOption struct {
+		flag  string
+		value *string
+	}
+	paths := []pathOption{
+		{"data", &pgConfig.PgData},
+		{"log-dir", &pgConfig.LogDir},
+	}
+	if cmd == pgStartCmd {
+		paths = append(paths, pathOption{"log", &pgStartLog})
+	}
+	for _, path := range paths {
+		if *path.value == "" || filepath.IsAbs(*path.value) {
+			continue
+		}
+		absolute, err := filepath.Abs(*path.value)
+		if err != nil {
+			return fmt.Errorf("resolve --%s from the caller's working directory: %w", path.flag, err)
+		}
+		*path.value = absolute
+	}
+	return nil
 }
 
 func pgPreRun(cmd *cobra.Command, args []string) error {
@@ -768,7 +804,7 @@ func runClone(cmd *cobra.Command, opts *postgres.CloneOptions) error {
 			if config.IsStructuredOutput() {
 				return handleAuxResult(cloneErrorResult(err))
 			}
-			return handleCloneError(err)
+			return runtimeCommandError(cmd, handleCloneError(err))
 		}
 		return handlePlanOutput(plan)
 	}
@@ -789,7 +825,7 @@ func runClone(cmd *cobra.Command, opts *postgres.CloneOptions) error {
 	}
 
 	if err := postgres.ExecuteClone(opts); err != nil {
-		return silentRuntimeError(cmd, handleCloneError(err))
+		return runtimeCommandError(cmd, handleCloneError(err))
 	}
 	return nil
 }

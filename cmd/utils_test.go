@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
+	"unicode/utf8"
 
 	"pig/internal/config"
 	"pig/internal/output"
@@ -425,6 +427,115 @@ func TestCaptureLegacyOutputRestoresStateAfterPanic(t *testing.T) {
 	}
 	if config.OutputFormat != config.OUTPUT_JSON {
 		t.Fatalf("captureLegacyOutput should restore output format, got %q", config.OutputFormat)
+	}
+}
+
+func TestReadLimitedPreservesHeadAndTail(t *testing.T) {
+	for _, limit := range []int{1, 15, 16, legacyOutputCaptureLimit, 0, -1} {
+		effectiveLimit := limit
+		if effectiveLimit <= 0 {
+			effectiveLimit = legacyOutputCaptureLimit
+		}
+		for _, size := range []int{0, effectiveLimit - 1, effectiveLimit, effectiveLimit + 1, 3 * effectiveLimit} {
+			input := strings.Repeat("0123456789", size/10+1)[:size]
+			for _, fragmented := range []bool{false, true} {
+				reader := io.Reader(strings.NewReader(input))
+				if fragmented {
+					reader = iotest.OneByteReader(reader)
+				}
+				result := readLimited(reader, limit)
+				want := input
+				if size > effectiveLimit {
+					want = input[:effectiveLimit/2] + legacyOutputTruncationMarker + input[size-(effectiveLimit-effectiveLimit/2):]
+				}
+				if result.output != want || result.truncated != (size > effectiveLimit) || result.readErr != nil {
+					t.Fatalf("limit=%d size=%d fragmented=%t: got length=%d truncated=%t err=%v, want length=%d",
+						limit, size, fragmented, len(result.output), result.truncated, result.readErr, len(want))
+				}
+			}
+		}
+	}
+}
+
+func TestReadLimitedPreservesUTF8AndReadErrors(t *testing.T) {
+	input := "开始🌱" + strings.Repeat("进度", 100) + "末尾错误"
+	readErr := errors.New("reader failed")
+	for _, limit := range []int{1, 16, 17, 19, len(input), len(input) + 1} {
+		reader := io.MultiReader(strings.NewReader(input), iotest.ErrReader(readErr))
+		result := readLimited(reader, limit)
+		if !errors.Is(result.readErr, readErr) || !utf8.ValidString(result.output) {
+			t.Fatalf("limit=%d: result=%+v", limit, result)
+		}
+		if limit >= len(input) {
+			if result.output != input || result.truncated {
+				t.Fatalf("untruncated UTF-8 input changed: %+v", result)
+			}
+			continue
+		}
+		parts := strings.Split(result.output, legacyOutputTruncationMarker)
+		if !result.truncated || len(parts) != 2 || !strings.HasPrefix(input, parts[0]) || !strings.HasSuffix(input, parts[1]) {
+			t.Fatalf("UTF-8 head/tail lost: %+v", result)
+		}
+		if limit > 1 && (!strings.Contains(parts[0], "开始") || !strings.Contains(parts[1], "错误")) {
+			t.Fatalf("UTF-8 boundary removed complete runes: %+v", result)
+		}
+	}
+}
+
+func TestRunLegacyStructuredTruncatedFailureIsPureJSON(t *testing.T) {
+	origFormat, origStdout := config.OutputFormat, os.Stdout
+	t.Cleanup(func() { config.OutputFormat, os.Stdout = origFormat, origStdout })
+	t.Setenv("PIG_NON_INTERACTIVE", "")
+	config.OutputFormat = config.OUTPUT_JSON
+	for _, redact := range []bool{false, true} {
+		// A file avoids blocking on an outer pipe while rendering a 64 KiB result.
+		file, err := os.CreateTemp(t.TempDir(), "legacy-output-*.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = file.Close() })
+		os.Stdout = file
+		var runErr error
+		stderr := captureStderr(t, func() {
+			runErr = runLegacyStructuredContractWithPolicy(legacyModuleSty, "test download", "", nil, nil, nil,
+				legacyStructuredPolicy{RedactCapturedOutput: redact}, func() error {
+					fmt.Fprintln(os.Stdout, "download context")
+					fmt.Fprint(os.Stdout, strings.Repeat("progress\n", legacyOutputCaptureLimit))
+					fmt.Fprintln(os.Stderr, "final connection failure")
+					return errors.New("download failed")
+				})
+		})
+		os.Stdout = origStdout
+		if runErr == nil || stderr != "" {
+			t.Fatalf("failure error=%v stderr=%q", runErr, stderr)
+		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			Success bool              `json:"success"`
+			Data    legacyCommandData `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil || result.Success {
+			t.Fatalf("failure stdout is not one JSON envelope: %v", err)
+		}
+		if redact {
+			if !result.Data.OutputRedacted || result.Data.CapturedOutput != "" || result.Data.OutputTruncated || strings.Contains(string(raw), "connection failure") {
+				t.Fatalf("sensitive truncated output leaked: %+v", result.Data)
+			}
+			continue
+		}
+		captured := result.Data.CapturedOutput
+		if !result.Data.OutputTruncated || !strings.HasPrefix(captured, "download context") || !strings.HasSuffix(captured, "final connection failure") || !strings.Contains(captured, legacyOutputTruncationMarker) {
+			t.Fatal("truncated JSON must retain context, truncation marker, and final failure")
+		}
+		if len(captured) > legacyOutputCaptureLimit+len(legacyOutputTruncationMarker) {
+			t.Fatalf("captured content exceeded limit: %d", len(captured))
+		}
 	}
 }
 

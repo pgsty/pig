@@ -16,6 +16,10 @@ import (
 
 const DefaultDBSU = "postgres"
 
+// Streaming output is already delivered to the caller; retain only a bounded
+// diagnostic tail per stream. Data capture APIs must continue returning all data.
+const dbsuDiagnosticLimit = 64 * 1024
+
 // ExitCodeError represents an error with an associated exit code.
 // Use this when you want to propagate subprocess exit codes to callers.
 type ExitCodeError struct {
@@ -190,11 +194,19 @@ func executeDBSUCommand(dbsu string, args []string, stdin io.Reader, stdout, std
 	}
 
 	cmd := buildDBSUCmd(dbsu, args)
-	var stdoutBuffer bytes.Buffer
-	var stderrBuffer bytes.Buffer
+	var stdoutBuffer, stderrBuffer interface {
+		io.Writer
+		String() string
+	} = &bytes.Buffer{}, &bytes.Buffer{}
+	if stdout != nil {
+		stdoutBuffer = NewTailBuffer(dbsuDiagnosticLimit)
+	}
+	if stderr != nil {
+		stderrBuffer = NewTailBuffer(dbsuDiagnosticLimit)
+	}
 	cmd.Stdin = stdin
-	cmd.Stdout = captureWriter(stdout, &stdoutBuffer)
-	cmd.Stderr = captureWriter(stderr, &stderrBuffer)
+	cmd.Stdout = captureWriter(stdout, stdoutBuffer)
+	cmd.Stderr = captureWriter(stderr, stderrBuffer)
 
 	err := cmd.Run()
 	result := DBSUCommandResult{

@@ -326,3 +326,35 @@ func appendPgTargetCommandFlags(args []string, cfg *Config) []string {
 	}
 	return args
 }
+
+// BuildInitCommand preserves the selected target and initdb options when
+// suggesting a retry after explicit confirmation.
+func BuildInitCommand(cfg *Config, opts *InitOptions, includeYes bool) string {
+	args := appendPgTargetCommandFlags([]string{"pig", "pg", "init"}, cfg)
+	if opts == nil {
+		opts = &InitOptions{}
+	}
+	if opts.Encoding != "" {
+		args = append(args, "--encoding", opts.Encoding)
+	}
+	if opts.Locale != "" {
+		args = append(args, "--locale", opts.Locale)
+	}
+	if opts.Checksum {
+		args = append(args, "--data-checksum")
+	}
+	if opts.NoDataChecksums {
+		args = append(args, "--no-data-checksums")
+	}
+	if opts.Force {
+		args = append(args, "--force")
+	}
+	if includeYes {
+		args = append(args, "--yes")
+	}
+	if len(opts.ExtraArgs) > 0 {
+		args = append(args, "--")
+		args = append(args, opts.ExtraArgs...)
+	}
+	return utils.ShellQuoteArgs(args)
+}

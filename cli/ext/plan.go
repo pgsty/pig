@@ -8,6 +8,9 @@ package ext
 import (
 	"fmt"
 	"pig/internal/output"
+	"pig/internal/utils"
+	"slices"
+	"sort"
 	"strings"
 )
 
@@ -179,7 +182,7 @@ func buildAddCommand(names []string) string {
 
 // BuildRmPlan constructs a structured execution plan for ext rm.
 // It shows what will happen without actually executing the removal.
-func BuildRmPlan(pgVer int, names []string, yes bool) *output.Plan {
+func BuildRmPlan(pgVer int, names []string, yes bool) (*output.Plan, error) {
 	if Catalog == nil {
 		return &output.Plan{
 			Command:  buildRmCommand(names),
@@ -187,7 +190,7 @@ func BuildRmPlan(pgVer int, names []string, yes bool) *output.Plan {
 			Affects:  []output.Resource{},
 			Expected: "error: extension catalog not initialized",
 			Risks:    []string{"Extension catalog not loaded, cannot resolve packages"},
-		}
+		}, nil
 	}
 	if len(names) == 0 {
 		return &output.Plan{
@@ -196,7 +199,7 @@ func BuildRmPlan(pgVer int, names []string, yes bool) *output.Plan {
 			Affects:  []output.Resource{},
 			Expected: "error: no extensions specified",
 			Risks:    []string{"No extension names were provided"},
-		}
+		}, nil
 	}
 
 	if pgVer == 0 {
@@ -204,9 +207,59 @@ func BuildRmPlan(pgVer int, names []string, yes bool) *output.Plan {
 	}
 
 	resolution := ResolveExtensionPackages(pgVer, names, false)
+	command := fmt.Sprintf("%s -v %d", buildRmCommand(names), pgVer)
+	if yes {
+		command += " --yes"
+	}
+	if blocked := checkRemovalSafety(pgVer, resolution); len(blocked) > 0 {
+		message := removalSafetyMessage(blocked)
+		checks := make([]output.Check, 0, len(blocked))
+		for _, failure := range blocked {
+			checks = append(checks, output.Check{Name: "protected package: " + failure.Name, Status: "failed", Detail: failure.Error})
+		}
+		return &output.Plan{
+			Command:       command,
+			Boundary:      "OS package removal; protected packages require an explicit kernel/package-group alias",
+			Actions:       []output.Action{},
+			Affects:       []output.Resource{},
+			Expected:      message,
+			Preconditions: checks,
+		}, fmt.Errorf("%s", message)
+	}
 	resolved, notFound := resolution.resolved, resolution.unresolved
 
-	return buildRmPlanFromState(names, resolved, notFound, yes)
+	plan := buildRmPlanFromState(names, resolved, notFound, yes)
+	plan.Command = command
+	plan.Boundary = "OS packages, including all extensions they provide; package-manager dependency removals are not simulated"
+	addRemovalPackageDetails(plan, pgVer, resolution)
+	return plan, nil
+}
+
+// Describe catalog contents, not installed database objects. A PL or PostGIS
+// package can supply more extensions than the user named.
+func addRemovalPackageDetails(plan *output.Plan, pgVer int, resolution *PackageResolveResult) {
+	targets := map[int]bool{}
+	for _, request := range resolution.requests {
+		_, target := removalAliasTarget(request.alias, pgVer)
+		targets[target] = true
+	}
+	contents := make(map[string][]string)
+	for target := range targets {
+		for _, ext := range Catalog.Extensions {
+			for _, pkg := range ProcessPkgName(ext.PackageName(target), target) {
+				if !slices.Contains(contents[pkg], ext.Name) {
+					contents[pkg] = append(contents[pkg], ext.Name)
+				}
+			}
+		}
+	}
+	for i := range plan.Affects {
+		names := contents[plan.Affects[i].Name]
+		if len(names) > 0 {
+			sort.Strings(names)
+			plan.Affects[i].Detail = "Includes catalog extensions: " + strings.Join(names, ", ")
+		}
+	}
 }
 
 // buildRmPlanFromState constructs a remove plan from given state.
@@ -258,11 +311,12 @@ func buildRmAffects(resolved []resolvedExt) []output.Resource {
 }
 
 func buildRmExpected(resolved []resolvedExt) string {
-	var names []string
+	var packages, names []string
 	for _, r := range resolved {
+		packages = append(packages, r.packages...)
 		names = append(names, r.name)
 	}
-	return fmt.Sprintf("Extensions removed: %s", strings.Join(names, ", "))
+	return fmt.Sprintf("Packages removed: %s (requested: %s)", strings.Join(packages, ", "), strings.Join(names, ", "))
 }
 
 func buildRmRisks(resolved []resolvedExt, notFound []string) []string {
@@ -299,5 +353,5 @@ func buildRmRisks(resolved []resolvedExt, notFound []string) []string {
 }
 
 func buildRmCommand(names []string) string {
-	return fmt.Sprintf("pig ext rm %s", strings.Join(names, " "))
+	return utils.ShellQuoteArgs(append([]string{"pig", "ext", "rm"}, names...))
 }

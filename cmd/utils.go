@@ -10,7 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
+	"pig/cli/get"
 	"pig/internal/config"
 	"pig/internal/output"
 	"pig/internal/utils"
@@ -20,6 +22,8 @@ import (
 )
 
 const legacyOutputCaptureLimit = 64 * 1024
+
+const legacyOutputTruncationMarker = "\n... [output truncated; showing beginning and end] ...\n"
 
 var ansiColorSequence = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
@@ -449,6 +453,12 @@ func captureLegacyOutputUnlocked(fn func() error, limit int) (captured string, t
 	oldStderr := os.Stderr
 	oldFormat := config.OutputFormat
 	oldLogrusOut := logrus.StandardLogger().Out
+	// The wrapped callback runs in text mode; keep download progress out of
+	// its captured diagnostics while preserving warnings and final errors.
+	if config.IsStructuredOutput() {
+		restoreProgress := get.SetDownloadProgressWriter(io.Discard)
+		defer restoreProgress()
+	}
 	// Rendering legacy text inside a structured envelope must not re-enable
 	// sudo prompts or terminal stdin in the wrapped operation.
 	oldNonInteractive, hadNonInteractive := os.LookupEnv("PIG_NON_INTERACTIVE")
@@ -494,42 +504,65 @@ func readLimited(r io.Reader, limit int) captureResult {
 	if limit <= 0 {
 		limit = legacyOutputCaptureLimit
 	}
-	var buf bytes.Buffer
+	// Keep the beginning for context and a rolling tail for the final failure.
+	// Continue draining even after truncation so a verbose subprocess cannot block.
+	headLimit := limit / 2
+	tailLimit := limit - headLimit
+	var head bytes.Buffer
+	tail := make([]byte, 0, tailLimit)
 	tmp := make([]byte, 4096)
-	total := 0
-	truncated := false
+	result := captureResult{}
 
 	for {
 		n, err := r.Read(tmp)
 		if n > 0 {
-			if total < limit {
-				writeN := n
-				if total+n > limit {
-					writeN = limit - total
-					truncated = true
-				}
-				_, _ = buf.Write(tmp[:writeN])
-			} else {
-				truncated = true
+			chunk := tmp[:n]
+			if head.Len() < headLimit {
+				keep := min(len(chunk), headLimit-head.Len())
+				_, _ = head.Write(chunk[:keep])
+				chunk = chunk[keep:]
 			}
-			total += n
+			if len(tail)+len(chunk) > tailLimit {
+				result.truncated = true
+				if len(chunk) >= tailLimit {
+					tail = append(tail[:0], chunk[len(chunk)-tailLimit:]...)
+				} else {
+					drop := len(tail) + len(chunk) - tailLimit
+					tail = append(tail[:copy(tail, tail[drop:])], chunk...)
+				}
+			} else {
+				tail = append(tail, chunk...)
+			}
 		}
 		if err != nil {
-			if err == io.EOF {
-				break
+			if err != io.EOF {
+				result.readErr = err
 			}
-			return captureResult{
-				output:    buf.String(),
-				truncated: truncated,
-				readErr:   err,
-			}
+			break
 		}
 	}
 
-	return captureResult{
-		output:    buf.String(),
-		truncated: truncated,
+	result.output = joinLegacyOutput(head.Bytes(), tail, result.truncated)
+	return result
+}
+
+func joinLegacyOutput(head, tail []byte, truncated bool) string {
+	if !truncated {
+		return string(head) + string(tail)
 	}
+	// The byte limit may split a UTF-8 rune at either edge of the omitted text.
+	// Drop only those fragments; do not manufacture replacement characters.
+	last := len(head) - 1
+	for last >= 0 && !utf8.RuneStart(head[last]) {
+		last--
+	}
+	if last >= 0 && !utf8.FullRune(head[last:]) {
+		head = head[:last]
+	}
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+		tail = tail[1:]
+	}
+	return string(head) + legacyOutputTruncationMarker + string(tail)
 }
 
 func normalizeParams(params map[string]interface{}) map[string]interface{} {

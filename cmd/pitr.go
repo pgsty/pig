@@ -157,7 +157,7 @@ The command uses the same execution privilege strategy as other pig commands:
 		if pitrOpts.Plan {
 			plan, err := pitr.Plan(pitrOpts)
 			if err != nil {
-				return handlePITRPlanError(err)
+				return handlePITRPlanError(cmd, err)
 			}
 			return handlePlanOutput(plan)
 		}
@@ -180,7 +180,7 @@ The command uses the same execution privilege strategy as other pig commands:
 
 		// Text output: execute after validation without Cobra usage/error noise
 		// for runtime, precheck, and confirmation-cancel failures.
-		return silentRuntimeError(cmd, pitr.Execute(pitrOpts))
+		return runtimeCommandError(cmd, pitr.Execute(pitrOpts))
 	},
 }
 
@@ -190,7 +190,7 @@ func preparePITRStructuredOptions(opts *pitr.Options) {
 	}
 }
 
-func handlePITRPlanError(err error) error {
+func handlePITRPlanError(cmd *cobra.Command, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -202,7 +202,7 @@ func handlePITRPlanError(err error) error {
 	if config.IsStructuredOutput() {
 		return handleAuxResult(output.Fail(code, err.Error()))
 	}
-	return &utils.ExitCodeError{Code: output.ExitCode(code), Err: err, Silent: true}
+	return runtimeCommandError(cmd, &utils.ExitCodeError{Code: output.ExitCode(code), Err: err})
 }
 
 func init() {

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -94,6 +95,55 @@ func TestProgressReaderSuppressesStructuredOutput(t *testing.T) {
 	reader.finish()
 	if display.Len() != 0 {
 		t.Fatalf("structured download emitted progress: %q", display.String())
+	}
+}
+
+func TestDownloadToTempUsesCurrentStderrForProgress(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), 1024*1024)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	origStdout, origStderr := os.Stdout, os.Stderr
+	origFormat := config.OutputFormat
+	t.Cleanup(func() {
+		os.Stdout, os.Stderr = origStdout, origStderr
+		config.OutputFormat = origFormat
+	})
+	t.Cleanup(SetDownloadProgressWriter(nil))
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	stdout, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdout.Close()
+	os.Stdout = stdout
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderr.Close()
+	os.Stderr = stderr
+	tempPath, _, _, err := downloadToTemp(server.URL, t.TempDir(), "pigsty-v1.2.3.tgz")
+	os.Stdout, os.Stderr = origStdout, origStderr
+	progress, readErr := os.ReadFile(stderr.Name())
+	if err != nil {
+		t.Fatalf("downloadToTemp: %v", err)
+	}
+	if readErr != nil {
+		t.Fatalf("read progress: %v", readErr)
+	}
+	if tempPath != "" {
+		_ = os.Remove(tempPath)
+	}
+	if !strings.Contains(string(progress), "download pigsty-v1.2.3.tgz") {
+		t.Fatalf("download progress did not follow current stderr: %q", progress)
+	}
+	if raw, err := os.ReadFile(stdout.Name()); err != nil || len(raw) != 0 {
+		t.Fatalf("download wrote stdout: %q, %v", raw, err)
 	}
 }
 

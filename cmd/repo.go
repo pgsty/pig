@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"pig/cli/repo"
+	"pig/internal/config"
+	"pig/internal/output"
 
 	"github.com/spf13/cobra"
 )
@@ -18,8 +20,9 @@ var (
 	repoCacheDir string
 	repoCachePkg string
 
-	repoBootDir string
-	repoBootPkg string
+	repoBootDir        string
+	repoBootPkg        string
+	repoBootWithResult = repo.BootWithResult
 )
 
 // repoCmd represents the top-level `repo` command
@@ -50,8 +53,8 @@ var repoCmd = &cobra.Command{
   pig repo add all extra           # extra module has non-free and some 3rd repo for certain extensions
   pig repo update                  # update repo cache
   pig repo create                  # update local repository metadata
-  pig repo boot                    # extract /tmp/pkg.tgz to /www/pigsty
-  pig repo cache                   # cache /www/pigsty into /tmp/pkg.tgz
+  pig repo boot                    # extract /var/tmp/pkg.tgz to /www/pigsty
+  pig repo cache                   # cache /www/pigsty into /var/tmp/pkg.tgz
 `,
 }
 
@@ -212,12 +215,19 @@ var repoBootCmd = &cobra.Command{
 	Annotations:  ancsAnn("pig repo boot", "action", "stable", "restricted", true, "medium", "recommended", "root", 10000),
 	Args:         cobra.NoArgs,
 	Example: `
-  pig repo boot                    # boot repo from /tmp/pkg.tgz to /www
+  pig repo boot                    # boot repo from /var/tmp/pkg.tgz to /www
   pig repo boot -p /tmp/pkg.tgz    # boot repo from given package path
   pig repo boot -d /srv            # boot repo to another directory /srv
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		result := repo.BootWithResult(repoBootPkg, repoBootDir)
+		path := ""
+		if cmd.Flags().Changed("path") {
+			path = repoBootPkg
+			if path == "" {
+				return handleAuxResult(output.Fail(output.CodeRepoInvalidArgs, "offline package path must not be empty"))
+			}
+		}
+		result := repoBootWithResult(path, repoBootDir)
 		return handleAuxResult(result)
 	},
 }
@@ -230,7 +240,7 @@ var repoCacheCmd = &cobra.Command{
 	Annotations:  ancsAnn("pig repo cache", "action", "stable", "restricted", true, "low", "none", "root", 30000),
 	Args:         cobra.ArbitraryArgs,
 	Example: `
-  pig repo cache                    # create /tmp/pkg.tgz offline package from /www/pigsty
+  pig repo cache                    # create /var/tmp/pkg.tgz offline package from /www/pigsty
   pig repo cache -d /srv            # overwrite default content dir /www to /srv
   pig repo cache pigsty docker      # create the tarball with both pigsty & docker repo
   pig repo c                        # the simplest use case to make offline package
@@ -291,11 +301,11 @@ func init() {
 
 	// boot command flags
 	repoBootCmd.Flags().StringVarP(&repoBootDir, "dir", "d", "/www/", "target repo path")
-	repoBootCmd.Flags().StringVarP(&repoBootPkg, "path", "p", "/tmp/pkg.tgz", "offline package path")
+	repoBootCmd.Flags().StringVarP(&repoBootPkg, "path", "p", config.DefaultOfflinePackagePath, "offline package path")
 
 	// cache command flags
 	repoCacheCmd.Flags().StringVarP(&repoCacheDir, "dir", "d", "/www/", "source repo path")
-	repoCacheCmd.Flags().StringVarP(&repoCachePkg, "path", "p", "/tmp/pkg.tgz", "offline package path")
+	repoCacheCmd.Flags().StringVarP(&repoCachePkg, "path", "p", config.DefaultOfflinePackagePath, "offline package path")
 
 	repoCmd.AddCommand(repoAddCmd)
 	repoCmd.AddCommand(repoSetCmd)

@@ -586,7 +586,7 @@ func cacheDefaults(dirPath, pkgPath string, repos []string) (string, string, []s
 		dirPath = "/www"
 	}
 	if pkgPath == "" {
-		pkgPath = "/tmp/pkg.tgz"
+		pkgPath = config.DefaultOfflinePackagePath
 	}
 	if len(repos) == 0 {
 		repos = []string{"pigsty"}

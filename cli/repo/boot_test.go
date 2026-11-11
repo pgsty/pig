@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"pig/internal/config"
+	"pig/internal/output"
 	"reflect"
 	"strings"
 	"testing"
@@ -75,6 +76,43 @@ func TestBootWithResultReusesCommittedRepoAsRoot(t *testing.T) {
 	data, ok := result.Data.(*RepoBootData)
 	if !ok || !data.Reused || len(data.ExtractedFiles) != 0 {
 		t.Fatalf("reuse reported extracted files: %#v", result.Data)
+	}
+}
+
+func TestBootUsesResolvedInputAndStopsOnInspectionError(t *testing.T) {
+	originalResolve, originalEUID := repoBootResolvePackage, repoBootEUID
+	t.Cleanup(func() { repoBootResolvePackage, repoBootEUID = originalResolve, originalEUID })
+	for _, tc := range []struct {
+		name, input, resolved string
+		err                   error
+		code                  int
+	}{
+		{name: "automatic legacy", resolved: "/tmp/pkg.tgz", code: output.CodeRepoBootFailed},
+		{name: "explicit default missing", input: config.DefaultOfflinePackagePath, resolved: config.DefaultOfflinePackagePath, err: os.ErrNotExist, code: output.CodeRepoPackageNotFound},
+		{name: "unreadable primary", resolved: config.DefaultOfflinePackagePath, err: os.ErrPermission, code: output.CodeRepoBootFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repoBootResolvePackage = func(input string) (string, error) {
+				if input != tc.input {
+					t.Fatalf("input = %q, want %q", input, tc.input)
+				}
+				return tc.resolved, tc.err
+			}
+			repoBootEUID = func() int {
+				if tc.err != nil {
+					t.Fatal("inspection error passed input preflight")
+				}
+				return 1000
+			}
+			target := filepath.Join(t.TempDir(), "not-created")
+			result := BootWithResult(tc.input, target)
+			if result.Success || result.Code != tc.code || result.Data.(*RepoBootData).SourcePkg != tc.resolved {
+				t.Fatalf("unexpected result: %+v data=%+v", result, result.Data)
+			}
+			if _, err := os.Lstat(target); !os.IsNotExist(err) {
+				t.Fatalf("failed preflight created target: %v", err)
+			}
+		})
 	}
 }
 

@@ -276,6 +276,7 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"babelfish":           "babelfish-$v",
 			"babelfishpg":         "babelfish-$v",
 			"orioledb":            "orioledb-$v",
+			"orioledb-server":     "orioledb-$v",
 			"pgedge":              "pgedge-$v",
 			"supabase":            "pg_tle_$v,pgvector_$v,pg_cron_$v,pgsodium_$v,pg_graphql_$v,pg_jsonschema_$v,wrappers_$v,vault_$v,pgjwt_$v,pgsql_http_$v,pg_net_$v,supautils_$v,index_advisor_$v,safeupdate_$v,pg_plan_filter_$v",
 			"pgtde":               "pgtde-18,pgtde-18-contrib",
@@ -299,15 +300,16 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"vtraces":             "victoria-traces",
 		}
 		pkgMapTmpl := map[string]string{
-			"pgsql":        "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl", // postgresql$v-llvmjit
-			"pgsql-mini":   "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib",
-			"pgsql-core":   "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl", // postgresql$v-llvmjit
-			"pgsql-full":   "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit postgresql$v-test postgresql$v-devel",
-			"pgsql-main":   "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl pg_repack_$v wal2json_$v pgvector_$v", // postgresql$v-llvmjit
-			"pgsql-client": "postgresql$v",
-			"pgsql-server": "postgresql$v-server postgresql$v-libs postgresql$v-contrib",
-			"pgsql-devel":  "postgresql$v-devel",
-			"pgsql-basic":  "pg_repack_$v wal2json_$v pgvector_$v",
+			"pgsql":         "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl", // postgresql$v-llvmjit
+			"pgsql-mini":    "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib",
+			"pgsql-core":    "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl", // postgresql$v-llvmjit
+			"pgsql-full":    "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl postgresql$v-llvmjit postgresql$v-test postgresql$v-devel",
+			"pgsql-main":    "postgresql$v postgresql$v-server postgresql$v-libs postgresql$v-contrib postgresql$v-plperl postgresql$v-plpython3 postgresql$v-pltcl pg_repack_$v wal2json_$v pgvector_$v", // postgresql$v-llvmjit
+			"pgsql-client":  "postgresql$v",
+			"pgsql-server":  "postgresql$v-server postgresql$v-libs postgresql$v-contrib",
+			"pgsql-contrib": "postgresql$v-contrib",
+			"pgsql-devel":   "postgresql$v-devel",
+			"pgsql-basic":   "pg_repack_$v wal2json_$v pgvector_$v",
 		}
 		for k, v := range pkgMapTmpl {
 			pkgMap[k] = v
@@ -357,6 +359,7 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"babelfish":           "babelfish-$v",
 			"babelfishpg":         "babelfish-$v",
 			"orioledb":            "orioledb-$v",
+			"orioledb-server":     "orioledb-$v",
 			"pgedge":              "pgedge-$v",
 			"supabase":            "postgresql-$v-pg-tle,postgresql-$v-pg-graphql,postgresql-$v-pg-jsonschema,postgresql-$v-wrappers,postgresql-$v-pgvector,postgresql-$v-cron,postgresql-$v-pgsodium,postgresql-$v-vault,postgresql-$v-pgjwt,postgresql-$v-http,postgresql-$v-pg-net,postgresql-$v-supautils,postgresql-$v-index-advisor,postgresql-$v-pg-safeupdate,postgresql-$v-pg-plan-filter",
 			"pgtde":               "pgtde-18 pgtde-18-contrib",
@@ -379,15 +382,16 @@ func (ec *ExtensionCatalog) LoadAliasMap(distroCode string) {
 			"vtraces":             "victoria-traces",
 		}
 		pkgMapTmpl := map[string]string{
-			"pgsql":        "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v",
-			"pgsql-mini":   "postgresql-$v postgresql-client-$v",
-			"pgsql-core":   "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v",
-			"pgsql-full":   "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v postgresql-server-dev-$v",
-			"pgsql-main":   "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v postgresql-$v-repack postgresql-$v-wal2json postgresql-$v-pgvector",
-			"pgsql-client": "postgresql-client-$v",
-			"pgsql-server": "postgresql-$v",
-			"pgsql-devel":  "postgresql-server-dev-$v",
-			"pgsql-basic":  "postgresql-$v-repack postgresql-$v-wal2json postgresql-$v-pgvector",
+			"pgsql":         "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v",
+			"pgsql-mini":    "postgresql-$v postgresql-client-$v",
+			"pgsql-core":    "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v",
+			"pgsql-full":    "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v postgresql-server-dev-$v",
+			"pgsql-main":    "postgresql-$v postgresql-client-$v postgresql-plpython3-$v postgresql-plperl-$v postgresql-pltcl-$v postgresql-$v-repack postgresql-$v-wal2json postgresql-$v-pgvector",
+			"pgsql-client":  "postgresql-client-$v",
+			"pgsql-server":  "postgresql-$v",
+			"pgsql-contrib": "", // Debian bundles contrib modules in the server package.
+			"pgsql-devel":   "postgresql-server-dev-$v",
+			"pgsql-basic":   "postgresql-$v-repack postgresql-$v-wal2json postgresql-$v-pgvector",
 		}
 		for k, v := range pkgMapTmpl {
 			pkgMap[k] = v

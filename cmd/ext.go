@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"pig/cli/ext"
 	"pig/internal/output"
+	"pig/internal/utils"
 	"strconv"
 
 	"github.com/sirupsen/logrus"
@@ -177,6 +178,31 @@ var extRmCmd = &cobra.Command{
 	Aliases:     []string{"r", "remove"},
 	Annotations: ancsAnn("pig ext rm", "action", "stable", "restricted", false, "medium", "recommended", "root", 10000),
 	Args:        cobra.MinimumNArgs(1),
+	Long: `Remove operating-system packages selected by extension names or explicit aliases.
+
+PostgreSQL server packages, shared contrib bundles, and replacement kernels are
+protected. Removing them requires a registered explicit kernel or package-group
+alias, such as pg18-server, pgsql-server -v 18, or pgedge -v 18.
+Extension names such as pg_trgm, plpgsql, and spock cannot authorize their removal.
+Each operand is checked; adding an explicit alias does not authorize another operand.
+--yes only confirms package removal and does not bypass this protection.
+
+pg18-contrib selects the separate contrib bundle on EL only; it is unavailable on
+Debian. Use orioledb-server for deliberate OrioleDB kernel removal; orioledb remains
+a protected extension operand. Independent language packages remain removable by
+extension name, including PL/Python, PL/Tcl, and PL/Perl packages.
+
+--plan shows the selected package boundary without invoking the package manager.
+A blocked plan reports failed preconditions, contains no actions, and exits with
+status 2. Package removal can affect other extensions sharing those packages;
+the plan does not predict all package-manager dependency removals.`,
+	Example: `
+  pig ext rm vector -v 18                    # remove an ordinary extension package
+  pig ext rm plpython3u -v 18                # remove an independent language package
+  pig ext rm pg18-server --plan              # preview explicit server-group removal
+  pig ext rm pg18-contrib --plan             # preview contrib-bundle removal (EL only)
+  pig ext rm orioledb-server -v 17 --plan     # preview explicit OrioleDB kernel removal
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pgVer, err := extProbeVersion()
 		if err != nil {
@@ -185,8 +211,14 @@ var extRmCmd = &cobra.Command{
 
 		// Plan mode: show plan without executing
 		if extRmPlan {
-			plan := ext.BuildRmPlan(pgVer, args, extYes)
-			return handlePlanOutput(plan)
+			plan, err := ext.BuildRmPlan(pgVer, args, extYes)
+			if outputErr := handlePlanOutput(plan); outputErr != nil {
+				return outputErr
+			}
+			if err != nil {
+				return &utils.ExitCodeError{Code: output.ExitCode(output.CodeExtensionProtectedPackage), Err: err, Silent: true}
+			}
+			return nil
 		}
 
 		result := ext.RmExtensions(pgVer, args, extYes)
@@ -426,7 +458,7 @@ func init() {
 	extStatusCmd.Flags().BoolVarP(&extShowContrib, "contrib", "c", false, "show contrib extensions too")
 	extAddCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm install")
 	extAddCmd.Flags().BoolVar(&extAddPlan, "plan", false, "preview install plan without executing")
-	extRmCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm removal")
+	extRmCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm removal (does not bypass protected-package checks)")
 	extRmCmd.Flags().BoolVar(&extRmPlan, "plan", false, "preview remove plan without executing")
 	extUpdateCmd.Flags().BoolVarP(&extYes, "yes", "y", false, "auto confirm update")
 	extUpdateCmd.Flags().BoolVarP(&extUpdateMirror, "mirror", "m", false, "prefer mirror (pigsty.cc) as primary source")

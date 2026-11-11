@@ -23,6 +23,8 @@ type Repository struct {
 	Meta        map[string]string `yaml:"meta"`
 	Minor       bool              `yaml:"minor"` // if true, use full version (e.g. 9.6) instead of major (e.g. 9) in $releasever
 	Distro      string            `yaml:"-"`     // el|deb
+
+	explicitAPTTrust map[string]bool
 }
 
 // SupportAmd64 checks if the repository supports amd64 architecture

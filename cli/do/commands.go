@@ -64,10 +64,8 @@ func BuildPgsqlRmCommands(args []string, uninstall bool) ([][]string, error) {
 		}
 		selector = target
 	}
-	command := []string{"pgsql-rm.yml", "-l", selector}
-	if uninstall {
-		command = append(command, "-e", "pg_rm_pkg=true")
-	}
+	// Override Pigsty's package-removal default even when --uninstall is omitted.
+	command := []string{"pgsql-rm.yml", "-l", selector, "-e", fmt.Sprintf("pg_rm_pkg=%t", uninstall)}
 	return [][]string{command}, nil
 }
 
@@ -157,7 +155,7 @@ func RemovePgmon(inventory string, args []string) error {
 	if !validClusterName(args[0]) {
 		return fmt.Errorf("invalid pgsql cluster name: %s", args[0])
 	}
-	target := fmt.Sprintf("/etc/prometheus/targets/pgrds/%s.yml", args[0])
+	target := fmt.Sprintf("/infra/targets/pgrds/%s.yml", args[0])
 	logrus.Infof("removing pgsql monitor target %s", args[0])
 	return RunAnsible(inventory, []string{"infra", "-m", "file", "-b", "-a", fmt.Sprintf("path=%s state=absent", target)})
 }

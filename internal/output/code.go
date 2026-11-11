@@ -66,19 +66,20 @@ const (
 
 // Extension module specific codes (MODULE_EXT = 100000)
 const (
-	CodeExtensionNotFound      = MODULE_EXT + CAT_RESOURCE + 1  // Extension not found in catalog
-	CodeExtensionNoPackage     = MODULE_EXT + CAT_RESOURCE + 2  // Extension has no package for current OS/PG
-	CodeExtensionCatalogError  = MODULE_EXT + CAT_CONFIG + 1    // Catalog loading/parsing error
-	CodeExtensionNoPG          = MODULE_EXT + CAT_STATE + 1     // No PostgreSQL installation found
-	CodeExtensionUnsupportedOS = MODULE_EXT + CAT_STATE + 2     // Operating system not supported
-	CodeExtensionPgConfigError = MODULE_EXT + CAT_STATE + 3     // pg_config detection/validation error
-	CodeExtensionInvalidArgs   = MODULE_EXT + CAT_PARAM + 1     // Invalid or missing arguments
-	CodeExtensionInstallFailed = MODULE_EXT + CAT_OPERATION + 1 // Package manager installation failed
-	CodeExtensionRemoveFailed  = MODULE_EXT + CAT_OPERATION + 2 // Package manager removal failed
-	CodeExtensionUpdateFailed  = MODULE_EXT + CAT_OPERATION + 3 // Package manager update failed
-	CodeExtensionImportFailed  = MODULE_EXT + CAT_OPERATION + 4 // Package download/import failed
-	CodeExtensionLinkFailed    = MODULE_EXT + CAT_OPERATION + 5 // PostgreSQL link/unlink failed
-	CodeExtensionReloadFailed  = MODULE_EXT + CAT_OPERATION + 6 // Catalog reload failed
+	CodeExtensionNotFound         = MODULE_EXT + CAT_RESOURCE + 1  // Extension not found in catalog
+	CodeExtensionNoPackage        = MODULE_EXT + CAT_RESOURCE + 2  // Extension has no package for current OS/PG
+	CodeExtensionCatalogError     = MODULE_EXT + CAT_CONFIG + 1    // Catalog loading/parsing error
+	CodeExtensionNoPG             = MODULE_EXT + CAT_STATE + 1     // No PostgreSQL installation found
+	CodeExtensionUnsupportedOS    = MODULE_EXT + CAT_STATE + 2     // Operating system not supported
+	CodeExtensionPgConfigError    = MODULE_EXT + CAT_STATE + 3     // pg_config detection/validation error
+	CodeExtensionInvalidArgs      = MODULE_EXT + CAT_PARAM + 1     // Invalid or missing arguments
+	CodeExtensionProtectedPackage = MODULE_EXT + CAT_PARAM + 2     // Removal requires an explicit kernel/package-group alias
+	CodeExtensionInstallFailed    = MODULE_EXT + CAT_OPERATION + 1 // Package manager installation failed
+	CodeExtensionRemoveFailed     = MODULE_EXT + CAT_OPERATION + 2 // Package manager removal failed
+	CodeExtensionUpdateFailed     = MODULE_EXT + CAT_OPERATION + 3 // Package manager update failed
+	CodeExtensionImportFailed     = MODULE_EXT + CAT_OPERATION + 4 // Package download/import failed
+	CodeExtensionLinkFailed       = MODULE_EXT + CAT_OPERATION + 5 // PostgreSQL link/unlink failed
+	CodeExtensionReloadFailed     = MODULE_EXT + CAT_OPERATION + 6 // Catalog reload failed
 )
 
 // Repository module specific codes (MODULE_REPO = 110000)

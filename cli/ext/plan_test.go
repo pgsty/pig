@@ -294,7 +294,11 @@ func TestPlanPackagesMatchPreparedOperation(t *testing.T) {
 			if tt.op == pkgOpInstall {
 				plan = BuildAddPlan(17, tt.names, false)
 			} else {
-				plan = BuildRmPlan(17, tt.names, false)
+				var err error
+				plan, err = BuildRmPlan(17, tt.names, false)
+				if err != nil {
+					t.Fatalf("BuildRmPlan failed: %v", err)
+				}
 			}
 			prep, result := prepareExtensionPkgOp(preparePkgOpOptions{
 				PgVersion:             17,
@@ -404,7 +408,10 @@ func TestBuildRmPlan_Normal(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildRmPlan(17, []string{"postgis"}, false)
+	plan, err := BuildRmPlan(17, []string{"postgis"}, false)
+	if err != nil {
+		t.Fatalf("BuildRmPlan failed: %v", err)
+	}
 	if plan == nil {
 		t.Fatal("BuildRmPlan returned nil")
 	}
@@ -439,7 +446,10 @@ func TestBuildRmPlan_WithDependents(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildRmPlan(17, []string{"postgis"}, false)
+	plan, err := BuildRmPlan(17, []string{"postgis"}, false)
+	if err != nil {
+		t.Fatalf("BuildRmPlan failed: %v", err)
+	}
 	if plan == nil {
 		t.Fatal("BuildRmPlan returned nil")
 	}
@@ -461,7 +471,10 @@ func TestBuildRmPlan_SharedPackagePreservesDependencyRisk(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildRmPlan(17, []string{"postgis_topology", "postgis"}, false)
+	plan, err := BuildRmPlan(17, []string{"postgis_topology", "postgis"}, false)
+	if err != nil {
+		t.Fatalf("BuildRmPlan failed: %v", err)
+	}
 	if got := packageResources(plan); !reflect.DeepEqual(got, []string{"postgis35_17*"}) {
 		t.Fatalf("plan packages = %v, want one shared package", got)
 	}
@@ -480,7 +493,10 @@ func TestBuildRmPlan_NotInstalled(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildRmPlan(17, []string{"nonexistent_ext"}, false)
+	plan, err := BuildRmPlan(17, []string{"nonexistent_ext"}, false)
+	if err != nil {
+		t.Fatalf("BuildRmPlan failed: %v", err)
+	}
 	if plan == nil {
 		t.Fatal("BuildRmPlan returned nil")
 	}
@@ -496,7 +512,10 @@ func TestBuildRmPlan_CatalogNil(t *testing.T) {
 	Catalog = nil
 	defer func() { Catalog = oldCatalog }()
 
-	plan := BuildRmPlan(17, []string{"postgis"}, false)
+	plan, err := BuildRmPlan(17, []string{"postgis"}, false)
+	if err != nil {
+		t.Fatalf("BuildRmPlan failed: %v", err)
+	}
 	if plan == nil {
 		t.Fatal("BuildRmPlan returned nil even with nil Catalog")
 	}
@@ -510,7 +529,10 @@ func TestBuildRmPlan_EmptyNames(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildRmPlan(17, []string{}, false)
+	plan, err := BuildRmPlan(17, []string{}, false)
+	if err != nil {
+		t.Fatalf("BuildRmPlan failed: %v", err)
+	}
 	if plan == nil {
 		t.Fatal("BuildRmPlan returned nil")
 	}
@@ -538,7 +560,10 @@ func TestPlanFieldsCompleteness_Rm(t *testing.T) {
 	cleanup := setupTestCatalog()
 	defer cleanup()
 
-	plan := BuildRmPlan(17, []string{"postgis"}, false)
+	plan, err := BuildRmPlan(17, []string{"postgis"}, false)
+	if err != nil {
+		t.Fatalf("BuildRmPlan failed: %v", err)
+	}
 	validateExtPlanFields(t, plan, "rm")
 }
 

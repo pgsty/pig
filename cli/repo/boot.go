@@ -55,8 +55,9 @@ func elLocalRepoContent(targetDir string) string {
 func AddLocalRepo(targetDir string) error { return addLocalRepo(targetDir) }
 
 var (
-	repoBootEUID     = os.Geteuid
-	repoBootAddLocal = addLocalRepo
+	repoBootEUID           = os.Geteuid
+	repoBootAddLocal       = addLocalRepo
+	repoBootResolvePackage = config.ResolveOfflinePackagePath
 )
 
 // getLocalRepoPath returns the local repo config file path based on OS type
@@ -89,6 +90,7 @@ func ExtractOfflineWithResult(offlinePkg, targetDir string) *output.Result {
 
 func bootWithResult(offlinePkg, targetDir string, configureLocal bool) *output.Result {
 	startTime := time.Now()
+	inputPkg := offlinePkg
 	offlinePkg, targetDir = bootDefaults(offlinePkg, targetDir)
 
 	// Build OS environment info
@@ -112,11 +114,19 @@ func bootWithResult(offlinePkg, targetDir string, configureLocal bool) *output.R
 		reuseCommitted = true
 	}
 
-	// Check if offline package exists
-	if _, err := os.Stat(offlinePkg); !reuseCommitted && os.IsNotExist(err) {
-		data.DurationMs = time.Since(startTime).Milliseconds()
-		return output.Fail(output.CodeRepoPackageNotFound,
-			fmt.Sprintf("offline package not found: %s", offlinePkg)).WithData(data)
+	if !reuseCommitted {
+		var err error
+		offlinePkg, err = repoBootResolvePackage(inputPkg)
+		data.SourcePkg = offlinePkg
+		if err != nil {
+			data.DurationMs = time.Since(startTime).Milliseconds()
+			if os.IsNotExist(err) {
+				return output.Fail(output.CodeRepoPackageNotFound,
+					fmt.Sprintf("offline package not found: %s", offlinePkg)).WithData(data)
+			}
+			return output.Fail(output.CodeRepoBootFailed,
+				fmt.Sprintf("failed to inspect offline package: %v", err)).WithData(data)
+		}
 	}
 	if repoBootEUID() != 0 {
 		data.DurationMs = time.Since(startTime).Milliseconds()
@@ -267,7 +277,7 @@ func finishRepoBoot(data *RepoBootData, offlinePkg, targetDir, pigstyDir string,
 
 func bootDefaults(offlinePkg, targetDir string) (string, string) {
 	if offlinePkg == "" {
-		offlinePkg = "/tmp/pkg.tgz"
+		offlinePkg = config.DefaultOfflinePackagePath
 	}
 	if targetDir == "" {
 		targetDir = defaultRepoTargetDir

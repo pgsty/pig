@@ -40,6 +40,29 @@ func TestBuildPgsqlRmCommandsRemovesReplicaInsteadOfCluster(t *testing.T) {
 	}
 }
 
+func TestBuildPgsqlRmCommandsKeepsPackagesByDefault(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		args     []string
+		selector string
+	}{
+		{"cluster", []string{"pg-test"}, "pg-test"},
+		{"replica", []string{"pg-test", "10.10.10.13"}, "10.10.10.13,&pg-test"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			commands, err := BuildPgsqlRmCommands(tt.args, false)
+			if err != nil {
+				t.Fatalf("BuildPgsqlRmCommands() error = %v", err)
+			}
+
+			want := [][]string{{"pgsql-rm.yml", "-l", tt.selector, "-e", "pg_rm_pkg=false"}}
+			if !reflect.DeepEqual(commands, want) {
+				t.Fatalf("BuildPgsqlRmCommands() = %#v, want %#v", commands, want)
+			}
+		})
+	}
+}
+
 func TestBuildNodeCommandsAcceptMultipleSelectors(t *testing.T) {
 	addCommands, err := BuildNodeAddCommands([]string{"10.10.10.10", "10.10.10.11"})
 	if err != nil {
@@ -267,6 +290,19 @@ func TestSingleSelectorBuildersRejectExtraArgs(t *testing.T) {
 	if err := RemovePgmon("", []string{"pg-meta", "ignored"}); err == nil {
 		t.Fatal("RemovePgmon should reject an ignored positional argument")
 	}
+}
+
+func TestRemovePgmonUsesPigstyTargetPath(t *testing.T) {
+	home, inventory, _, capture := setupAnsibleRunnerTest(t, "ansible")
+	if err := RemovePgmon(inventory, []string{"pg-test"}); err != nil {
+		t.Fatalf("RemovePgmon() error = %v", err)
+	}
+
+	assertAnsibleCapture(t, capture, home, []string{
+		"-i", inventory,
+		"infra", "-m", "file", "-b",
+		"-a", "path=/infra/targets/pgrds/pg-test.yml state=absent",
+	})
 }
 
 func TestRunAnsibleUsesAnsibleFromPigstyHome(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"pig/internal/output"
+	"pig/internal/utils"
 )
 
 // ValidateKillOptions exposes the same validation used by Kill for plan callers.
@@ -49,17 +50,18 @@ func BuildKillPlan(cfg *Config, opts *KillOptions) *output.Plan {
 		)
 	}
 
+	psCommand := utils.ShellQuoteArgs(appendPgTargetCommandFlags([]string{"pig", "pg", "ps"}, cfg))
 	nextActions := []output.NextAction{
-		{Command: "pig pg ps", Reason: "verify remaining local PostgreSQL sessions", Required: false},
+		{Command: psCommand, Reason: "verify remaining local PostgreSQL sessions", Required: false},
 	}
 	if !opts.Execute {
 		nextActions = append([]output.NextAction{
-			{Command: buildKillCommand(opts, true, false), Reason: "execute this kill plan after review", Required: true},
+			{Command: buildKillCommand(cfg, opts, true, false), Reason: "execute this kill plan after review", Required: true},
 		}, nextActions...)
 	}
 
 	return &output.Plan{
-		Command:      buildKillCommand(opts, false, true),
+		Command:      buildKillCommand(cfg, opts, false, true),
 		Boundary:     "pg:local-instance",
 		Confirmation: "recommended",
 		Actions: []output.Action{
@@ -79,34 +81,31 @@ func BuildKillPlan(cfg *Config, opts *KillOptions) *output.Plan {
 			{Name: "boundary", Status: "local-only", Detail: "does not manage Patroni, load balancers, or client draining"},
 		},
 		Verifications: []output.Check{
-			{Name: "session list", Status: "manual", Detail: "pig pg ps"},
+			{Name: "session list", Status: "manual", Detail: psCommand},
 		},
 		NextActions: nextActions,
 	}
 }
 
-func buildKillCommand(opts *KillOptions, includeExecute bool, includePlan bool) string {
-	parts := []string{"pig", "pg", "kill"}
+func buildKillCommand(cfg *Config, opts *KillOptions, includeExecute bool, includePlan bool) string {
+	parts := appendPgTargetCommandFlags([]string{"pig", "pg", "kill"}, cfg)
 	if opts == nil {
-		if includePlan {
-			parts = append(parts, "--plan")
-		}
-		return strings.Join(parts, " ")
+		opts = &KillOptions{}
 	}
 	if opts.Pid > 0 {
 		parts = append(parts, "--pid", strconv.Itoa(opts.Pid))
 	}
 	if opts.User != "" {
-		parts = append(parts, "--user", quotePgArg(opts.User))
+		parts = append(parts, "--user", opts.User)
 	}
 	if opts.Db != "" {
-		parts = append(parts, "--database", quotePgArg(opts.Db))
+		parts = append(parts, "--database", opts.Db)
 	}
 	if opts.State != "" {
-		parts = append(parts, "--state", quotePgArg(opts.State))
+		parts = append(parts, "--state", opts.State)
 	}
 	if opts.Query != "" {
-		parts = append(parts, "--query", quotePgArg(opts.Query))
+		parts = append(parts, "--query", opts.Query)
 	}
 	if opts.All {
 		parts = append(parts, "--all")
@@ -123,7 +122,7 @@ func buildKillCommand(opts *KillOptions, includeExecute bool, includePlan bool) 
 	if includePlan {
 		parts = append(parts, "--plan")
 	}
-	return strings.Join(parts, " ")
+	return utils.ShellQuoteArgs(parts)
 }
 
 func killFilterDetail(opts *KillOptions) string {
@@ -165,14 +164,4 @@ func killFilterDetail(opts *KillOptions) string {
 		return "client backends except current session"
 	}
 	return strings.Join(parts, ", ")
-}
-
-func quotePgArg(arg string) string {
-	if arg == "" {
-		return arg
-	}
-	if strings.ContainsAny(arg, " \t\n\"'\\") {
-		return strconv.Quote(arg)
-	}
-	return arg
 }

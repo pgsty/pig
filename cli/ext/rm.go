@@ -27,6 +27,20 @@ func RmExtensions(pgVer int, names []string, yes bool) *output.Result {
 	pkgToExt := prep.PkgToExt
 	failed := prep.Failed
 
+	if blocked := checkRemovalSafety(prep.PgVersion, prep.Resolution); len(blocked) > 0 {
+		return output.Fail(output.CodeExtensionProtectedPackage, removalSafetyMessage(blocked)).WithData(&ExtensionRmData{
+			PgVersion:   prep.PgVersion,
+			OSCode:      config.OSCode,
+			Arch:        config.OSArch,
+			Requested:   names,
+			Packages:    allPkgNames,
+			Removed:     []string{},
+			Failed:      append(failed, blocked...),
+			DurationMs:  time.Since(prep.StartTime).Milliseconds(),
+			AutoConfirm: yes,
+		})
+	}
+
 	// If no packages to remove, return early
 	if len(allPkgNames) == 0 {
 		data := &ExtensionRmData{
@@ -72,11 +86,11 @@ func RmExtensions(pgVer int, names []string, yes bool) *output.Result {
 
 	// Determine overall result
 	if len(failed) > 0 {
-		message := fmt.Sprintf("removed %d extensions, failed %d", len(removed), len(failed))
+		message := fmt.Sprintf("removed %d packages, failed %d requests", len(removed), len(failed))
 		result := output.Fail(output.CodeExtensionRemoveFailed, message).WithData(data)
 		return result
 	}
 
-	message := fmt.Sprintf("Removed %d extensions", len(removed))
+	message := fmt.Sprintf("Removed %d packages", len(removed))
 	return output.OK(message, data)
 }

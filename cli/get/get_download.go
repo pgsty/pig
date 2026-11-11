@@ -14,13 +14,45 @@ import (
 	"pig/internal/utils"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 )
 
 var pigstyVersionRe = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:-(?:a|b|c|alpha|beta|rc)\d+)?$`)
 
-var downloadProgressOut io.Writer = os.Stdout
+// A nil override follows os.Stderr at download time. Progress is diagnostic
+// output; binding a file during package initialization bypasses later redirects.
+var (
+	downloadProgressOut io.Writer
+	downloadProgressMu  sync.RWMutex
+)
+
+// SetDownloadProgressWriter overrides progress for a serialized legacy command
+// and returns a function that restores the previous writer. Structured wrappers
+// use io.Discard while temporarily rendering legacy output as text. A nil writer
+// restores the default runtime stderr destination. Each download takes a snapshot
+// of the writer when it starts.
+func SetDownloadProgressWriter(writer io.Writer) func() {
+	downloadProgressMu.Lock()
+	previous := downloadProgressOut
+	downloadProgressOut = writer
+	downloadProgressMu.Unlock()
+	return func() {
+		downloadProgressMu.Lock()
+		downloadProgressOut = previous
+		downloadProgressMu.Unlock()
+	}
+}
+
+func downloadProgressWriter() io.Writer {
+	downloadProgressMu.RLock()
+	defer downloadProgressMu.RUnlock()
+	if downloadProgressOut != nil {
+		return downloadProgressOut
+	}
+	return os.Stderr
+}
 
 const downloadProgressWidth = 16
 
@@ -231,7 +263,7 @@ func downloadToTemp(url, targetDir, filename string) (tempPath, checksum string,
 		total:    size,
 		filename: filename,
 		sizeMiB:  sizeMiB,
-		out:      downloadProgressOut,
+		out:      downloadProgressWriter(),
 	}
 
 	n, err := io.CopyBuffer(io.MultiWriter(out, h), reader, make([]byte, 32*1024))

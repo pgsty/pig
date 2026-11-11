@@ -74,7 +74,7 @@ func GetAllDatabases(cfg *Config) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmdArgs = append(cmdArgs, "-d", "postgres", "-t", "-A", "-c",
+	cmdArgs = append(cmdArgs, "-X", "-d", "postgres", "-t", "-A", "-c",
 		"SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname")
 
 	// Capture stdout only so diagnostics cannot become database names.

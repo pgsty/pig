@@ -20,11 +20,12 @@ const (
 type preparedPkgOp struct {
 	StartTime time.Time
 
-	PgVersion int
-	Requested []string
-	Packages  []string
-	PkgToExt  map[string]string
-	Failed    []*FailedExtItem
+	PgVersion  int
+	Requested  []string
+	Packages   []string
+	PkgToExt   map[string]string
+	Failed     []*FailedExtItem
+	Resolution *PackageResolveResult
 }
 
 type preparePkgOpOptions struct {
@@ -80,12 +81,13 @@ func prepareExtensionPkgOp(opts preparePkgOpOptions) (*preparedPkgOp, *output.Re
 	}
 
 	return &preparedPkgOp{
-		StartTime: startTime,
-		PgVersion: pgVer,
-		Requested: opts.Requested,
-		Packages:  resolved.Packages,
-		PkgToExt:  resolved.PackageOwner,
-		Failed:    failed,
+		StartTime:  startTime,
+		PgVersion:  pgVer,
+		Requested:  opts.Requested,
+		Packages:   resolved.Packages,
+		PkgToExt:   resolved.PackageOwner,
+		Failed:     failed,
+		Resolution: resolved,
 	}, nil
 }
 

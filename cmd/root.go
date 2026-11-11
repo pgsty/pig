@@ -320,7 +320,7 @@ func isUsageExecutionError(err error) bool {
 }
 
 func reorderOutputBeforeHelp(args []string) []string {
-	if len(args) < 3 {
+	if len(args) < 2 {
 		return args
 	}
 	// Native pt argv is an opaque boundary. In particular, do not move an
@@ -331,6 +331,9 @@ func reorderOutputBeforeHelp(args []string) []string {
 
 	helpIdx := -1
 	for i, arg := range args {
+		if arg == "--" {
+			break
+		}
 		if arg == "--help" || arg == "-h" {
 			helpIdx = i
 			break
@@ -363,13 +366,16 @@ func reorderOutputBeforeHelp(args []string) []string {
 func findOutputFlagSpan(args []string, start int) (int, int) {
 	for i := start; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" {
+			break
+		}
 		if arg == "-o" || arg == "--output" {
 			if i+1 < len(args) {
 				return i, i + 2
 			}
 			return -1, -1
 		}
-		if strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o=") {
+		if strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o") {
 			return i, i + 1
 		}
 	}
@@ -394,6 +400,8 @@ func outputFormatFromArgs(args []string) string {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
+		case arg == "--":
+			return format
 		case arg == "-o" || arg == "--output":
 			if i+1 < len(args) {
 				format = validateOutputFormat(args[i+1])
@@ -401,8 +409,8 @@ func outputFormatFromArgs(args []string) string {
 			}
 		case strings.HasPrefix(arg, "--output="):
 			format = validateOutputFormat(strings.TrimPrefix(arg, "--output="))
-		case strings.HasPrefix(arg, "-o="):
-			format = validateOutputFormat(strings.TrimPrefix(arg, "-o="))
+		case strings.HasPrefix(arg, "-o"):
+			format = validateOutputFormat(strings.TrimPrefix(strings.TrimPrefix(arg, "-o"), "="))
 		}
 	}
 	return format

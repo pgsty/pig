@@ -223,7 +223,7 @@ func AddReposWithOptions(modules []string, opts AddOptions) *output.Result {
 	configureRepoRoute(manager, opts)
 	data.Region = manager.Region
 
-	warning, err := manager.preparePigstyKey(expandedModules, opts.GPGCheck)
+	warning, err := manager.prepareRepoTrust(expandedModules, opts)
 	if err != nil {
 		data.DurationMs = time.Since(startTime).Milliseconds()
 		return output.Fail(output.CodeRepoAddFailed, err.Error()).WithData(data)
@@ -287,6 +287,28 @@ func configureRepoRoute(manager *Manager, opts AddOptions) {
 	} else {
 		manager.DetectRegion(opts.Region)
 	}
+}
+
+func (m *Manager) prepareRepoTrust(modules []string, opts AddOptions) (string, error) {
+	explicit := m.explicitAPTPolicies(modules)
+	warning, err := m.preparePigstyKey(modules, opts.GPGCheck)
+	if err != nil {
+		return "", err
+	}
+	if m.OsType == config.DistroDEB && opts.GPGCheck && warning == "" {
+		for _, repository := range m.selectedPigstyRepositories(modules) {
+			explicit[repository]["trusted"] = true
+		}
+	}
+	inherited, err := m.reconcileAPTTrust(modules, explicit, opts.Remove)
+	if err != nil {
+		return "", err
+	}
+	if inherited && warning != "" {
+		warning = strings.Replace(warning, "continuing with signature verification disabled for selected Pigsty repositories",
+			"preserving retained APT trust settings; new implicit Pigsty sources use signature verification disabled", 1)
+	}
+	return warning, nil
 }
 
 func addRepoModules(manager *Manager, modules []string, data *RepoAddData, stopOnFailure bool) {

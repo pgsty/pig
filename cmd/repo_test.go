@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"pig/internal/config"
+	"pig/internal/output"
 	"pig/internal/utils"
 
 	"github.com/spf13/cobra"
@@ -29,6 +30,55 @@ func TestRepoCreateDocumentsMacOSPrivilegeException(t *testing.T) {
 func TestRepoCacheExamplesDoNotAdvertiseUnknownForceFlag(t *testing.T) {
 	if strings.Contains(repoCacheCmd.Example, " -f") && repoCacheCmd.Flags().ShorthandLookup("f") == nil {
 		t.Fatalf("repo cache examples advertise an undeclared -f flag:\n%s", repoCacheCmd.Example)
+	}
+}
+
+func TestRepoOfflinePackageFlagsUsePigstyDefault(t *testing.T) {
+	for _, command := range []*cobra.Command{repoBootCmd, repoCacheCmd} {
+		flag := command.Flags().Lookup("path")
+		if flag == nil {
+			t.Fatalf("%s missing --path flag", command.CommandPath())
+		}
+		if flag.DefValue != config.DefaultOfflinePackagePath {
+			t.Fatalf("%s --path default = %q, want %q", command.CommandPath(), flag.DefValue, config.DefaultOfflinePackagePath)
+		}
+	}
+}
+
+func TestRepoBootDistinguishesExplicitDefaultPath(t *testing.T) {
+	origRun, origPkg := repoBootWithResult, repoBootPkg
+	flag := repoBootCmd.Flags().Lookup("path")
+	origChanged := flag.Changed
+	t.Cleanup(func() {
+		repoBootWithResult, repoBootPkg = origRun, origPkg
+		flag.Changed = origChanged
+	})
+	for _, tc := range []struct {
+		name        string
+		changed     bool
+		value, want string
+		invalid     bool
+	}{
+		{name: "automatic", value: config.DefaultOfflinePackagePath},
+		{name: "explicit default", changed: true, value: config.DefaultOfflinePackagePath, want: config.DefaultOfflinePackagePath},
+		{name: "explicit custom", changed: true, value: "/mnt/pkg.tgz", want: "/mnt/pkg.tgz"},
+		{name: "explicit empty", changed: true, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			repoBootWithResult = func(path, dir string) *output.Result {
+				called = true
+				if tc.invalid || path != tc.want || dir != repoBootDir {
+					t.Fatalf("boot received path=%q dir=%q", path, dir)
+				}
+				return output.OK("selected input", nil)
+			}
+			repoBootPkg, flag.Changed = tc.value, tc.changed
+			err := repoBootCmd.RunE(repoBootCmd, nil)
+			if (err != nil) != tc.invalid || called == tc.invalid {
+				t.Fatalf("error=%v called=%v", err, called)
+			}
+		})
 	}
 }
 
