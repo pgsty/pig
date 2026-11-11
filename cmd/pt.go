@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"strings"
 
 	"pig/cli/patroni"
@@ -123,7 +124,18 @@ func patroniCommandPreRun(cmd *cobra.Command, args []string) error {
 	if !patroniCommandNeedsConfig(cmd, args) {
 		return nil
 	}
-	return patroni.ResolveCommandOptions(utils.GetDBSU(patroniDBSU))
+	if err := patroni.ResolveCommandOptions(utils.GetDBSU(patroniDBSU)); err != nil {
+		if config.IsStructuredOutput() {
+			code := output.CodePtConfigResolveFailed
+			var statusCoder interface{ StatusCode() int }
+			if errors.As(err, &statusCoder) {
+				code = statusCoder.StatusCode()
+			}
+			return handleAuxResult(output.Fail(code, "failed to resolve Patroni configuration").WithDetail(err.Error()))
+		}
+		return err
+	}
+	return nil
 }
 
 func patroniCommandNeedsConfig(cmd *cobra.Command, args []string) bool {

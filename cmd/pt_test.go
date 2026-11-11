@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"pig/cli/patroni"
 	"pig/internal/config"
+	"pig/internal/output"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -444,4 +446,31 @@ func mustCmdGetwd(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return wd
+}
+
+func TestPatroniStructuredStatusConfigResolveFailureEmitsJSON(t *testing.T) {
+	t.Cleanup(resetPtTestState)
+	t.Setenv("PATRONICTL_CONFIG_FILE", "")
+	t.Setenv("PIG_NO_SUDO", "")
+	binDir := t.TempDir()
+	for _, name := range []string{"sudo", "su"} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte("#!/bin/sh\necho 'configuration probe denied' >&2\nexit 1\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var execErr error
+	raw := captureStdout(t, func() {
+		execErr = executePtTestWithoutConfigEnv(t, "pt", "--dbsu", "pig-test-unavailable-dbsu", "status", "-o", "json")
+	})
+	if execErr == nil {
+		t.Fatal("expected conventional config probe failure")
+	}
+	var payload output.Result
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &payload); err != nil {
+		t.Fatalf("expected structured JSON error on stdout, err=%v raw=%q", err, raw)
+	}
+	if payload.Success || payload.Code != output.CodePtConfigResolveFailed {
+		t.Fatalf("expected config resolution failure envelope, got %+v", payload)
+	}
 }
