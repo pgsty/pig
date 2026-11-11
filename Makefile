@@ -3,10 +3,10 @@
 # Mtime     :   2026-08-14
 # Copyright (C) 2018-2026 Ruohang Feng
 #==============================================================#
-VERSION=v1.11.0
+VERSION=v1.11.1
 PIG_VERSION:=$(patsubst v%,%,$(VERSION))
 PIGSTY_VERSION:=4.6.0
-GORELEASER_VERSION:=v2.20.0
+GORELEASER_VERSION:=v2.20.1
 GORELEASER:=go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
 DOCS_DIR?=../pig.pgsty.com
 

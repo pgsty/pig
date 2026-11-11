@@ -2,7 +2,7 @@
 
 [![Website: pig.pgsty.com](https://img.shields.io/badge/Website-pig.pgsty.com-slategray?style=flat&logo=cilium&logoColor=white)](https://pig.pgsty.com/)
 [![Doc: pig](https://img.shields.io/badge/Docs-pig-slategray?style=flat)](https://pig.pgsty.com/docs/)
-[![Version: v1.11.0](https://img.shields.io/badge/version-v1.11.0-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.11.0)
+[![Version: v1.11.1](https://img.shields.io/badge/version-v1.11.1-slategray?style=flat)](https://github.com/pgsty/pig/releases/tag/v1.11.1)
 [![Pigsty: v4.6.0](https://img.shields.io/badge/Pigsty-v4.6.0-slategray?style=flat)](https://pigsty.io/docs/about/release)
 [![License: Apache-2.0](https://img.shields.io/github/license/pgsty/pig?logo=opensourceinitiative&logoColor=green&color=slategray)](https://github.com/pgsty/pig/blob/main/LICENSE)
 [![Extensions: 625](https://img.shields.io/badge/extensions-625-%233E668F?style=flat&logo=postgresql&logoColor=white&labelColor=3E668F)](https://pigsty.io/ext/list)
@@ -19,7 +19,7 @@ Also explore the full [**PGEXT.CLOUD directory**](https://pgext.cloud/) of 2,733
 
 The current public catalog metric is **625 packaged entries**. The entries map to **518** distinct package names when PostgreSQL contrib modules are included, and the package view used for availability reports covers **457** non-contrib package families. The full PGEXT.CLOUD directory contains **2,733** ecosystem entries, including packaged, source-only, and provider-specific extensions.
 
-The count follows the catalog directory-entry contract: it measures coverage, while package names, platform availability, PostgreSQL-major support, and database enablement remain separate properties. The `v1.11.0` release uses the **2026-11-10 625-entry** public metric; later catalog data can be loaded with `pig ext reload`.
+The count follows the catalog directory-entry contract: it measures coverage, while package names, platform availability, PostgreSQL-major support, and database enablement remain separate properties. The `v1.11.1` release uses the **2026-11-10 625-entry** public metric; later catalog data can be loaded with `pig ext reload`.
 
 [![PostgreSQL Extension Ecosystem](https://pigsty.io/img/pigsty/ecosystem.jpg)](https://medium.com/@fengruohang/postgres-is-eating-the-database-world-157c204dcfc4)
 
@@ -633,7 +633,7 @@ RUN pig repo set && pig install -y -v 18 pgsql pg_duckdb timescaledb postgis pgv
 
 **Build Extension**
 
-You can even build RPM / DEB packages directly with the `pig build` subcommand. Source builds use Go 1.27.3 or later for the PIG CLI, and the default cargo-pgrx version is 0.19.3.
+You can even build RPM / DEB packages directly with the `pig build` subcommand. Source builds use Go 1.27.4 or later for the PIG CLI, and the default cargo-pgrx version is 0.19.3.
 
 Build targets are explicit extension or package names. Debug packages are produced by default; pass `--nodbg` when they are not wanted. `pig build proxy` installs or verifies Xray, while `pig build proxy client --from ./client.uri` configures an HTTP/SOCKS client and `pig build proxy server --host ... --target ... --export ./client.uri` configures a VLESS/REALITY server. The legacy `id@host:port` client form remains available.
 
