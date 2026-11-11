@@ -46,27 +46,24 @@ func ParsePostgresVersion(input string) (int, int, error) {
 		return 0, 0, fmt.Errorf("major version %d is out of range [1..99]", major)
 	}
 
-	// 3. Check if a '.' followed by digits exists for the minor version; default to minor=0 if not
+	// 3. Check if a '.' immediately followed by digits exists within the same
+	//    version token (before any whitespace or parenthesized build metadata);
+	//    default to minor=0 if not.
 	minor := 0
-
-	// leftover is the substring after endIdx, e.g., ".10", ".5something", "rc2", " some-other-thing"
 	leftover := s[endIdx:]
-	leftover = strings.TrimLeftFunc(leftover, func(r rune) bool {
-		// Skip all characters until a '.' is found
-		return r != '.'
-	})
+	if sepIdx := strings.IndexFunc(leftover, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '('
+	}); sepIdx >= 0 {
+		leftover = leftover[:sepIdx]
+	}
 
-	// If leftover is empty or doesn't start with '.', there's no minor version
-	if leftover == "" || leftover[0] != '.' {
+	dotIdx := strings.IndexByte(leftover, '.')
+	if dotIdx < 0 {
 		return major, 0, nil
 	}
 
-	// Extract potential minor version digits after '.'
-	restAfterDot := leftover[1:]
-	restAfterDot = strings.TrimLeftFunc(restAfterDot, func(r rune) bool {
-		return !unicode.IsDigit(r)
-	})
-	if restAfterDot == "" {
+	restAfterDot := leftover[dotIdx+1:]
+	if restAfterDot == "" || !unicode.IsDigit(rune(restAfterDot[0])) {
 		return major, 0, nil
 	}
 

@@ -232,6 +232,9 @@ command.`,
 			return nil
 		}
 
+		if err := ext.ReloadCatalog(); err != nil {
+			return err
+		}
 		result := pigstyBootNativeExec(cmd.Context(), stycli.NativeBootstrapOptions{
 			Region:      bootRegion,
 			PackagePath: pigstyBootPackage,

@@ -41,6 +41,8 @@ func TestParsePostgresVersion(t *testing.T) {
 		{"13beta0", 13, 0, false},                      // just major
 		{"14alpha1", 14, 0, false},                     // just major
 		{"15rc2", 15, 0, false},                        // just major
+		{"PostgreSQL 18rc1 (Ubuntu 18~rc1-1.pgdg24.04+1)", 18, 0, false},
+		{"18~rc1-1.pgdg24.04+1", 18, 0, false},
 
 	}
 

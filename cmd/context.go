@@ -61,6 +61,9 @@ Examples:
 		if err := commandModulePreRun(cmd, args); err != nil {
 			return err
 		}
+		if err := ext.ReloadCatalog(); err != nil {
+			return err
+		}
 		// Pre-detect PostgreSQL installations
 		if err := ext.DetectPostgres(); err != nil {
 			logrus.Debugf("DetectPostgres: %v", err)

@@ -25,6 +25,9 @@ var statusCmd = &cobra.Command{
     - Network Conditions
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := ext.ReloadCatalog(); err != nil {
+			return err
+		}
 		if config.IsStructuredOutput() {
 			result := statuscli.GetStatusResult()
 			return handleAuxResult(result)

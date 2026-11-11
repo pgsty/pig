@@ -239,6 +239,7 @@ pg<ver>-mini             pg<ver>-core
 pg<ver>-full             pg<ver>-main
 pg<ver>-client           pg<ver>-server
 pg<ver>-devel            pg<ver>-basic
+pg<ver>-contrib
 ```
 
 Dynamic category aliases (`pg18-gis`, `pg17-rag`, `pgsql-olap`, ...):
@@ -304,7 +305,8 @@ Take el for examples:
 "agensgraph":          "agensgraph-$v"
 "pgedge":              "pgedge-$v"
 "polardb":             "polardb-$v"
-"orioledb":            "orioledb-$v"
+"orioledb":            "orioledb_$v"
+"orioledb-server":     "orioledb-$v"
 "openhalodb":          "openhalodb-$v"
 "percona-core":        "percona-postgresql18,percona-postgresql18-server,percona-postgresql18-contrib,percona-postgresql18-plperl,percona-postgresql18-plpython3,percona-postgresql18-pltcl,percona-pg_tde18"
 "percona-main":        "percona-postgresql18,percona-postgresql18-server,percona-postgresql18-contrib,percona-postgresql18-plperl,percona-postgresql18-plpython3,percona-postgresql18-pltcl,percona-pg_tde18,percona-postgis35_18,percona-postgis35_18-client,percona-postgis35_18-utils,percona-pgvector_18,percona-wal2json18,percona-pg_repack18,percona-pgaudit18,percona-pgaudit18_set_user,percona-pg_stat_monitor18,percona-pg_gather"

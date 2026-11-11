@@ -116,16 +116,36 @@ func resolvePGHome(arg string) (string, error) {
 		}
 	}
 
-	// Otherwise, treat as direct path
-	return arg, nil
+	// Otherwise, treat as direct path and normalize to a clean absolute path.
+	if strings.TrimSpace(arg) == "" {
+		return "", &LinkError{
+			Code: output.CodeExtensionInvalidArgs,
+			Err:  fmt.Errorf("PGHOME path cannot be empty"),
+		}
+	}
+	absHome, err := filepath.Abs(arg)
+	if err != nil {
+		return "", &LinkError{
+			Code: output.CodeExtensionInvalidArgs,
+			Err:  fmt.Errorf("invalid PGHOME path %q: %w", arg, err),
+		}
+	}
+	return absHome, nil
 }
 
 // validatePGHome checks if the given path is a valid PostgreSQL installation
 func validatePGHome(pgHome string) error {
+	pgHome = filepath.Clean(pgHome)
 	if systemPaths[pgHome] {
 		return &LinkError{
 			Code: output.CodeExtensionInvalidArgs,
 			Err:  fmt.Errorf("cannot use system path %s as PostgreSQL home", pgHome),
+		}
+	}
+	if strings.ContainsAny(pgHome, "\"$`\\\n\r\x00") {
+		return &LinkError{
+			Code: output.CodeExtensionInvalidArgs,
+			Err:  fmt.Errorf("PGHOME path contains unsafe shell characters"),
 		}
 	}
 

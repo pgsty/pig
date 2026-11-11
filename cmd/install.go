@@ -52,6 +52,9 @@ Examples:
   pig install pg17 --plan              # preview translated install command
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := ext.ReloadCatalog(); err != nil {
+			return err
+		}
 		// Plan mode: show plan without executing install.
 		if installPlan {
 			var pgVer int

@@ -186,3 +186,40 @@ func TestEmbeddedCatalogPostGISPackageResolution(t *testing.T) {
 		})
 	}
 }
+
+func TestEmbeddedCatalogReferentialIntegrity(t *testing.T) {
+	ec := loadEmbeddedCatalogForTest(t)
+	for _, ext := range ec.Extensions {
+		if ext == nil {
+			continue
+		}
+		for _, dep := range ext.Requires {
+			if ec.ExtNameMap[dep] == nil {
+				t.Errorf("extension %q requires unknown extension %q", ext.Name, dep)
+			}
+		}
+		for _, rev := range ext.RequireBy {
+			if ec.ExtNameMap[rev] == nil {
+				t.Errorf("extension %q require_by references unknown extension %q", ext.Name, rev)
+			}
+		}
+		for _, rel := range ext.SeeAlso {
+			if ec.ExtNameMap[rel] == nil {
+				t.Errorf("extension %q see_also references unknown extension %q", ext.Name, rel)
+			}
+		}
+	}
+}
+
+func TestInfraAliasIncludesKESAndOpenBao(t *testing.T) {
+	ec := loadEmbeddedCatalogForTest(t)
+	for _, distro := range []string{config.DistroEL, config.DistroDEB} {
+		ec.LoadAliasMap(distro)
+		infra := strings.Fields(ec.AliasMap["infra"])
+		for _, want := range []string{"kes", "openbao"} {
+			if !slices.Contains(infra, want) {
+				t.Errorf("infra alias on %s = %v, missing %q", distro, infra, want)
+			}
+		}
+	}
+}
