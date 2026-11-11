@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -76,6 +77,27 @@ func resolveOfflinePackagePath(path string, lstat func(string) (os.FileInfo, err
 		return DefaultOfflinePackagePath, err
 	}
 	return legacyPath, legacyErr
+}
+
+// TrustedAutomaticPackage validates that an auto-discovered offline package
+// (/var/tmp/pkg.tgz or /tmp/pkg.tgz) is a regular non-symlink file, not
+// group/world-writable, and owned by root or the invoking SUDO_UID.
+func TrustedAutomaticPackage(info os.FileInfo) bool {
+	if info == nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat == nil {
+		return false
+	}
+	if stat.Uid == 0 {
+		return true
+	}
+	uid, err := strconv.ParseUint(strings.TrimSpace(os.Getenv("SUDO_UID")), 10, 32)
+	return err == nil && stat.Uid == uint32(uid)
 }
 
 // Output format constants

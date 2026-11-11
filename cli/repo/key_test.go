@@ -68,18 +68,48 @@ func TestInstallPigstyKeyAttemptsInstallWhenStatDenied(t *testing.T) {
 	assertInstalledPigstyKey(t, keyPath)
 }
 
+func TestInstallPigstyKeyReusesSymlinkToExistingRegularFile(t *testing.T) {
+	_, keyPath := setupAddKeyTest(t, config.DistroDEB, "d12", "x86_64")
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "managed-pigsty.asc")
+	const content = "administrator-managed symlinked key\n"
+	if err := os.WriteFile(target, []byte(content), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, keyPath); err != nil {
+		t.Fatal(err)
+	}
+	putPigstyKey = func(string, []byte, os.FileMode) error {
+		t.Fatal("symlink resolving to regular key reached the writer")
+		return nil
+	}
+	if err := InstallPigstyKey(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInstallPigstyKeyRejectsNonRegularDestination(t *testing.T) {
-	for _, kind := range []string{"directory", "symlink"} {
+	for _, kind := range []string{"directory", "symlink", "hidden-symlink"} {
 		t.Run(kind, func(t *testing.T) {
 			_, keyPath := setupAddKeyTest(t, config.DistroDEB, "d12", "aarch64")
 			if err := os.MkdirAll(filepath.Dir(keyPath), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			var err error
-			if kind == "directory" {
+			switch kind {
+			case "directory":
 				err = os.Mkdir(keyPath, 0o755)
-			} else {
+			case "symlink":
 				err = os.Symlink(filepath.Join(t.TempDir(), "missing"), keyPath)
+			case "hidden-symlink":
+				existing := filepath.Join(t.TempDir(), "existing.asc")
+				if writeErr := os.WriteFile(existing, []byte("fake"), 0o644); writeErr != nil {
+					t.Fatal(writeErr)
+				}
+				err = os.Symlink(existing, keyPath)
+				statPigstyKey = func(string) (os.FileInfo, error) { return nil, os.ErrPermission }
 			}
 			if err != nil {
 				t.Fatal(err)

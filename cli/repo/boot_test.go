@@ -385,3 +385,29 @@ func TestBootWithResultRejectsNonRootInsteadOfInvokingTar(t *testing.T) {
 		t.Fatalf("unexpected non-root result: %+v", result)
 	}
 }
+
+func TestBootWithResultRejectsUntrustedAutomaticPackageBeforeCreatingTarget(t *testing.T) {
+	origEUID, origResolve := repoBootEUID, repoBootResolvePackage
+	t.Cleanup(func() {
+		repoBootEUID, repoBootResolvePackage = origEUID, origResolve
+	})
+	repoBootEUID = func() int { return 0 }
+
+	untrustedPkg := filepath.Join(t.TempDir(), "pkg.tgz")
+	if err := os.WriteFile(untrustedPkg, []byte("untrusted"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(untrustedPkg, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	repoBootResolvePackage = func(string) (string, error) { return untrustedPkg, nil }
+
+	target := filepath.Join(t.TempDir(), "uncreated-repo-target")
+	result := BootWithResult("", target)
+	if result.Success || result.Code != output.CodeRepoBootFailed || !strings.Contains(result.Message, "untrusted automatic offline package") {
+		t.Fatalf("expected untrusted automatic package rejection, got %+v", result)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("untrusted automatic package check should fail before creating target, lstat err=%v", err)
+	}
+}

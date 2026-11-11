@@ -133,6 +133,14 @@ func bootWithResult(offlinePkg, targetDir string, configureLocal bool) *output.R
 		return output.Fail(output.CodeRepoBootFailed,
 			"native repository extraction requires root; run pig repo boot with sudo").WithData(data)
 	}
+	if !reuseCommitted && strings.TrimSpace(inputPkg) == "" {
+		info, err := os.Lstat(offlinePkg)
+		if err != nil || !config.TrustedAutomaticPackage(info) {
+			data.DurationMs = time.Since(startTime).Milliseconds()
+			return output.Fail(output.CodeRepoBootFailed,
+				fmt.Sprintf("untrusted automatic offline package: %s", offlinePkg)).WithData(data)
+		}
+	}
 
 	// Match Pigsty's repository layout on a fresh host: /www is a stable
 	// convenience link while repository data lives below /data/nginx. Existing

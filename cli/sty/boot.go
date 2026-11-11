@@ -12,9 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 
 	"pig/cli/ext"
 	"pig/cli/install"
@@ -646,18 +644,7 @@ func resolveBootPackage(requested string) (string, error) {
 }
 
 func trustedAutomaticPackage(info os.FileInfo) bool {
-	if info.Mode().Perm()&0o022 != 0 {
-		return false
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat == nil {
-		return false
-	}
-	if stat.Uid == 0 {
-		return true
-	}
-	uid, err := strconv.ParseUint(strings.TrimSpace(os.Getenv("SUDO_UID")), 10, 32)
-	return err == nil && stat.Uid == uint32(uid)
+	return config.TrustedAutomaticPackage(info)
 }
 
 func regularFile(path string) bool {
@@ -709,6 +696,9 @@ func ReexecBootstrapAsRoot(args []string, stderr io.Writer) ReexecOutcome {
 		cmd.Stdout = &stdout
 	} else {
 		cmd.Stdout = os.Stdout
+		if os.Getenv("PIG_NON_INTERACTIVE") == "" {
+			cmd.Stdin = os.Stdin
+		}
 	}
 	cmd.Stderr = stderr
 	err = cmd.Run()
