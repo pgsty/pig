@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"pig/cli/ext"
@@ -426,7 +427,7 @@ var pgStatusCmd = &cobra.Command{
 		}
 
 		// Text mode: preserve existing behavior
-		return postgres.Status(pgConfig)
+		return silentRuntimeError(cmd, postgres.Status(pgConfig))
 	},
 }
 
@@ -976,6 +977,7 @@ var pgKillCmd = &cobra.Command{
 		opts := &postgres.KillOptions{
 			Execute: pgKillExecute,
 			Pid:     pgKillPid,
+			PidSet:  cmd.Flags().Changed("pid"),
 			User:    pgKillUser,
 			Db:      pgKillDb,
 			State:   pgKillState,
@@ -984,28 +986,28 @@ var pgKillCmd = &cobra.Command{
 			Cancel:  pgKillCancel,
 			Watch:   pgKillWatch,
 		}
+		if err := postgres.ValidateKillOptions(opts); err != nil {
+			return structuredParamError(
+				output.MODULE_PG,
+				"pig postgres kill",
+				"invalid kill parameters",
+				err.Error(),
+				args,
+				map[string]interface{}{
+					"execute":  pgKillExecute,
+					"pid":      pgKillPid,
+					"user":     pgKillUser,
+					"database": pgKillDb,
+					"state":    pgKillState,
+					"query":    pgKillQuery,
+					"all":      pgKillAll,
+					"cancel":   pgKillCancel,
+					"watch":    pgKillWatch,
+					"plan":     pgKillPlan,
+				},
+			)
+		}
 		if pgKillPlan {
-			if err := postgres.ValidateKillOptions(opts); err != nil {
-				return structuredParamError(
-					output.MODULE_PG,
-					"pig postgres kill",
-					"invalid kill parameters",
-					err.Error(),
-					args,
-					map[string]interface{}{
-						"execute":  pgKillExecute,
-						"pid":      pgKillPid,
-						"user":     pgKillUser,
-						"database": pgKillDb,
-						"state":    pgKillState,
-						"query":    pgKillQuery,
-						"all":      pgKillAll,
-						"cancel":   pgKillCancel,
-						"watch":    pgKillWatch,
-						"plan":     pgKillPlan,
-					},
-				)
-			}
 			return handlePlanOutput(postgres.BuildKillPlan(pgConfig, opts))
 		}
 		if config.IsStructuredOutput() && pgKillWatch > 0 {
@@ -1148,10 +1150,11 @@ func addPgForkCreateFlags(cmd *cobra.Command, opts *forkCLIOptions) {
 
 func newPgForkListCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:         "list",
-		Short:       "List managed PostgreSQL forks",
-		Args:        cobra.NoArgs,
-		Annotations: ancsAnn("pig postgres fork list", "query", "volatile", "safe", true, "safe", "none", "dbsu", 1000),
+		Use:          "list",
+		Short:        "List managed PostgreSQL forks",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		Annotations:  ancsAnn("pig postgres fork list", "query", "volatile", "safe", true, "safe", "none", "dbsu", 1000),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runForkList(cmd)
 		},
@@ -1176,7 +1179,7 @@ func newPgForkStartCommand(parentOpts *forkCLIOptions) *cobra.Command {
 			if opts.plan {
 				return runForkTargetPlan("start", opts, firstArg(args), "Start PostgreSQL fork")
 			}
-			return runForkAction("fork start", func() (postgres.ResultData, error) {
+			return runForkAction(cmd, "fork start", func() (postgres.ResultData, error) {
 				return postgres.StartFork(buildForkTargetOptions(opts, firstArg(args)))
 			})
 		},
@@ -1204,7 +1207,7 @@ func newPgForkStopCommand(parentOpts *forkCLIOptions) *cobra.Command {
 			if opts.plan {
 				return runForkTargetPlan("stop", opts, firstArg(args), "Stop PostgreSQL fork")
 			}
-			return runForkAction("fork stop", func() (postgres.ResultData, error) {
+			return runForkAction(cmd, "fork stop", func() (postgres.ResultData, error) {
 				return postgres.StopFork(buildForkTargetOptions(opts, firstArg(args)))
 			})
 		},
@@ -1236,7 +1239,7 @@ func newPgForkRemoveCommand(parentOpts *forkCLIOptions) *cobra.Command {
 			if err := requireForkRemoveStructuredConfirmation(opts, firstArg(args)); err != nil {
 				return err
 			}
-			return runForkAction("fork remove", func() (postgres.ResultData, error) {
+			return runForkAction(cmd, "fork remove", func() (postgres.ResultData, error) {
 				return postgres.RemoveFork(buildForkTargetOptions(opts, firstArg(args)))
 			})
 		},
@@ -1327,7 +1330,11 @@ func forkTargetArgs(opts *forkCLIOptions) cobra.PositionalArgs {
 func runForkList(cmd *cobra.Command) error {
 	forks, err := postgres.ScanForksAs(pgConfig.DbSU, "/pg")
 	if err != nil {
-		return handleForkError(&postgres.ForkError{Code: output.CodeForkPrecheckFailed, Err: err})
+		forkErr := &postgres.ForkError{Code: output.CodeForkPrecheckFailed, Err: err}
+		if config.IsStructuredOutput() {
+			return handleAuxResult(forkErrorResult(forkErr))
+		}
+		return runtimeCommandError(cmd, handleForkError(forkErr))
 	}
 	postgres.RefreshForkRuntimeStates(forks, pgConfig.DbSU)
 	if config.IsStructuredOutput() {
@@ -1347,7 +1354,7 @@ func runFork(cmd *cobra.Command, opts *postgres.Options) error {
 			if config.IsStructuredOutput() {
 				return handleAuxResult(forkErrorResult(err))
 			}
-			return handleForkError(err)
+			return runtimeCommandError(cmd, handleForkError(err))
 		}
 		return handlePlanOutput(plan)
 	}
@@ -1368,7 +1375,7 @@ func runFork(cmd *cobra.Command, opts *postgres.Options) error {
 	}
 
 	if err := postgres.Execute(opts); err != nil {
-		return handleForkError(err)
+		return runtimeCommandError(cmd, handleForkError(err))
 	}
 	return nil
 }
@@ -1394,7 +1401,7 @@ func buildForkConfirmationCommand(opts *postgres.Options, includeYes bool, inclu
 	return command
 }
 
-func runForkAction(message string, action func() (postgres.ResultData, error)) error {
+func runForkAction(cmd *cobra.Command, message string, action func() (postgres.ResultData, error)) error {
 	result, err := action()
 	if config.IsStructuredOutput() {
 		if err != nil {
@@ -1403,7 +1410,7 @@ func runForkAction(message string, action func() (postgres.ResultData, error)) e
 		return handleAuxResult(output.OK(message, result))
 	}
 	if err != nil {
-		return handleForkError(err)
+		return runtimeCommandError(cmd, handleForkError(err))
 	}
 	fmt.Fprint(os.Stderr, postgres.ForkActionHint(message, result))
 	return nil
@@ -2012,7 +2019,7 @@ var pgTuneCmd = &cobra.Command{
 		if pgTuneMaxConn < 0 {
 			return fmt.Errorf("max-conn must be >= 0")
 		}
-		if pgTuneShmemR < 0.1 || pgTuneShmemR > 0.4 {
+		if math.IsNaN(pgTuneShmemR) || math.IsInf(pgTuneShmemR, 0) || pgTuneShmemR < 0.1 || pgTuneShmemR > 0.4 {
 			return fmt.Errorf("shmem-ratio must be between 0.1 and 0.4, got %.2f", pgTuneShmemR)
 		}
 		return nil

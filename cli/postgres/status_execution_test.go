@@ -87,6 +87,9 @@ func TestTextStatusSharesStructuredExitCodes(t *testing.T) {
 			if got := utils.ExitCode(err); got != result.ExitCode() {
 				t.Fatalf("text exit = %d (%v), structured = %d; text=%s", got, err, result.ExitCode(), text)
 			}
+			if err != nil && !utils.IsSilentExit(err) {
+				t.Fatalf("text status returned non-silent error %#v; Cobra/root logger would emit Error/Usage chatter", err)
+			}
 			for _, section := range []string{"[pg_ctl status]", "[PostgreSQL Processes]", "[Related Services]"} {
 				if !strings.Contains(text, section) {
 					t.Errorf("text status lost %s: %s", section, text)

@@ -359,7 +359,7 @@ func TestRunForkActionPrintsConnectionHint(t *testing.T) {
 	config.OutputFormat = config.OUTPUT_TEXT
 
 	out := captureStderr(t, func() {
-		err := runForkAction("fork start", func() (postgrescli.ResultData, error) {
+		err := runForkAction(nil, "fork start", func() (postgrescli.ResultData, error) {
 			return postgrescli.ResultData{
 				Name:            "dev",
 				Destination:     "/pg/data-dev",
@@ -385,7 +385,7 @@ func TestRunForkActionPrintsStopResult(t *testing.T) {
 	config.OutputFormat = config.OUTPUT_TEXT
 
 	out := captureStderr(t, func() {
-		err := runForkAction("fork stop", func() (postgrescli.ResultData, error) {
+		err := runForkAction(nil, "fork stop", func() (postgrescli.ResultData, error) {
 			return postgrescli.ResultData{
 				Name:        "dev",
 				Destination: "/pg/data-dev",

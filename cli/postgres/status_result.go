@@ -315,6 +315,30 @@ func checkProcessRunningAsDBSUWithError(dbsu string, pid int) (bool, error) {
 }
 
 func testPathAsDBSU(dbsu, flag, path string) (bool, error) {
+	if utils.IsDBSU(dbsu) {
+		info, err := os.Stat(path)
+		if err == nil {
+			switch flag {
+			case "-d":
+				return info.IsDir(), nil
+			case "-f":
+				return info.Mode().IsRegular(), nil
+			default:
+				return true, nil
+			}
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		if errors.Is(err, os.ErrPermission) || isPermissionErr(err) {
+			return false, fmt.Errorf("permission denied: %v", err)
+		}
+		return false, fmt.Errorf("test %s %s failed: %w", flag, path, err)
+	}
+
+	if absPath, absErr := filepath.Abs(path); absErr == nil {
+		path = absPath
+	}
 	output, err := utils.DBSUCommandOutput(dbsu, []string{"test", flag, path})
 	if err == nil {
 		return true, nil
@@ -322,7 +346,10 @@ func testPathAsDBSU(dbsu, flag, path string) (bool, error) {
 
 	output = strings.TrimSpace(output)
 	if isPermissionOutput(output) || isPermissionErr(err) {
-		return false, fmt.Errorf("permission denied: %s", output)
+		if output != "" {
+			return false, fmt.Errorf("permission denied: %s", output)
+		}
+		return false, fmt.Errorf("permission denied: %w", err)
 	}
 	if isNotFoundOutput(output) {
 		return false, nil
@@ -331,7 +358,10 @@ func testPathAsDBSU(dbsu, flag, path string) (bool, error) {
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 		return false, nil
 	}
-	return false, fmt.Errorf("test %s %s failed: %s", flag, path, output)
+	if output != "" {
+		return false, fmt.Errorf("test %s %s failed: %s", flag, path, output)
+	}
+	return false, fmt.Errorf("test %s %s failed: %w", flag, path, err)
 }
 
 func isPermissionErr(err error) bool {

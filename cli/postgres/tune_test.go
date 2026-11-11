@@ -1,8 +1,19 @@
 package postgres
 
 import (
+	"math"
+	"pig/internal/output"
 	"testing"
 )
+
+func TestTuneResultRejectsNonFiniteRatios(t *testing.T) {
+	for _, ratio := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		result := TuneResult(nil, &TuneOptions{Profile: "oltp", ShmemRatio: ratio})
+		if result.Success || result.Code != output.CodePgTuneInvalidRatio {
+			t.Fatalf("non-finite ratio %v accepted: %+v", ratio, result)
+		}
+	}
+}
 
 // paramMap converts a TuneParam slice to name→value map for easy assertions.
 func paramMap(params []TuneParam) map[string]string {

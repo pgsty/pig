@@ -79,6 +79,7 @@ func Ps(cfg *Config, opts *PsOptions) error {
 type KillOptions struct {
 	Execute bool   // actually kill (default is dry-run)
 	Pid     int    // kill specific PID
+	PidSet  bool   // whether --pid was explicitly provided
 	User    string // filter by user
 	Db      string // filter by database
 	State   string // filter by state (idle/active/idle in transaction)
@@ -92,6 +93,12 @@ func validateKillOptions(opts *KillOptions) error {
 	// Validate inputs to prevent SQL injection.
 	if opts == nil {
 		return nil
+	}
+	if (opts.PidSet && opts.Pid <= 0) || opts.Pid < 0 {
+		return fmt.Errorf("invalid pid: %d (must be a positive integer)", opts.Pid)
+	}
+	if opts.Watch < 0 {
+		return fmt.Errorf("invalid watch interval: %d (must be >= 0)", opts.Watch)
 	}
 
 	if !ValidateIdentifier(opts.User) {

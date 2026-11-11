@@ -177,7 +177,8 @@ func runMaintAllDatabases(cfg *Config, task *maintTask) error {
 // ValidateMaintenanceDatabase accepts literal database names, not libpq
 // connection strings, which can override -h/-p and contain credentials.
 func ValidateMaintenanceDatabase(dbname string) error {
-	if strings.Contains(dbname, "=") || strings.HasPrefix(dbname, "postgresql://") || strings.HasPrefix(dbname, "postgres://") {
+	lower := strings.ToLower(strings.TrimSpace(dbname))
+	if strings.Contains(dbname, "=") || strings.HasPrefix(lower, "postgresql://") || strings.HasPrefix(lower, "postgres://") {
 		return fmt.Errorf("database must be a literal name, not a connection string; use the native client for connection strings")
 	}
 	return nil

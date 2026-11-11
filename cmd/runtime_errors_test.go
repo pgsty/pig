@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,6 +68,17 @@ func TestRuntimePrecheckErrorsRemainVisible(t *testing.T) {
 		{"pg clone plan", func(command *cobra.Command) error {
 			return runClone(command, &postgres.CloneOptions{SourceDB: "source", DestDB: "target", DbSU: "pigtest", Plan: true})
 		}, "fake connection refused", output.CodeForkPrecheckFailed, output.ExitCode(output.CodeForkPrecheckFailed)},
+		{"pg fork", func(command *cobra.Command) error {
+			return runFork(command, &postgres.Options{Kind: postgres.KindInstance, DbSU: "pigtest", Yes: true, Instance: postgres.InstanceOptions{Name: "bad name"}})
+		}, "fork name", output.CodeForkInvalidArgs, output.ExitCode(output.CodeForkInvalidArgs)},
+		{"pg fork plan", func(command *cobra.Command) error {
+			return runFork(command, &postgres.Options{Kind: postgres.KindInstance, DbSU: "pigtest", Plan: true, Instance: postgres.InstanceOptions{Name: "bad name"}})
+		}, "fork name", output.CodeForkInvalidArgs, output.ExitCode(output.CodeForkInvalidArgs)},
+		{"pg fork action", func(command *cobra.Command) error {
+			return runForkAction(command, "fork stop", func() (postgres.ResultData, error) {
+				return postgres.ResultData{}, &postgres.ForkError{Code: output.CodeForkSourceNotFound, Err: os.ErrNotExist}
+			})
+		}, "file does not exist", output.CodeForkSourceNotFound, output.ExitCode(output.CodeForkSourceNotFound)},
 	} {
 		for _, format := range []string{config.OUTPUT_TEXT, config.OUTPUT_JSON, config.OUTPUT_YAML} {
 			t.Run(test.name+"/"+format, func(t *testing.T) {
@@ -111,5 +123,74 @@ func TestRuntimePrecheckErrorsRemainVisible(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPgStatusTextModeSuppressesUsageAndDuplicateErrors(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Fatalf("detect current user: %v", err)
+	}
+	origFormat, origUser := config.OutputFormat, config.CurrentUser
+	origPg := *pgConfig
+	origChanged := map[string]bool{}
+	for _, name := range []string{"data", "dbsu", "version"} {
+		origChanged[name] = pgCmd.PersistentFlags().Lookup(name).Changed
+	}
+	origSilenceUsage, origSilenceErrors := pgStatusCmd.SilenceUsage, pgStatusCmd.SilenceErrors
+	origRootSilenceUsage, origRootSilenceErrors := rootCmd.SilenceUsage, rootCmd.SilenceErrors
+	t.Cleanup(func() {
+		config.OutputFormat, config.CurrentUser = origFormat, origUser
+		*pgConfig = origPg
+		pgStatusCmd.SilenceUsage, pgStatusCmd.SilenceErrors = origSilenceUsage, origSilenceErrors
+		rootCmd.SilenceUsage, rootCmd.SilenceErrors = origRootSilenceUsage, origRootSilenceErrors
+		rootCmd.SetArgs(nil)
+		for name, changed := range origChanged {
+			pgCmd.PersistentFlags().Lookup(name).Changed = changed
+		}
+	})
+
+	binDir := t.TempDir()
+	for name, body := range map[string]string{
+		"ps":        "#!/bin/sh\nprintf 'PID PPID START COMMAND\\n'\n",
+		"systemctl": "#!/bin/sh\nprintf 'inactive\\n'\nexit 3\n",
+	} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", binDir)
+
+	config.OutputFormat = config.OUTPUT_TEXT
+	config.CurrentUser = current.Username
+	missingDir := filepath.Join(t.TempDir(), "missing-pgdata")
+
+	var runErr error
+	var stdout string
+	args := []string{"pg", "status", "-D", missingDir, "-U", current.Username, "-v", "999"}
+	stderr := captureStderr(t, func() {
+		stdout = captureStdout(t, func() {
+			rootCmd.SetArgs(args)
+			prepareEarlyOutputSettings(args)
+			wrapSilentExitSilence(rootCmd)
+			runErr = rootCmd.Execute()
+		})
+	})
+
+	if runErr == nil {
+		t.Fatal("pg status on missing data directory returned nil error")
+	}
+	wantExit := output.ExitCode(output.CodePgStatusDataDirNotFound)
+	if got := utils.ExitCode(runErr); got != wantExit {
+		t.Fatalf("pg status exit = %d, want %d (err=%v)", got, wantExit, runErr)
+	}
+	if !strings.Contains(stdout, "PostgreSQL Status Summary") || !strings.Contains(stdout, "[pg_ctl status]") {
+		t.Fatalf("pg status missing summary sections on stdout: %q", stdout)
+	}
+	if strings.Contains(stderr, "Error:") || strings.Contains(stderr, "Usage:") {
+		t.Fatalf("pg status leaked Cobra Error/Usage to stderr: %q", stderr)
+	}
+	if !utils.IsSilentExit(runErr) || shouldLogExecutionError(runErr) {
+		t.Fatalf("pg status returned non-silent error %#v; root logger would emit duplicate ERRO line", runErr)
 	}
 }

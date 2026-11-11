@@ -7,6 +7,7 @@ package postgres
 
 import (
 	"fmt"
+	"math"
 	"pig/internal/output"
 	"sort"
 	"strings"
@@ -68,7 +69,7 @@ func TuneResult(cfg *Config, opts *TuneOptions) *output.Result {
 	}
 
 	ratio := opts.ShmemRatio
-	if ratio < 0.1 || ratio > 0.4 {
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0.1 || ratio > 0.4 {
 		return output.Fail(output.CodePgTuneInvalidRatio,
 			fmt.Sprintf("shmem-ratio must be between 0.1 and 0.4, got %.2f", ratio))
 	}

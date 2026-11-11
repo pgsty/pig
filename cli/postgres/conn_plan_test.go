@@ -76,3 +76,25 @@ func TestBuildInitCommandPreservesOptionsAndArgumentBoundary(t *testing.T) {
 		t.Fatalf("explicit default/checksum init retry = %q", got)
 	}
 }
+
+func TestValidateKillOptionsRejectsInvalidPidAndWatch(t *testing.T) {
+	for _, opts := range []*KillOptions{
+		{PidSet: true, Pid: 0},
+		{PidSet: true, Pid: -1},
+		{Pid: -5},
+		{Watch: -1},
+	} {
+		if err := ValidateKillOptions(opts); err == nil {
+			t.Fatalf("ValidateKillOptions(%+v) unexpectedly succeeded", opts)
+		}
+	}
+	for _, opts := range []*KillOptions{
+		nil,
+		{},
+		{PidSet: true, Pid: 42, Watch: 3},
+	} {
+		if err := ValidateKillOptions(opts); err != nil {
+			t.Fatalf("ValidateKillOptions(%+v) returned unexpected error: %v", opts, err)
+		}
+	}
+}

@@ -1911,7 +1911,7 @@ func TestCopyDataDirUsesDirectCommands(t *testing.T) {
 	}
 }
 
-func TestConfigureInstanceUsesDirectCommandsAndRewritesAutoConf(t *testing.T) {
+func TestConfigureInstanceUsesDirectCommandsAndRewritesConfigs(t *testing.T) {
 	originalCommand := forkDBSUCommand
 	originalRead := forkReadFileAsDBSU
 	originalWrite := forkWriteFileAsDBSU
@@ -1929,11 +1929,11 @@ func TestConfigureInstanceUsesDirectCommandsAndRewritesAutoConf(t *testing.T) {
 		return nil
 	}
 	forkReadFileAsDBSU = func(path, dbsu string) (string, error) {
-		return "shared_buffers = '1GB'\nprimary_conninfo = 'old'\nport = 1111\n", nil
+		return "shared_buffers = '1GB'\nprimary_conninfo = 'old'\nport=1111\ndata_directory='/pg/data'\nrestore_command='pgbackrest archive-get %f %p'\n", nil
 	}
-	written := ""
+	writes := map[string]string{}
 	forkWriteFileAsDBSU = func(path, content, dbsu string) error {
-		written = content
+		writes[filepath.Base(path)] = content
 		return nil
 	}
 
@@ -1950,15 +1950,89 @@ func TestConfigureInstanceUsesDirectCommandsAndRewritesAutoConf(t *testing.T) {
 			t.Fatalf("commands missing %q: %#v", want, commands)
 		}
 	}
-	for _, want := range []string{"shared_buffers = '1GB'", "port = 15432", "archive_mode = off", "log_directory = 'log'"} {
-		if !strings.Contains(written, want) {
-			t.Fatalf("written auto.conf missing %q:\n%s", want, written)
+	for _, name := range []string{"postgresql.conf", "postgresql.auto.conf"} {
+		written := writes[name]
+		for _, want := range []string{
+			"shared_buffers = '1GB'",
+			"port = 15432",
+			"archive_mode = off",
+			"log_directory = 'log'",
+			"data_directory = '/pg/data-dev'",
+			"hba_file = '/pg/data-dev/pg_hba.conf'",
+			"ident_file = '/pg/data-dev/pg_ident.conf'",
+			"external_pid_file = ''",
+			"restore_command = ''",
+		} {
+			if !strings.Contains(written, want) {
+				t.Fatalf("written auto.conf missing %q:\n%s", want, written)
+			}
+		}
+		for _, removed := range []string{"primary_conninfo", "port=1111", "data_directory='/pg/data'", "pgbackrest archive-get"} {
+			if strings.Contains(written, removed) {
+				t.Fatalf("written auto.conf should remove %q:\n%s", removed, written)
+			}
 		}
 	}
-	for _, removed := range []string{"primary_conninfo", "port = 1111"} {
-		if strings.Contains(written, removed) {
-			t.Fatalf("written auto.conf should remove %q:\n%s", removed, written)
-		}
+}
+
+// Exercise PostgreSQL's own configuration selection: data_directory must be
+// pinned before it selects which directory's postgresql.auto.conf to load.
+func TestForkConfigBindsPathsWithPostgres(t *testing.T) {
+	postgres, err := exec.LookPath("postgres")
+	if err != nil || os.Geteuid() == 0 {
+		t.Skip("requires a local PostgreSQL binary and an unprivileged user")
+	}
+	originalCommand, originalRead, originalWrite := forkDBSUCommand, forkReadFileAsDBSU, forkWriteFileAsDBSU
+	t.Cleanup(func() {
+		forkDBSUCommand, forkReadFileAsDBSU, forkWriteFileAsDBSU = originalCommand, originalRead, originalWrite
+	})
+	forkDBSUCommand = func(_ string, args []string) error { return exec.Command(args[0], args[1:]...).Run() }
+	forkReadFileAsDBSU = func(path, _ string) (string, error) {
+		body, err := os.ReadFile(path)
+		return string(body), err
+	}
+	forkWriteFileAsDBSU = func(path, content, _ string) error { return os.WriteFile(path, []byte(content), 0600) }
+	for _, name := range []string{"ordinary", "quote'and\\backslash", "line\nbreak"} {
+		t.Run(name, func(t *testing.T) {
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			dataDir := filepath.Join(root, name)
+			sourceDir := filepath.Join(root, "source")
+			for _, dir := range []string{dataDir, sourceDir} {
+				if err := os.Mkdir(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for path, body := range map[string]string{
+				filepath.Join(dataDir, "postgresql.conf"):        "include = 'source.conf'\n",
+				filepath.Join(dataDir, "source.conf"):            "data_directory = '" + sourceDir + "'\nhba_file = '" + sourceDir + "/pg_hba.conf'\n",
+				filepath.Join(dataDir, "postgresql.auto.conf"):   "data_directory = '" + sourceDir + "'\nport = 1111\n",
+				filepath.Join(sourceDir, "postgresql.auto.conf"): "port = 25432\n",
+			} {
+				if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := configureInstance("unused", dataDir, 15432); err != nil {
+				t.Fatal(err)
+			}
+			for guc, want := range map[string]string{
+				"data_directory":    dataDir,
+				"hba_file":          filepath.Join(dataDir, "pg_hba.conf"),
+				"ident_file":        filepath.Join(dataDir, "pg_ident.conf"),
+				"external_pid_file": "", "restore_command": "", "port": "15432", "archive_mode": "off",
+			} {
+				var stderr bytes.Buffer
+				cmd := exec.Command(postgres, "-D", dataDir, "-C", guc)
+				cmd.Stderr = &stderr
+				got, err := cmd.Output()
+				if err != nil || strings.TrimSuffix(string(got), "\n") != want {
+					t.Errorf("postgres -C %s = %q, %v; want %q; stderr=%s", guc, got, err, want, &stderr)
+				}
+			}
+		})
 	}
 }
 

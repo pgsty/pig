@@ -1579,41 +1579,76 @@ func configureInstance(dbsu, dataDir string, port int) error {
 	if err := forkDBSUCommand(dbsu, []string{"touch", autoconf}); err != nil {
 		return err
 	}
-	content, err := forkReadFileAsDBSU(autoconf, dbsu)
-	if err != nil {
-		return err
+	// PostgreSQL selects data_directory from the main configuration before
+	// loading auto.conf. Pin both files so inherited paths (including those in
+	// included configuration) cannot redirect startup back to the source.
+	for _, name := range []string{"postgresql.conf", "postgresql.auto.conf"} {
+		path := filepath.Join(dataDir, name)
+		content, err := forkReadFileAsDBSU(path, dbsu)
+		if err != nil {
+			return err
+		}
+		if err := forkWriteFileAsDBSU(path, rewriteForkConfig(content, dataDir, port), dbsu); err != nil {
+			return err
+		}
 	}
-	return forkWriteFileAsDBSU(autoconf, rewriteForkAutoConf(content, port), dbsu)
+	return nil
 }
 
-func rewriteForkAutoConf(content string, port int) string {
+func forkManagedGUCKey(trimmed string) string {
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return ""
+	}
+	end := strings.IndexAny(trimmed, " \t=")
+	if end < 0 {
+		return ""
+	}
+	return strings.ToLower(trimmed[:end])
+}
+
+func isForkManagedGUC(key string) bool {
+	if strings.HasPrefix(key, "recovery_target") {
+		return true
+	}
+	switch key {
+	case "port", "archive_mode", "log_directory", "data_directory",
+		"hba_file", "ident_file", "external_pid_file", "restore_command",
+		"primary_conninfo", "primary_slot_name":
+		return true
+	default:
+		return false
+	}
+}
+
+func rewriteForkConfig(content, dataDir string, port int) string {
 	lines := []string{}
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
-		switch {
-		case trimmed == "":
+		if trimmed == "" || isForkManagedGUC(forkManagedGUCKey(trimmed)) {
 			continue
-		case strings.HasPrefix(trimmed, "port = "):
-			continue
-		case strings.HasPrefix(trimmed, "archive_mode = "):
-			continue
-		case strings.HasPrefix(trimmed, "log_directory = "):
-			continue
-		case strings.HasPrefix(trimmed, "primary_conninfo"):
-			continue
-		case strings.HasPrefix(trimmed, "primary_slot_name"):
-			continue
-		case strings.HasPrefix(trimmed, "recovery_target"):
-			continue
-		default:
-			lines = append(lines, line)
 		}
+		lines = append(lines, line)
 	}
 	lines = append(lines,
 		fmt.Sprintf("port = %d", port),
 		"archive_mode = off",
 		"log_directory = 'log'",
 	)
+	if strings.TrimSpace(dataDir) != "" {
+		// Unlike standard SQL literals, PostgreSQL configuration strings always
+		// interpret backslash escapes and cannot contain literal line breaks.
+		escape := strings.NewReplacer("\\", "\\\\", "'", "''", "\n", "\\n", "\r", "\\r")
+		escapedDir := escape.Replace(dataDir)
+		escapedHBA := escape.Replace(filepath.Join(dataDir, "pg_hba.conf"))
+		escapedIdent := escape.Replace(filepath.Join(dataDir, "pg_ident.conf"))
+		lines = append(lines,
+			fmt.Sprintf("data_directory = '%s'", escapedDir),
+			fmt.Sprintf("hba_file = '%s'", escapedHBA),
+			fmt.Sprintf("ident_file = '%s'", escapedIdent),
+			"external_pid_file = ''",
+			"restore_command = ''",
+		)
+	}
 	return strings.Join(lines, "\n") + "\n"
 }
 
