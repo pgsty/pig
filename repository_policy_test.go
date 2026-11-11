@@ -3,9 +3,45 @@ package main
 import (
 	"errors"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// Release artifacts are built by GoReleaser, whose ldflags override the source
+// defaults, so every place that states a version has to move together.
+func TestReleaseMetadataVersionsAgree(t *testing.T) {
+	read := func(path string) string {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		return string(raw)
+	}
+	find := func(name, text, pattern string) string {
+		match := regexp.MustCompile(pattern).FindStringSubmatch(text)
+		if match == nil {
+			t.Fatalf("%s not found with pattern %q", name, pattern)
+		}
+		return match[1]
+	}
+	makefile, source := read("Makefile"), read("internal/config/config.go")
+	goreleaser, readme := read(".goreleaser.yml"), read("README.md")
+
+	pig := find("Makefile VERSION", makefile, `(?m)^VERSION=v(\d+\.\d+\.\d+)$`)
+	pigsty := find("Makefile PIGSTY_VERSION", makefile, `(?m)^PIGSTY_VERSION:=(\d+\.\d+\.\d+)$`)
+	for _, check := range []struct{ name, got, want string }{
+		{"config.go PigVersion", find("config.go PigVersion", source, `(?m)^\s*PigVersion\s*=\s*"([^"]+)"`), pig},
+		{"config.go PigstyVersion", find("config.go PigstyVersion", source, `(?m)^\s*PigstyVersion\s*=\s*"([^"]+)"`), pigsty},
+		{".goreleaser.yml PigstyVersion", find(".goreleaser.yml PigstyVersion", goreleaser, `config\.PigstyVersion=([0-9.]+)'`), pigsty},
+		{"README version badge", find("README version badge", readme, `badge/version-v([0-9.]+)-`), pig},
+		{"README Pigsty badge", find("README Pigsty badge", readme, `badge/Pigsty-v([0-9.]+)-`), pigsty},
+	} {
+		if check.got != check.want {
+			t.Errorf("%s = %q, want %q (Makefile is the reference)", check.name, check.got, check.want)
+		}
+	}
+}
 
 func TestRepositoryHasNoLocalDocumentationTree(t *testing.T) {
 	if _, err := os.Stat("docs"); !errors.Is(err, os.ErrNotExist) {

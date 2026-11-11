@@ -17,9 +17,9 @@ Also explore the full [**PGEXT.CLOUD directory**](https://pgext.cloud/) of 2,733
 
 ## Current catalog snapshot
 
-The current public catalog metric is **625 packaged entries**. The source snapshot retains lifecycle records for removed entries; the entries map to **518** distinct package names when PostgreSQL contrib modules are included, and the package view used for availability reports covers **457** non-contrib package families. The full PGEXT.CLOUD directory contains **2,733** ecosystem entries, including packaged, source-only, and provider-specific extensions.
+The current public catalog metric is **625 packaged entries**. The entries map to **518** distinct package names when PostgreSQL contrib modules are included, and the package view used for availability reports covers **457** non-contrib package families. The full PGEXT.CLOUD directory contains **2,733** ecosystem entries, including packaged, source-only, and provider-specific extensions.
 
-The count follows the catalog directory-entry contract: it measures coverage, while package names, platform availability, PostgreSQL-major support, and database enablement remain separate properties. The `v1.11.0` release uses the **2026-11-09 625-entry** public metric; later catalog data can be loaded with `pig ext reload`.
+The count follows the catalog directory-entry contract: it measures coverage, while package names, platform availability, PostgreSQL-major support, and database enablement remain separate properties. The `v1.11.0` release uses the **2026-11-10 625-entry** public metric; later catalog data can be loaded with `pig ext reload`.
 
 [![PostgreSQL Extension Ecosystem](https://pigsty.io/img/pigsty/ecosystem.jpg)](https://medium.com/@fengruohang/postgres-is-eating-the-database-world-157c204dcfc4)
 
