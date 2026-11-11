@@ -37,7 +37,10 @@ type PbBackupResultData struct {
 	Prior           string `json:"prior,omitempty" yaml:"prior,omitempty"`   // Prior backup label (for diff/incr backups)
 }
 
-var backupLabelRegex = regexp.MustCompile(`(?i)backup label\s*[:=]\s*([0-9]{8}-[0-9]{6}[A-Za-z])`)
+var (
+	newBackupLabelRegex = regexp.MustCompile(`(?i)new backup label\s*[:=]\s*([0-9]{8}-[0-9]{6}[A-Za-z](?:_[0-9]{8}-[0-9]{6}[A-Za-z])?)`)
+	backupLabelRegex    = regexp.MustCompile(`(?i)backup label\s*[:=]\s*([0-9]{8}-[0-9]{6}[A-Za-z](?:_[0-9]{8}-[0-9]{6}[A-Za-z])?)`)
+)
 
 // BackupResult creates a structured result for pb backup command.
 // It validates preconditions, executes the backup, and returns the result.
@@ -241,9 +244,15 @@ func buildBackupResultData(stanza string, latest *BackupInfo) *PbBackupResultDat
 }
 
 func parseBackupLabel(output string) string {
-	matches := backupLabelRegex.FindStringSubmatch(output)
-	if len(matches) > 1 {
+	if matches := newBackupLabelRegex.FindStringSubmatch(output); len(matches) > 1 {
 		return strings.TrimSpace(matches[1])
+	}
+	allMatches := backupLabelRegex.FindAllStringSubmatch(output, -1)
+	if len(allMatches) > 0 {
+		last := allMatches[len(allMatches)-1]
+		if len(last) > 1 {
+			return strings.TrimSpace(last[1])
+		}
 	}
 	return ""
 }

@@ -258,7 +258,9 @@ func ValidateRestoreExtraArgs(args []string) error {
 		name := restoreExtraArgName(arg)
 		_, blocked := blockedRestoreExtraArgs[name]
 		if blocked || blockedPgPathArgRegex.MatchString(name) || blockedRepoArgRegex.MatchString(name) {
-			return fmt.Errorf("extra restore arg %q conflicts with pig restore flags; use pig's restore target/lifecycle flags instead", arg)
+			// Repository options can carry credentials; report only the option.
+			option, _, _ := strings.Cut(arg, "=")
+			return fmt.Errorf("extra restore arg %q conflicts with pig restore flags; use pig's restore target/lifecycle flags instead", option)
 		}
 	}
 	return nil
@@ -290,7 +292,13 @@ func patroniManagedRestoreError(cfg *Config, opts *RestoreOptions, patroniActive
 
 func restoreExtraArgName(arg string) string {
 	if i := strings.Index(arg, "="); i >= 0 {
-		return arg[:i]
+		arg = arg[:i]
+	}
+	if strings.HasPrefix(arg, "--reset-") {
+		return "--" + strings.TrimPrefix(arg, "--reset-")
+	}
+	if strings.HasPrefix(arg, "--no-") {
+		return "--" + strings.TrimPrefix(arg, "--no-")
 	}
 	return arg
 }

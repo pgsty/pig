@@ -411,6 +411,39 @@ func TestPITRStructuredModeDoesNotAutoConfirm(t *testing.T) {
 	}
 }
 
+func TestPITRExplicitEmptyDataDirRejected(t *testing.T) {
+	origFormat := config.OutputFormat
+	origOpts := *pitrOpts
+	dataFlag := pitrCmd.Flags().Lookup("data")
+	origChanged := dataFlag.Changed
+	defer func() {
+		config.OutputFormat = origFormat
+		*pitrOpts = origOpts
+		dataFlag.Changed = origChanged
+	}()
+
+	config.OutputFormat = config.OUTPUT_JSON
+	*pitrOpts = pitr.Options{Default: true, Yes: true}
+	if err := pitrCmd.Flags().Set("data", "  "); err != nil {
+		t.Fatalf("set --data flag: %v", err)
+	}
+
+	var runErr error
+	raw := captureStdout(t, func() {
+		runErr = pitrCmd.RunE(pitrCmd, nil)
+	})
+	if runErr == nil {
+		t.Fatal("explicit empty -D must be rejected")
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(bytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if code, _ := payload["code"].(float64); int(code) != output.CodePITRInvalidArgs {
+		t.Fatalf("code = %v, want CodePITRInvalidArgs(%d)", payload["code"], output.CodePITRInvalidArgs)
+	}
+}
+
 func bytesTrimSpace(b []byte) []byte {
 	return []byte(strings.TrimSpace(string(b)))
 }

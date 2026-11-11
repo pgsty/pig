@@ -282,3 +282,40 @@ func TestPbDeleteStructuredGatePinsSingleStanza(t *testing.T) {
 		t.Errorf("execute command should pin the resolved stanza: %q", exec.Command)
 	}
 }
+
+func TestPbRestoreExplicitEmptyDataDirRejected(t *testing.T) {
+	origFormat := config.OutputFormat
+	origDefault := pbRestoreDefault
+	origDataDir := pbRestoreDataDir
+	dataFlag := pbRestoreCmd.Flags().Lookup("data")
+	origChanged := dataFlag.Changed
+	defer func() {
+		config.OutputFormat = origFormat
+		pbRestoreDefault = origDefault
+		pbRestoreDataDir = origDataDir
+		dataFlag.Changed = origChanged
+	}()
+
+	config.OutputFormat = config.OUTPUT_JSON
+	pbRestoreDefault = true
+	if err := pbRestoreCmd.Flags().Set("data", "   "); err != nil {
+		t.Fatalf("set --data flag: %v", err)
+	}
+
+	var runErr error
+	raw := capturePbStdout(t, func() {
+		runErr = pbRestoreCmd.RunE(pbRestoreCmd, nil)
+	})
+	if runErr == nil {
+		t.Fatal("explicit empty -D must be rejected")
+	}
+	var payload struct {
+		Code int `json:"code"`
+	}
+	if err := json.Unmarshal(pbBytesTrimSpace([]byte(raw)), &payload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, raw)
+	}
+	if payload.Code != output.CodePbInvalidRestoreParams {
+		t.Fatalf("code = %d, want CodePbInvalidRestoreParams(%d)", payload.Code, output.CodePbInvalidRestoreParams)
+	}
+}

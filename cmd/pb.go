@@ -428,6 +428,9 @@ IMPORTANT: PostgreSQL must be stopped before restore.`,
 		if err := rejectRestoreExtraArgsBeforeDash(cmd, args, output.CodePbInvalidRestoreParams); err != nil {
 			return err
 		}
+		if cmd.Flags().Changed("data") && strings.TrimSpace(pbRestoreDataDir) == "" {
+			return restoreInvalidParamsError(output.CodePbInvalidRestoreParams, fmt.Errorf("data directory (-D/--data) cannot be empty"))
+		}
 		if err := pgbackrest.ValidateRestoreOptions(opts); err != nil {
 			return restoreInvalidParamsError(output.CodePbInvalidRestoreParams, err)
 		}

@@ -864,3 +864,30 @@ func TestIsBackupNotFoundError(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateRestoreExtraArgsRejectsResetAndNoOwnedFlags(t *testing.T) {
+	blocked := [][]string{
+		{"--reset-pg1-path"},
+		{"--reset-repo1-path"},
+		{"--reset-target"},
+		{"--no-target-exclusive"},
+		{"--reset-stanza"},
+	}
+	for _, args := range blocked {
+		if err := ValidateRestoreExtraArgs(args); err == nil {
+			t.Errorf("ValidateRestoreExtraArgs(%v) succeeded, want rejection", args)
+		}
+	}
+	if err := ValidateRestoreExtraArgs([]string{"--delta", "--no-delta", "--process-max=4"}); err != nil {
+		t.Fatalf("ValidateRestoreExtraArgs allowed flag failed: %v", err)
+	}
+}
+
+func TestValidateRestoreExtraArgsDoesNotEchoCredentials(t *testing.T) {
+	for _, flag := range []string{"--repo1-cipher-pass", "--reset-repo1-cipher-pass", "--no-repo1-cipher-pass"} {
+		err := ValidateRestoreExtraArgs([]string{flag + "=private-secret"})
+		if err == nil || strings.Contains(err.Error(), "private-secret") {
+			t.Fatalf("unsafe restore diagnostic for %s: %v", flag, err)
+		}
+	}
+}

@@ -377,3 +377,34 @@ func TestPbBackupResultDataLargeSizes(t *testing.T) {
 		t.Errorf("Large repo size mismatch: got %d, want %d", unmarshaled.SizeRepo, data.SizeRepo)
 	}
 }
+
+func TestParseBackupLabelExtractsCompoundDiffAndIncrLabels(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+		want string
+	}{
+		{
+			name: "full backup",
+			out:  "INFO: new backup label = 20261111-120000F\n",
+			want: "20261111-120000F",
+		},
+		{
+			name: "incremental backup with prior label first",
+			out:  "INFO: last backup label = 20261111-120000F, version = 2.54\nINFO: new backup label = 20261111-120000F_20261111-130000I\n",
+			want: "20261111-120000F_20261111-130000I",
+		},
+		{
+			name: "differential backup with inline prior label",
+			out:  "last backup label = 20261111-120000F, new backup label = 20261111-120000F_20261111-123000D",
+			want: "20261111-120000F_20261111-123000D",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseBackupLabel(tc.out); got != tc.want {
+				t.Fatalf("parseBackupLabel() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

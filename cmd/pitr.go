@@ -7,6 +7,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"pig/cli/pitr"
 	"pig/internal/config"
@@ -147,6 +148,9 @@ The command uses the same execution privilege strategy as other pig commands:
 		}
 		if err := rejectRestoreExtraArgsBeforeDash(cmd, args, output.CodePITRInvalidArgs); err != nil {
 			return err
+		}
+		if cmd.Flags().Changed("data") && strings.TrimSpace(pitrOpts.DataDir) == "" {
+			return restoreInvalidParamsError(output.CodePITRInvalidArgs, fmt.Errorf("data directory (-D/--data) cannot be empty"))
 		}
 		if err := pitr.ValidateOptions(pitrOpts); err != nil {
 			return restoreInvalidParamsError(output.CodePITRInvalidArgs, err)
