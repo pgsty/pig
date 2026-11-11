@@ -387,3 +387,24 @@ func TestInitConfigRejectsMalformedExistingFile(t *testing.T) {
 		t.Fatalf("malformed config error = %v", err)
 	}
 }
+
+func TestInventoryConnectionHasPasswordMultiHostAndSSLPassword(t *testing.T) {
+	for _, withSecret := range []string{
+		"postgresql://dbuser:secret@10.10.10.10:5432,10.10.10.11:5432/meta",
+		"postgres://dbuser@10.10.10.10:5432,10.10.10.11:5432/meta?sslpassword=keypass",
+		"postgresql://dbuser@10.10.10.10:5432/meta?password=pw",
+		"host=10.10.10.10 sslpassword=keypass dbname=meta",
+	} {
+		if !InventoryConnectionHasPassword(withSecret) {
+			t.Errorf("InventoryConnectionHasPassword(%q) = false, want true", withSecret)
+		}
+	}
+	for _, withoutSecret := range []string{
+		"postgresql://dbuser@10.10.10.10:5432,10.10.10.11:5432/meta?sslmode=require",
+		"host=10.10.10.10,10.10.10.11 port=5432 dbname=meta user=dbuser",
+	} {
+		if InventoryConnectionHasPassword(withoutSecret) {
+			t.Errorf("InventoryConnectionHasPassword(%q) = true, want false", withoutSecret)
+		}
+	}
+}

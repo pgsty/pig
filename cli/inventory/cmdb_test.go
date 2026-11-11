@@ -357,3 +357,74 @@ func TestCMDBExportAmbiguousStringsSemanticRoundtrip(t *testing.T) {
 		t.Fatalf("CMDB semantic roundtrip: got=%#v want=%#v YAML=%s", got, values, body)
 	}
 }
+
+func TestCMDBDumpRoundTripsMultiDigitIntegersFloatsAndSpecialStrings(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{
+		"all": map[string]any{
+			"vars": map[string]any{
+				"pg_version": 18,
+				"pg_port":    5432,
+				"ratio":      0.25,
+				"huge":       1.5e20,
+				"eq":         "=",
+				"merge":      "<<",
+				"exp_str":    "1e1",
+			},
+			"children": map[string]any{
+				"pg-meta": map[string]any{
+					"vars": map[string]any{"pg_cluster": "pg-meta"},
+					"hosts": map[string]any{
+						"10.10.10.10": map[string]any{"pg_seq": 10},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _, err := prepareCMDBDump(raw)
+	if err != nil {
+		t.Fatalf("prepareCMDBDump failed: %v", err)
+	}
+	yamlText := string(body)
+	for _, want := range []string{"pg_version: 18\n", "pg_port: 5432\n", "pg_seq: 10\n", "ratio: 0.25\n"} {
+		if !strings.Contains(yamlText, want) {
+			t.Fatalf("expected clean scalar %q in exported YAML:\n%s", want, yamlText)
+		}
+	}
+	for _, unwanted := range []string{"1.8e1", "5.432e3", "1e1\n"} {
+		if strings.Contains(yamlText, unwanted) {
+			t.Fatalf("unexpected raw scientific integer/unquoted token %q in exported YAML:\n%s", unwanted, yamlText)
+		}
+	}
+	if python := os.Getenv("PIG_TEST_PYYAML"); python != "" {
+		check := exec.Command(python, "-c", "import sys,json,yaml; v=yaml.safe_load(sys.stdin); assert v == json.loads(sys.argv[1]); assert type(v['all']['vars']['pg_version']) is int", string(raw))
+		check.Stdin = bytes.NewReader(body)
+		if out, err := check.CombinedOutput(); err != nil {
+			t.Fatalf("PyYAML dump semantics: %v: %s", err, out)
+		}
+	}
+}
+
+func TestCMDBDumpPreservesExactIntegers(t *testing.T) {
+	for _, number := range []string{"9007199254740993", "-9223372036854775808", "9223372036854775807", "9223372036854775808", "18446744073709551615"} {
+		t.Run(number, func(t *testing.T) {
+			raw := []byte(`{"all":{"vars":{"exact":` + number + `},"children":{}}}`)
+			body, _, err := prepareCMDBDump(raw)
+			if err != nil {
+				t.Fatalf("dump exact integer: %v", err)
+			}
+			if !strings.Contains(string(body), "exact: "+number+"\n") {
+				t.Fatalf("integer lost its exact spelling: %s", body)
+			}
+			if python := os.Getenv("PIG_TEST_PYYAML"); python != "" {
+				check := exec.Command(python, "-c", "import sys,yaml; v=yaml.safe_load(sys.stdin)['all']['vars']['exact']; assert type(v) is int and v == int(sys.argv[1])", number)
+				check.Stdin = bytes.NewReader(body)
+				if out, err := check.CombinedOutput(); err != nil {
+					t.Fatalf("PyYAML exact integer: %v: %s", err, out)
+				}
+			}
+		})
+	}
+}

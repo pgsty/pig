@@ -36,7 +36,7 @@ func TestUserRolesStringAndObjectCompatibility(t *testing.T) {
 
 func TestAmbiguousStringsSurviveEditAndSerialization(t *testing.T) {
 	// 010 is a retained control case, not evidence that it was previously broken.
-	for _, value := range []string{"1:30", "010", "yes", "2001-12-15", "2001-12-15T02:59:43.1Z", "2001-1-5 2:59:43 -5", "2001-13-99", "2001-1-5", "1:30.5", "plain"} {
+	for _, value := range []string{"1:30", "010", "yes", "=", "<<", "1e1", "2001-12-15", "2001-12-15T02:59:43.1Z", "2001-1-5 2:59:43 -5", "2001-13-99", "2001-1-5", "1:30.5", "plain"} {
 		for _, flow := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/flow=%v", value, flow), func(t *testing.T) {
 				source := "all:\n  vars:\n    value: old # preserve\n"

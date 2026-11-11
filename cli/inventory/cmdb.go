@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"pig/internal/cmdb"
@@ -853,12 +854,94 @@ func clearGeneratedYAMLStyle(node *yaml.Node) {
 		return
 	}
 	node.Style = 0
-	if node.Kind == yaml.ScalarNode && node.Tag == "!!str" && yaml11AmbiguousString(node.Value) {
-		node.Style = yaml.DoubleQuotedStyle
+	if node.Kind == yaml.ScalarNode {
+		switch node.Tag {
+		case "!!str":
+			if yaml11AmbiguousString(node.Value) {
+				node.Style = yaml.DoubleQuotedStyle
+			}
+		case "!!int", "!!float":
+			if tag, formatted, ok := normalizeGeneratedYAMLNumber(node.Value); ok {
+				node.Tag = tag
+				node.Value = formatted
+			}
+		}
 	}
 	for _, child := range node.Content {
 		clearGeneratedYAMLStyle(child)
 	}
+}
+
+func normalizeGeneratedYAMLNumber(text string) (string, string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", "", false
+	}
+	sign := ""
+	if strings.HasPrefix(trimmed, "-") {
+		sign, trimmed = "-", trimmed[1:]
+	} else if strings.HasPrefix(trimmed, "+") {
+		trimmed = trimmed[1:]
+	}
+	mantissa, expText := trimmed, ""
+	if idx := strings.IndexAny(trimmed, "eE"); idx >= 0 {
+		mantissa, expText = trimmed[:idx], trimmed[idx+1:]
+	}
+	var exponent int64
+	if expText != "" {
+		parsed, err := strconv.ParseInt(expText, 10, 32)
+		if err != nil {
+			return "", "", false
+		}
+		exponent = parsed
+	}
+	integer, fraction := mantissa, ""
+	if idx := strings.IndexByte(mantissa, '.'); idx >= 0 {
+		integer, fraction = mantissa[:idx], mantissa[idx+1:]
+	}
+	digits := integer + fraction
+	if digits == "" {
+		return "", "", false
+	}
+	for i := 0; i < len(digits); i++ {
+		if digits[i] < '0' || digits[i] > '9' {
+			return "", "", false
+		}
+	}
+	leading := len(digits) - len(strings.TrimLeft(digits, "0"))
+	if leading == len(digits) {
+		return "!!int", "0", true
+	}
+	digits = strings.TrimRight(digits[leading:], "0")
+	decimalPos := int64(len(integer)-leading) + exponent
+	if decimalPos >= int64(len(digits)) && decimalPos <= 20 {
+		candidate := sign + digits + strings.Repeat("0", int(decimalPos)-len(digits))
+		if _, err := strconv.ParseInt(candidate, 10, 64); err == nil {
+			return "!!int", candidate, true
+		}
+		if _, err := strconv.ParseUint(candidate, 10, 64); err == nil {
+			return "!!int", candidate, true
+		}
+	}
+	return "!!float", formatGeneratedYAMLFloat(sign, digits, decimalPos), true
+}
+
+func formatGeneratedYAMLFloat(sign, digits string, decimalPos int64) string {
+	if decimalPos > 0 && decimalPos < int64(len(digits)) && decimalPos <= 15 {
+		return sign + digits[:decimalPos] + "." + digits[decimalPos:]
+	}
+	if decimalPos <= 0 && decimalPos >= -4 {
+		return sign + "0." + strings.Repeat("0", int(-decimalPos)) + digits
+	}
+	sciExp := decimalPos - 1
+	mantissa := digits[:1] + ".0"
+	if len(digits) > 1 {
+		mantissa = digits[:1] + "." + digits[1:]
+	}
+	if sciExp >= 0 {
+		return sign + mantissa + "e+" + strconv.FormatInt(sciExp, 10)
+	}
+	return sign + mantissa + "e" + strconv.FormatInt(sciExp, 10)
 }
 
 func yaml11AmbiguousString(value string) bool {

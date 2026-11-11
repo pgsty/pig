@@ -729,8 +729,10 @@ var (
 	// Match PyYAML SafeLoader's timestamp resolver, including forms that yaml.v3
 	// leaves as strings. Resolution is syntactic: even invalid dates need quoting.
 	ansiblePlainTimestamp = regexp.MustCompile(`^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?)$`)
-	// yaml.v3 additionally recognizes dates with one-digit months or days.
-	yamlPlainDate = regexp.MustCompile(`^[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}$`)
+	// yaml.v3 additionally recognizes dates with one-digit months or days, and YAML 1.2
+	// octal / signless-exponent numeric literals that PyYAML treats differently.
+	yamlPlainDate   = regexp.MustCompile(`^[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}$`)
+	yamlPlainNumber = regexp.MustCompile(`^[-+]?(?:0o[0-7_]+|(?:[0-9][0-9_]*(?:\.[0-9_]*)?|\.[0-9][0-9_]*)[eE][-+]?[0-9]+)$`)
 )
 
 func implicitPlainScalar(node *yaml.Node) bool {
@@ -781,11 +783,11 @@ func resolveAnsiblePlainScalar(text string) (ScalarKind, any) {
 func IsAmbiguousPlainString(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	switch strings.ToLower(trimmed) {
-	case "y", "n":
+	case "y", "n", "=", "<<":
 		return true
 	}
 	kind, _ := resolveAnsiblePlainScalar(trimmed)
-	return kind != StringScalar || yamlPlainDate.MatchString(trimmed)
+	return kind != StringScalar || yamlPlainDate.MatchString(trimmed) || yamlPlainNumber.MatchString(trimmed)
 }
 
 func parseAnsibleInteger(text string) (any, bool) {

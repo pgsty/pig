@@ -349,31 +349,77 @@ func managedInventoryScriptToken(body []byte) (ManagedInventoryScriptKind, strin
 // password parameters without returning or logging the literal.
 func InventoryConnectionHasPassword(value string) bool {
 	trimmed := strings.TrimSpace(value)
+	if uriHasPassword(trimmed) {
+		return true
+	}
+	lower := strings.ToLower(trimmed)
+	return conninfoHasPasswordKey(lower, "password") || conninfoHasPasswordKey(lower, "sslpassword")
+}
+
+func uriHasPassword(trimmed string) bool {
 	if parsed, err := url.Parse(trimmed); err == nil && parsed.Scheme != "" {
 		if parsed.User != nil {
 			if _, exists := parsed.User.Password(); exists {
 				return true
 			}
 		}
-		for key := range parsed.Query() {
-			if strings.EqualFold(key, "password") {
-				return true
-			}
+		if queryHasPasswordParam(parsed.Query()) {
+			return true
 		}
 	}
+	// Multi-host PostgreSQL URIs (e.g. postgresql://user:pass@h1:5432,h2:5432/db)
+	// may fail net/url.Parse because of commas in host:port authority.
 	lower := strings.ToLower(trimmed)
+	var rest string
+	switch {
+	case strings.HasPrefix(lower, "postgresql://"):
+		rest = trimmed[len("postgresql://"):]
+	case strings.HasPrefix(lower, "postgres://"):
+		rest = trimmed[len("postgres://"):]
+	default:
+		return false
+	}
+	authority := rest
+	if cut := strings.IndexAny(rest, "/?#"); cut >= 0 {
+		authority = rest[:cut]
+	}
+	if at := strings.LastIndexByte(authority, '@'); at >= 0 && strings.Contains(authority[:at], ":") {
+		return true
+	}
+	if q := strings.IndexByte(rest, '?'); q >= 0 {
+		rawQuery := rest[q+1:]
+		if hash := strings.IndexByte(rawQuery, '#'); hash >= 0 {
+			rawQuery = rawQuery[:hash]
+		}
+		if values, err := url.ParseQuery(rawQuery); err == nil && queryHasPasswordParam(values) {
+			return true
+		}
+	}
+	return false
+}
+
+func queryHasPasswordParam(values url.Values) bool {
+	for key := range values {
+		if strings.EqualFold(key, "password") || strings.EqualFold(key, "sslpassword") {
+			return true
+		}
+	}
+	return false
+}
+
+func conninfoHasPasswordKey(lower, key string) bool {
 	for offset := 0; ; {
-		index := strings.Index(lower[offset:], "password")
+		index := strings.Index(lower[offset:], key)
 		if index < 0 {
 			return false
 		}
 		index += offset
 		beforeOK := index == 0 || unicode.IsSpace(rune(lower[index-1]))
-		after := strings.TrimLeft(lower[index+len("password"):], " \t")
+		after := strings.TrimLeft(lower[index+len(key):], " \t")
 		if beforeOK && strings.HasPrefix(after, "=") {
 			return true
 		}
-		offset = index + len("password")
+		offset = index + len(key)
 	}
 }
 
