@@ -214,6 +214,49 @@ func TestPutFilePreservesExistingMode(t *testing.T) {
 	}
 }
 
+func TestPutFileRefusesUnknownExistingMode(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires an unprivileged caller for a real permission failure")
+	}
+	dir := t.TempDir()
+	protected := filepath.Join(dir, "private")
+	if err := os.Mkdir(protected, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(protected, 0700) })
+	path := filepath.Join(protected, "secret")
+	if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(protected, 0000); err != nil {
+		t.Fatal(err)
+	}
+	// If PutFile tries to guess the mode and elevate, let the real file
+	// replacement run so the test also observes any permission widening.
+	originalUser := config.CurrentUser
+	config.CurrentUser = "test-user"
+	t.Cleanup(func() { config.CurrentUser = originalUser })
+	t.Setenv("PIG_NO_SUDO", "")
+	t.Setenv("PIG_TEST_PROTECTED_DIR", protected)
+	fakeSudo := "#!/bin/sh\nchmod 0700 \"$PIG_TEST_PROTECTED_DIR\" || exit 1\nif [ \"$1\" = \"-n\" ]; then shift; fi\nexec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "sudo"), []byte(fakeSudo), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := PutFile(path, []byte("new")); !errors.Is(err, os.ErrPermission) {
+		t.Errorf("PutFile must refuse an unknown existing mode: %v", err)
+	}
+	if err := os.Chmod(protected, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("private file permissions changed: %v, %v", info, err)
+	}
+	if body, err := os.ReadFile(path); err != nil || string(body) != "old" {
+		t.Fatalf("private file changed: %q, %v", body, err)
+	}
+}
+
 func TestIsPathWithinRejectsSiblingPrefixAndTraversal(t *testing.T) {
 	root := t.TempDir()
 	base := filepath.Join(root, "base")

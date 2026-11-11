@@ -234,6 +234,8 @@ func commandOutputTail(value string, lines int) string {
 func PutFile(filePath string, content []byte) error {
 	mode, err := existingFileMode(filePath, 0644)
 	if err != nil {
+		// An inaccessible existing file may be private. Only callers that
+		// explicitly choose a mode (PutFileMode) can install without reading it.
 		return err
 	}
 	return PutFileMode(filePath, content, mode)

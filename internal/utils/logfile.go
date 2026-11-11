@@ -53,13 +53,17 @@ func RequireRegularFileAsDBSU(path, dbsu string) error {
 	if !os.IsPermission(err) {
 		return fmt.Errorf("inspect file %s: %w", path, err)
 	}
+	absPath, absErr := filepath.Abs(path)
+	if absErr != nil {
+		return fmt.Errorf("inspect file %s: %w", path, absErr)
+	}
 	output, dbsuErr := DBSUCommandStdout(dbsu, []string{
-		"sh", "-c", `test ! -L "$1" && test -f "$1" && printf '%s\n' "$1"`, "sh", path,
+		"sh", "-c", `test ! -L "$1" && test -f "$1" && printf '%s\n' "$1"`, "sh", absPath,
 	})
 	if dbsuErr != nil {
 		return fmt.Errorf("inspect file %s as %s: %w", path, dbsu, dbsuErr)
 	}
-	if strings.TrimSpace(output) != path {
+	if strings.TrimSpace(output) != absPath {
 		return fmt.Errorf("path is not a regular file: %s", path)
 	}
 	return nil

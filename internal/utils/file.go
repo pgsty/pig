@@ -259,7 +259,14 @@ func ReadFileAsDBSU(path, dbsu string) (string, error) {
 
 	// Use DBSUCommandStdout for privilege escalation
 	logrus.Debugf("reading file via privilege escalation")
-	return DBSUCommandStdout(dbsu, []string{"cat", "--", path})
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("file path is empty")
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return DBSUCommandStdout(dbsu, []string{"cat", "--", absPath})
 }
 
 // WriteFileAsDBSU writes content to a file using DBSU privilege escalation.
