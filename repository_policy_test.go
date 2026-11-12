@@ -3,7 +3,9 @@ package main
 import (
 	"errors"
 	"os"
+	"pig/cli/ext"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -39,6 +41,23 @@ func TestReleaseMetadataVersionsAgree(t *testing.T) {
 	} {
 		if check.got != check.want {
 			t.Errorf("%s = %q, want %q (Makefile is the reference)", check.name, check.got, check.want)
+		}
+	}
+
+	ec := &ext.ExtensionCatalog{}
+	if err := ec.Load(nil); err != nil {
+		t.Fatalf("load embedded extension catalog: %v", err)
+	}
+	wantExtCount := strconv.Itoa(len(ec.Extensions))
+	for _, check := range []struct{ name, got string }{
+		{"README extensions badge", find("README extensions badge", readme, `badge/extensions-(\d+)-`)},
+		{"README lead packaged entries", find("README lead packaged entries", readme, `\[(\d+) packaged entries\]`)},
+		{"README snapshot packaged entries", find("README snapshot packaged entries", readme, `\*\*(\d+) packaged entries\*\*`)},
+		{"README release entry metric", find("README release entry metric", readme, `(\d+)-entry`)},
+		{"README catalog entries link", find("README catalog entries link", readme, `\[full list of (\d+) catalog entries\]`)},
+	} {
+		if check.got != wantExtCount {
+			t.Errorf("%s = %q, want %q (embedded catalog has %s entries)", check.name, check.got, wantExtCount, wantExtCount)
 		}
 	}
 }
