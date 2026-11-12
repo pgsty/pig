@@ -3,7 +3,7 @@
 # Mtime     :   2026-08-14
 # Copyright (C) 2018-2026 Ruohang Feng
 #==============================================================#
-VERSION=v1.11.1
+VERSION=v1.11.0
 PIG_VERSION:=$(patsubst v%,%,$(VERSION))
 PIGSTY_VERSION:=4.6.0
 GORELEASER_VERSION:=v2.20.1
