@@ -131,6 +131,7 @@ func TestPgStatusTextModeSuppressesUsageAndDuplicateErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("detect current user: %v", err)
 	}
+	origOutputFlag := outputFormat
 	origFormat, origUser := config.OutputFormat, config.CurrentUser
 	origPg := *pgConfig
 	origChanged := map[string]bool{}
@@ -140,10 +141,13 @@ func TestPgStatusTextModeSuppressesUsageAndDuplicateErrors(t *testing.T) {
 	origSilenceUsage, origSilenceErrors := pgStatusCmd.SilenceUsage, pgStatusCmd.SilenceErrors
 	origRootSilenceUsage, origRootSilenceErrors := rootCmd.SilenceUsage, rootCmd.SilenceErrors
 	t.Cleanup(func() {
+		outputFormat = origOutputFlag
 		config.OutputFormat, config.CurrentUser = origFormat, origUser
 		*pgConfig = origPg
 		pgStatusCmd.SilenceUsage, pgStatusCmd.SilenceErrors = origSilenceUsage, origSilenceErrors
 		rootCmd.SilenceUsage, rootCmd.SilenceErrors = origRootSilenceUsage, origRootSilenceErrors
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
 		rootCmd.SetArgs(nil)
 		for name, changed := range origChanged {
 			pgCmd.PersistentFlags().Lookup(name).Changed = changed
@@ -161,6 +165,7 @@ func TestPgStatusTextModeSuppressesUsageAndDuplicateErrors(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir)
 
+	outputFormat = config.OUTPUT_TEXT
 	config.OutputFormat = config.OUTPUT_TEXT
 	config.CurrentUser = current.Username
 	missingDir := filepath.Join(t.TempDir(), "missing-pgdata")

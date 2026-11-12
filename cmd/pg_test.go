@@ -1247,6 +1247,105 @@ func TestPgVacuumFullTextRequiresConfirmationBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestPgVacuumAndFreezeRejectSchemaWithoutTable(t *testing.T) {
+	origFormat := config.OutputFormat
+	origAll := pgMaintAll
+	origSchema := pgMaintSchema
+	origTable := pgMaintTable
+	origVerbose := pgMaintVerbose
+	origFull := pgMaintFull
+	origPlan := pgMaintPlan
+	origYes := pgMaintYes
+	origConfirm := highRiskTextConfirm
+	origExec := pgVacuumCommandExec
+	origVacSilenceErr := pgVacuumCmd.SilenceErrors
+	origVacSilenceUse := pgVacuumCmd.SilenceUsage
+	origFrzSilenceErr := pgFreezeCmd.SilenceErrors
+	origFrzSilenceUse := pgFreezeCmd.SilenceUsage
+	defer func() {
+		config.OutputFormat = origFormat
+		pgMaintAll = origAll
+		pgMaintSchema = origSchema
+		pgMaintTable = origTable
+		pgMaintVerbose = origVerbose
+		pgMaintFull = origFull
+		pgMaintPlan = origPlan
+		pgMaintYes = origYes
+		highRiskTextConfirm = origConfirm
+		pgVacuumCommandExec = origExec
+		pgVacuumCmd.SilenceErrors = origVacSilenceErr
+		pgVacuumCmd.SilenceUsage = origVacSilenceUse
+		pgFreezeCmd.SilenceErrors = origFrzSilenceErr
+		pgFreezeCmd.SilenceUsage = origFrzSilenceUse
+	}()
+
+	pgMaintAll = false
+	pgMaintSchema = "public"
+	pgMaintTable = ""
+	pgMaintVerbose = false
+
+	// 1. Structured --plan rejects --schema without --table instead of emitting an invalid plan.
+	config.OutputFormat = config.OUTPUT_JSON
+	pgMaintPlan = true
+	pgMaintFull = false
+	pgMaintYes = false
+	var planErr error
+	rawPlan := capturePgStdout(t, func() {
+		planErr = pgVacuumCmd.RunE(pgVacuumCmd, []string{"app"})
+	})
+	var exitErr *utils.ExitCodeError
+	if !errors.As(planErr, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("pg vacuum --schema public --plan error = %v, want ExitCodeError(2)", planErr)
+	}
+	var planPayload map[string]interface{}
+	if err := json.Unmarshal(pgBytesTrimSpace([]byte(rawPlan)), &planPayload); err != nil {
+		t.Fatalf("invalid json output: %v raw=%q", err, rawPlan)
+	}
+	if int(planPayload["code"].(float64)) != output.GenericParamError(output.MODULE_PG) {
+		t.Fatalf("code = %v, want %d", planPayload["code"], output.GenericParamError(output.MODULE_PG))
+	}
+
+	// 2. Text --full rejects --schema without --table before prompting for confirmation.
+	config.OutputFormat = config.OUTPUT_TEXT
+	pgMaintPlan = false
+	pgMaintFull = true
+	pgMaintYes = false
+	prompted := false
+	executed := false
+	highRiskTextConfirm = func(string, string) error {
+		prompted = true
+		return nil
+	}
+	pgVacuumCommandExec = func(*postgrescli.Config, string, *postgrescli.VacuumOptions) error {
+		executed = true
+		return nil
+	}
+	fullErr := pgVacuumCmd.RunE(pgVacuumCmd, []string{"app"})
+	if fullErr == nil || !strings.Contains(fullErr.Error(), "--schema requires --table") {
+		t.Fatalf("pg vacuum --full --schema public error = %v, want --schema requires --table", fullErr)
+	}
+	if prompted || executed {
+		t.Fatalf("pg vacuum --full with invalid options should neither prompt (%v) nor execute (%v)", prompted, executed)
+	}
+
+	// 3. Structured freeze also rejects --schema without --table with param error code.
+	config.OutputFormat = config.OUTPUT_JSON
+	var freezeErr error
+	rawFreeze := capturePgStdout(t, func() {
+		freezeErr = pgFreezeCmd.RunE(pgFreezeCmd, []string{"app"})
+	})
+	if !errors.As(freezeErr, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("pg freeze --schema public error = %v, want ExitCodeError(2)", freezeErr)
+	}
+	var freezePayload map[string]interface{}
+	if err := json.Unmarshal(pgBytesTrimSpace([]byte(rawFreeze)), &freezePayload); err != nil {
+		t.Fatalf("invalid freeze json output: %v raw=%q", err, rawFreeze)
+	}
+	if int(freezePayload["code"].(float64)) != output.GenericParamError(output.MODULE_PG) {
+		t.Fatalf("freeze code = %v, want %d", freezePayload["code"], output.GenericParamError(output.MODULE_PG))
+	}
+}
+
 func capturePgStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	origStdout := os.Stdout

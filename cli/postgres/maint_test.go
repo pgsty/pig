@@ -89,7 +89,52 @@ func TestRunMaintAllDatabasesReturnsPartialFailureAfterAllAttempts(t *testing.T)
 	}
 	for _, call := range calls {
 		if !strings.Contains(call, "VACUUM (FULL)") {
-			t.Fatalf("maintenance call should use full SQL, got calls=%v", calls)
+			t.Fatalf("maintenance call should use full SQL, got calls=%v", call)
 		}
+	}
+}
+
+func TestVacuumAndFreezeRejectSchemaWithoutTable(t *testing.T) {
+	origRun := maintRunPsqlMaintenance
+	defer func() {
+		maintRunPsqlMaintenance = origRun
+	}()
+
+	var calls []string
+	maintRunPsqlMaintenance = func(_ *Config, dbname, sql string) error {
+		calls = append(calls, dbname+":"+sql)
+		return nil
+	}
+
+	err := Vacuum(nil, "app", &VacuumOptions{
+		MaintOptions: MaintOptions{Schema: "public"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "--schema requires --table") {
+		t.Fatalf("Vacuum(--schema without --table) error = %v, want --schema requires --table", err)
+	}
+
+	err = Freeze(nil, "app", &FreezeOptions{Schema: "public"})
+	if err == nil || !strings.Contains(err.Error(), "--schema requires --table") {
+		t.Fatalf("Freeze(--schema without --table) error = %v, want --schema requires --table", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("Vacuum/Freeze with invalid target should not invoke psql, calls=%v", calls)
+	}
+
+	if err := Vacuum(nil, "app", &VacuumOptions{
+		MaintOptions: MaintOptions{Schema: "public", Table: "events"},
+	}); err != nil {
+		t.Fatalf("Vacuum(--schema public --table events) error = %v", err)
+	}
+	if len(calls) != 1 || calls[0] != "app:VACUUM public.events" {
+		t.Fatalf("Vacuum(--schema public --table events) calls = %v", calls)
+	}
+
+	calls = nil
+	if err := Analyze(nil, "app", &MaintOptions{Schema: "public"}); err != nil {
+		t.Fatalf("Analyze(--schema public) should remain supported, got %v", err)
+	}
+	if len(calls) != 1 || !strings.Contains(calls[0], "EXECUTE 'ANALYZE") {
+		t.Fatalf("Analyze(--schema public) calls = %v", calls)
 	}
 }

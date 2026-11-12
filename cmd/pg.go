@@ -1754,17 +1754,17 @@ var pgVacuumCmd = &cobra.Command{
 			},
 			Full: pgMaintFull,
 		}
+		if err := postgres.ValidateVacuumOptions(pgMaintSchema, pgMaintTable); err != nil {
+			return structuredParamError(
+				output.MODULE_PG,
+				"pig postgres vacuum",
+				"invalid vacuum parameters",
+				err.Error(),
+				args,
+				maintenanceParams(dbname, true),
+			)
+		}
 		if pgMaintPlan {
-			if err := postgres.ValidateMaintenanceOptions(pgMaintSchema, pgMaintTable); err != nil {
-				return structuredParamError(
-					output.MODULE_PG,
-					"pig postgres vacuum",
-					"invalid vacuum parameters",
-					err.Error(),
-					args,
-					maintenanceParams(dbname, true),
-				)
-			}
 			return handlePlanOutput(postgres.BuildVacuumPlan(pgConfig, dbname, opts))
 		}
 		if config.IsStructuredOutput() && pgMaintFull && !pgMaintYes {
@@ -1831,6 +1831,22 @@ var pgAnalyzeCmd = &cobra.Command{
 			Table:   pgMaintTable,
 			Verbose: pgMaintVerbose,
 		}
+		if err := postgres.ValidateMaintenanceOptions(pgMaintSchema, pgMaintTable); err != nil {
+			return structuredParamError(
+				output.MODULE_PG,
+				"pig postgres analyze",
+				"invalid analyze parameters",
+				err.Error(),
+				args,
+				map[string]interface{}{
+					"database": dbname,
+					"all":      pgMaintAll,
+					"schema":   pgMaintSchema,
+					"table":    pgMaintTable,
+					"verbose":  pgMaintVerbose,
+				},
+			)
+		}
 		return runLegacyStructured(legacyModulePg, "pig postgres analyze", args, map[string]interface{}{
 			"database": dbname,
 			"all":      pgMaintAll,
@@ -1862,6 +1878,22 @@ var pgFreezeCmd = &cobra.Command{
 			Schema:  pgMaintSchema,
 			Table:   pgMaintTable,
 			Verbose: pgMaintVerbose,
+		}
+		if err := postgres.ValidateVacuumOptions(pgMaintSchema, pgMaintTable); err != nil {
+			return structuredParamError(
+				output.MODULE_PG,
+				"pig postgres freeze",
+				"invalid freeze parameters",
+				err.Error(),
+				args,
+				map[string]interface{}{
+					"database": dbname,
+					"all":      pgMaintAll,
+					"schema":   pgMaintSchema,
+					"table":    pgMaintTable,
+					"verbose":  pgMaintVerbose,
+				},
+			)
 		}
 		return runLegacyStructured(legacyModulePg, "pig postgres freeze", args, map[string]interface{}{
 			"database": dbname,
@@ -1903,17 +1935,17 @@ var pgRepackCmd = &cobra.Command{
 			Jobs: pgMaintJobs,
 			Plan: pgMaintPlan,
 		}
+		if err := postgres.ValidateMaintenanceOptions(pgMaintSchema, pgMaintTable); err != nil {
+			return structuredParamError(
+				output.MODULE_PG,
+				"pig postgres repack",
+				"invalid repack parameters",
+				err.Error(),
+				args,
+				maintenanceParams(dbname, false),
+			)
+		}
 		if pgMaintPlan {
-			if err := postgres.ValidateMaintenanceOptions(pgMaintSchema, pgMaintTable); err != nil {
-				return structuredParamError(
-					output.MODULE_PG,
-					"pig postgres repack",
-					"invalid repack parameters",
-					err.Error(),
-					args,
-					maintenanceParams(dbname, false),
-				)
-			}
 			return handlePlanOutput(postgres.BuildRepackPlan(pgConfig, dbname, opts))
 		}
 		return runLegacyStructured(legacyModulePg, "pig postgres repack", args, map[string]interface{}{

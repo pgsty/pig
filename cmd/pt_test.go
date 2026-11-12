@@ -397,6 +397,14 @@ func executePtTest(t *testing.T, args ...string) error {
 
 func executePtTestWithoutConfigEnv(t *testing.T, args ...string) error {
 	t.Helper()
+	t.Cleanup(func() {
+		resetPtTestState()
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+		rootCmd.SilenceErrors = false
+		rootCmd.SilenceUsage = false
+		rootCmd.SetArgs(nil)
+	})
 	resetPtTestState()
 	rootCmd.SetOut(io.Discard)
 	rootCmd.SetErr(io.Discard)

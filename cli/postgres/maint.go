@@ -198,6 +198,18 @@ func validateMaintOptions(dbname, schema, table string) error {
 	return nil
 }
 
+// ValidateVacuumOptions validates options for VACUUM and VACUUM FREEZE, which
+// cannot run per-schema inside a PL/pgSQL DO block.
+func ValidateVacuumOptions(schema, table string) error {
+	if err := validateMaintOptions("", schema, table); err != nil {
+		return err
+	}
+	if schema != "" && table == "" {
+		return fmt.Errorf("--schema requires --table; for a whole schema, use native vacuumdb --schema")
+	}
+	return nil
+}
+
 // ============================================================================
 // Vacuum
 // ============================================================================
@@ -219,7 +231,10 @@ func Vacuum(cfg *Config, dbname string, opts *VacuumOptions) error {
 	}
 
 	// Validate identifiers
-	if err := validateMaintOptions(dbname, schema, table); err != nil {
+	if err := ValidateMaintenanceDatabase(dbname); err != nil {
+		return err
+	}
+	if err := ValidateVacuumOptions(schema, table); err != nil {
 		return err
 	}
 
@@ -319,7 +334,10 @@ func Freeze(cfg *Config, dbname string, opts *FreezeOptions) error {
 	}
 
 	// Validate identifiers
-	if err := validateMaintOptions(dbname, schema, table); err != nil {
+	if err := ValidateMaintenanceDatabase(dbname); err != nil {
+		return err
+	}
+	if err := ValidateVacuumOptions(schema, table); err != nil {
 		return err
 	}
 
